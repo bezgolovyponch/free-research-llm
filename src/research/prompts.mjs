@@ -37,7 +37,7 @@ ${constraintsText(constraints)}
 DOMAIN PLAYBOOK (${template.label}) — use as a checklist, adapt to the question:
 - typical drivers: ${template.drivers}
 - typical metrics: ${template.metrics}
-- typical sources: ${template.sources} (include official TOS, API docs, regulator sites)
+- typical sources: ${template.sources} (include official TOS, API docs, regulator sites, national statistical agencies, market research reports for price trends)
 - decision rule: ${template.decisionRule}
 ${dataSummary ? `\nUSER DATA AVAILABLE (source id D1):\n${dataSummary}\n` : ''}
 Build an issue tree that answers the QUESTION:
