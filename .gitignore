@@ -225,3 +225,5 @@ node_modules/
 /reports/
 *.tmp
 .DS_Store
+/loop/state.json
+/loop/history.jsonl

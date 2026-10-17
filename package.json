@@ -15,7 +15,8 @@
     "demo": "FRL_DEMO=1 node src/server.mjs",
     "ask": "node src/cli.mjs",
     "test": "vitest run",
-    "check": "node --check src/server.mjs && vitest run"
+    "check": "node --check src/server.mjs && vitest run",
+    "autoloop": "node src/loop/cli.mjs"
   },
   "devDependencies": {
     "vitest": "^3.2.7"
