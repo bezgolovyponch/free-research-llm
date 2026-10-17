@@ -55,13 +55,14 @@ Reports are written to `reports/<project>.md`.
 | Variable | What | Cost |
 |---|---|---|
 | `GROQ_API_KEY` | Groq models, very fast | free tier |
+| `CEREBRAS_API_KEY` | Cerebras models, very fast (https://cloud.cerebras.ai) | free tier |
 | `GEMINI_API_KEY` | Google Gemini via its OpenAI-compatible endpoint | free tier |
 | `OPENROUTER_API_KEY` | only `:free` models are used | free (50 req/day under $10 credit) |
 | `OLLAMA_BASE_URL` | local Ollama, default `http://localhost:11434/v1` | free, local |
 | `DEEPSEEK_API_KEY` + `FRL_PAID_CALL_LIMIT` | near-free paid fallback. It stays **off** until you set a call limit | paid |
 | `CUSTOM_LLM_BASE_URL` / `CUSTOM_LLM_API_KEY` / `CUSTOM_LLM_MODEL` | any OpenAI-compatible endpoint | — |
 | `TAVILY_API_KEY` / `BRAVE_API_KEY` / `SEARXNG_URL` | web search (Wikipedia is always on unless `FRL_WIKIPEDIA=0`) | free tiers |
-| `FRL_PROVIDER_ORDER` | default `groq,gemini,openrouter,ollama,custom,deepseek` | — |
+| `FRL_PROVIDER_ORDER` | default `groq,cerebras,gemini,openrouter,ollama,custom,deepseek` | — |
 | `FRL_<PROVIDER>_FAST_MODEL` / `_DEEP_MODEL` | pin a model, e.g. `FRL_GROQ_DEEP_MODEL=llama-3.3-70b-versatile` | — |
 | `PORT` / `HOST` | default `4600` / `127.0.0.1` (local only) | — |
 

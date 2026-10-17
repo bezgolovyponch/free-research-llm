@@ -96,9 +96,11 @@ export class OpenAICompatibleProvider {
       this.state = this.selected.fast ? 'ready' : 'no-models';
       this.detail = this.selected.fast ? `fast=${this.selected.fast} deep=${this.selected.deep}` : 'no chat model available';
     } catch (error) {
-      if (this.modelOverrides.any || this.modelOverrides.fast) {
-        this.selected.fast ??= this.modelOverrides.fast ?? this.modelOverrides.any;
-        this.selected.deep ??= this.modelOverrides.deep ?? this.selected.fast;
+      const fallback = this.preset.fallbackModels;
+      const authFailed = error.status === 401 || error.status === 403;
+      if (!authFailed && (this.modelOverrides.any || this.modelOverrides.fast || fallback)) {
+        this.selected.fast ??= this.modelOverrides.fast ?? this.modelOverrides.any ?? fallback.fast;
+        this.selected.deep ??= this.modelOverrides.deep ?? this.modelOverrides.any ?? fallback?.deep ?? this.selected.fast;
         this.state = 'ready';
         this.detail = `model list unavailable, using configured model (${error.message})`;
       } else {

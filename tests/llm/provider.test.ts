@@ -5,6 +5,7 @@ import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
 
 const groq = PROVIDER_PRESETS.find((p) => p.id === 'groq')!;
 const openrouter = PROVIDER_PRESETS.find((p) => p.id === 'openrouter')!;
+const cerebras = PROVIDER_PRESETS.find((p) => p.id === 'cerebras')!;
 
 describe('pickModel', () => {
   it('prefers exact, then partial matches, and skips non-chat models', () => {
@@ -60,5 +61,15 @@ describe('OpenAICompatibleProvider', () => {
     expect(error).toBeInstanceOf(ProviderError);
     expect(error.retryable).toBe(true);
     expect(error.retryAfterMs).toBe(7000);
+  });
+
+  it('uses the preset fallback model when the model list is unavailable, but not on a bad key', async () => {
+    const down = fakeFetch([[/\/models$/, () => new Response('nope', { status: 404 })]]);
+    const p = await new OpenAICompatibleProvider({ preset: cerebras, apiKey: 'k', fetchImpl: down }).discover();
+    expect(p.state).toBe('ready');
+    expect(p.selected).toEqual({ fast: 'gpt-oss-120b', deep: 'gpt-oss-120b' });
+    const denied = fakeFetch([[/\/models$/, () => new Response('bad key', { status: 401 })]]);
+    const q = await new OpenAICompatibleProvider({ preset: cerebras, apiKey: 'x', fetchImpl: denied }).discover();
+    expect(q.state).toBe('error');
   });
 });

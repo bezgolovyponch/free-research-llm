@@ -10,7 +10,7 @@ import { ProjectStore } from './store.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const DEFAULT_ORDER = ['groq', 'gemini', 'openrouter', 'ollama', 'custom', 'deepseek'];
+const DEFAULT_ORDER = ['groq', 'cerebras', 'gemini', 'openrouter', 'ollama', 'custom', 'deepseek'];
 
 function modelOverrides(env, preset) {
   const prefix = `FRL_${preset.id.toUpperCase()}`;

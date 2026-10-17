@@ -11,6 +11,18 @@ export const PROVIDER_PRESETS = [
     },
   },
   {
+    id: 'cerebras',
+    label: 'Cerebras (free tier)',
+    baseURL: 'https://api.cerebras.ai/v1',
+    keyEnv: 'CEREBRAS_API_KEY',
+    signup: 'https://cloud.cerebras.ai',
+    prefer: {
+      fast: ['gpt-oss-120b', 'qwen-3.8-27b', 'qwen', 'llama'],
+      deep: ['gpt-oss-120b', 'qwen-3.8-27b', 'kimi', 'qwen', 'llama'],
+    },
+    fallbackModels: { fast: 'gpt-oss-120b', deep: 'gpt-oss-120b' },
+  },
+  {
     id: 'gemini',
     label: 'Google Gemini (free tier)',
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',

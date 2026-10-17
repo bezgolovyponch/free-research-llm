@@ -11,12 +11,14 @@
 3. **Get one free model key** (two is better, because when one quota runs out the app switches to the other):
    - Groq: https://console.groq.com/keys
    - Gemini: https://aistudio.google.com/apikey
+   - Cerebras: https://cloud.cerebras.ai
    - Fully offline alternative: install Ollama (https://ollama.com/download), then run `ollama pull qwen2.5:7b`. It needs no key.
 4. **Optional, for better sources:** get a free Tavily key (https://app.tavily.com), which gives 1,000 searches a month. Without it the app searches Wikipedia only.
 5. **Store the keys in your shell, not in a project file:**
    ```bash
    echo 'export GROQ_API_KEY="paste-here"'   >> ~/.zshrc
    echo 'export GEMINI_API_KEY="paste-here"' >> ~/.zshrc
+   echo 'export CEREBRAS_API_KEY="paste-here"' >> ~/.zshrc
    echo 'export TAVILY_API_KEY="paste-here"' >> ~/.zshrc
    source ~/.zshrc
    ```
