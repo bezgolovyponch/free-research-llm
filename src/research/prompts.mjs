@@ -46,6 +46,7 @@ Build an issue tree that answers the QUESTION:
 3. Under each driver 2-4 LEAF sub-questions (parentId = driver id), each answerable by one lookup, calculation, comparison, estimate or data analysis. Max ${MAX_NODES} nodes total.
 4. Every node: id (drivers "D1".."D6", leaves "D1.1" etc.), title (<=8 words), question (specific, with geography/time/units), why (how the answer moves the decision), hypothesis (your best guess to test), metric, unit, method (one of ${METHODS.join('|')}), searchQueries (2-3 precise web queries, include country language terms when useful), dependsOn (ids of OTHER nodes whose answer this needs, e.g. a margin calculation depends on price leaves), impact 1-5 (effect on the decision), uncertainty 1-5 (how unknown it is today).
 5. "assumptionsToConfirm": things the user must confirm.
+6. Be brief: every text field at most 15 words, 1-2 searchQueries per node, compact JSON without indentation. List drivers first, then their leaves.
 
 JSON shape:
 {"decision":"","successCriteria":"","assumptionsToConfirm":[""],"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"dependsOn":[],"impact":3,"uncertainty":3}]}`,
@@ -164,7 +165,7 @@ DECISION RULE: ${template.decisionRule}
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
 ${lines.join('\n')}
 
-Write the final decision memo. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units.
+Write the final decision memo. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:
 {"verdict":"GO | NO-GO | GO-IF ... (one line)","confidence":"low|medium|high","summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
 Drivers: ${drivers.map((d) => d.id).join(', ')}.`,

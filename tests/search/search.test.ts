@@ -50,3 +50,11 @@ describe('search', () => {
     expect(await new SearchService({ fetchImpl, backends: [], jinaReader: false }).pageText('https://spa.example/')).toBe('');
   });
 });
+
+describe('encyclopedia queries', () => {
+  it('strips web-search syntax and falls back to shorter topic queries', async () => {
+    const { encyclopediaQueries } = await import('../../src/search/search.mjs');
+    expect(encyclopediaQueries('"Toyota RAV4 hybrid" 2018 price Germany mobile.de median')).toEqual(['Toyota RAV4 hybrid Germany', 'Toyota RAV4 hybrid', 'Toyota RAV4']);
+    expect(encyclopediaQueries('"margin scheme" used car VAT Poland')).toEqual(['margin scheme used car VAT Poland', 'margin scheme used', 'margin scheme']);
+  });
+});

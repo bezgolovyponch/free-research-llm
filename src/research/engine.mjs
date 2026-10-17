@@ -137,7 +137,7 @@ export class ResearchEngine {
   async gatherSources(project, node) {
     const sources = [];
     if (this.search?.enabled) {
-      const queries = node.searchQueries.length ? node.searchQueries : [node.question];
+      const queries = [...node.searchQueries, node.title, node.question].filter(Boolean);
       const web = await this.search.search(queries, { maxSources: 6 });
       web.forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
       if (!web.length && this.search.lastErrors.length) this.emit(project, 'warn', `${node.id}: search failed (${this.search.lastErrors.join('; ').slice(0, 200)})`, { nodeId: node.id });
@@ -245,6 +245,7 @@ export class ResearchEngine {
       for (const nodeId of researchOrder(project.nodes)) {
         if (this.cancelled.has(id)) {
           project.phase = 'cancelled';
+          this.running.delete(id);
           this.emit(project, 'phase', 'stopped by user');
           return await this.store.save(project);
         }
@@ -263,6 +264,7 @@ export class ResearchEngine {
       }
       await this.synthesize(project);
       project.phase = 'done';
+      this.running.delete(id);
       this.emit(project, 'phase', 'done');
       return await this.store.save(project);
     } catch (error) {

@@ -117,6 +117,18 @@ export class SearxngBackend {
   }
 }
 
+export function encyclopediaQueries(query) {
+  const cleaned = String(query)
+    .replace(/["“”]/g, ' ')
+    .replace(/\b[\w-]+\.(?:de|pl|cz|com|org|net|eu|co\.uk)\b/gi, ' ')
+    .replace(/\b(?:price|prices|median|average|cost|costs|current|rate|per|day|how|much|what|is|the|in|of|for|and|vs)\b/gi, ' ')
+    .replace(/\b\d+(?:[-–]\d+)?k?\s*(?:km)?\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const words = cleaned.split(' ').filter(Boolean);
+  return [...new Set([cleaned, words.slice(0, 3).join(' '), words.slice(0, 2).join(' ')].filter((q) => q.length > 2))];
+}
+
 export class WikipediaBackend {
   constructor({ fetchImpl, lang = 'en' }) {
     this.id = 'wikipedia';
@@ -125,10 +137,18 @@ export class WikipediaBackend {
     this.fullText = true;
   }
 
+  async findPages(query, limit) {
+    const host = `https://${this.lang}.wikipedia.org`;
+    for (const q of encyclopediaQueries(query)) {
+      const found = await fetchJson(this.fetchImpl, `${host}/w/rest.php/v1/search/page?q=${encodeURIComponent(q)}&limit=${limit}`, { headers: { 'user-agent': USER_AGENT } });
+      if (found.pages?.length) return found.pages.slice(0, limit);
+    }
+    return [];
+  }
+
   async search(query, limit) {
     const host = `https://${this.lang}.wikipedia.org`;
-    const found = await fetchJson(this.fetchImpl, `${host}/w/rest.php/v1/search/page?q=${encodeURIComponent(query)}&limit=${limit}`, { headers: { 'user-agent': USER_AGENT } });
-    const pages = (found.pages ?? []).slice(0, limit);
+    const pages = await this.findPages(query, limit);
     const results = [];
     for (const page of pages) {
       let text = htmlToText(page.excerpt ?? '');

@@ -19,6 +19,7 @@ Checked against each provider's own docs on **2026-10-17**. Free tiers change of
 | 4 — optional | Cloudflare Workers AI | small extra pool | 10,000 neurons/day | no |
 | 4 — optional | Cohere | `command-a` model | 1,000 calls/month (trial key) | no |
 | 4 — optional | Puter | GPT/Claude/Gemini via one token | your Puter account's free monthly allowance (size not published); you pay Puter if you exceed it | no |
+| built in | **Pollinations** (no key) | works with zero keys, so the app always has a model | anonymous: **1 reply per 30 s per IP** (HTTP 402 `FREE_LIMIT`), model `gpt-oss-20b`; prompts go to a public third-party API. Off: `FRL_POLLINATIONS=0`. A free key from https://enter.pollinations.ai raises limits (`POLLINATIONS_API_KEY`) | no |
 | skip | ~~GitHub Models~~ | **retired 2026-07-30** | — | — |
 | skip | Hugging Face | free accounts get **no** monthly inference credits now | — | — |
 | skip | Brave Search | free plan replaced by $5/month credit that **requires a card** | — | yes |
@@ -29,13 +30,14 @@ Checked against each provider's own docs on **2026-10-17**. Free tiers change of
 
 ```
 DEEP role  (issue tree, retries after failed checks, final memo — few calls, needs the smartest model)
-  gemini → mistral → cerebras → groq → nvidia → sambanova → openrouter → cloudflare → cohere → puter → ollama
+  gemini → mistral → cerebras → groq → nvidia → sambanova → openrouter → cloudflare → cohere → puter → pollinations → ollama
 
 FAST role  (research every sub-question — many calls, needs volume)
-  groq → gemini → mistral → nvidia → cerebras → openrouter → cloudflare → sambanova → cohere → puter → ollama
+  groq → gemini → mistral → nvidia → cerebras → openrouter → cloudflare → sambanova → cohere → puter → pollinations → ollama
 
 REVIEWER   always a different provider than the one that wrote the answer
-ON 429     that provider cools down (honours Retry-After); the next one in the list answers;
+ON 429/402 that provider cools down (honours Retry-After or the "retry after" text); the next one answers;
+CUT OFF    a reply stopped by the token limit is re-asked with double the budget (up to 16K);
            if every provider is cooling, the app waits up to 65 s, then stops cleanly (press Run / resume later)
 SEARCH     tavily → exa → serper → brave → searxng → wikipedia (first one that returns results wins);
            pages that return too little text are re-read through the free Jina reader
@@ -101,6 +103,7 @@ route fast: groq → gemini → mistral
 - Cloudflare Workers AI free neurons and OpenAI endpoint: https://developers.cloudflare.com/workers-ai/platform/pricing/ · https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/
 - Cohere compatibility API: https://docs.cohere.com/docs/compatibility-api · trial limits: https://docs.cohere.com/docs/rate-limits
 - Puter OpenAI-compatible endpoint and user-pays model: https://developer.puter.com/tutorials/use-openai-sdk-with-puter/ · https://docs.puter.com/user-pays-model/ · https://developer.puter.com/pricing/
+- Pollinations anonymous endpoint (tested live 2026-10-17: `GET https://text.pollinations.ai/openai/models`, 402 FREE_LIMIT text): https://text.pollinations.ai/openai
 - GitHub Models retirement: https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models
 - Hugging Face credits: https://huggingface.co/docs/inference-providers/pricing
 - Tavily free credits: https://docs.tavily.com/documentation/api-credits

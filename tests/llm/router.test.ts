@@ -59,9 +59,9 @@ describe('ModelRouter', () => {
     const waits: number[] = [];
     const a = provider('a', [new ProviderError('rate', { status: 429, retryAfterMs: 5000 }), '{"after":true}']);
     const router = new ModelRouter({ providers: [a], now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; } });
-    await expect(router.complete({ messages: [] })).rejects.toBeInstanceOf(NoModelAvailableError);
     await expect(router.complete({ messages: [] })).resolves.toMatchObject({ data: { after: true } });
     expect(waits).toEqual([5000]);
+    expect(router.ledger.map((r) => r.provider)).toEqual(['a', 'router', 'a']);
   });
 
   it('raises a clear error when nothing is configured or everything fails', async () => {

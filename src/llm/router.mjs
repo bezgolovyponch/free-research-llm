@@ -4,6 +4,7 @@ import { ProviderError } from './provider.mjs';
 export class NoModelAvailableError extends Error {}
 
 const DEFAULT_COOLDOWN_MS = 60000;
+const MAX_WAIT_ROUNDS = 3;
 const REPAIR_INSTRUCTION = 'Your previous reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.';
 
 export class ModelRouter {
@@ -70,18 +71,15 @@ export class ModelRouter {
     return waits.length ? Math.max(0, Math.min(...waits)) : Infinity;
   }
 
-  async complete({ messages, tier = 'fast', json = true, purpose = 'chat', avoid, temperature }) {
-    let candidates = this.available({ avoid, tier });
-    const wait = candidates.length ? 0 : this.shortestCooldownMs();
-    if (!candidates.length && wait <= this.maxWaitMs) {
-      this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
-      await this.sleep(wait);
-      candidates = this.available({ avoid, tier });
-    }
-    if (!candidates.length) {
-      throw new NoModelAvailableError(this.ready ? 'all free model quotas are cooling down after rate limits (and the paid-call budget is used up or unset); retry in a minute' : 'no model provider is configured — open Setup');
-    }
-    const errors = [];
+  async waitForCooldown({ avoid, tier, purpose }) {
+    const wait = this.shortestCooldownMs();
+    if (wait > this.maxWaitMs) return [];
+    this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
+    await this.sleep(wait);
+    return this.available({ avoid, tier });
+  }
+
+  async tryProviders(candidates, { messages, tier, json, purpose, temperature }, errors) {
     for (const provider of candidates) {
       let attemptMessages = messages;
       for (let repair = 0; repair < 2; repair++) {
@@ -94,16 +92,33 @@ export class ModelRouter {
           this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms: this.now() - started, tokens: reply.usage?.total_tokens ?? null });
           return { ...reply, data };
         } catch (error) {
-          const isProvider = error instanceof ProviderError;
           this.record({ purpose, tier, provider: provider.id, ok: false, ms: this.now() - started, error: error.message.slice(0, 200) });
           errors.push(error.message);
-          if (isProvider) {
+          if (error instanceof ProviderError) {
             if (error.retryable) this.coolDown(provider, error);
             break;
           }
           attemptMessages = [...messages, { role: 'user', content: REPAIR_INSTRUCTION }];
         }
       }
+    }
+    return null;
+  }
+
+  async complete({ messages, tier = 'fast', json = true, purpose = 'chat', avoid, temperature }) {
+    const request = { messages, tier, json, purpose, temperature };
+    const errors = [];
+    let candidates = this.available({ avoid, tier });
+    for (let round = 0; round < MAX_WAIT_ROUNDS; round++) {
+      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose });
+      if (!candidates.length) break;
+      const reply = await this.tryProviders(candidates, request, errors);
+      if (reply) return reply;
+      if (this.shortestCooldownMs() === 0) break;
+      candidates = [];
+    }
+    if (!errors.length) {
+      throw new NoModelAvailableError(this.ready ? 'all free model quotas are cooling down after rate limits (and the paid-call budget is used up or unset); retry in a minute' : 'no model provider is configured — open Setup');
     }
     throw new NoModelAvailableError(`every provider failed for ${purpose}: ${errors.join(' || ').slice(0, 600)}`);
   }

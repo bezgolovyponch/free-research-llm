@@ -80,3 +80,32 @@ describe('OpenAICompatibleProvider', () => {
     expect(p.describe()).toMatchObject({ state: 'not-configured', detail: expect.stringMatching(/not running/) });
   });
 });
+
+describe('provider limits', () => {
+  it('treats a 402 free-limit reply as a retryable rate limit with its wait time', async () => {
+    const pollinations = PROVIDER_PRESETS.find((p) => p.id === 'pollinations')!;
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'openai-fast' }] })],
+      [/\/chat\/completions$/, () => new Response('{"error":{"code":"FREE_LIMIT","message":"Free limit reached: 1 reply every 30 seconds per IP. Retry after 2s"}}', { status: 402 })],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: { ...pollinations, minIntervalMs: 0 }, fetchImpl }).discover();
+    const error = await p.chat({ messages: [] }).catch((e) => e);
+    expect(error.retryable).toBe(true);
+    expect(error.retryAfterMs).toBe(30000);
+  });
+
+  it('retries with a doubled token budget when the reply was cut off', async () => {
+    const budgets: number[] = [];
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'llama-3.1-8b-instant' }] })],
+      [/\/chat\/completions$/, (_u, init) => {
+        const max = JSON.parse(String(init.body)).max_tokens;
+        budgets.push(max);
+        return jsonResponse({ choices: [{ finish_reason: budgets.length === 1 ? 'length' : 'stop', message: { content: budgets.length === 1 ? '{"cut' : '{"whole":true}' } }] });
+      }],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: groq, apiKey: 'k', fetchImpl }).discover();
+    await expect(p.chat({ messages: [], maxTokens: 1000 })).resolves.toMatchObject({ content: '{"whole":true}' });
+    expect(budgets).toEqual([1000, 2000]);
+  });
+});

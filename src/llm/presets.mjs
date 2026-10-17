@@ -116,6 +116,20 @@ export const PROVIDER_PRESETS = [
     fallbackModels: { fast: 'gemini-3.5-flash-lite', deep: 'gpt-5.4-nano' },
   },
   {
+    id: 'pollinations',
+    label: 'Pollinations (no key, anonymous public API)',
+    baseURL: 'https://text.pollinations.ai/openai',
+    keyEnv: null,
+    optionalKeyEnv: 'POLLINATIONS_API_KEY',
+    disableEnv: 'FRL_POLLINATIONS',
+    signup: 'https://auth.pollinations.ai',
+    minIntervalMs: 31000,
+    maxOutputTokens: 1500,
+    extraBody: { reasoning_effort: 'low' },
+    prefer: { fast: ['openai-fast', 'openai'], deep: ['openai-fast', 'openai'] },
+    fallbackModels: { fast: 'openai', deep: 'openai' },
+  },
+  {
     id: 'ollama',
     label: 'Ollama (local, no key)',
     baseURL: 'http://localhost:11434/v1',
@@ -153,8 +167,8 @@ export const PROVIDER_PRESETS = [
 ];
 
 export const ROUTE_ORDER = {
-  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'ollama', 'deepseek'],
-  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'ollama', 'deepseek'],
+  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'pollinations', 'ollama', 'deepseek'],
+  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'pollinations', 'ollama', 'deepseek'],
 };
 
 export const SEARCH_KEYS = [

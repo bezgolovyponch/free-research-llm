@@ -6,11 +6,12 @@ import { KeychainSecrets } from './secrets.mjs';
 import { toMarkdown } from './report.mjs';
 
 function parseArgs(argv) {
-  const args = { question: [], template: 'auto', csv: '', constraints: {} };
+  const args = { question: [], template: 'auto', csv: '', constraints: {}, resume: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--template' || a === '-t') args.template = argv[++i];
     else if (a === '--csv') args.csv = argv[++i];
+    else if (a === '--resume') args.resume = argv[++i];
     else if (a === '--set') {
       const [k, ...v] = String(argv[++i]).split('=');
       args.constraints[k] = v.join('=');
@@ -19,10 +20,11 @@ function parseArgs(argv) {
   return { ...args, question: args.question.join(' ').trim() };
 }
 
-const USAGE = `usage: npm run ask -- "your question" [--template auto|generic|car-arbitrage|glamping-location|taxes|market-sizing] [--csv data.csv] [--set key=value]`;
+const USAGE = `usage: npm run ask -- "your question" [--template auto|generic|car-arbitrage|glamping-location|taxes|market-sizing] [--csv data.csv] [--set key=value]
+       npm run ask -- --resume <project-id>`;
 
 const args = parseArgs(process.argv.slice(2));
-if (!args.question) {
+if (!args.question && !args.resume) {
   console.error(USAGE);
   process.exit(2);
 }
@@ -34,7 +36,10 @@ if (!app.router.ready) {
   process.exit(1);
 }
 const csvText = args.csv ? await fs.readFile(args.csv, 'utf8') : '';
-const project = await app.engine.createProject({ question: args.question, templateId: args.template, constraints: args.constraints, csvText, csvName: args.csv ? path.basename(args.csv) : '' });
+const project = args.resume
+  ? await app.engine.load(args.resume)
+  : await app.engine.createProject({ question: args.question, templateId: args.template, constraints: args.constraints, csvText, csvName: args.csv ? path.basename(args.csv) : '' });
+console.log(`project: ${project.id}`);
 app.engine.subscribe(project.id, (event) => console.log(`[${event.type}] ${event.message}`));
 try {
   const done = await app.engine.run(project.id);

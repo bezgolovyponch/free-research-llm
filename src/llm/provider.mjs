@@ -1,15 +1,18 @@
 import { NON_CHAT_MODEL } from './presets.mjs';
 
+const MAX_TOKEN_BUDGET = 16000;
+
 export class ProviderError extends Error {
   constructor(message, { status = 0, retryAfterMs = 0, provider = '' } = {}) {
     super(message);
     this.status = status;
     this.retryAfterMs = retryAfterMs;
     this.provider = provider;
+    this.quotaLimited = status === 402 && /limit|retry after|quota/i.test(message);
   }
 
   get retryable() {
-    return this.status === 0 || this.status === 408 || this.status === 429 || this.status >= 500;
+    return this.status === 0 || this.status === 408 || this.status === 429 || this.status >= 500 || this.quotaLimited;
   }
 }
 
@@ -24,13 +27,21 @@ export function pickModel(models, preferences, freeOnly = false) {
   return usable[0] ?? null;
 }
 
+export function retryAfterFromText(body, floorMs = 0) {
+  const seconds = String(body).match(/retry after (\d+(?:\.\d+)?)\s*s/i);
+  const window = String(body).match(/every (\d+) seconds/i);
+  const ms = Math.max(seconds ? Number(seconds[1]) * 1000 : 0, window ? Number(window[1]) * 1000 : 0, /limit/i.test(body) ? floorMs : 0);
+  return ms;
+}
+
 function retryAfter(res) {
   const header = Number(res.headers.get('retry-after'));
   return Number.isFinite(header) && header > 0 ? header * 1000 : 0;
 }
 
 export class OpenAICompatibleProvider {
-  constructor({ preset, apiKey = '', baseURL, modelOverrides = {}, fetchImpl = fetch, timeoutMs = 120000 }) {
+  constructor({ preset, apiKey = '', baseURL, modelOverrides = {}, fetchImpl = fetch, timeoutMs = 120000, disabled = false }) {
+    this.disabled = disabled;
     this.id = preset.id;
     this.label = preset.label;
     this.preset = preset;
@@ -43,6 +54,16 @@ export class OpenAICompatibleProvider {
     this.selected = { fast: modelOverrides.fast ?? null, deep: modelOverrides.deep ?? null };
     this.state = 'unknown';
     this.detail = '';
+    this.minIntervalMs = preset.minIntervalMs ?? 0;
+    this.nextSlot = 0;
+  }
+
+  async throttle() {
+    if (!this.minIntervalMs) return;
+    const now = Date.now();
+    const wait = Math.max(0, this.nextSlot - now);
+    this.nextSlot = Math.max(now, this.nextSlot) + this.minIntervalMs;
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
   }
 
   get configured() {
@@ -68,7 +89,7 @@ export class OpenAICompatibleProvider {
       const res = await this.fetchImpl(`${this.baseURL}${path}`, { ...init, headers: this.headers(), signal: controller.signal });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        throw new ProviderError(`${this.id} HTTP ${res.status}: ${body.slice(0, 240)}`, { status: res.status, retryAfterMs: retryAfter(res), provider: this.id });
+        throw new ProviderError(`${this.id} HTTP ${res.status}: ${body.slice(0, 240)}`, { status: res.status, retryAfterMs: retryAfter(res) || retryAfterFromText(body, this.minIntervalMs), provider: this.id });
       }
       return await res.json();
     } catch (error) {
@@ -81,6 +102,11 @@ export class OpenAICompatibleProvider {
   }
 
   async discover() {
+    if (this.disabled) {
+      this.state = 'not-configured';
+      this.detail = `disabled by ${this.preset.disableEnv}=0`;
+      return this;
+    }
     if (!this.configured) {
       this.state = 'not-configured';
       const missing = [this.preset.keyEnv && !this.apiKey ? this.preset.keyEnv : '', this.baseURL.includes('{account}') ? this.preset.accountEnv : ''].filter(Boolean);
@@ -115,24 +141,35 @@ export class OpenAICompatibleProvider {
     return this;
   }
 
-  async chat({ messages, tier = 'fast', json = true, temperature = 0.2, maxTokens = 2500 }) {
+  async chat({ messages, tier = 'fast', json = true, temperature = 0.2, maxTokens = 4000 }) {
     const model = this.selected[tier] ?? this.selected.fast;
-    const payload = { model, messages, temperature, max_tokens: maxTokens };
-    const send = async (withJsonMode) => this.request('/chat/completions', {
-      method: 'POST',
-      body: JSON.stringify(withJsonMode ? { ...payload, response_format: { type: 'json_object' } } : payload),
-    });
-    let body;
-    try {
-      body = await send(json);
-    } catch (error) {
-      if (!(json && error.status === 400)) throw error;
-      body = await send(false);
+    const cap = this.preset.maxOutputTokens ?? MAX_TOKEN_BUDGET;
+    let budget = Math.min(maxTokens, cap);
+    let jsonMode = json;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await this.throttle();
+      const payload = { model, messages, temperature, max_tokens: budget, ...(this.preset.extraBody ?? {}), ...(jsonMode ? { response_format: { type: 'json_object' } } : {}) };
+      let body;
+      try {
+        body = await this.request('/chat/completions', { method: 'POST', body: JSON.stringify(payload) });
+      } catch (error) {
+        if (jsonMode && error.status === 400) {
+          jsonMode = false;
+          continue;
+        }
+        throw error;
+      }
+      const choice = body.choices?.[0];
+      const content = choice?.message?.content ?? '';
+      const truncated = choice?.finish_reason === 'length';
+      if (truncated && budget < cap) {
+        budget = Math.min(budget * 2, cap);
+        continue;
+      }
+      if (!content) throw new ProviderError(`${this.id} returned an empty reply${truncated ? ' (token limit reached)' : ''}`, { status: 502, provider: this.id });
+      return { content, model, provider: this.id, usage: body.usage ?? {}, truncated };
     }
-    const choice = body.choices?.[0];
-    const content = choice?.message?.content ?? '';
-    if (!content) throw new ProviderError(`${this.id} returned an empty reply`, { status: 502, provider: this.id });
-    return { content, model, provider: this.id, usage: body.usage ?? {} };
+    throw new ProviderError(`${this.id} gave no usable reply after retries`, { status: 502, provider: this.id });
   }
 
   describe() {

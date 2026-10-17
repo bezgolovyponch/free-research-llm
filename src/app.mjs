@@ -45,11 +45,12 @@ export class ProviderFactory {
   }
 
   build(preset) {
-    const apiKey = this.sessionKeys.get(preset.id) || (preset.keyEnv ? this.env[preset.keyEnv] : '') || '';
+    const apiKey = this.sessionKeys.get(preset.id) || (preset.keyEnv ? this.env[preset.keyEnv] : '') || (preset.optionalKeyEnv ? this.env[preset.optionalKeyEnv] : '') || '';
     const account = this.sessionKeys.get(`${preset.id}:account`) || (preset.accountEnv ? this.env[preset.accountEnv] : '') || '';
     const template = (preset.baseEnv && this.env[preset.baseEnv]) || this.sessionKeys.get(`${preset.id}:url`) || preset.baseURL;
     const baseURL = account ? template.replace('{account}', encodeURIComponent(account)) : template;
-    return new OpenAICompatibleProvider({ preset, apiKey, baseURL, modelOverrides: modelOverrides(this.env, preset), fetchImpl: this.fetchImpl });
+    const disabled = Boolean(preset.disableEnv) && this.env[preset.disableEnv] === '0';
+    return new OpenAICompatibleProvider({ preset, apiKey, baseURL, disabled, modelOverrides: modelOverrides(this.env, preset), fetchImpl: this.fetchImpl });
   }
 
   async buildAll() {
