@@ -52,3 +52,18 @@ describe('verifyFinding', () => {
     expect(v.grade).toBe('verified');
   });
 });
+
+describe('concrete answers', () => {
+  it('downgrades an answer that says the evidence cannot settle it', () => {
+    const v = verifyFinding({ finding: { answer: 'Based on the evidence it is not possible to determine the median price.', claims: [], confidence: 'low' }, sources, node: { method: 'lookup', unit: 'EUR', metric: 'median price' } });
+    expect(v.grade).toBe('weak');
+    expect(v.checks.find((c) => c.id === 'concrete')!.passed).toBe(false);
+  });
+
+  it('requires a number when the node expects one, and not otherwise', () => {
+    const vague = verifyFinding({ finding: { answer: 'Prices are higher in Poland.', claims: [], confidence: 'low' }, sources, node: { method: 'comparison', unit: '', metric: 'price gap' } });
+    expect(vague.grade).toBe('weak');
+    const qualitative = verifyFinding({ finding: { answer: 'A dealer licence is required above 5 cars a year.', claims: [], confidence: 'low' }, sources, node: { method: 'lookup', unit: '' } });
+    expect(qualitative.checks.some((c) => c.id === 'concrete')).toBe(false);
+  });
+});

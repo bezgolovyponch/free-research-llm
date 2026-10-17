@@ -174,7 +174,7 @@ export class ResearchEngine {
       });
       const finding = normalizeFinding(reply.data);
       const critique = await this.critique(node, finding, node.sources, reply.provider);
-      const verification = verifyFinding({ finding, sources: node.sources, critique });
+      const verification = verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
       this.emit(project, 'node', `${node.id}: ${verification.grade} (attempt ${attempt}, ${tier} tier, ${reply.provider})`, { nodeId: node.id });
       if (!needsEscalation(verification)) return;
@@ -190,7 +190,7 @@ export class ResearchEngine {
     const reply = await this.router.complete({ purpose: 'rollup', tier: 'fast', messages: rollupPrompt({ question: project.question, node, children }) });
     const finding = normalizeFinding(reply.data);
     node.sources = children.map((c) => ({ id: c.id, kind: 'node', title: c.title, url: '', domain: `node:${c.id}`, text: c.finding?.answer ?? '' }));
-    const verification = verifyFinding({ finding, sources: node.sources });
+    const verification = verifyFinding({ finding, sources: node.sources, node: { method: 'rollup' } });
     const weakest = Math.min(...children.map((c) => GRADE_RANK[c.status] ?? 0));
     const fromChildren = ['unsupported', 'weak', 'supported', 'verified'][weakest];
     const ownChecksPassed = verification.grade === 'verified' || verification.grade === 'supported';

@@ -46,6 +46,20 @@ function checkNumbersSourced(finding) {
   );
 }
 
+const NON_ANSWER = /not possible to (determine|say|calculate)|cannot be (determined|calculated|established)|unable to (determine|find|calculate)|(insufficient|no|missing) (data|evidence|information)|not (available|provided) in the (evidence|sources)/i;
+
+function expectsNumber(node) {
+  return Boolean(node && (node.unit || ['calculation', 'comparison', 'data'].includes(node.method)));
+}
+
+function checkConcrete(finding, node) {
+  const answer = String(finding?.answer ?? '');
+  if (NON_ANSWER.test(answer)) return check('concrete', 'Gives a concrete answer, not "unknown"', false, 'answer says the evidence cannot settle it');
+  if (!expectsNumber(node)) return null;
+  const numeric = /\d/.test(answer) || (finding?.claims ?? []).some((c) => /\d/.test(c.text) || typeof c.value === 'number');
+  return check('concrete', 'Gives a concrete answer, not "unknown"', numeric, numeric ? `numeric answer for ${node.metric || 'the metric'}` : `no number given for ${node.metric || 'the metric'} (${node.unit || node.method})`);
+}
+
 function checkCalculation(finding) {
   const calc = finding?.calculation;
   if (!calc || !calc.formula) return null;
@@ -79,10 +93,11 @@ function checkCritique(critique) {
   return check('critique', 'Independent reviewer found no major flaw', !major, critique.issues?.length ? critique.issues.join(' | ').slice(0, 300) : 'reviewer agrees');
 }
 
-export function verifyFinding({ finding, sources = [], critique = null }) {
+export function verifyFinding({ finding, sources = [], critique = null, node = null }) {
   const sourceIds = new Set(sources.map((s) => s.id));
   const checks = [
     checkAnswer(finding),
+    checkConcrete(finding, node),
     checkCitations(finding, sourceIds),
     checkNumbersSourced(finding),
     checkCalculation(finding),
