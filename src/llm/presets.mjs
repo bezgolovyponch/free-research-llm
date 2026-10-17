@@ -1,13 +1,24 @@
 export const PROVIDER_PRESETS = [
   {
+    id: 'gemini',
+    label: 'Google Gemini (free tier)',
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    keyEnv: 'GEMINI_API_KEY',
+    signup: 'https://aistudio.google.com/apikey',
+    prefer: {
+      fast: ['gemini-3.8-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite', 'flash-lite', 'flash'],
+      deep: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3-pro', 'gemini-2.5-flash', 'flash'],
+    },
+  },
+  {
     id: 'groq',
     label: 'Groq (free tier)',
     baseURL: 'https://api.groq.com/openai/v1',
     keyEnv: 'GROQ_API_KEY',
     signup: 'https://console.groq.com/keys',
     prefer: {
-      fast: ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile'],
-      deep: ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'qwen/qwen3-32b'],
+      fast: ['openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'],
+      deep: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'qwen/qwen3-32b'],
     },
   },
   {
@@ -18,20 +29,45 @@ export const PROVIDER_PRESETS = [
     signup: 'https://cloud.cerebras.ai',
     prefer: {
       fast: ['gpt-oss-120b', 'qwen-3.8-27b', 'qwen', 'llama'],
-      deep: ['gpt-oss-120b', 'qwen-3.8-27b', 'kimi', 'qwen', 'llama'],
+      deep: ['gpt-oss-120b', 'qwen-3.8-27b', 'qwen', 'llama'],
     },
     fallbackModels: { fast: 'gpt-oss-120b', deep: 'gpt-oss-120b' },
   },
   {
-    id: 'gemini',
-    label: 'Google Gemini (free tier)',
-    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    keyEnv: 'GEMINI_API_KEY',
-    signup: 'https://aistudio.google.com/apikey',
+    id: 'mistral',
+    label: 'Mistral (free Experiment plan)',
+    baseURL: 'https://api.mistral.ai/v1',
+    keyEnv: 'MISTRAL_API_KEY',
+    signup: 'https://console.mistral.ai/api-keys',
     prefer: {
-      fast: ['gemini-3.8-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'flash'],
-      deep: ['gemini-3.8-flash', 'gemini-3-pro', 'gemini-2.5-pro', 'gemini-2.5-flash', 'flash'],
+      fast: ['mistral-small-latest', 'mistral-small'],
+      deep: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-large', 'mistral-medium'],
     },
+    fallbackModels: { fast: 'mistral-small-latest', deep: 'mistral-large-latest' },
+  },
+  {
+    id: 'nvidia',
+    label: 'NVIDIA build.nvidia.com (free prototyping)',
+    baseURL: 'https://integrate.api.nvidia.com/v1',
+    keyEnv: 'NVIDIA_API_KEY',
+    signup: 'https://build.nvidia.com',
+    prefer: {
+      fast: ['meta/llama-3.3-70b-instruct', 'openai/gpt-oss-20b', 'meta/llama-3.1-8b-instruct'],
+      deep: ['openai/gpt-oss-120b', 'deepseek-ai/deepseek-v3', 'qwen/qwen3', 'meta/llama-3.3-70b-instruct'],
+    },
+    fallbackModels: { fast: 'meta/llama-3.3-70b-instruct', deep: 'openai/gpt-oss-120b' },
+  },
+  {
+    id: 'sambanova',
+    label: 'SambaNova Cloud (free tier, ~20 requests/day)',
+    baseURL: 'https://api.sambanova.ai/v1',
+    keyEnv: 'SAMBANOVA_API_KEY',
+    signup: 'https://cloud.sambanova.ai/apis',
+    prefer: {
+      fast: ['gpt-oss-120b', 'Meta-Llama-3.3-70B-Instruct'],
+      deep: ['DeepSeek-V3.2', 'DeepSeek-V3.1', 'gpt-oss-120b'],
+    },
+    fallbackModels: { fast: 'gpt-oss-120b', deep: 'DeepSeek-V3.2' },
   },
   {
     id: 'openrouter',
@@ -44,6 +80,40 @@ export const PROVIDER_PRESETS = [
       fast: ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3', 'deepseek'],
       deep: ['deepseek/deepseek-r1:free', 'deepseek/deepseek-chat-v3', 'deepseek', 'qwen/qwen3', 'llama-3.3-70b'],
     },
+  },
+  {
+    id: 'cloudflare',
+    label: 'Cloudflare Workers AI (10k neurons/day free)',
+    baseURL: 'https://api.cloudflare.com/client/v4/accounts/{account}/ai/v1',
+    accountEnv: 'CLOUDFLARE_ACCOUNT_ID',
+    keyEnv: 'CLOUDFLARE_API_TOKEN',
+    signup: 'https://dash.cloudflare.com/profile/api-tokens',
+    prefer: {
+      fast: ['@cf/meta/llama-3.1-8b-instruct'],
+      deep: ['@cf/openai/gpt-oss-120b', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
+    },
+    fallbackModels: { fast: '@cf/meta/llama-3.1-8b-instruct', deep: '@cf/meta/llama-3.3-70b-instruct-fp8-fast' },
+  },
+  {
+    id: 'cohere',
+    label: 'Cohere (trial key, 1,000 calls/month)',
+    baseURL: 'https://api.cohere.ai/compatibility/v1',
+    keyEnv: 'COHERE_API_KEY',
+    signup: 'https://dashboard.cohere.com/api-keys',
+    prefer: { fast: ['command-a'], deep: ['command-a'] },
+    fallbackModels: { fast: 'command-a-plus-05-2026', deep: 'command-a-plus-05-2026' },
+  },
+  {
+    id: 'puter',
+    label: 'Puter (uses your Puter account allowance)',
+    baseURL: 'https://api.puter.com/puterai/openai/v1',
+    keyEnv: 'PUTER_AUTH_TOKEN',
+    signup: 'https://puter.com/dashboard#account',
+    prefer: {
+      fast: ['gemini-3.5-flash-lite', 'gpt-5.4-nano'],
+      deep: ['gemini-3.5-flash-lite', 'gpt-5.4-nano'],
+    },
+    fallbackModels: { fast: 'gemini-3.5-flash-lite', deep: 'gpt-5.4-nano' },
   },
   {
     id: 'ollama',
@@ -82,4 +152,16 @@ export const PROVIDER_PRESETS = [
   },
 ];
 
-export const NON_CHAT_MODEL = /embed|whisper|tts|audio|image|vision-only|guard|moderation|rerank|transcribe|aqa|imagen|veo|lyria|native-audio|computer-use|robotics/i;
+export const ROUTE_ORDER = {
+  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'ollama', 'deepseek'],
+  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'ollama', 'deepseek'],
+};
+
+export const SEARCH_KEYS = [
+  { env: 'TAVILY_API_KEY', label: 'Tavily search (1,000 credits/month free)', signup: 'https://app.tavily.com' },
+  { env: 'EXA_API_KEY', label: 'Exa search ($10/month free credit)', signup: 'https://dashboard.exa.ai/api-keys' },
+  { env: 'SERPER_API_KEY', label: 'Serper Google search (2,500 free queries once)', signup: 'https://serper.dev/api-key' },
+  { env: 'BRAVE_API_KEY', label: 'Brave search ($5/month credit, card required)', signup: 'https://api-dashboard.search.brave.com' },
+];
+
+export const NON_CHAT_MODEL = /embed|whisper|tts|audio|image|vision-only|guard|moderation|rerank|transcribe|aqa|imagen|veo|lyria|native-audio|computer-use|robotics|orpheus|playai|compound|ocr|reward|parakeet|retriever|nemoguard|safety|clip|kosmos|deplot|paligemma|vila|neva|flux|stable-diffusion|bge-|m2m|translate/i;

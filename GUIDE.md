@@ -8,23 +8,11 @@
    git clone https://github.com/bezgolovyponch/free-research-llm.git
    cd free-research-llm
    ```
-3. **Get one free model key** (two is better, because when one quota runs out the app switches to the other):
-   - Groq: https://console.groq.com/keys
-   - Gemini: https://aistudio.google.com/apikey
-   - Cerebras: https://cloud.cerebras.ai
-   - Fully offline alternative: install Ollama (https://ollama.com/download), then run `ollama pull qwen2.5:7b`. It needs no key.
-4. **Optional, for better sources:** get a free Tavily key (https://app.tavily.com), which gives 1,000 searches a month. Without it the app searches Wikipedia only.
-5. **Store the keys in your shell, not in a project file:**
-   ```bash
-   echo 'export GROQ_API_KEY="paste-here"'   >> ~/.zshrc
-   echo 'export GEMINI_API_KEY="paste-here"' >> ~/.zshrc
-   echo 'export CEREBRAS_API_KEY="paste-here"' >> ~/.zshrc
-   echo 'export TAVILY_API_KEY="paste-here"' >> ~/.zshrc
-   source ~/.zshrc
-   ```
-   You can also paste a key into the **Setup** tab. It is then kept for the current session only and is never written to disk.
+3. **Get free keys and save them.** The full list with verified limits and exact clicks is in **[KEYS.md](KEYS.md)**. In short: create **Gemini**, **Groq** and **Tavily** keys (more is better: Mistral, Cerebras, NVIDIA, Exa), then double-click **`keys.command`** and paste each key when asked. They are stored in the macOS Keychain, not in a file.
+4. Alternative without the Keychain: put `export GROQ_API_KEY="…"` lines in `~/.zshrc`, or paste keys in the app's **Setup** tab, which keeps them for the current session only.
+5. Fully offline option: install Ollama (https://ollama.com/download), then run `ollama pull qwen2.5:7b`. It needs no key.
 6. **Start the app:** run `npm start`, or on a Mac double-click `start.command`. Open **http://127.0.0.1:4600**.
-7. **Check Setup.** At least one provider must show **● ready** with a fast and a deep model. The header chip shows the active model.
+7. **Check Setup.** At least one provider must show **● ready** with a fast and a deep model. The **Routing** card shows which provider answers which role.
 
 To try the flow before you have a key, run `npm run demo`. Every answer is scripted and labelled DEMO.
 
@@ -63,7 +51,7 @@ Rules of thumb: give one decision per project; state numbers with currency and y
 
 | Symptom | Fix |
 |---|---|
-| Setup shows "○ no key" everywhere | Run `export GROQ_API_KEY=...` in the **same terminal** before `npm start`, or paste the key in Setup. `start.command` loads `~/.zshrc`. |
+| Setup shows "○ no key" everywhere | Run `./keys.command` and paste at least one key, then restart. The terminal line "keys from macOS Keychain: …" confirms they loaded. |
 | Provider "● error … HTTP 401" | The key is wrong or revoked. Create a new one. |
 | "all free model quotas are cooling down" | The daily or minute quota is used up. Add a second provider or wait, then press **Run / resume**. |
 | Many amber nodes saying "number(s) without source" | Search found little. Add `TAVILY_API_KEY`, upload a CSV, or re-research with a hint naming a site. |

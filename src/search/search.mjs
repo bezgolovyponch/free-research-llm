@@ -69,6 +69,41 @@ export class BraveBackend {
   }
 }
 
+export class ExaBackend {
+  constructor({ apiKey, fetchImpl }) {
+    this.id = 'exa';
+    this.apiKey = apiKey;
+    this.fetchImpl = fetchImpl;
+    this.fullText = true;
+  }
+
+  async search(query, limit) {
+    const body = await fetchJson(this.fetchImpl, 'https://api.exa.ai/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': this.apiKey },
+      body: JSON.stringify({ query, numResults: limit, contents: { text: { maxCharacters: PAGE_TEXT_LIMIT } } }),
+    });
+    return (body.results ?? []).map((r) => ({ title: r.title ?? r.url, url: r.url, snippet: String(r.text ?? '').slice(0, 300), text: String(r.text ?? '').slice(0, PAGE_TEXT_LIMIT) }));
+  }
+}
+
+export class SerperBackend {
+  constructor({ apiKey, fetchImpl }) {
+    this.id = 'serper';
+    this.apiKey = apiKey;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async search(query, limit) {
+    const body = await fetchJson(this.fetchImpl, 'https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': this.apiKey },
+      body: JSON.stringify({ q: query, num: limit }),
+    });
+    return (body.organic ?? []).slice(0, limit).map((r) => ({ title: r.title, url: r.link, snippet: r.snippet ?? '' }));
+  }
+}
+
 export class SearxngBackend {
   constructor({ baseURL, fetchImpl }) {
     this.id = 'searxng';
@@ -110,10 +145,11 @@ export class WikipediaBackend {
 }
 
 export class SearchService {
-  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, resultsPerQuery = 4 }) {
+  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4 }) {
     this.backends = backends;
     this.fetchImpl = fetchImpl;
     this.fetchPages = fetchPages;
+    this.jinaReader = jinaReader;
     this.resultsPerQuery = resultsPerQuery;
     this.lastErrors = [];
   }
@@ -122,19 +158,27 @@ export class SearchService {
     return this.backends.length > 0;
   }
 
-  async pageText(url) {
+  async fetchText(url, accept) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), 10000);
     try {
-      const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept: 'text/html,text/plain' }, signal: controller.signal });
+      const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept }, signal: controller.signal });
       const type = res.headers.get('content-type') ?? '';
-      if (!res.ok || !/text\/(html|plain)/.test(type)) return '';
-      return htmlToText(await res.text()).slice(0, PAGE_TEXT_LIMIT);
+      if (!res.ok || !/text\/(html|plain|markdown)/.test(type)) return '';
+      const body = await res.text();
+      return (/html/.test(type) ? htmlToText(body) : body.trim()).slice(0, PAGE_TEXT_LIMIT);
     } catch {
       return '';
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async pageText(url) {
+    const direct = await this.fetchText(url, 'text/html,text/plain');
+    if (direct.length >= 400 || !this.jinaReader) return direct;
+    const viaReader = await this.fetchText(`https://r.jina.ai/${url}`, 'text/plain');
+    return viaReader.length > direct.length ? viaReader : direct;
   }
 
   async search(queries, { maxSources = 6 } = {}) {

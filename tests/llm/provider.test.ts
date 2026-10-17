@@ -72,4 +72,11 @@ describe('OpenAICompatibleProvider', () => {
     const q = await new OpenAICompatibleProvider({ preset: cerebras, apiKey: 'x', fetchImpl: denied }).discover();
     expect(q.state).toBe('error');
   });
+
+  it('reports a missing local Ollama as not configured instead of an error', async () => {
+    const ollama = PROVIDER_PRESETS.find((p) => p.id === 'ollama')!;
+    const fetchImpl = async () => { throw new TypeError('fetch failed'); };
+    const p = await new OpenAICompatibleProvider({ preset: ollama, fetchImpl }).discover();
+    expect(p.describe()).toMatchObject({ state: 'not-configured', detail: expect.stringMatching(/not running/) });
+  });
 });

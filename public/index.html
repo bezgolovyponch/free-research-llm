@@ -204,7 +204,7 @@
   <section id="tab-setup" class="tab">
     <div class="wrap">
       <h2>Setup: connect free models and search</h2>
-      <p class="lead">Connect at least one model provider. The router uses them in order and switches to the next one when a free quota runs out (HTTP 429). Keys pasted here stay in the server's memory only: they are never written to disk and are gone on restart. For permanent keys, export them in your shell (see Guide).</p>
+      <p class="lead">Connect at least one model provider. The router uses them in order and switches to the next one when a free quota runs out (HTTP 429). Keys pasted here stay in the server's memory only and are gone on restart. To save keys permanently, double-click <span class="mono">keys.command</span> in the app folder: it stores them in the macOS Keychain. KEYS.md lists which free keys to get.</p>
       <div class="card tablewrap" style="padding:6px"><table id="provTable"></table></div>
       <div class="card">
         <h3 style="margin-top:0">Paste a key for this session</h3>
@@ -217,6 +217,7 @@
         </div>
         <p class="small muted" id="keyHelp" style="margin-top:6px"></p>
       </div>
+      <div class="card"><h3 style="margin-top:0">Routing (who answers what)</h3><div id="routeInfo" class="small"></div></div>
       <div class="card"><h3 style="margin-top:0">Web search</h3><div id="searchInfo" class="small"></div></div>
       <div class="card"><h3 style="margin-top:0">Recent model calls</h3><div class="tablewrap"><table id="ledgerTable"></table></div></div>
       <div class="card"><h3 style="margin-top:0">Appearance</h3><div class="row"><button class="btn dim sm" data-theme-set="">System</button><button class="btn dim sm" data-theme-set="light">Light</button><button class="btn dim sm" data-theme-set="dark">Dark</button></div></div>
@@ -229,14 +230,8 @@
       <div class="card">
         <h3 style="margin-top:0">A · One-time setup (5 minutes)</h3>
         <ol class="steps">
-          <li>Get one free key. <b>Groq</b>: <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> or <b>Gemini</b>: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Two keys are better: when one quota runs out, the router switches to the other.</li>
-          <li>Optional, better sources: a free <b>Tavily</b> key (<a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a>) or <b>Brave Search</b> key. Without one, the app searches Wikipedia.</li>
-          <li>Put the keys in your shell, not in a file inside the project:
-            <pre class="cmd">echo 'export GROQ_API_KEY="paste-here"' >> ~/.zshrc
-echo 'export GEMINI_API_KEY="paste-here"' >> ~/.zshrc
-echo 'export CEREBRAS_API_KEY="paste-here"' >> ~/.zshrc
-source ~/.zshrc</pre>
-            Or paste them in <b>Setup</b> for the current session only.</li>
+          <li>Create free keys: at least <b>Gemini</b> (<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>), <b>Groq</b> (<a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>) and <b>Tavily</b> for web search (<a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a>). Better: also Mistral, Cerebras, NVIDIA and Exa. The full verified list is in <span class="mono">KEYS.md</span>.</li>
+          <li>Double-click <span class="mono">keys.command</span> in the app folder and paste each key when asked. Keys go into the macOS Keychain, not into a file. You can also paste a key in <b>Setup</b> for the current session only.</li>
           <li>Start the app: <pre class="cmd">cd free-research-llm && npm start</pre>Then open <b>http://127.0.0.1:4600</b>. Mac: double-click <span class="mono">start.command</span>.</li>
         </ol>
       </div>
@@ -327,24 +322,28 @@ function renderSetup(){
   });
   $("provTable").innerHTML=h;
   const sel=$("keyProvider");const cur=sel.value;
-  sel.innerHTML=s.providers.filter(p=>p.keyEnv).map(p=>'<option value="'+esc(p.id)+'">'+esc(p.label)+"</option>").join("");
+  sel.innerHTML='<optgroup label="Models">'+s.providers.filter(p=>p.keyEnv).map(p=>'<option value="'+esc(p.id)+'">'+esc(p.label)+(p.state==="ready"?" ✓":"")+"</option>").join("")+'</optgroup><optgroup label="Web search">'+(s.searchKeys||[]).map(k=>'<option value="'+esc(k.env)+'">'+esc(k.label)+(k.set?" ✓":"")+"</option>").join("")+"</optgroup>";
+  const r=s.route||{fast:[],deep:[]};
+  $("routeInfo").innerHTML=(r.deep.length?"<b>Deep</b> (decompose, hard retries, memo): "+r.deep.map(esc).join(" → ")+"<br><b>Fast</b> (research each sub-question): "+r.fast.map(esc).join(" → ")+"<br>":"<span style='color:var(--rd)'>No ready provider yet.</span><br>")+"<span class='muted'>The first ready provider answers. On a rate limit (429) the next one takes over, and the reviewer always uses a different provider than the writer. Change the order with FRL_DEEP_ORDER / FRL_FAST_ORDER.</span>";
   if(cur)sel.value=cur;
   updateKeyHelp();
-  $("searchInfo").innerHTML="Active: <b>"+esc(s.search.backends.join(", ")||"none")+"</b>. Wikipedia works without a key. For real web results, export <span class='mono'>TAVILY_API_KEY</span> (free 1,000 searches/month, <a href='https://app.tavily.com' target='_blank' rel='noopener'>app.tavily.com</a>) or <span class='mono'>BRAVE_API_KEY</span>, then restart."+(s.search.lastErrors.length?'<div style="color:var(--rd)">last errors: '+esc(s.search.lastErrors.join("; "))+"</div>":"");
+  $("searchInfo").innerHTML="Active: <b>"+esc(s.search.backends.join(", ")||"none")+"</b>. Wikipedia works without a key. For real web results add <b>Tavily</b> (1,000 free/month, <a href='https://app.tavily.com' target='_blank' rel='noopener'>app.tavily.com</a>) and/or <b>Exa</b> or <b>Serper</b>: paste above under \"Web search\", or save with <span class='mono'>keys.command</span>."+(s.search.lastErrors.length?'<div style="color:var(--rd)">last errors: '+esc(s.search.lastErrors.join("; "))+"</div>":"");
   let l="<tr><th>time</th><th>purpose</th><th>tier</th><th>provider/model</th><th>result</th></tr>";
   s.ledger.slice().reverse().forEach(r=>{l+="<tr><td class='small mono'>"+esc(r.ts.slice(11,19))+"</td><td>"+esc(r.purpose)+"</td><td>"+esc(r.tier)+"</td><td class='small mono'>"+esc(r.provider+(r.model?"/"+r.model:""))+"</td><td class='small'>"+(r.ok?'<span style="color:var(--gr)">ok</span> '+r.ms+"ms":'<span style="color:var(--rd)">'+esc(trunc(r.error,90))+"</span>")+"</td></tr>";});
   $("ledgerTable").innerHTML=s.ledger.length?l:"<tr><td class='muted'>no calls yet</td></tr>";
 }
 function updateKeyHelp(){
-  const id=$("keyProvider").value;const p=(STATE.status?.providers||[]).find(x=>x.id===id);
-  $("keyUrl").style.display=id==="custom"?"block":"none";
-  $("keyHelp").innerHTML=p?("Permanent alternative: <span class='mono'>export "+esc(p.keyEnv)+"=…</span> in ~/.zshrc, then restart."+(safeUrl(p.signup)?" Get a key: <a href='"+esc(p.signup)+"' target='_blank' rel='noopener'>"+esc(p.signup)+"</a>":"")):"";
+  const id=$("keyProvider").value;const s=STATE.status||{};
+  const p=(s.providers||[]).find(x=>x.id===id)||(s.searchKeys||[]).map(k=>({keyEnv:k.env,signup:k.signup})).find(x=>x.keyEnv===id);
+  $("keyUrl").style.display=(id==="custom"||id==="cloudflare")?"block":"none";
+  $("keyUrl").placeholder=id==="cloudflare"?"Cloudflare account ID":"base URL, e.g. https://host/v1";
+  $("keyHelp").innerHTML=p?("Get it: "+(safeUrl(p.signup)?"<a href='"+esc(p.signup)+"' target='_blank' rel='noopener'>"+esc(p.signup)+"</a>":"—")+". To keep it after restart, run <span class='mono'>./keys.command</span> (saves to macOS Keychain) or export <span class='mono'>"+esc(p.keyEnv)+"</span> in ~/.zshrc."):"";
 }
 $("keyProvider").addEventListener("change",updateKeyHelp);
 $("btnKey").addEventListener("click",async()=>{
   const key=$("keyValue").value.trim();if(!key){toast("paste a key first");return;}
   $("btnKey").disabled=true;
-  try{STATE.status=await api("/api/keys",{method:"POST",body:{provider:$("keyProvider").value,key,baseURL:$("keyUrl").value.trim()}});$("keyValue").value="";await loadStatus();const p=STATE.status.providers.find(x=>x.id===$("keyProvider").value);toast(p&&p.state==="ready"?p.label+" connected":"not connected: "+(p?p.detail:""));}
+  try{await api("/api/keys",{method:"POST",body:{provider:$("keyProvider").value,key,baseURL:$("keyUrl").value.trim()}});$("keyValue").value="";await loadStatus();const p=STATE.status.providers.find(x=>x.id===$("keyProvider").value);toast(p?(p.state==="ready"?p.label+" connected":"not connected: "+p.detail):"search key set for this session");}
   catch(e){toast(e.message);}finally{$("btnKey").disabled=false;}
 });
 $("btnRefresh").addEventListener("click",async()=>{try{await api("/api/providers/refresh",{method:"POST"});await loadStatus();toast("providers re-checked");}catch(e){toast(e.message);}});

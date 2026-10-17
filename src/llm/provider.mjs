@@ -46,7 +46,7 @@ export class OpenAICompatibleProvider {
   }
 
   get configured() {
-    return Boolean(this.baseURL) && (this.preset.keyEnv === null || Boolean(this.apiKey));
+    return Boolean(this.baseURL) && !this.baseURL.includes('{account}') && (this.preset.keyEnv === null || Boolean(this.apiKey));
   }
 
   get ready() {
@@ -83,7 +83,8 @@ export class OpenAICompatibleProvider {
   async discover() {
     if (!this.configured) {
       this.state = 'not-configured';
-      this.detail = this.preset.keyEnv ? `set ${this.preset.keyEnv}` : 'no base URL';
+      const missing = [this.preset.keyEnv && !this.apiKey ? this.preset.keyEnv : '', this.baseURL.includes('{account}') ? this.preset.accountEnv : ''].filter(Boolean);
+      this.detail = missing.length ? `set ${missing.join(' and ')}` : 'no base URL';
       return this;
     }
     try {
@@ -103,6 +104,9 @@ export class OpenAICompatibleProvider {
         this.selected.deep ??= this.modelOverrides.deep ?? this.modelOverrides.any ?? fallback?.deep ?? this.selected.fast;
         this.state = 'ready';
         this.detail = `model list unavailable, using configured model (${error.message})`;
+      } else if (this.preset.local && error.status === 0) {
+        this.state = 'not-configured';
+        this.detail = 'not running (optional: install from ollama.com)';
       } else {
         this.state = 'error';
         this.detail = error.message;
@@ -143,6 +147,7 @@ export class OpenAICompatibleProvider {
       local: Boolean(this.preset.local),
       paid: Boolean(this.preset.paid),
       keyEnv: this.preset.keyEnv,
+      accountEnv: this.preset.accountEnv ?? null,
       signup: this.preset.signup,
       modelCount: this.models.length,
     };

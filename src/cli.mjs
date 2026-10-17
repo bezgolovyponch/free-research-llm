@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { App, ROOT_DIR } from './app.mjs';
+import { KeychainSecrets } from './secrets.mjs';
 import { toMarkdown } from './report.mjs';
 
 function parseArgs(argv) {
@@ -25,6 +26,7 @@ if (!args.question) {
   console.error(USAGE);
   process.exit(2);
 }
+await new KeychainSecrets().fillMissing(process.env);
 const app = new App();
 await app.refreshProviders();
 if (!app.router.ready) {

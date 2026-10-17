@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BraveBackend, SearchService, TavilyBackend, WikipediaBackend, htmlToText } from '../../src/search/search.mjs';
+import { BraveBackend, ExaBackend, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, htmlToText } from '../../src/search/search.mjs';
 import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
 
 describe('search', () => {
@@ -27,5 +27,26 @@ describe('search', () => {
     ]);
     const sources = await new SearchService({ fetchImpl, backends: [new WikipediaBackend({ fetchImpl })] }).search(['glamping']);
     expect(sources[0]).toMatchObject({ url: 'https://en.wikipedia.org/wiki/Glamping', text: 'Glamping is glamorous camping.' });
+  });
+
+  it('maps Exa and Serper results and sends their auth headers', async () => {
+    const fetchImpl = fakeFetch([
+      [/api\.exa\.ai/, () => jsonResponse({ results: [{ title: 'E', url: 'https://e.example/', text: 'exa text' }] })],
+      [/google\.serper\.dev/, () => jsonResponse({ organic: [{ title: 'S', link: 'https://s.example/', snippet: 'serp' }] })],
+    ]);
+    expect(await new ExaBackend({ apiKey: 'ek', fetchImpl }).search('q', 3)).toEqual([{ title: 'E', url: 'https://e.example/', snippet: 'exa text', text: 'exa text' }]);
+    expect(await new SerperBackend({ apiKey: 'sk', fetchImpl }).search('q', 3)).toEqual([{ title: 'S', url: 'https://s.example/', snippet: 'serp' }]);
+    expect((fetchImpl.calls[0].init.headers as Record<string, string>)['x-api-key']).toBe('ek');
+    expect(JSON.parse(String(fetchImpl.calls[1].init.body))).toEqual({ q: 'q', num: 3 });
+  });
+
+  it('falls back to the Jina reader when a page yields too little text', async () => {
+    const fetchImpl = fakeFetch([
+      [/r\.jina\.ai/, () => new Response('Reader text '.repeat(50), { headers: { 'content-type': 'text/plain' } })],
+      [/spa\.example/, () => new Response('<div id=app></div>', { headers: { 'content-type': 'text/html' } })],
+    ]);
+    const text = await new SearchService({ fetchImpl, backends: [] }).pageText('https://spa.example/');
+    expect(text.startsWith('Reader text')).toBe(true);
+    expect(await new SearchService({ fetchImpl, backends: [], jinaReader: false }).pageText('https://spa.example/')).toBe('');
   });
 });

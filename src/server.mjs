@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { App, ROOT_DIR } from './app.mjs';
+import { KeychainSecrets } from './secrets.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { TEMPLATES } from './research/templates.mjs';
 import { toMarkdown } from './report.mjs';
@@ -141,10 +142,13 @@ export async function startServer({ app = new App(), port = Number(process.env.P
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const fromKeychain = await new KeychainSecrets().fillMissing(process.env);
   const { app, url } = await startServer();
+  if (fromKeychain.length) console.log(`  keys from macOS Keychain: ${fromKeychain.join(', ')}`);
   const status = app.status();
   const ready = status.providers.filter((p) => p.state === 'ready');
   console.log(`\n  Free Research LLM is running → ${url}\n`);
-  console.log(ready.length ? `  models: ${ready.map((p) => `${p.id} (${p.fast})`).join(', ')}` : '  models: NONE connected yet — open the page and follow Setup (or run: npm run demo)');
+  console.log(ready.length ? `  models: ${ready.map((p) => `${p.id} (${p.fast})`).join(', ')}` : '  models: NONE connected yet — run ./keys.command (or open Setup in the page)');
+  if (ready.length) console.log(`  route deep: ${status.route.deep.join(' → ')}\n  route fast: ${status.route.fast.join(' → ')}`);
   console.log(`  search: ${status.search.backends.join(', ') || 'off'}${status.demo ? '\n  DEMO MODE: scripted answers, not real research' : ''}\n`);
 }

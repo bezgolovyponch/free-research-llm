@@ -33,7 +33,7 @@ You need Node.js 20+. There are no runtime dependencies.
 ```bash
 git clone https://github.com/bezgolovyponch/free-research-llm.git
 cd free-research-llm
-export GROQ_API_KEY="..."        # free: https://console.groq.com/keys  (or GEMINI_API_KEY, see below)
+./keys.command                   # paste free keys once (see KEYS.md); stored in macOS Keychain
 npm start                        # → http://127.0.0.1:4600
 ```
 
@@ -50,21 +50,13 @@ Reports are written to `reports/<project>.md`.
 
 **[GUIDE.md](GUIDE.md)** has the exact step-by-step instructions. **[AUDIT.md](AUDIT.md)** explains what was wrong with the tour-business calibration (FREECC) and what changed.
 
-## Configuration (environment only — keys never go into files)
+## Keys and routing
 
-| Variable | What | Cost |
-|---|---|---|
-| `GROQ_API_KEY` | Groq models, very fast | free tier |
-| `CEREBRAS_API_KEY` | Cerebras models, very fast (https://cloud.cerebras.ai) | free tier |
-| `GEMINI_API_KEY` | Google Gemini via its OpenAI-compatible endpoint | free tier |
-| `OPENROUTER_API_KEY` | only `:free` models are used | free (50 req/day under $10 credit) |
-| `OLLAMA_BASE_URL` | local Ollama, default `http://localhost:11434/v1` | free, local |
-| `DEEPSEEK_API_KEY` + `FRL_PAID_CALL_LIMIT` | near-free paid fallback. It stays **off** until you set a call limit | paid |
-| `CUSTOM_LLM_BASE_URL` / `CUSTOM_LLM_API_KEY` / `CUSTOM_LLM_MODEL` | any OpenAI-compatible endpoint | — |
-| `TAVILY_API_KEY` / `BRAVE_API_KEY` / `SEARXNG_URL` | web search (Wikipedia is always on unless `FRL_WIKIPEDIA=0`) | free tiers |
-| `FRL_PROVIDER_ORDER` | default `groq,cerebras,gemini,openrouter,ollama,custom,deepseek` | — |
-| `FRL_<PROVIDER>_FAST_MODEL` / `_DEEP_MODEL` | pin a model, e.g. `FRL_GROQ_DEEP_MODEL=llama-3.3-70b-versatile` | — |
-| `PORT` / `HOST` | default `4600` / `127.0.0.1` (local only) | — |
+**[KEYS.md](KEYS.md)** lists which free keys to get (verified 2026-10-17), the exact clicks for each, and how the router uses them. Short version: get **Gemini + Groq + Tavily**, then double-click **`keys.command`** to save them in the macOS Keychain. Optional extras: Mistral, Cerebras, NVIDIA, Exa, OpenRouter, SambaNova, Cloudflare, Cohere, Puter.
+
+Supported providers: Gemini, Groq, Cerebras, Mistral, NVIDIA, SambaNova, OpenRouter (`:free` only), Cloudflare Workers AI, Cohere, Puter, Ollama (local), any custom OpenAI-compatible endpoint, and DeepSeek (paid; used only if `FRL_PAID_CALL_LIMIT` > 0). Search: Tavily, Exa, Serper, Brave, SearXNG and Wikipedia, plus the Jina reader for pages that return too little text.
+
+The **deep** role (issue tree, retries, memo) and the **fast** role (research every sub-question) each have their own provider order, and the reviewer always uses a different provider. Keys are read from the shell environment first, then from the macOS Keychain. They are never read from or written to a project file.
 
 Model IDs are not hard-coded. Each provider's `/models` list is read at start and the best match from a preference list is picked, so renamed free models keep working. When a free quota returns HTTP 429, the router moves to the next provider. It cools the exhausted one down (honouring `Retry-After`), and if every provider is cooling it waits up to 65 seconds before giving up. Keys pasted in the Setup tab live only in server memory.
 
@@ -78,6 +70,7 @@ Model IDs are not hard-coded. Each provider's `/models` list is read at start an
 | `src/llm/` | provider presets, OpenAI-compatible client, failover router, scripted demo provider |
 | `src/research/` | engine, prompts, issue tree, mechanical verifier, safe calculator, domain templates, JSON extraction |
 | `src/search/` | Tavily, Brave, SearXNG, Wikipedia backends + page text fetch |
+| `src/secrets.mjs` | loads missing keys from the macOS Keychain (`keys.command` writes them) |
 | `src/data/csv.mjs` | CSV parsing + column profiling (your data becomes source D1) |
 | `public/index.html` | the decomposition UI (single file, no external resources) |
 | `tests/` | Vitest suites (`npm test`, needs `npm install` once) |

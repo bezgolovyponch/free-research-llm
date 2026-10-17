@@ -84,3 +84,14 @@ describe('ModelRouter paid budget', () => {
     await expect(blocked.complete({ messages: [] })).rejects.toThrow(/paid-call budget/);
   });
 });
+
+describe('ModelRouter route order', () => {
+  it('orders providers per tier and reports the live route', async () => {
+    const g = provider('gemini', ['{}']);
+    const q = provider('groq', ['{}']);
+    const router = new ModelRouter({ providers: [g, q], routeOrder: { fast: ['groq', 'gemini'], deep: ['gemini', 'groq'] } });
+    await expect(router.complete({ messages: [], tier: 'fast' })).resolves.toMatchObject({ provider: 'groq' });
+    await expect(router.complete({ messages: [], tier: 'deep' })).resolves.toMatchObject({ provider: 'gemini' });
+    expect(router.route()).toEqual({ fast: ['groq', 'gemini'], deep: ['gemini', 'groq'] });
+  });
+});

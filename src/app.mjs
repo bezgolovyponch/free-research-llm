@@ -1,16 +1,26 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PROVIDER_PRESETS } from './llm/presets.mjs';
+import { PROVIDER_PRESETS, ROUTE_ORDER, SEARCH_KEYS } from './llm/presets.mjs';
 import { OpenAICompatibleProvider } from './llm/provider.mjs';
 import { ModelRouter } from './llm/router.mjs';
 import { ScriptedProvider } from './llm/scripted-provider.mjs';
 import { ResearchEngine } from './research/engine.mjs';
-import { BraveBackend, SearchService, SearxngBackend, TavilyBackend, WikipediaBackend } from './search/search.mjs';
+import { BraveBackend, ExaBackend, SearchService, SearxngBackend, SerperBackend, TavilyBackend, WikipediaBackend } from './search/search.mjs';
 import { ProjectStore } from './store.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const DEFAULT_ORDER = ['groq', 'cerebras', 'gemini', 'openrouter', 'ollama', 'custom', 'deepseek'];
+function listEnv(value) {
+  return String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+export function routeOrderFrom(env) {
+  const both = listEnv(env.FRL_PROVIDER_ORDER);
+  return {
+    fast: listEnv(env.FRL_FAST_ORDER).length ? listEnv(env.FRL_FAST_ORDER) : both.length ? both : ROUTE_ORDER.fast,
+    deep: listEnv(env.FRL_DEEP_ORDER).length ? listEnv(env.FRL_DEEP_ORDER) : both.length ? both : ROUTE_ORDER.deep,
+  };
+}
 
 function modelOverrides(env, preset) {
   const prefix = `FRL_${preset.id.toUpperCase()}`;
@@ -29,14 +39,16 @@ export class ProviderFactory {
   }
 
   order() {
-    const wanted = String(this.env.FRL_PROVIDER_ORDER || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const ids = wanted.length ? wanted : DEFAULT_ORDER;
+    const only = listEnv(this.env.FRL_PROVIDER_ORDER);
+    const ids = only.length ? only : PROVIDER_PRESETS.map((p) => p.id);
     return ids.map((id) => PROVIDER_PRESETS.find((p) => p.id === id)).filter(Boolean);
   }
 
   build(preset) {
     const apiKey = this.sessionKeys.get(preset.id) || (preset.keyEnv ? this.env[preset.keyEnv] : '') || '';
-    const baseURL = (preset.baseEnv && this.env[preset.baseEnv]) || this.sessionKeys.get(`${preset.id}:url`) || preset.baseURL;
+    const account = this.sessionKeys.get(`${preset.id}:account`) || (preset.accountEnv ? this.env[preset.accountEnv] : '') || '';
+    const template = (preset.baseEnv && this.env[preset.baseEnv]) || this.sessionKeys.get(`${preset.id}:url`) || preset.baseURL;
+    const baseURL = account ? template.replace('{account}', encodeURIComponent(account)) : template;
     return new OpenAICompatibleProvider({ preset, apiKey, baseURL, modelOverrides: modelOverrides(this.env, preset), fetchImpl: this.fetchImpl });
   }
 
@@ -48,25 +60,31 @@ export class ProviderFactory {
 
   setSessionKey(providerId, key, baseURL) {
     if (key) this.sessionKeys.set(providerId, key);
-    if (baseURL) this.sessionKeys.set(`${providerId}:url`, baseURL);
+    if (!baseURL) return;
+    if (/^https?:\/\//.test(baseURL)) this.sessionKeys.set(`${providerId}:url`, baseURL);
+    else this.sessionKeys.set(`${providerId}:account`, baseURL);
   }
 }
 
 export function buildSearch({ env, fetchImpl }) {
   const backends = [];
   if (env.TAVILY_API_KEY) backends.push(new TavilyBackend({ apiKey: env.TAVILY_API_KEY, fetchImpl }));
+  if (env.EXA_API_KEY) backends.push(new ExaBackend({ apiKey: env.EXA_API_KEY, fetchImpl }));
+  if (env.SERPER_API_KEY) backends.push(new SerperBackend({ apiKey: env.SERPER_API_KEY, fetchImpl }));
   if (env.BRAVE_API_KEY) backends.push(new BraveBackend({ apiKey: env.BRAVE_API_KEY, fetchImpl }));
   if (env.SEARXNG_URL) backends.push(new SearxngBackend({ baseURL: env.SEARXNG_URL, fetchImpl }));
   if (env.FRL_WIKIPEDIA !== '0') backends.push(new WikipediaBackend({ fetchImpl, lang: env.FRL_WIKIPEDIA_LANG || 'en' }));
-  return new SearchService({ backends, fetchImpl, fetchPages: env.FRL_FETCH_PAGES !== '0' });
+  return new SearchService({ backends, fetchImpl, fetchPages: env.FRL_FETCH_PAGES !== '0', jinaReader: env.FRL_JINA_READER !== '0' });
 }
 
 export class App {
   constructor({ env = process.env, fetchImpl = fetch, dataDir, providers, search } = {}) {
     this.env = env;
+    this.fetchImpl = fetchImpl;
+    this.sessionSearchEnv = {};
     this.demo = env.FRL_DEMO === '1';
     this.factory = new ProviderFactory({ env, fetchImpl });
-    this.router = new ModelRouter({ providers: providers ?? [], paidCallLimit: Number(env.FRL_PAID_CALL_LIMIT ?? 0) || 0 });
+    this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), paidCallLimit: Number(env.FRL_PAID_CALL_LIMIT ?? 0) || 0 });
     this.search = search ?? buildSearch({ env, fetchImpl });
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects') });
     this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo });
@@ -84,6 +102,12 @@ export class App {
   }
 
   async setKey(providerId, key, baseURL) {
+    if (SEARCH_KEYS.some((k) => k.env === providerId)) {
+      this.sessionSearchEnv[providerId] = String(key ?? '').trim();
+      this.search = buildSearch({ env: { ...this.env, ...this.sessionSearchEnv }, fetchImpl: this.fetchImpl });
+      this.engine.search = this.search;
+      return this.router.status();
+    }
     this.factory.setSessionKey(providerId, String(key ?? '').trim(), String(baseURL ?? '').trim());
     return this.refreshProviders();
   }
@@ -93,6 +117,8 @@ export class App {
       ready: this.router.ready,
       demo: this.engine.demo,
       providers: this.router.status(),
+      route: this.router.route(),
+      searchKeys: SEARCH_KEYS.map((k) => ({ ...k, set: Boolean(this.env[k.env] || this.sessionSearchEnv[k.env]) })),
       search: this.search.describe(),
       ledger: this.router.ledger.slice(-40),
       calls: this.router.calls,

@@ -7,8 +7,9 @@ const DEFAULT_COOLDOWN_MS = 60000;
 const REPAIR_INSTRUCTION = 'Your previous reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.';
 
 export class ModelRouter {
-  constructor({ providers = [], paidCallLimit = 0, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {} }) {
+  constructor({ providers = [], routeOrder = null, paidCallLimit = 0, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {} }) {
     this.providers = providers;
+    this.routeOrder = routeOrder;
     this.paidCallLimit = paidCallLimit;
     this.paidCalls = 0;
     this.cooldownMs = cooldownMs;
@@ -29,9 +30,19 @@ export class ModelRouter {
     this.providers = providers;
   }
 
-  available({ avoid } = {}) {
+  ordered(tier) {
+    const order = this.routeOrder?.[tier];
+    if (!order) return this.providers;
+    const rank = (p) => {
+      const i = order.indexOf(p.id);
+      return i < 0 ? order.length : i;
+    };
+    return [...this.providers].sort((a, b) => rank(a) - rank(b));
+  }
+
+  available({ avoid, tier = 'fast' } = {}) {
     const time = this.now();
-    const usable = this.providers.filter((p) => p.ready && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.overPaidBudget(p));
+    const usable = this.ordered(tier).filter((p) => p.ready && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.overPaidBudget(p));
     if (!avoid) return usable;
     const preferred = usable.filter((p) => p.id !== avoid);
     return preferred.length ? [...preferred, ...usable.filter((p) => p.id === avoid)] : usable;
@@ -60,12 +71,12 @@ export class ModelRouter {
   }
 
   async complete({ messages, tier = 'fast', json = true, purpose = 'chat', avoid, temperature }) {
-    let candidates = this.available({ avoid });
+    let candidates = this.available({ avoid, tier });
     const wait = candidates.length ? 0 : this.shortestCooldownMs();
     if (!candidates.length && wait <= this.maxWaitMs) {
       this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
       await this.sleep(wait);
-      candidates = this.available({ avoid });
+      candidates = this.available({ avoid, tier });
     }
     if (!candidates.length) {
       throw new NoModelAvailableError(this.ready ? 'all free model quotas are cooling down after rate limits (and the paid-call budget is used up or unset); retry in a minute' : 'no model provider is configured — open Setup');
@@ -95,6 +106,11 @@ export class ModelRouter {
       }
     }
     throw new NoModelAvailableError(`every provider failed for ${purpose}: ${errors.join(' || ').slice(0, 600)}`);
+  }
+
+  route() {
+    const ids = (tier) => this.ordered(tier).filter((p) => p.ready && !this.overPaidBudget(p)).map((p) => p.id);
+    return { fast: ids('fast'), deep: ids('deep') };
   }
 
   status() {

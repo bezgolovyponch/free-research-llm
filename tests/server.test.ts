@@ -16,9 +16,9 @@ async function call(method: string, url: string, body?: unknown) {
 }
 
 async function waitFor(id: string, phase: string) {
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 400; i++) {
     const { body } = await call('GET', `/api/projects/${id}`);
-    if (body.phase === phase) return body;
+    if (body.phase === phase && body.report) return body;
     await new Promise((r) => setTimeout(r, 30));
   }
   throw new Error(`project never reached ${phase}`);
