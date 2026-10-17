@@ -221,7 +221,7 @@ __marimo__/
 
 # free-research-llm
 node_modules/
-data/
-reports/
+/data/
+/reports/
 *.tmp
 .DS_Store
