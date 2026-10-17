@@ -1,0 +1,23 @@
+{
+  "name": "free-research-llm",
+  "version": "1.0.0",
+  "description": "Free research LLM: one prompt in, a decomposed, source-checked analytical answer out. Runs locally on free model quotas.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "frl": "src/cli.mjs"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "demo": "FRL_DEMO=1 node src/server.mjs",
+    "ask": "node src/cli.mjs",
+    "test": "vitest run",
+    "check": "node --check src/server.mjs && vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
+}

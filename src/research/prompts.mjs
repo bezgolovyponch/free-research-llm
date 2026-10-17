@@ -1,0 +1,173 @@
+import { MAX_NODES, METHODS } from './tree.mjs';
+
+const SYSTEM = 'You are a rigorous research analyst. You decompose questions MECE-style, use only evidence you are given, label every assumption, show calculations as formulas, and never invent sources, URLs or numbers. You reply with a single JSON object only.';
+
+export const TASK_MARKERS = {
+  decompose: 'TASK=DECOMPOSE',
+  expand: 'TASK=EXPAND',
+  research: 'TASK=RESEARCH',
+  critique: 'TASK=CRITIQUE',
+  rollup: 'TASK=ROLLUP',
+  synthesize: 'TASK=SYNTHESIZE',
+};
+
+function constraintsText(constraints = {}) {
+  const lines = Object.entries(constraints).filter(([, v]) => String(v ?? '').trim()).map(([k, v]) => `- ${k}: ${v}`);
+  return lines.length ? lines.join('\n') : '- none stated (choose sensible defaults and list them as assumptions)';
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function decomposePrompt({ question, template, constraints, dataSummary }) {
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.decompose}
+Today is ${today()}.
+
+QUESTION (the decision to support):
+${question}
+
+CONSTRAINTS:
+${constraintsText(constraints)}
+
+DOMAIN PLAYBOOK (${template.label}) — use as a checklist, adapt to the question:
+- typical drivers: ${template.drivers}
+- typical metrics: ${template.metrics}
+- typical sources: ${template.sources}
+- decision rule: ${template.decisionRule}
+${dataSummary ? `\nUSER DATA AVAILABLE (source id D1):\n${dataSummary}\n` : ''}
+Build an issue tree that answers the QUESTION:
+1. "decision": restate the decision in one sentence; "successCriteria": the measurable threshold that answers it.
+2. 3-6 top-level DRIVERS (parentId null): mutually exclusive, together exhaustive for the decision.
+3. Under each driver 2-4 LEAF sub-questions (parentId = driver id), each answerable by one lookup, calculation, comparison, estimate or data analysis. Max ${MAX_NODES} nodes total.
+4. Every node: id (drivers "D1".."D6", leaves "D1.1" etc.), title (<=8 words), question (specific, with geography/time/units), why (how the answer moves the decision), hypothesis (your best guess to test), metric, unit, method (one of ${METHODS.join('|')}), searchQueries (2-3 precise web queries, include country language terms when useful), dependsOn (ids of OTHER nodes whose answer this needs, e.g. a margin calculation depends on price leaves), impact 1-5 (effect on the decision), uncertainty 1-5 (how unknown it is today).
+5. "assumptionsToConfirm": things the user must confirm.
+
+JSON shape:
+{"decision":"","successCriteria":"","assumptionsToConfirm":[""],"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"dependsOn":[],"impact":3,"uncertainty":3}]}`,
+    },
+  ];
+}
+
+export function expandPrompt({ question, node, hint }) {
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.expand}
+Overall question: ${question}
+Node to break down further: ${node.id} — ${node.question}
+${hint ? `User guidance: ${hint}\n` : ''}Return 2-4 sub-questions that together fully answer the node. Use ids "${node.id}.a", "${node.id}.b", ... and parentId "${node.id}".
+JSON shape: {"nodes":[{"id":"","parentId":"${node.id}","title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"dependsOn":[],"impact":3,"uncertainty":3}]}`,
+    },
+  ];
+}
+
+function sourcesBlock(sources) {
+  if (!sources.length) return 'NO SOURCES were retrieved. Use general knowledge only, mark every number as "assumption": true, and set confidence "low".';
+  return sources.map((s) => `[${s.id}] ${s.title}${s.url ? ` <${s.url}>` : ''}\n${String(s.text || s.snippet || '').slice(0, 1800)}`).join('\n\n');
+}
+
+function upstreamBlock(upstream) {
+  if (!upstream.length) return 'none';
+  return upstream.map((u) => `${u.id} (${u.status}): ${u.answer}${u.keyNumbers ? ` | numbers: ${u.keyNumbers}` : ''}`).join('\n');
+}
+
+export function researchPrompt({ question, node, sources, upstream, previousFailures, hint }) {
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.research}
+Today is ${today()}. Overall question: ${question}
+
+SUB-QUESTION ${node.id}: ${node.question}
+Metric: ${node.metric || 'n/a'} (${node.unit || 'unit n/a'}) · method: ${node.method} · hypothesis to test: ${node.hypothesis || 'n/a'}
+${hint ? `User guidance: ${hint}\n` : ''}
+ANSWERS ALREADY ESTABLISHED (use them, cite as their node id in text):
+${upstreamBlock(upstream)}
+
+EVIDENCE (cite by id in square brackets, e.g. S1; D1 is the user's data):
+${sourcesBlock(sources)}
+${previousFailures?.length ? `\nA PREVIOUS ATTEMPT FAILED THESE CHECKS — fix the cause:\n- ${previousFailures.join('\n- ')}\n` : ''}
+RULES:
+- Answer only from EVIDENCE and established answers. If evidence is missing, give your best estimate, set "assumption": true on that claim and say what data would settle it in "gaps".
+- Every claim containing a number must list sourceIds from the EVIDENCE ids above, or be marked assumption.
+- "sourceIds" may only contain ids shown above (${sources.map((s) => s.id).join(', ') || 'none'}). Never invent ids or URLs.
+- If the method is calculation/comparison, provide "calculation": a formula using variable names (letters, digits, _), + - * / ^ ( ) and min/max/abs/round, the numeric value of each input, and the result. The result will be recomputed by machine.
+- confidence "high" only with 2+ independent sources agreeing.
+
+JSON shape:
+{"answer":"one or two sentences that directly answer the sub-question, with the key number","claims":[{"text":"","value":null,"unit":"","sourceIds":["S1"],"assumption":false}],"calculation":{"formula":"","inputs":{"name":{"value":0,"unit":"","sourceId":"S1"}},"result":0,"unit":""},"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}
+Omit "calculation" if no arithmetic is involved.`,
+    },
+  ];
+}
+
+export function critiquePrompt({ node, finding, sources }) {
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.critique}
+You are an independent reviewer. Check this finding against the evidence. Do not solve the task again; judge it.
+
+SUB-QUESTION ${node.id}: ${node.question}
+FINDING: ${JSON.stringify(finding).slice(0, 3000)}
+
+EVIDENCE:
+${sourcesBlock(sources)}
+
+Look for: claims the evidence does not say, wrong units or currency, stale years, arithmetic or logic errors, missing major cost/factor, overconfidence.
+JSON shape: {"agree":true,"severity":"none|minor|major","issues":[""],"betterAnswer":""}`,
+    },
+  ];
+}
+
+export function rollupPrompt({ question, node, children }) {
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.rollup}
+Overall question: ${question}
+DRIVER ${node.id}: ${node.question}
+
+SUB-FINDINGS:
+${children.map((c) => `${c.id} [${c.status}] ${c.question}\n  -> ${c.finding?.answer ?? 'no answer'}`).join('\n')}
+
+Combine the sub-findings into the driver's answer. Do not add new facts. Cite sub-finding ids in the text. If a sub-finding is weak or unsupported, say how that limits the conclusion.
+JSON shape: {"answer":"","claims":[{"text":"","sourceIds":[],"assumption":false}],"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}`,
+    },
+  ];
+}
+
+export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes }) {
+  const drivers = nodes.filter((n) => n.parentId === 'Q');
+  const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}`);
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.synthesize}
+QUESTION: ${question}
+DECISION: ${decision}
+SUCCESS CRITERIA: ${successCriteria || 'not stated'}
+CONSTRAINTS:
+${constraintsText(constraints)}
+DECISION RULE: ${template.decisionRule}
+
+RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
+${lines.join('\n')}
+
+Write the final decision memo. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units.
+JSON shape:
+{"verdict":"GO | NO-GO | GO-IF ... (one line)","confidence":"low|medium|high","summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
+Drivers: ${drivers.map((d) => d.id).join(', ')}.`,
+    },
+  ];
+}

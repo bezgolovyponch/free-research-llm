@@ -1,0 +1,64 @@
+import { describe, expect, it } from 'vitest';
+import { PROVIDER_PRESETS } from '../../src/llm/presets.mjs';
+import { OpenAICompatibleProvider, ProviderError, pickModel } from '../../src/llm/provider.mjs';
+import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
+
+const groq = PROVIDER_PRESETS.find((p) => p.id === 'groq')!;
+const openrouter = PROVIDER_PRESETS.find((p) => p.id === 'openrouter')!;
+
+describe('pickModel', () => {
+  it('prefers exact, then partial matches, and skips non-chat models', () => {
+    expect(pickModel(['whisper-large', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'], ['llama-3.1-8b-instant'])).toBe('llama-3.1-8b-instant');
+    expect(pickModel(['text-embedding-004', 'gemini-2.5-flash'], ['flash'])).toBe('gemini-2.5-flash');
+    expect(pickModel(['text-embedding-004'], ['x'])).toBeNull();
+  });
+
+  it('keeps OpenRouter to :free models', () => {
+    expect(pickModel(['deepseek/deepseek-chat', 'deepseek/deepseek-r1:free'], ['deepseek'], true)).toBe('deepseek/deepseek-r1:free');
+  });
+});
+
+describe('OpenAICompatibleProvider', () => {
+  it('is not configured without its key', async () => {
+    const p = await new OpenAICompatibleProvider({ preset: groq, fetchImpl: fakeFetch([]) }).discover();
+    expect(p.state).toBe('not-configured');
+    expect(p.ready).toBe(false);
+  });
+
+  it('discovers models, picks tiers and chats with the bearer key', async () => {
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'llama-3.1-8b-instant' }, { id: 'llama-3.3-70b-versatile' }] })],
+      [/\/chat\/completions$/, () => jsonResponse({ choices: [{ message: { content: '{"ok":true}' } }], usage: { total_tokens: 9 } })],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: groq, apiKey: 'k', fetchImpl }).discover();
+    expect(p.selected).toEqual({ fast: 'llama-3.1-8b-instant', deep: 'llama-3.3-70b-versatile' });
+    const reply = await p.chat({ messages: [{ role: 'user', content: 'hi' }], tier: 'deep' });
+    expect(reply).toMatchObject({ content: '{"ok":true}', model: 'llama-3.3-70b-versatile', provider: 'groq' });
+    const sent = fetchImpl.calls.at(-1)!;
+    expect((sent.init.headers as Record<string, string>).authorization).toBe('Bearer k');
+    expect(JSON.parse(String(sent.init.body)).response_format).toEqual({ type: 'json_object' });
+  });
+
+  it('retries without JSON mode when the endpoint rejects response_format', async () => {
+    let n = 0;
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'deepseek/deepseek-r1:free' }] })],
+      [/\/chat\/completions$/, () => (++n === 1 ? new Response('bad response_format', { status: 400 }) : jsonResponse({ choices: [{ message: { content: 'x' } }] }))],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: openrouter, apiKey: 'k', fetchImpl }).discover();
+    await expect(p.chat({ messages: [] })).resolves.toMatchObject({ content: 'x' });
+    expect(JSON.parse(String(fetchImpl.calls.at(-1)!.init.body)).response_format).toBeUndefined();
+  });
+
+  it('turns 429 into a retryable error carrying retry-after', async () => {
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'llama-3.1-8b-instant' }] })],
+      [/\/chat\/completions$/, () => new Response('slow down', { status: 429, headers: { 'retry-after': '7' } })],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: groq, apiKey: 'k', fetchImpl }).discover();
+    const error = await p.chat({ messages: [] }).catch((e) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error.retryable).toBe(true);
+    expect(error.retryAfterMs).toBe(7000);
+  });
+});

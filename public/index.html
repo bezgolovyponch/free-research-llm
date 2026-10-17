@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free Research LLM</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --panel2:#eef1f5; --line:#d9dee6; --txt:#18202c; --dim:#5d6a7c;
+    --acc:#0f8f80; --acc-ink:#ffffff; --am:#b7791f; --gr:#2f855a; --tl:#2b8a9e; --rd:#c53030; --bl:#2b6cb0; --vi:#6b46c1; --gray:#8a96a8;
+    --edge:#c3cad6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0b0e14; --panel:#121722; --panel2:#0e131d; --line:#1e2634; --txt:#dbe4f0; --dim:#8494ab;
+      --acc:#39d2c0; --acc-ink:#06231f; --am:#f5a623; --gr:#4ade80; --tl:#5eead4; --rd:#f87171; --bl:#60a5fa; --vi:#a78bfa; --gray:#5b6a82;
+      --edge:#2a3548;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b0e14; --panel:#121722; --panel2:#0e131d; --line:#1e2634; --txt:#dbe4f0; --dim:#8494ab;
+    --acc:#39d2c0; --acc-ink:#06231f; --am:#f5a623; --gr:#4ade80; --tl:#5eead4; --rd:#f87171; --bl:#60a5fa; --vi:#a78bfa; --gray:#5b6a82;
+    --edge:#2a3548;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%}
+  body{background:var(--bg); color:var(--txt); font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; display:flex; flex-direction:column; overflow:hidden}
+  .mono,code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap}
+  .logo{font-weight:800; color:var(--acc); white-space:nowrap}
+  .logo small{color:var(--dim); font-weight:500}
+  nav{display:flex; gap:2px; flex-wrap:wrap}
+  nav button{background:transparent; border:1px solid transparent; color:var(--dim); padding:6px 11px; border-radius:8px; cursor:pointer; font:inherit; font-weight:600}
+  nav button:hover{color:var(--txt)}
+  nav button.on{color:var(--acc); border-color:var(--line); background:var(--panel2)}
+  .hdr-right{margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .chip{background:var(--panel2); border:1px solid var(--line); color:var(--dim); border-radius:999px; padding:3px 10px; font-size:12px; white-space:nowrap}
+  .chip b{color:var(--txt)}
+  .chip.bad b{color:var(--rd)} .chip.ok b{color:var(--gr)} .chip.demo{border-color:var(--am); color:var(--am)}
+  select,textarea,input[type=text],input[type=password]{width:100%; background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font:inherit}
+  select{width:auto; max-width:320px; padding:5px 8px}
+  textarea{min-height:110px; resize:vertical}
+  main{flex:1 1 auto; overflow:hidden; position:relative}
+  section.tab{display:none; height:100%; overflow:auto; padding:18px}
+  section.tab.on{display:block}
+  #tab-tree.on{display:flex; padding:0; overflow:hidden}
+  h2{font-size:18px; margin-bottom:8px}
+  h3{font-size:12px; margin:16px 0 6px; color:var(--acc); text-transform:uppercase; letter-spacing:.8px}
+  p.lead{color:var(--dim); max-width:860px; margin-bottom:14px}
+  .wrap{max-width:980px; margin:0 auto}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+  .grid2{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px}
+  label.f{display:block; font-size:12px; color:var(--dim); margin-bottom:4px; font-weight:600}
+  button.btn{background:var(--acc); color:var(--acc-ink); border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:700; cursor:pointer}
+  button.btn.ghost{background:transparent; color:var(--acc); border:1px solid var(--acc)}
+  button.btn.dim{background:var(--panel2); color:var(--txt); border:1px solid var(--line); font-weight:600}
+  button.btn.danger{background:transparent; color:var(--rd); border:1px solid var(--rd)}
+  button.btn.sm{padding:5px 10px; font-size:12px}
+  button.btn:disabled{opacity:.45; cursor:not-allowed}
+  .tchip{display:inline-flex; align-items:center; gap:6px; background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:6px 12px; margin:3px; cursor:pointer; font-size:13px; font-weight:600; color:var(--txt)}
+  .tchip.on{border-color:var(--acc); color:var(--acc)}
+  .muted{color:var(--dim)} .small{font-size:12px}
+  .notice{border-left:3px solid var(--am); background:var(--panel2); padding:10px 12px; border-radius:6px; margin-bottom:12px}
+  .notice.err{border-color:var(--rd)} .notice.ok{border-color:var(--gr)}
+  #cloudWrap{flex:1 1 auto; position:relative; min-width:0; display:flex; flex-direction:column}
+  #runbar{display:flex; gap:10px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap}
+  #runbar .prog{flex:1 1 160px; height:6px; background:var(--panel2); border-radius:3px; overflow:hidden; min-width:120px}
+  #runbar .prog i{display:block; height:100%; background:linear-gradient(90deg,var(--acc),var(--vi)); transition:width .3s}
+  #cloud{flex:1 1 auto; width:100%; display:block; background:var(--bg); touch-action:none}
+  #legend{position:absolute; bottom:10px; left:10px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:6px 10px; font-size:12px; color:var(--dim); max-width:calc(100% - 20px)}
+  .dot{display:inline-block; width:10px; height:10px; border-radius:50%; margin:0 4px 0 8px; vertical-align:-1px}
+  #side{flex:0 0 420px; max-width:46%; border-left:1px solid var(--line); background:var(--panel); overflow:auto; padding:14px}
+  @media (max-width:820px){
+    #tab-tree.on{flex-direction:column; overflow:auto}
+    #cloudWrap{flex:0 0 60vh}
+    #side{flex:1 0 auto; max-width:none; border-left:0; border-top:1px solid var(--line)}
+    header{padding:8px 16px; gap:8px}
+    .logo small{display:none}
+    nav{flex-wrap:nowrap; overflow-x:auto; max-width:100%; width:100%}
+    nav button{flex:0 0 auto; padding:6px 9px}
+    .hdr-right{margin-left:0; width:100%}
+    .hdr-right select{max-width:100%; flex:1 1 100%}
+    section.tab{padding:12px 16px}
+    input[type=file]{max-width:100%}
+  }
+  section.tab, .wrap, .card{min-width:0; max-width:100%}
+  .wrap{overflow-wrap:anywhere}
+  .badge{font-size:11px; border-radius:6px; padding:2px 8px; font-weight:700; border:1px solid; display:inline-block}
+  .kv{margin:10px 0}
+  .kv b.k{color:var(--acc); font-size:11px; text-transform:uppercase; letter-spacing:.6px; display:block; margin-bottom:2px}
+  .check{font-size:13px; margin:3px 0}
+  .check .y{color:var(--gr); font-weight:700} .check .n{color:var(--rd); font-weight:700}
+  .sub{display:block; width:100%; text-align:left; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; cursor:pointer; color:var(--txt); font:inherit}
+  .sub:hover{border-color:var(--acc)}
+  table{border-collapse:collapse; width:100%}
+  th,td{border-bottom:1px solid var(--line); padding:7px 9px; text-align:left; vertical-align:top}
+  th{color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.5px}
+  tr.click{cursor:pointer} tr.click:hover td{background:var(--panel2)}
+  a{color:var(--bl)}
+  .tablewrap{overflow-x:auto}
+  .verdict{font-size:20px; font-weight:800; margin:6px 0 10px}
+  ol.steps{padding-left:22px} ol.steps li{margin:8px 0}
+  #log{max-height:160px; overflow:auto; font-size:12px; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:8px; margin-top:8px}
+  #log div{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  #toast{position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--panel); border:1px solid var(--acc); color:var(--txt); padding:10px 18px; border-radius:10px; display:none; z-index:50; max-width:90%; box-shadow:0 6px 24px #0003}
+  svg text{user-select:none}
+  .node{cursor:pointer}
+  .node text{fill:var(--txt); font-size:11px; pointer-events:none}
+  .node text.nid{font-weight:800; font-size:12px}
+  .node text.lbl{fill:var(--dim); font-size:10px}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .pulse{animation:pulse 1.1s infinite}
+  details.acc{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin-bottom:10px}
+  details.acc summary{cursor:pointer; font-weight:700}
+  kbd{background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:12px}
+  pre.cmd{background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px; white-space:pre-wrap; font-size:12px; margin:6px 0}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Free Research LLM <small>· one question → decomposed, checked answer</small></div>
+  <nav id="nav">
+    <button data-t="ask" class="on">1 · Ask</button>
+    <button data-t="tree">2 · Tree</button>
+    <button data-t="findings">3 · Findings</button>
+    <button data-t="report">4 · Report</button>
+    <button data-t="sources">5 · Sources</button>
+    <button data-t="setup">Setup</button>
+    <button data-t="guide">Guide</button>
+  </nav>
+  <div class="hdr-right">
+    <select id="projectPick" aria-label="Open project"><option value="">— projects —</option></select>
+    <span class="chip" id="chipModel">model <b>…</b></span>
+    <span class="chip" id="chipSearch">search <b>…</b></span>
+  </div>
+</header>
+
+<main>
+  <section id="tab-ask" class="tab on">
+    <div class="wrap">
+      <h2>Ask one analytical question</h2>
+      <p class="lead">Write the decision you need to make, with place, time and money if you know them. The app breaks it into a tree of sub-questions. It researches each one with free models and web sources, checks every answer mechanically, and writes a decision memo.</p>
+      <div id="askNotice"></div>
+      <div class="card">
+        <h3 style="margin-top:0">Type of problem</h3>
+        <div id="templateChips"></div>
+        <h3>Your question</h3>
+        <textarea id="inQuestion" placeholder="e.g. Is it profitable to buy used 2015-2019 Toyota RAV4 hybrids in Germany and resell them in Poland?"></textarea>
+        <div class="row" style="margin-top:6px"><button class="btn dim sm" id="useExample">Use the example for this type</button><span class="small muted" id="templateHint"></span></div>
+        <h3>Details (optional, but they make the answer sharper)</h3>
+        <div class="grid2" id="fields"></div>
+        <h3>Your own data (optional)</h3>
+        <div class="row"><input type="file" id="inCsv" accept=".csv,.tsv,.txt"><span class="small muted" id="csvInfo">CSV with a header row: for example car listings, bookings, invoices. The app profiles it and cites it as source D1.</span></div>
+        <div class="row" style="margin-top:16px"><button class="btn" id="btnStart">Research it →</button><span class="small muted">Runs in the background. Watch it live in the Tree tab.</span></div>
+      </div>
+      <div class="card"><h3 style="margin-top:0">Recent projects</h3><div id="recent" class="small muted">none yet</div></div>
+    </div>
+  </section>
+
+  <section id="tab-tree" class="tab">
+    <div id="cloudWrap">
+      <div id="runbar">
+        <b id="phase" class="small">no project</b>
+        <div class="prog"><i id="progBar" style="width:0%"></i></div>
+        <span class="small muted" id="progText"></span>
+        <button class="btn sm" id="btnRun">▶ Run / resume</button>
+        <button class="btn danger sm" id="btnStop">■ Stop</button>
+        <button class="btn dim sm" id="btnFit">Fit</button>
+      </div>
+      <svg id="cloud" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="legend">
+        <span class="dot" style="background:var(--gr)"></span>verified
+        <span class="dot" style="background:var(--tl)"></span>supported
+        <span class="dot" style="background:var(--am)"></span>weak
+        <span class="dot" style="background:var(--rd)"></span>unsupported/failed
+        <span class="dot" style="background:var(--bl)"></span>researching
+        <span class="dot" style="background:var(--gray)"></span>pending · size = impact × uncertainty · dashed = "needs"
+      </div>
+    </div>
+    <div id="side"></div>
+  </section>
+
+  <section id="tab-findings" class="tab">
+    <div class="wrap">
+      <h2>Findings: most decision-relevant first</h2>
+      <p class="lead">Priority = impact × uncertainty, so the sub-questions that can move the decision most come first. Grades come from mechanical checks, not from the model's opinion of itself.</p>
+      <div class="card tablewrap" style="padding:6px"><table id="findTable"></table></div>
+    </div>
+  </section>
+
+  <section id="tab-report" class="tab">
+    <div class="wrap" id="reportBody"><p class="muted">No report yet. Start a project in Ask.</p></div>
+  </section>
+
+  <section id="tab-sources" class="tab">
+    <div class="wrap">
+      <h2>Sources</h2>
+      <p class="lead">Every source the research saw, grouped by sub-question. A claim may cite only these IDs; the citation check rejects invented ones.</p>
+      <div id="sourceList"></div>
+    </div>
+  </section>
+
+  <section id="tab-setup" class="tab">
+    <div class="wrap">
+      <h2>Setup: connect free models and search</h2>
+      <p class="lead">Connect at least one model provider. The router uses them in order and switches to the next one when a free quota runs out (HTTP 429). Keys pasted here stay in the server's memory only: they are never written to disk and are gone on restart. For permanent keys, export them in your shell (see Guide).</p>
+      <div class="card tablewrap" style="padding:6px"><table id="provTable"></table></div>
+      <div class="card">
+        <h3 style="margin-top:0">Paste a key for this session</h3>
+        <div class="row">
+          <select id="keyProvider"></select>
+          <input type="password" id="keyValue" placeholder="API key" style="flex:1; min-width:200px">
+          <input type="text" id="keyUrl" placeholder="base URL (custom only)" style="flex:1; min-width:180px; display:none">
+          <button class="btn" id="btnKey">Connect</button>
+          <button class="btn dim" id="btnRefresh">Re-check providers</button>
+        </div>
+        <p class="small muted" id="keyHelp" style="margin-top:6px"></p>
+      </div>
+      <div class="card"><h3 style="margin-top:0">Web search</h3><div id="searchInfo" class="small"></div></div>
+      <div class="card"><h3 style="margin-top:0">Recent model calls</h3><div class="tablewrap"><table id="ledgerTable"></table></div></div>
+      <div class="card"><h3 style="margin-top:0">Appearance</h3><div class="row"><button class="btn dim sm" data-theme-set="">System</button><button class="btn dim sm" data-theme-set="light">Light</button><button class="btn dim sm" data-theme-set="dark">Dark</button></div></div>
+    </div>
+  </section>
+
+  <section id="tab-guide" class="tab">
+    <div class="wrap">
+      <h2>How to get an issue solved: exact steps</h2>
+      <div class="card">
+        <h3 style="margin-top:0">A · One-time setup (5 minutes)</h3>
+        <ol class="steps">
+          <li>Get one free key. <b>Groq</b>: <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> or <b>Gemini</b>: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Two keys are better: when one quota runs out, the router switches to the other.</li>
+          <li>Optional, better sources: a free <b>Tavily</b> key (<a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a>) or <b>Brave Search</b> key. Without one, the app searches Wikipedia.</li>
+          <li>Put the keys in your shell, not in a file inside the project:
+            <pre class="cmd">echo 'export GROQ_API_KEY="paste-here"' >> ~/.zshrc
+echo 'export GEMINI_API_KEY="paste-here"' >> ~/.zshrc
+source ~/.zshrc</pre>
+            Or paste them in <b>Setup</b> for the current session only.</li>
+          <li>Start the app: <pre class="cmd">cd free-research-llm && npm start</pre>Then open <b>http://127.0.0.1:4600</b>. Mac: double-click <span class="mono">start.command</span>.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">B · Solve an issue</h3>
+        <ol class="steps">
+          <li><b>Ask</b>: pick the problem type (or Auto). Write the decision in one or two sentences with <i>where, when, how much, what counts as success</i>. Fill the detail fields. Attach a CSV if you have one.</li>
+          <li>Click <b>Research it</b>. The <b>Tree</b> tab shows the question decomposed into 3–6 drivers, each with 2–4 sub-questions, plus dependencies such as "margin needs both prices".</li>
+          <li>Watch the nodes change colour: grey (pending), blue (researching), then the grade. Each leaf gets web sources, an answer with cited claims, a machine-recomputed calculation, and an independent reviewer pass. A leaf that fails the checks is retried once on the stronger model.</li>
+          <li>Fix the tree where it is wrong. Click a node to <b>edit</b> its question, <b>add</b> a sub-question, <b>break it down</b> further or <b>re-research</b> it with a hint (e.g. "use otomoto.pl prices, 2026"). Only that branch is redone.</li>
+          <li>Read <b>Report</b>: verdict (GO / NO-GO / GO-IF), key numbers, scenarios, what flips the decision, risks and next steps. Download it as Markdown.</li>
+          <li>Trust amber and red nodes less. Use them as your to-do list: get the missing data, upload it as CSV, or re-research with a better hint.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">C · Writing a good question</h3>
+        <table>
+          <tr><th>Type</th><th>Weak</th><th>Strong</th></tr>
+          <tr><td>Cars arbitrage</td><td>Is car flipping profitable?</td><td>Net margin per car buying 2015-2019 RAV4 hybrids under 150k km in Germany and selling in Poland, including transport, excise, registration and 30 days holding cost. Which specs clear €1,500?</td></tr>
+          <tr><td>Glamping</td><td>Where to build glamping?</td><td>Which of Šumava, Krkonoše or České Švýcarsko gives a 6-tent glamping site the best payback on €250k capex, with a target of 60% occupancy and payback in under 4 years?</td></tr>
+          <tr><td>Taxes</td><td>How to pay less tax?</td><td>Czech IT freelancer, €70k invoiced in 2026, no employees: compare flat-rate tax, 60% lump-sum expenses and an s.r.o. on total tax, social and health contributions.</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">D · What the grades mean</h3>
+        <p class="small"><b style="color:var(--gr)">verified</b>: all checks pass and the claims are cited from 2+ independent sources (or your data). <b style="color:var(--tl)">supported</b>: all checks pass, fewer independent sources. <b style="color:var(--am)">weak</b>: an uncited number, a reviewer objection, or overconfidence. <b style="color:var(--rd)">unsupported</b>: no answer, an invented source, or arithmetic that does not recompute. Taxes and legal answers are research, not advice: confirm them with a licensed advisor before acting.</p>
+      </div>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const STATUS_COLOR={verified:"var(--gr)",supported:"var(--tl)",weak:"var(--am)",unsupported:"var(--rd)",failed:"var(--rd)",researching:"var(--bl)",pending:"var(--gray)"};
+const STATE={templates:[],status:null,project:null,selected:null,templateId:"auto",csv:null,es:null,view:null,drawQueued:false};
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const safeUrl=(u)=>/^https?:\/\//i.test(String(u||""))?String(u):"";
+const trunc=(s,n)=>{s=String(s||"");return s.length>n?s.slice(0,n-1)+"…":s;};
+
+function toast(msg){const t=$("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",4200);}
+
+async function api(path,opts={}){
+  const res=await fetch(path,{method:opts.method||"GET",headers:{"content-type":"application/json"},body:opts.body?JSON.stringify(opts.body):undefined});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok)throw new Error(data.error||("HTTP "+res.status));
+  return data;
+}
+
+function gotoTab(name){
+  document.querySelectorAll("section.tab").forEach(s=>s.classList.toggle("on",s.id==="tab-"+name));
+  document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===name));
+  if(name==="tree")drawTree(true);
+  if(name==="setup")loadStatus();
+  syncHash(name);
+}
+function syncHash(tab){
+  const t=tab||(document.querySelector("#nav button.on")||{}).dataset?.t||"ask";
+  const h="#t="+t+(STATE.project?"&p="+encodeURIComponent(STATE.project.id):"");
+  if(location.hash!==h)history.replaceState(null,"",h);
+}
+document.querySelectorAll("#nav button").forEach(b=>b.addEventListener("click",()=>gotoTab(b.dataset.t)));
+
+function applyTheme(v){try{if(v)localStorage.setItem("frl-theme",v);else localStorage.removeItem("frl-theme");}catch(e){} if(v)document.documentElement.setAttribute("data-theme",v);else document.documentElement.removeAttribute("data-theme");}
+try{const t=localStorage.getItem("frl-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}
+document.querySelectorAll("[data-theme-set]").forEach(b=>b.addEventListener("click",()=>applyTheme(b.dataset.themeSet)));
+
+async function loadStatus(){
+  try{STATE.status=await api("/api/status");}catch(e){toast("server unreachable: "+e.message);return;}
+  const s=STATE.status;
+  const ready=s.providers.filter(p=>p.state==="ready");
+  const cm=$("chipModel");
+  cm.className="chip "+(s.demo?"demo":ready.length?"ok":"bad");
+  cm.innerHTML=s.demo?"model <b>DEMO (scripted)</b>":ready.length?"model <b>"+esc(ready[0].id)+(ready.length>1?" +"+(ready.length-1):"")+"</b>":"model <b>none: open Setup</b>";
+  $("chipSearch").innerHTML="search <b>"+esc(s.search.backends.join(", ")||"off")+"</b>";
+  $("askNotice").innerHTML=s.demo?'<div class="notice">DEMO MODE: answers come from a scripted fake model, so you can see the flow. Connect a free model in <b>Setup</b> for real research.</div>':!ready.length?'<div class="notice err">No model connected yet. Open <b>Setup</b> and paste a free Groq or Gemini key (2 minutes), or see <b>Guide</b>.</div>':"";
+  renderSetup();
+}
+
+function renderSetup(){
+  const s=STATE.status;if(!s)return;
+  const icon={ready:'<span style="color:var(--gr)">● ready</span>',"not-configured":'<span class="muted">○ no key</span>',error:'<span style="color:var(--rd)">● error</span>',"no-models":'<span style="color:var(--am)">● no models</span>'};
+  let h="<tr><th>Provider</th><th>State</th><th>Fast model</th><th>Deep model</th><th>Key</th></tr>";
+  s.providers.forEach(p=>{
+    const cool=(p.coolingDownMs>0?' <span style="color:var(--am)">(cooling '+Math.ceil(p.coolingDownMs/1000)+'s)</span>':"")+(p.budgetExhausted&&p.state==="ready"?' <span style="color:var(--am)">(off: paid budget '+esc(s.paid.calls)+"/"+esc(s.paid.limit)+" — set FRL_PAID_CALL_LIMIT)</span>":"");
+    h+="<tr><td><b>"+esc(p.label)+"</b>"+(p.paid?' <span class="small" style="color:var(--am)">paid</span>':"")+"</td><td>"+(icon[p.state]||esc(p.state))+cool+'<div class="small muted">'+esc(trunc(p.detail,120))+"</div></td><td class='mono small'>"+esc(p.fast||"—")+"</td><td class='mono small'>"+esc(p.deep||"—")+"</td><td class='small'>"+(p.keyEnv?'<span class="mono">'+esc(p.keyEnv)+"</span>":"none needed")+(safeUrl(p.signup)?' · <a href="'+esc(p.signup)+'" target="_blank" rel="noopener">get it</a>':"")+"</td></tr>";
+  });
+  $("provTable").innerHTML=h;
+  const sel=$("keyProvider");const cur=sel.value;
+  sel.innerHTML=s.providers.filter(p=>p.keyEnv).map(p=>'<option value="'+esc(p.id)+'">'+esc(p.label)+"</option>").join("");
+  if(cur)sel.value=cur;
+  updateKeyHelp();
+  $("searchInfo").innerHTML="Active: <b>"+esc(s.search.backends.join(", ")||"none")+"</b>. Wikipedia works without a key. For real web results, export <span class='mono'>TAVILY_API_KEY</span> (free 1,000 searches/month, <a href='https://app.tavily.com' target='_blank' rel='noopener'>app.tavily.com</a>) or <span class='mono'>BRAVE_API_KEY</span>, then restart."+(s.search.lastErrors.length?'<div style="color:var(--rd)">last errors: '+esc(s.search.lastErrors.join("; "))+"</div>":"");
+  let l="<tr><th>time</th><th>purpose</th><th>tier</th><th>provider/model</th><th>result</th></tr>";
+  s.ledger.slice().reverse().forEach(r=>{l+="<tr><td class='small mono'>"+esc(r.ts.slice(11,19))+"</td><td>"+esc(r.purpose)+"</td><td>"+esc(r.tier)+"</td><td class='small mono'>"+esc(r.provider+(r.model?"/"+r.model:""))+"</td><td class='small'>"+(r.ok?'<span style="color:var(--gr)">ok</span> '+r.ms+"ms":'<span style="color:var(--rd)">'+esc(trunc(r.error,90))+"</span>")+"</td></tr>";});
+  $("ledgerTable").innerHTML=s.ledger.length?l:"<tr><td class='muted'>no calls yet</td></tr>";
+}
+function updateKeyHelp(){
+  const id=$("keyProvider").value;const p=(STATE.status?.providers||[]).find(x=>x.id===id);
+  $("keyUrl").style.display=id==="custom"?"block":"none";
+  $("keyHelp").innerHTML=p?("Permanent alternative: <span class='mono'>export "+esc(p.keyEnv)+"=…</span> in ~/.zshrc, then restart."+(safeUrl(p.signup)?" Get a key: <a href='"+esc(p.signup)+"' target='_blank' rel='noopener'>"+esc(p.signup)+"</a>":"")):"";
+}
+$("keyProvider").addEventListener("change",updateKeyHelp);
+$("btnKey").addEventListener("click",async()=>{
+  const key=$("keyValue").value.trim();if(!key){toast("paste a key first");return;}
+  $("btnKey").disabled=true;
+  try{STATE.status=await api("/api/keys",{method:"POST",body:{provider:$("keyProvider").value,key,baseURL:$("keyUrl").value.trim()}});$("keyValue").value="";await loadStatus();const p=STATE.status.providers.find(x=>x.id===$("keyProvider").value);toast(p&&p.state==="ready"?p.label+" connected":"not connected: "+(p?p.detail:""));}
+  catch(e){toast(e.message);}finally{$("btnKey").disabled=false;}
+});
+$("btnRefresh").addEventListener("click",async()=>{try{await api("/api/providers/refresh",{method:"POST"});await loadStatus();toast("providers re-checked");}catch(e){toast(e.message);}});
+
+function currentTemplate(){return STATE.templates.find(t=>t.id===STATE.templateId)||null;}
+function renderTemplates(){
+  const chips=[{id:"auto",label:"Auto-detect"}].concat(STATE.templates);
+  $("templateChips").innerHTML=chips.map(t=>'<span class="tchip'+(t.id===STATE.templateId?" on":"")+'" data-id="'+esc(t.id)+'">'+esc(t.label)+"</span>").join("");
+  $("templateChips").querySelectorAll(".tchip").forEach(c=>c.addEventListener("click",()=>{STATE.templateId=c.dataset.id;renderTemplates();}));
+  const t=currentTemplate()||STATE.templates[0];
+  $("templateHint").textContent=STATE.templateId==="auto"?"Auto picks the type from your wording.":"Checklist: "+trunc(t.drivers,140);
+  const prev={};document.querySelectorAll("#fields input").forEach(i=>prev[i.dataset.k]=i.value);
+  $("fields").innerHTML=(t?t.fields:[]).map(f=>'<div><label class="f">'+esc(f.label)+'</label><input type="text" data-k="'+esc(f.key)+'" placeholder="'+esc(f.placeholder)+'" value="'+esc(prev[f.key]||"")+'"></div>').join("");
+}
+$("useExample").addEventListener("click",()=>{const t=currentTemplate()||STATE.templates[0];$("inQuestion").value=t.example;});
+$("inCsv").addEventListener("change",async(e)=>{
+  const f=e.target.files[0];if(!f){STATE.csv=null;return;}
+  if(f.size>7*1024*1024){toast("CSV too large (max 7 MB) — trim it first");e.target.value="";return;}
+  STATE.csv={name:f.name,text:await f.text()};
+  $("csvInfo").textContent=f.name+" · "+Math.round(f.size/1024)+" KB loaded, cited as D1";
+});
+$("btnStart").addEventListener("click",async()=>{
+  const question=$("inQuestion").value.trim();
+  if(question.length<8){toast("write the question as a full sentence first");return;}
+  const constraints={};document.querySelectorAll("#fields input").forEach(i=>{if(i.value.trim())constraints[i.dataset.k]=i.value.trim();});
+  $("btnStart").disabled=true;
+  try{
+    const p=await api("/api/projects",{method:"POST",body:{question,templateId:STATE.templateId,constraints,csvText:STATE.csv?STATE.csv.text:"",csvName:STATE.csv?STATE.csv.name:""}});
+    await loadProjects();openProject(p.id);gotoTab("tree");toast("started: decomposing your question");
+  }catch(e){toast(e.message);if(/Setup/.test(e.message))gotoTab("setup");}
+  finally{$("btnStart").disabled=false;}
+});
+
+async function loadProjects(){
+  let list=[];try{list=await api("/api/projects");}catch(e){return;}
+  const pick=$("projectPick");const cur=STATE.project?STATE.project.id:"";
+  pick.innerHTML='<option value="">— projects —</option>'+list.map(p=>'<option value="'+esc(p.id)+'">'+esc(trunc(p.question,60))+"</option>").join("");
+  pick.value=cur;
+  $("recent").innerHTML=list.length?list.slice(0,12).map(p=>'<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0"><a href="#" data-open="'+esc(p.id)+'">'+esc(trunc(p.question,90))+'</a><span class="small muted">'+esc(p.phase)+(p.verdict?" · "+esc(trunc(p.verdict,40)):"")+(p.demo?" · demo":"")+' <button class="btn danger sm" data-del="'+esc(p.id)+'">delete</button></span></div>').join(""):"none yet";
+  $("recent").querySelectorAll("[data-open]").forEach(a=>a.addEventListener("click",ev=>{ev.preventDefault();openProject(a.dataset.open);gotoTab("tree");}));
+  $("recent").querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",async()=>{if(!confirm("Delete this project permanently?"))return;await api("/api/projects/"+b.dataset.del,{method:"DELETE"});if(STATE.project&&STATE.project.id===b.dataset.del){STATE.project=null;renderAll();}loadProjects();}));
+}
+$("projectPick").addEventListener("change",e=>{if(e.target.value){openProject(e.target.value);gotoTab("tree");}});
+
+async function openProject(id){
+  if(STATE.es)STATE.es.close();
+  STATE.selected=null;STATE.view=null;
+  if(new URLSearchParams(location.hash.slice(1)).get("snapshot")){
+    try{STATE.project=await api("/api/projects/"+encodeURIComponent(id));}catch(e){toast(e.message);}
+    $("projectPick").value=id;renderAll();return;
+  }
+  STATE.es=new EventSource("/api/projects/"+encodeURIComponent(id)+"/events");
+  STATE.es.onmessage=(m)=>{
+    const d=JSON.parse(m.data);
+    const fresh=!STATE.project||STATE.project.id!==d.project.id;
+    STATE.project=d.project;
+    if(fresh){STATE.view=null;syncHash();}
+    queueRender();
+    if(d.event&&d.event.type==="phase"&&/done|stopped/.test(d.event.message))loadProjects();
+  };
+  $("projectPick").value=id;
+}
+
+function queueRender(){if(STATE.drawQueued)return;STATE.drawQueued=true;requestAnimationFrame(()=>{STATE.drawQueued=false;renderAll();});}
+function renderAll(){renderRunbar();drawTree(false);renderSide();renderFindings();renderReport();renderSources();}
+
+function nodesOf(){return STATE.project?STATE.project.nodes:[];}
+function byId(id){return nodesOf().find(n=>n.id===id);}
+function kids(id){return nodesOf().filter(n=>n.parentId===id);}
+function prio(n){return n.impact*n.uncertainty;}
+
+function renderRunbar(){
+  const p=STATE.project;
+  if(!p){$("phase").textContent="no project — start one in Ask";$("progBar").style.width="0%";$("progText").textContent="";return;}
+  const ns=p.nodes;const fin=ns.filter(n=>!["pending","researching"].includes(n.status)).length;
+  const running=["decomposing","researching","synthesizing"].includes(p.phase);
+  $("phase").innerHTML=(running?'<span class="pulse" style="color:var(--bl)">● </span>':"")+esc(p.phase)+(p.demo?' <span style="color:var(--am)">DEMO</span>':"");
+  $("progBar").style.width=(ns.length?Math.round(100*fin/ns.length):0)+"%";
+  const last=(p.log||[]).slice(-1)[0];
+  $("progText").textContent=fin+"/"+ns.length+" nodes"+(last?" · "+trunc(last.message,70):"");
+  $("btnRun").disabled=running;$("btnStop").disabled=!running;
+}
+$("btnRun").addEventListener("click",async()=>{if(!STATE.project)return;try{await api("/api/projects/"+STATE.project.id+"/run",{method:"POST"});toast("running");}catch(e){toast(e.message);}});
+$("btnStop").addEventListener("click",async()=>{if(!STATE.project)return;await api("/api/projects/"+STATE.project.id+"/cancel",{method:"POST"});toast("stopping after the current node");});
+$("btnFit").addEventListener("click",()=>{STATE.view=null;drawTree(true);});
+
+const svgNS="http://www.w3.org/2000/svg";
+function el(tag,attrs,parent){const e=document.createElementNS(svgNS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;}
+function layout(){
+  const ns=nodesOf();const pos={};
+  const depth={};const d=(n)=>{let k=1,c=n;while(c&&c.parentId&&c.parentId!=="Q"&&k<20){c=byId(c.parentId);k++;}return k;};
+  ns.forEach(n=>depth[n.id]=d(n));
+  const maxD=Math.max(1,...Object.values(depth));
+  const COLW=250,ROWH=64;let row=0;
+  const place=(id)=>{
+    const ch=kids(id).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));
+    if(!ch.length){const y=row++*ROWH;return y;}
+    const ys=ch.map(c=>{const y=place(c.id);pos[c.id]={x:(maxD-depth[c.id])*COLW,y};return y;});
+    return (Math.min(...ys)+Math.max(...ys))/2;
+  };
+  const rootY=place("Q");
+  pos.Q={x:maxD*COLW,y:rootY};
+  return {pos,w:(maxD+1)*COLW,h:Math.max(1,row)*ROWH};
+}
+function drawTree(force){
+  const svg=$("cloud");
+  if(!$("tab-tree").classList.contains("on")&&!force)return;
+  svg.innerHTML="";
+  const p=STATE.project;
+  if(!p||!p.nodes.length){
+    const t=el("text",{x:20,y:40,fill:"currentColor"},svg);t.textContent=p?"Decomposing the question…":"No project open. Start one in Ask.";
+    svg.setAttribute("viewBox","0 0 600 200");return;
+  }
+  const L=layout();
+  if(!STATE.view){STATE.view={x:-120,y:-60,w:L.w+260,h:L.h+120};}
+  const gE=el("g",{},svg),gN=el("g",{},svg);
+  const maxP=Math.max(1,...p.nodes.map(prio));
+  const center=(id)=>L.pos[id];
+  p.nodes.forEach(n=>{
+    const a=center(n.id),b=center(n.parentId||"Q");if(!a||!b)return;
+    const mx=(a.x+b.x)/2;
+    el("path",{d:"M"+a.x+","+a.y+" C"+mx+","+a.y+" "+mx+","+b.y+" "+b.x+","+b.y,fill:"none",stroke:"var(--edge)","stroke-width":1.6},gE);
+    n.dependsOn.forEach(dep=>{const c=center(dep);if(!c)return;el("path",{d:"M"+c.x+","+c.y+" Q"+((c.x+a.x)/2-40)+","+((c.y+a.y)/2)+" "+a.x+","+a.y,fill:"none",stroke:"var(--vi)","stroke-width":1.2,"stroke-dasharray":"4 4",opacity:.7},gE);});
+  });
+  const root=el("g",{class:"node",transform:"translate("+L.pos.Q.x+","+L.pos.Q.y+")"},gN);
+  el("circle",{r:26,fill:p.report?"var(--gr)":"var(--acc)",opacity:.9},root);
+  const rt=el("text",{class:"nid","text-anchor":"middle",y:4,fill:"var(--acc-ink)"},root);rt.textContent="Q";rt.style.fill="var(--acc-ink)";
+  const rl=el("text",{class:"lbl","text-anchor":"middle",y:44},root);rl.textContent=trunc(p.report?p.report.verdict:p.question,48);
+  root.addEventListener("click",(e)=>{e.stopPropagation();STATE.selected="Q";renderSide();drawTree(true);});
+  p.nodes.forEach(n=>{
+    const c=center(n.id);if(!c)return;
+    const g=el("g",{class:"node"+(n.status==="researching"?" pulse":""),transform:"translate("+c.x+","+c.y+")"},gN);
+    const r=8+12*Math.sqrt(prio(n)/maxP);
+    el("circle",{r:r+3,fill:"none",stroke:n.id===STATE.selected?"var(--txt)":"transparent","stroke-width":2},g);
+    el("circle",{r,fill:STATUS_COLOR[n.status]||"var(--gray)",opacity:n.status==="pending"?.55:.92},g);
+    const t1=el("text",{class:"nid",x:r+6,y:-2},g);t1.textContent=n.id;
+    const t2=el("text",{class:"lbl",x:r+6,y:11},g);t2.textContent=trunc(n.title,30);
+    g.addEventListener("click",(e)=>{e.stopPropagation();STATE.selected=n.id;renderSide();drawTree(true);});
+  });
+  applyView();
+}
+function applyView(){const v=STATE.view;if(v)$("cloud").setAttribute("viewBox",v.x+" "+v.y+" "+v.w+" "+v.h);}
+(function(){
+  const svg=$("cloud");let pan=null;
+  const pt=(e)=>{const r=svg.getBoundingClientRect();const v=STATE.view;return{x:v.x+(e.clientX-r.left)/r.width*v.w,y:v.y+(e.clientY-r.top)/r.height*v.h};};
+  svg.addEventListener("pointerdown",e=>{if(!STATE.view||e.target.closest(".node"))return;pan={sx:e.clientX,sy:e.clientY,vx:STATE.view.x,vy:STATE.view.y};svg.setPointerCapture(e.pointerId);});
+  svg.addEventListener("pointermove",e=>{if(!pan)return;const r=svg.getBoundingClientRect();STATE.view.x=pan.vx-(e.clientX-pan.sx)/r.width*STATE.view.w;STATE.view.y=pan.vy-(e.clientY-pan.sy)/r.height*STATE.view.h;applyView();});
+  svg.addEventListener("pointerup",()=>pan=null);
+  svg.addEventListener("wheel",e=>{if(!STATE.view)return;e.preventDefault();const f=e.deltaY>0?1.12:0.89;const p=pt(e);const v=STATE.view;const nw=Math.max(300,Math.min(12000,v.w*f));const k=nw/v.w;v.x=p.x-(p.x-v.x)*k;v.y=p.y-(p.y-v.y)*k;v.w=nw;v.h*=k;applyView();},{passive:false});
+})();
+
+function badge(st){return '<span class="badge" style="color:'+(STATUS_COLOR[st]||"var(--gray)")+';border-color:'+(STATUS_COLOR[st]||"var(--gray)")+'">'+esc(st.toUpperCase())+"</span>";}
+function claimsHtml(f,sources){
+  if(!f||!f.claims.length)return"";
+  const srcMap={};(sources||[]).forEach(s=>srcMap[s.id]=s);
+  return '<div class="kv"><b class="k">Claims</b>'+f.claims.map(c=>'<div class="small" style="margin:3px 0">• '+esc(c.text)+" "+c.sourceIds.map(id=>{const s=srcMap[id];const u=s&&safeUrl(s.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener" title="'+esc(s.title)+'">['+esc(id)+"]</a>":'<span class="mono">['+esc(id)+"]</span>";}).join(" ")+(c.assumption?' <span style="color:var(--am)">(assumption)</span>':"")+"</div>").join("")+"</div>";
+}
+function renderSide(){
+  const side=$("side");const p=STATE.project;
+  if(!p){side.innerHTML='<h2>No project</h2><p class="muted">Start with <b>Ask</b>.</p>';return;}
+  const n=STATE.selected&&STATE.selected!=="Q"?byId(STATE.selected):null;
+  if(!n){
+    side.innerHTML='<h2>'+esc(p.question)+'</h2>'+(p.decision?'<div class="kv"><b class="k">Decision</b>'+esc(p.decision)+"</div>":"")+(p.successCriteria?'<div class="kv"><b class="k">Success criteria</b>'+esc(p.successCriteria)+"</div>":"")+(p.report?'<div class="kv"><b class="k">Verdict</b><b>'+esc(p.report.verdict)+'</b> <span class="small muted">('+esc(p.report.confidence)+' confidence)</span><div><a href="#" id="toReport">open full report →</a></div></div>':"")+(p.error?'<div class="notice err">'+esc(p.error)+"</div>":"")+(p.assumptionsToConfirm&&p.assumptionsToConfirm.length?'<div class="kv"><b class="k">Please confirm</b>'+p.assumptionsToConfirm.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>":"")+'<h3>Drivers</h3>'+kids("Q").map(subBtn).join("")+'<div class="row" style="margin-top:8px"><button class="btn dim sm" id="addDriver">+ add driver question</button></div><h3>Live log</h3><div id="log">'+(p.log||[]).slice(-60).reverse().map(l=>'<div title="'+esc(l.message)+'"><span class="muted mono">'+esc(l.ts.slice(11,19))+"</span> "+esc(l.message)+"</div>").join("")+"</div>";
+    const tr=$("toReport");if(tr)tr.addEventListener("click",e=>{e.preventDefault();gotoTab("report");});
+    $("addDriver").addEventListener("click",()=>addChild("Q"));
+    side.querySelectorAll("[data-node]").forEach(b=>b.addEventListener("click",()=>{STATE.selected=b.dataset.node;renderSide();drawTree(true);}));
+    return;
+  }
+  const f=n.finding,v=n.verification,c=n.critique;
+  let h='<div class="small"><a href="#" id="toRoot">← question</a>'+(n.parentId&&n.parentId!=="Q"?' · <a href="#" data-node="'+esc(n.parentId)+'">↑ '+esc(n.parentId)+"</a>":"")+"</div>";
+  h+='<h2><span class="mono">'+esc(n.id)+"</span> "+esc(n.title)+"</h2>"+badge(n.status)+(n.attempts>1?' <span class="small muted">escalated to deep model</span>':"")+(n.model?' <span class="small muted mono">'+esc(n.model)+"</span>":"");
+  h+='<div class="kv"><b class="k">Question</b>'+esc(n.question)+"</div>";
+  if(n.why)h+='<div class="kv"><b class="k">Why it matters</b><span class="small">'+esc(n.why)+"</span></div>";
+  h+='<div class="kv small muted">impact '+n.impact+"/5 · uncertainty "+n.uncertainty+"/5 · method "+esc(n.method)+(n.metric?" · metric "+esc(n.metric)+(n.unit?" ("+esc(n.unit)+")":""):"")+(n.dependsOn.length?" · needs "+n.dependsOn.map(d=>'<a href="#" data-node="'+esc(d)+'">'+esc(d)+"</a>").join(", "):"")+"</div>";
+  if(n.error)h+='<div class="notice err small">'+esc(n.error)+"</div>";
+  if(f){
+    h+='<div class="kv"><b class="k">Answer</b><b>'+esc(f.answer)+'</b> <span class="small muted">('+esc(f.confidence)+" confidence)</span></div>";
+    if(f.calculation)h+='<div class="kv"><b class="k">Calculation (machine-recomputed)</b><span class="mono small">'+esc(f.calculation.formula)+" = "+esc(f.calculation.recomputed!=null?Math.round(f.calculation.recomputed*100)/100:f.calculation.result)+" "+esc(f.calculation.unit)+'</span><div class="small muted">'+Object.entries(f.calculation.inputs||{}).map(([k,val])=>esc(k)+"="+esc(val&&typeof val==="object"?val.value+" "+(val.unit||""):val)).join(" · ")+"</div></div>";
+    h+=claimsHtml(f,n.sources);
+    if(f.assumptions.length)h+='<div class="kv"><b class="k">Assumptions</b>'+f.assumptions.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>";
+    if(f.gaps.length)h+='<div class="kv"><b class="k">Gaps (data that would settle it)</b>'+f.gaps.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>";
+  }
+  if(v&&v.checks)h+='<div class="kv"><b class="k">Checks</b>'+v.checks.map(ch=>'<div class="check"><span class="'+(ch.passed?"y":"n")+'">'+(ch.passed?"✓":"✗")+"</span> "+esc(ch.label)+' <span class="small muted">— '+esc(ch.detail)+"</span></div>").join("")+"</div>";
+  if(c)h+='<div class="kv"><b class="k">Independent reviewer</b><span class="small">'+(c.agree?"agrees":"disagrees")+" · severity "+esc(c.severity)+(c.issues.length?"<br>"+c.issues.map(esc).join("<br>"):"")+"</span></div>";
+  h+='<h3>Act on this node</h3><input type="text" id="hint" placeholder="hint for re-research, e.g. use otomoto.pl prices from 2026"><div class="row" style="margin-top:8px"><button class="btn sm" id="actRerun">↻ Re-research</button><button class="btn ghost sm" id="actExpand">⤵ Break down further</button><button class="btn dim sm" id="actEdit">✎ Edit question</button><button class="btn dim sm" id="actAdd">+ Sub-question</button><button class="btn danger sm" id="actDel">Remove</button></div>';
+  const ch=kids(n.id);
+  if(ch.length)h+="<h3>Sub-questions ("+ch.length+")</h3>"+ch.sort((a,b)=>prio(b)-prio(a)).map(subBtn).join("");
+  side.innerHTML=h;
+  $("toRoot").addEventListener("click",e=>{e.preventDefault();STATE.selected=null;renderSide();drawTree(true);});
+  side.querySelectorAll("[data-node]").forEach(b=>b.addEventListener("click",(e)=>{e.preventDefault();STATE.selected=b.dataset.node;renderSide();drawTree(true);}));
+  const base="/api/projects/"+p.id+"/nodes/"+encodeURIComponent(n.id);
+  $("actRerun").addEventListener("click",async()=>{try{await api(base+"/rerun",{method:"POST",body:{hint:$("hint").value}});toast(n.id+" re-researching");}catch(e){toast(e.message);}});
+  $("actExpand").addEventListener("click",async(e)=>{e.target.disabled=true;toast("breaking "+n.id+" down…");try{const pr=await api(base+"/expand",{method:"POST",body:{hint:$("hint").value}});STATE.project=pr;STATE.view=null;renderAll();toast("added sub-questions; press Run to research them");}catch(err){toast(err.message);}finally{e.target.disabled=false;}});
+  $("actEdit").addEventListener("click",async()=>{const q=prompt("Edit the question for "+n.id,n.question);if(!q)return;try{STATE.project=await api(base,{method:"PATCH",body:{question:q,title:trunc(q,60)}});renderAll();toast("edited; press Run to re-research");}catch(e){toast(e.message);}});
+  $("actAdd").addEventListener("click",()=>addChild(n.id));
+  $("actDel").addEventListener("click",async()=>{if(!confirm("Remove "+n.id+" and its sub-questions?"))return;try{STATE.project=await api(base,{method:"DELETE"});STATE.selected=null;STATE.view=null;renderAll();}catch(e){toast(e.message);}});
+}
+async function addChild(parentId){
+  const q=prompt("New sub-question under "+parentId);if(!q)return;
+  try{STATE.project=await api("/api/projects/"+STATE.project.id+"/nodes/"+encodeURIComponent(parentId)+"/children",{method:"POST",body:{question:q}});STATE.view=null;renderAll();toast("added; press Run to research it");}catch(e){toast(e.message);}
+}
+function subBtn(k){return '<button class="sub" data-node="'+esc(k.id)+'"><span class="dot" style="margin-left:0;background:'+(STATUS_COLOR[k.status]||"var(--gray)")+'"></span><b class="mono">'+esc(k.id)+"</b> · "+esc(trunc(k.title,46))+(k.finding?'<div class="small muted">'+esc(trunc(k.finding.answer,120))+"</div>":"")+"</button>";}
+
+function renderFindings(){
+  const ns=nodesOf().slice().sort((a,b)=>prio(b)-prio(a));
+  let h="<tr><th>Priority</th><th>Node</th><th>Question → answer</th><th>Grade</th><th>Checks</th></tr>";
+  ns.forEach(n=>{h+='<tr class="click" data-node="'+esc(n.id)+'"><td><b>'+prio(n)+'</b><span class="small muted">/25</span></td><td class="mono"><b>'+esc(n.id)+"</b></td><td>"+esc(n.question)+(n.finding?'<div class="small" style="margin-top:4px"><b>→ '+esc(n.finding.answer)+"</b></div>":"")+"</td><td>"+badge(n.status)+"</td><td class='small'>"+(n.verification?n.verification.score+"%":"—")+"</td></tr>";});
+  $("findTable").innerHTML=ns.length?h:"<tr><td class='muted'>no findings yet</td></tr>";
+  $("findTable").querySelectorAll("[data-node]").forEach(r=>r.addEventListener("click",()=>{STATE.selected=r.dataset.node;gotoTab("tree");renderSide();}));
+}
+
+function renderReport(){
+  const p=STATE.project;const box=$("reportBody");
+  if(!p){box.innerHTML='<p class="muted">No report yet. Start a project in Ask.</p>';return;}
+  const r=p.report;
+  let h='<div class="row" style="justify-content:space-between"><h2>'+esc(p.question)+'</h2><div class="row"><a class="btn dim sm" style="text-decoration:none" href="/api/projects/'+encodeURIComponent(p.id)+'/report.md">⬇ Markdown</a><button class="btn dim sm" onclick="window.print()">Print / PDF</button></div></div>';
+  if(p.demo)h+='<div class="notice">DEMO MODE: these are scripted answers, not research.</div>';
+  if(!r){box.innerHTML=h+'<p class="muted">The memo is written after all sub-questions are researched. Phase: <b>'+esc(p.phase)+"</b>.</p>";return;}
+  h+='<div class="card"><div class="small muted">Verdict · '+esc(r.confidence)+' confidence</div><div class="verdict">'+esc(r.verdict)+"</div><p>"+esc(r.summary)+"</p></div>";
+  if(r.keyNumbers.length)h+='<div class="card tablewrap"><h3 style="margin-top:0">Key numbers</h3><table><tr><th>Metric</th><th>Value</th><th>From</th></tr>'+r.keyNumbers.map(k=>"<tr><td>"+esc(k.label)+"</td><td><b>"+esc(k.value)+" "+esc(k.unit||"")+'</b></td><td class="mono"><a href="#" data-node="'+esc(k.nodeId||"")+'">'+esc(k.nodeId||"")+"</a></td></tr>").join("")+"</table></div>";
+  if(r.scenarios.length)h+='<div class="card"><h3 style="margin-top:0">Scenarios</h3>'+r.scenarios.map(s=>"<p><b>"+esc(s.name)+":</b> "+esc(s.outcome)+' <span class="small muted">— assumes '+esc(s.assumptions)+"</span></p>").join("")+"</div>";
+  if(r.sensitivity.length)h+='<div class="card"><h3 style="margin-top:0">What flips the decision</h3>'+r.sensitivity.map(s=>"<p><b>"+esc(s.variable)+":</b> "+esc(s.effect)+"</p>").join("")+"</div>";
+  h+='<div class="card"><h3 style="margin-top:0">Next steps</h3><ol class="steps">'+r.nextSteps.map(s=>"<li><b>"+esc(s.step)+"</b> — "+esc(s.why)+(s.how?'<div class="small muted">How: '+esc(s.how)+"</div>":"")+"</li>").join("")+"</ol></div>";
+  h+='<div class="card"><h3 style="margin-top:0">Risks</h3>'+r.risks.map(x=>"<div>• "+esc(x)+"</div>").join("")+'<h3>Open questions</h3>'+r.openQuestions.map(x=>"<div>• "+esc(x)+"</div>").join("")+"</div>";
+  h+='<p class="small muted">Evidence quality: '+r.evidenceQuality.verified+"/"+r.evidenceQuality.total+" nodes verified or supported"+(r.evidenceQuality.weak.length?" · weak/unsupported: "+r.evidenceQuality.weak.map(esc).join(", "):"")+" · memo by "+esc(r.model)+"</p>";
+  box.innerHTML=h;
+  box.querySelectorAll("[data-node]").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();if(!a.dataset.node)return;STATE.selected=a.dataset.node;gotoTab("tree");renderSide();}));
+}
+
+function renderSources(){
+  const ns=nodesOf().filter(n=>(n.sources||[]).some(s=>s.kind!=="node"));
+  $("sourceList").innerHTML=ns.length?ns.map(n=>'<details class="acc"><summary><span class="mono">'+esc(n.id)+"</span> "+esc(n.title)+' <span class="small muted">('+n.sources.length+")</span></summary>"+n.sources.map(s=>{const u=safeUrl(s.url);return '<div style="margin:8px 0"><b class="mono">['+esc(s.id)+"]</b> "+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(s.title)+"</a>":esc(s.title))+' <span class="small muted">'+esc(s.domain||"")+(s.query?" · query: "+esc(s.query):"")+'</span><div class="small muted">'+esc(trunc(s.snippet||s.text,260))+"</div></div>";}).join("")+"</details>").join(""):'<p class="muted">No sources yet.</p>';
+}
+
+(async function boot(){
+  try{STATE.templates=await api("/api/templates");}catch(e){}
+  renderTemplates();
+  await loadStatus();
+  await loadProjects();
+  const hp=new URLSearchParams(location.hash.slice(1));
+  if(hp.get("p"))await openProject(hp.get("p"));
+  if(hp.get("n"))STATE.selected=hp.get("n");
+  if(hp.get("t"))gotoTab(hp.get("t"));
+  renderAll();
+  setInterval(()=>{if($("tab-setup").classList.contains("on"))loadStatus();},5000);
+})();
+</script>
+</body>
+</html>

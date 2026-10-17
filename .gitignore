@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# free-research-llm
+node_modules/
+data/
+reports/
+*.tmp
+.DS_Store
