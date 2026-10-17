@@ -37,7 +37,7 @@ ${constraintsText(constraints)}
 DOMAIN PLAYBOOK (${template.label}) — use as a checklist, adapt to the question:
 - typical drivers: ${template.drivers}
 - typical metrics: ${template.metrics}
-- typical sources: ${template.sources}
+- typical sources: ${template.sources} (include official TOS, API docs, regulator sites)
 - decision rule: ${template.decisionRule}
 ${dataSummary ? `\nUSER DATA AVAILABLE (source id D1):\n${dataSummary}\n` : ''}
 Build an issue tree that answers the QUESTION:
@@ -96,7 +96,7 @@ EVIDENCE (cite by id in square brackets, e.g. S1; D1 is the user's data):
 ${sourcesBlock(sources)}
 ${previousFailures?.length ? `\nA PREVIOUS ATTEMPT FAILED THESE CHECKS — fix the cause:\n- ${previousFailures.join('\n- ')}\n` : ''}
 RULES:
-- Answer only from EVIDENCE and established answers. If evidence is missing, give your best estimate, set "assumption": true on that claim and say what data would settle it in "gaps".
+- Answer only from EVIDENCE and established answers. For legality or licensing queries, require official statutes or terms of service as sources. If evidence is missing, give your best estimate, set "assumption": true on that claim and say what data would settle it in "gaps".
 - Every claim containing a number must list sourceIds from the EVIDENCE ids above, or be marked assumption.
 - "sourceIds" may only contain ids shown above (${sources.map((s) => s.id).join(', ') || 'none'}). Never invent ids or URLs.
 - If the method is calculation/comparison, provide "calculation": a formula using variable names (letters, digits, _), + - * / ^ ( ) and min/max/abs/round, the numeric value of each input, and the result. The result will be recomputed by machine.
