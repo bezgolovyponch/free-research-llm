@@ -98,3 +98,16 @@ describe('verify: links and non-answers', () => {
   });
 });
 
+describe('verify: code-read data', () => {
+  it('accepts high confidence when the cited source is data read by code', async () => {
+    const { verifyFinding } = await import('../../src/research/verify.mjs');
+    const sources = [{ id: 'S1', kind: 'data', provider: 'marketplace', url: 'https://k.example/s', domain: 'k.example', links: [{ url: 'https://k.example/ad/1', text: 'a' }] }];
+    const finding = { answer: 'Octavia for 3,790 EUR', confidence: 'high', claims: [{ text: 'price 3790 EUR', sourceIds: ['S1'] }], items: [{ url: 'https://k.example/ad/1' }] };
+    const result = verifyFinding({ finding, sources });
+    expect(result.checks.find((c) => c.id === 'independent-sources').passed).toBe(true);
+    expect(result.grade).toBe('verified');
+    const web = verifyFinding({ finding, sources: [{ ...sources[0], kind: 'web' }] });
+    expect(web.grade).toBe('weak');
+  });
+});
+

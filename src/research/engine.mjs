@@ -382,12 +382,13 @@ export class ResearchEngine {
     project.report = null;
   }
 
-  async resetResearch(id) {
+  async resetResearch(id, { tree = false } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('stop the run before resetting');
     const project = await this.load(id);
+    if (tree) project.nodes = [];
     for (const node of project.nodes) Object.assign(node, { status: 'pending', finding: null, verification: null, critique: null, error: null, sources: [], attempts: 0 });
-    Object.assign(project, { report: null, acceptanceResult: null, phase: 'tree-ready', error: null });
-    this.emit(project, 'edit', 'all findings cleared: the tree will be researched again from scratch');
+    Object.assign(project, { report: null, acceptanceResult: null, phase: tree ? 'created' : 'tree-ready', error: null });
+    this.emit(project, 'edit', tree ? 'tree and findings cleared: the question will be decomposed again' : 'all findings cleared: the tree will be researched again from scratch');
     return this.store.save(project);
   }
 

@@ -98,10 +98,11 @@ function checkConfidence(finding, sources) {
   const cited = new Set((finding?.claims ?? []).flatMap((c) => c.sourceIds ?? []));
   const domains = new Set(sources.filter((s) => cited.has(s.id)).map((s) => s.domain || domainOf(s.url) || s.id));
   const high = finding?.confidence === 'high';
+  const codeRead = sources.some((s) => cited.has(s.id) && s.kind === 'data');
   return check(
     'independent-sources',
-    'High confidence is backed by 2+ independent sources',
-    !high || domains.size >= 2,
+    'High confidence is backed by 2+ independent sources or by data read by code',
+    !high || domains.size >= 2 || codeRead,
     `${domains.size} independent source domain(s) cited; stated confidence ${finding?.confidence ?? 'unknown'}`,
   );
 }

@@ -125,6 +125,9 @@ describe('ResearchEngine', () => {
     expect(new Set(reset.nodes.map((n: { status: string }) => n.status))).toEqual(new Set(['pending']));
     expect([reset.report, reset.phase]).toEqual([null, 'tree-ready']);
     expect((await engine.run(project.id)).phase).toBe('done');
+    const rebuilt = await engine.resetResearch(project.id, { tree: true });
+    expect([rebuilt.nodes.length, rebuilt.phase]).toEqual([0, 'created']);
+    expect((await engine.run(project.id)).nodes.length).toBeGreaterThan(0);
   });
 
   it('marks a node failed but finishes the run when one call breaks', async () => {
