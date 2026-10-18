@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { ProjectImprover, applyVariant, improvementTargets, projectScore } from '../../src/research/improve.mjs';
+import { ProjectImprover, applyVariant, distinctResearches, improvementTargets, projectScore } from '../../src/research/improve.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
@@ -63,6 +63,18 @@ describe('ProjectImprover', () => {
     expect(saved.improve.best).toBe(saved.improve.baseline);
     expect(saved.log.some((l: { type: string }) => l.type === 'improve-state')).toBe(true);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
+describe('distinctResearches', () => {
+  it('keeps the newest non-demo project per question', () => {
+    const list = [
+      { id: 'old', question: 'Cars  DE→PL?', updatedAt: '2026-10-17' },
+      { id: 'new', question: 'cars de→pl?', updatedAt: '2026-10-18' },
+      { id: 'demo', question: 'x', demo: true, updatedAt: '2026-10-19' },
+      { id: 'other', question: 'Glamping?', updatedAt: '2026-10-16' },
+    ];
+    expect(distinctResearches(list)).toEqual(['new', 'other']);
   });
 });
 

@@ -24,6 +24,16 @@ export function projectScore(project) {
   return { ...base, acceptance, score: acceptance === null ? base.score : round(0.6 * acceptance + 0.4 * base.score) };
 }
 
+export function distinctResearches(list) {
+  const newest = new Map();
+  for (const p of list.filter((x) => !x.demo)) {
+    const key = String(p.question ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const seen = newest.get(key);
+    if (!seen || String(p.updatedAt) > String(seen.updatedAt)) newest.set(key, p);
+  }
+  return [...newest.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map((p) => p.id);
+}
+
 export function improvementTargets(project) {
   const leaves = project.nodes
     .filter((n) => isLeaf(project.nodes, n))
@@ -145,7 +155,7 @@ export class ProjectImprover {
 
   async cycle(state, sliceMs) {
     while (this.live(state)) {
-      const ids = (await this.engine.store.list()).filter((p) => !p.demo).map((p) => p.id);
+      const ids = distinctResearches(await this.engine.store.list());
       if (!ids.length) break;
       for (const id of ids) {
         if (!this.live(state)) break;
