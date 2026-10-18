@@ -46,7 +46,7 @@ function checkNumbersSourced(finding) {
   );
 }
 
-const NON_ANSWER = /(?:not possible|impossible|unable|cannot|can't|could not|couldn't) (?:to )?(?:be )?(?:determine|determined|say|calculate|calculated|establish|established|find|found|identify|verify|confirm|provide)|(?:insufficient|no|missing|lack of) (?:verifiable |reliable |relevant |concrete |specific )?(?:data|evidence|information|listings|sources|figures)|no verifiable|not (?:available|provided|present|found|mentioned) in the (?:provided |available )?(?:evidence|sources|data)|evidence (?:does not|doesn't) (?:contain|provide|include|mention)/i;
+const NON_ANSWER = /(?:not possible|impossible|unable|cannot|can't|could not|couldn't) (?:to )?(?:be )?(?:determine|determined|say|calculate|calculated|establish|established|find|found|identify|verify|confirm|provide|assess|assessed|estimate|estimated)|(?:insufficient|no|missing|lack of) (?:available )?(?:verifiable |reliable |relevant |concrete |specific |explicit )?(?:data|evidence|information|listings|sources|figures|counts)|no verifiable|(?:not|isn't) (?:available|provided|present|found|given|stated|mentioned|included|contained)(?: in| from| within| among)? (?:the )?(?:provided |available |given |retrieved )?(?:evidence|sources|data)|(?:evidence|sources|data) (?:does|do|did) not (?:contain|provide|include|mention|give|state|show)|there (?:is|are) no (?:available )?(?:evidence|data|information|figures)/i;
 
 function expectsNumber(node) {
   return Boolean(node && (node.unit || ['calculation', 'comparison', 'data'].includes(node.method)));

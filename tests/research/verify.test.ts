@@ -82,9 +82,19 @@ describe('verify: links and non-answers', () => {
 
   it('fails the concrete-answer check for evasive answers', async () => {
     const { verifyFinding } = await import('../../src/research/verify.mjs');
-    for (const answer of ['Based on the available evidence, we cannot determine the number.', 'No verifiable marketplace listings are available in the provided evidence.', 'The evidence does not contain prices.']) {
+    for (const answer of [
+      'Based on the available evidence, we cannot determine the number.',
+      'No verifiable marketplace listings are available in the provided evidence.',
+      'The evidence does not contain prices.',
+      'Average retail rent (EUR/m²) for 2025 is not available from the provided evidence for Brno, Ostrava, or Plzen.',
+      'The provided sources do not contain explicit 2025 population figures for Brno, Ostrava, or Plzen; therefore the ranking is open.',
+      'No evidence is available to determine the number of specialty coffee shops in Brno.',
+      'Total rent cannot be assessed because the average retail rent per square metre is not available.',
+      'There is no available evidence to determine how many specialty coffee shops operate in Brno.',
+    ]) {
       expect(verifyFinding({ finding: { answer, claims: [] }, sources }).checks.find((c) => c.id === 'concrete').passed).toBe(false);
     }
+    expect(verifyFinding({ finding: { answer: 'A standard kiosk occupies roughly 9 m² (3 m × 3 m).', claims: [] }, sources }).checks.find((c) => c.id === 'concrete')).toBeUndefined();
   });
 });
 
