@@ -118,6 +118,7 @@
   .msg{margin:6px 0; padding:7px 10px; border-radius:8px; font-size:13px; white-space:pre-wrap}
   .msg.user{background:var(--panel); border:1px solid var(--line); margin-left:28px}
   .msg.assistant{background:transparent; border:1px solid var(--acc); margin-right:28px}
+  .msg.app{background:var(--panel); border-left:3px solid var(--vi); margin-right:28px}
   .msg .meta{font-size:11px; color:var(--dim); margin-top:3px}
   .sugg{border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; background:var(--panel2)}
   .gq{color:var(--gr)} .gc{color:var(--tl)} .gu{color:var(--am)}
@@ -613,7 +614,7 @@ function bindSuggestions(root,id){
 }
 function chatHtml(key){
   const th=((STATE.project.chats||{})[key])||[];
-  return '<h3>Chat with '+(key==="Q"?"the whole project":"this node")+'</h3><div class="chat" id="chatBox">'+(th.length?th.map(m=>'<div class="msg '+(m.role==="user"?"user":"assistant")+'">'+esc(m.content)+((m.actions&&m.actions.length)||m.model?'<div class="meta">'+(m.model?esc(m.model):"")+(m.actions&&m.actions.length?" · actions: "+m.actions.map(a=>esc(a.type+" "+(a.nodeId||""))+(a.ok?" ✓":" ✗ "+esc(a.error||""))).join(", "):"")+"</div>":"")+"</div>").join(""):'<div class="small muted">Ask about this piece, tell it what to change ("search otomoto in Polish", "split by fuel type", "re-research with 2026 prices"). It can edit, add, split, suggest and re-research nodes; findings still pass the machine checks.</div>')+'</div><div class="row"><input type="text" id="chatIn" placeholder="message…" style="flex:1"><button class="btn sm" id="chatSend">Send</button></div>';
+  return '<h3>Chat with '+(key==="Q"?"the whole project":"this node")+'</h3><div class="chat" id="chatBox">'+(th.length?th.map(m=>'<div class="msg '+(m.role==="user"?"user":m.role==="app"?"app":"assistant")+'">'+(m.role==="app"?'<div class="meta">app report · '+esc((m.at||"").slice(0,16).replace("T"," "))+"</div>":"")+esc(m.content)+((m.actions&&m.actions.length)||m.model?'<div class="meta">'+(m.model?esc(m.model):"")+(m.actions&&m.actions.length?" · actions: "+m.actions.map(a=>esc(a.type+" "+(a.nodeId||""))+(a.ok?" ✓":" ✗ "+esc(a.error||""))).join(", "):"")+"</div>":"")+"</div>").join(""):'<div class="small muted">Ask about this piece, tell it what to change ("search otomoto in Polish", "split by fuel type", "re-research with 2026 prices"). It can edit, add, split, suggest and re-research nodes; findings still pass the machine checks.</div>')+'</div><div class="row"><input type="text" id="chatIn" placeholder="message…" style="flex:1"><button class="btn sm" id="chatSend">Send</button></div>';
 }
 function bindChat(key){
   const box=$("chatBox");if(box)box.scrollTop=box.scrollHeight;

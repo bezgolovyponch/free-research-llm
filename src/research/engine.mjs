@@ -1,5 +1,6 @@
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
+import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
@@ -320,11 +321,13 @@ export class ResearchEngine {
       project.phase = 'done';
       this.running.delete(id);
       this.emit(project, 'phase', 'done');
+      appendAppMessage(project, runSummary(project));
       return await this.store.save(project);
     } catch (error) {
       if (project) {
         project.phase = 'error';
         project.error = error.message;
+        appendAppMessage(project, `Research stopped with an error: ${error.message}. Press Run to resume; finished nodes are kept.`);
         this.emit(project, 'error', error.message);
         await this.store.save(project);
       }

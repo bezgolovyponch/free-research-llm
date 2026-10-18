@@ -1,4 +1,5 @@
 import { scoreProject } from '../loop/score.mjs';
+import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
 
@@ -189,6 +190,8 @@ export class ProjectImprover {
     const improve = { trials: [], ...(project.improve ?? {}), ...patch };
     if (trial) improve.trials = [...improve.trials, trial].slice(-MAX_TRIALS_KEPT);
     project.improve = improve;
+    if ('active' in patch) appendAppMessage(project, loopSummary(improve, !patch.active));
+    if (trial?.outcome === 'kept') appendAppMessage(project, `Kept a change on ${trial.nodeId}: ${trial.change}. Score ${trial.before} → ${trial.score}.`);
     if ('active' in patch) this.engine.emit(project, 'improve-state', patch.active ? `self-improving loop started for ${improve.hours} h` : `self-improving loop ended: ${patch.stopReason ?? patch.error ?? 'stopped'} · baseline ${improve.baseline} → best ${improve.best}`);
     if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}`, { nodeId: trial.nodeId });
     await this.engine.store.save(project);

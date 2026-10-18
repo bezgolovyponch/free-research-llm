@@ -1,8 +1,8 @@
 import { chatPrompt } from './prompts.mjs';
 import { ROOT_ID } from './tree.mjs';
 import { NotFoundError } from './engine.mjs';
+import { MAX_THREAD } from './notify.mjs';
 
-const MAX_THREAD = 100;
 const MAX_ACTIONS = 5;
 const ACTION_ORDER = { edit: 0, add: 1, remove: 2, expand: 3, suggest: 4, rerun: 5 };
 

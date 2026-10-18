@@ -253,7 +253,7 @@ ${children || 'none'}`;
 }
 
 export function chatPrompt({ project, node, thread, message }) {
-  const history = thread.slice(-10).map((m) => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
+  const history = thread.slice(-10).map((m) => `${m.role === 'app' ? 'APP REPORT' : m.role.toUpperCase()}: ${String(m.content).slice(0, 1500)}`).join('\n');
   const id = node?.id ?? 'Q';
   return [
     { role: 'system', content: SYSTEM },
