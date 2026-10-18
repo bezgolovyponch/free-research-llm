@@ -182,7 +182,6 @@ export class OpenAICompatibleProvider {
       fast: this.selected.fast,
       deep: this.selected.deep,
       local: Boolean(this.preset.local),
-      paid: Boolean(this.preset.paid),
       keyEnv: this.preset.keyEnv,
       accountEnv: this.preset.accountEnv ?? null,
       signup: this.preset.signup,

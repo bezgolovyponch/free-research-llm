@@ -73,18 +73,6 @@ describe('ModelRouter', () => {
   });
 });
 
-describe('ModelRouter paid budget', () => {
-  it('uses a paid provider only up to the paid-call limit', async () => {
-    const paid = Object.assign(provider('deepseek', ['{}', '{}']), { preset: { paid: true } });
-    const capped = new ModelRouter({ providers: [paid], paidCallLimit: 1, maxWaitMs: 0 });
-    await capped.complete({ messages: [] });
-    expect(capped.status()[0]).toMatchObject({ budgetExhausted: true });
-    await expect(capped.complete({ messages: [] })).rejects.toThrow(/paid-call budget/);
-    const blocked = new ModelRouter({ providers: [Object.assign(provider('deepseek', ['{}']), { preset: { paid: true } })], maxWaitMs: 0 });
-    await expect(blocked.complete({ messages: [] })).rejects.toThrow(/paid-call budget/);
-  });
-});
-
 describe('ModelRouter route order', () => {
   it('orders providers per tier and reports the live route', async () => {
     const g = provider('gemini', ['{}']);

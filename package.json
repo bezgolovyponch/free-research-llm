@@ -16,7 +16,6 @@
     "ask": "node src/cli.mjs",
     "test": "vitest run",
     "check": "node --check src/server.mjs && vitest run",
-    "autoloop": "node src/loop/cli.mjs",
     "quality": "node scripts/quality.mjs",
     "hooks": "git config core.hooksPath .githooks",
     "postinstall": "git config core.hooksPath .githooks || true",

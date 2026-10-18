@@ -1,4 +1,4 @@
-import { scoreProject } from '../loop/score.mjs';
+import { scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, listingSpec, nextNodeId, urlList } from './tree.mjs';

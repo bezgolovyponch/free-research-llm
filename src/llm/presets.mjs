@@ -77,7 +77,7 @@ export const PROVIDER_PRESETS = [
     signup: 'https://openrouter.ai/settings/keys',
     freeOnly: true,
     prefer: {
-      fast: ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3', 'deepseek'],
+      fast: ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3'],
       deep: ['deepseek/deepseek-r1:free', 'deepseek/deepseek-chat-v3', 'deepseek', 'qwen/qwen3', 'llama-3.3-70b'],
     },
   },
@@ -143,18 +143,6 @@ export const PROVIDER_PRESETS = [
     },
   },
   {
-    id: 'deepseek',
-    label: 'DeepSeek (near-free, paid)',
-    baseURL: 'https://api.deepseek.com/v1',
-    keyEnv: 'DEEPSEEK_API_KEY',
-    signup: 'https://platform.deepseek.com/api_keys',
-    paid: true,
-    prefer: {
-      fast: ['deepseek-chat'],
-      deep: ['deepseek-chat', 'deepseek-reasoner'],
-    },
-  },
-  {
     id: 'custom',
     label: 'Custom OpenAI-compatible endpoint',
     baseURL: '',
@@ -167,8 +155,8 @@ export const PROVIDER_PRESETS = [
 ];
 
 export const ROUTE_ORDER = {
-  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'pollinations', 'ollama', 'deepseek'],
-  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'pollinations', 'ollama', 'deepseek'],
+  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'pollinations', 'ollama'],
+  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'pollinations', 'ollama'],
 };
 
 export const SEARCH_KEYS = [

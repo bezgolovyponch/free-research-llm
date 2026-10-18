@@ -120,6 +120,6 @@ export class ScriptedProvider {
   }
 
   describe() {
-    return { id: this.id, label: this.label, state: 'ready', detail: 'scripted demo responses', configured: true, fast: this.selected.fast, deep: this.selected.deep, local: true, paid: false, keyEnv: null, signup: '', modelCount: 2 };
+    return { id: this.id, label: this.label, state: 'ready', detail: 'scripted demo responses', configured: true, fast: this.selected.fast, deep: this.selected.deep, local: true, keyEnv: null, signup: '', modelCount: 2 };
   }
 }

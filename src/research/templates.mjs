@@ -26,7 +26,7 @@ export const TEMPLATES = [
     ],
     drivers: 'Price gap buy vs sell market for identical spec (same year, mileage band, trim); landed cost (transport, registration, excise/VAT, technical inspection, translation, plates); time-to-sell & holding cost; condition/fraud risk (mileage rollback, accident history, VIN checks); demand depth and seasonality in sell market; FX risk; legal: margin-scheme VAT vs standard VAT, dealer licensing.',
     metrics: 'median listing price per spec in each market, landed cost per car, net margin per car, net margin %, days to sell, capital turns per year, annualised ROI',
-    sources: 'marketplace listings (mobile.de, autoscout24, otomoto, etc.), customs/excise tables, VAT rules for used cars (margin scheme), transport quotes, inspection fees, uploaded listing CSVs',
+    sources: 'marketplace listings read by code with the listings tool (DE: kleinanzeigen.de; CZ: bazos.cz, aaaauto.cz), registration and inspection fee tables, customs/excise and VAT rules for used cars (margin scheme), transport quotes, national used-car price statistics',
     decisionRule: 'GO only for specs where net margin per car after ALL landed costs and a holding-cost buffer beats the threshold; list those specs ranked by annualised ROI.',
   },
   {

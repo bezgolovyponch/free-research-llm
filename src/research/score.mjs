@@ -12,7 +12,3 @@ export function scoreProject(project) {
     .map((n) => ({ nodeId: n.id, title: n.title, question: n.question, grade: n.status, failures: n.verification?.failures ?? (n.error ? [n.error] : []), sources: (n.sources ?? []).length }));
   return { score: Math.round((base * 0.9 + decisive) * 1000) / 1000, counts, total: nodes.length, verdict, issues };
 }
-
-export function summarizeIssues(score, limit = 8) {
-  return score.issues.slice(0, limit).map((i) => `- ${i.nodeId} [${i.grade}, ${i.sources} sources] ${i.question}\n  failed: ${i.failures.join('; ').slice(0, 240) || 'n/a'}`).join('\n');
-}

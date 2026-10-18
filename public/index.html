@@ -312,14 +312,12 @@
           <div class="tabs" role="tablist">
             <button class="tab on" data-pane="outline">Outline</button>
             <button class="tab" data-pane="map">Map</button>
-            <button class="tab" data-pane="findings">Findings</button>
             <button class="tab" data-pane="report">Report</button>
             <button class="tab" data-pane="sources">Sources</button>
             <button class="tab" data-pane="chat" id="chatTab">Chat</button>
           </div>
           <div class="pane on" id="pane-outline"><div class="pane-inner"><div id="outline"></div></div></div>
           <div class="pane" id="pane-map"><div id="mapWrap"><svg id="cloud" xmlns="http://www.w3.org/2000/svg"></svg><div id="mapTools"><button class="btn secondary sm" id="btnFit">Fit</button></div></div></div>
-          <div class="pane" id="pane-findings"><div class="pane-inner"><div class="card tablewrap" style="padding:4px"><table id="findTable"></table></div></div></div>
           <div class="pane" id="pane-report"><div class="pane-inner" id="reportBody"></div></div>
           <div class="pane" id="pane-sources"><div class="pane-inner" id="sourceList"></div></div>
           <div class="pane" id="pane-chat"></div>
@@ -367,7 +365,7 @@
         <div class="card"><h2>Routing</h2><div id="routeInfo" class="small" style="margin-top:6px"></div></div>
         <div class="card"><h2>Web search</h2><div id="searchInfo" class="small" style="margin-top:6px"></div></div>
         <div class="card"><h2>Open from other devices</h2><p class="small" style="margin-top:6px">On this Mac run <span class="mono">frl install</span> (always on) or <span class="mono">frl start --remote</span>, then <span class="mono">frl url</span> for the phone / other-PC link. For access from anywhere, install Tailscale on both devices. Move keys to another computer with <span class="mono">frl keys export</span> → <span class="mono">frl keys import</span>.</p></div>
-        <div class="card tablewrap"><h2>Recent model calls</h2><table id="ledgerTable" style="margin-top:6px"></table></div>
+        <details class="card"><summary style="cursor:pointer;font-weight:700">Recent model calls (diagnostics)</summary><div class="tablewrap"><table id="ledgerTable" style="margin-top:8px"></table></div></details>
         <div class="card"><h2>Appearance</h2><div class="row" style="margin-top:8px"><button class="btn secondary sm" data-theme-set="">System</button><button class="btn secondary sm" data-theme-set="light">Light</button><button class="btn secondary sm" data-theme-set="dark">Dark</button></div></div>
       </div>
     </section>
@@ -376,7 +374,7 @@
       <div class="page">
         <h1>Guide</h1>
         <div class="card"><h2>1 · Ask</h2><ol class="steps" style="margin-top:8px"><li>Click <b>+ New research</b>. Write the decision with place, time and money.</li><li>Write the <b>expected result</b>: what must exist at the end. Code turns it into checks (item count, live links, value range).</li><li>Press <b>Build the tree</b>.</li></ol></div>
-        <div class="card"><h2>2 · Shape the tree</h2><ol class="steps" style="margin-top:8px"><li><b>Outline</b> lists every piece; <b>Map</b> shows the dependency graph. Click a piece to open it in the side panel.</li><li><b>Chat</b> with the piece: "read Golf listings in DE and CZ 2000–4000 EUR", "split by fuel type", "re-research". Your message takes priority over a running loop.</li><li><b>Suggest sub-issues</b> searches first, then proposes; each suggestion shows whether it is quoted from a source.</li></ol></div>
+        <div class="card"><h2>2 · Shape the tree</h2><ol class="steps" style="margin-top:8px"><li><b>Outline</b> lists every piece with its answer and grade; <b>Map</b> shows the dependency graph. Click a piece to open it in the side panel.</li><li><b>Chat</b> with the piece: "read Golf listings in DE and CZ 2000–4000 EUR", "split by fuel type", "re-research". Your message takes priority over a running loop.</li><li><b>Suggest sub-issues</b> searches first, then proposes; each suggestion shows whether it is quoted from a source.</li></ol></div>
         <div class="card"><h2>3 · Research and improve</h2><ol class="steps" style="margin-top:8px"><li><b>▶ Run</b> researches every piece. Colours: grey pending, blue running, green verified, teal supported, amber weak, red unsupported.</li><li><b>Improve loop</b> changes one piece at a time and keeps a change only if the measured score rises. Its reports appear in the chat.</li><li><b>Report</b> holds the verdict, the expected-result checks and every delivered link with its live / in-range check.</li></ol></div>
         <div class="card"><h2>What the grades mean</h2><p class="small" style="margin-top:6px"><b style="color:var(--gr)">verified</b>: all checks pass with 2+ independent sources or data read by code · <b style="color:var(--tl)">supported</b>: all checks pass · <b style="color:var(--am)">weak</b>: an uncited number, an evasive answer or a reviewer objection · <b style="color:var(--rd)">unsupported</b>: no answer, an invented source or link, or arithmetic that does not recompute.</p></div>
       </div>
@@ -539,7 +537,7 @@ async function openProject(id){
   STATE.es.onmessage=(m)=>{const d=JSON.parse(m.data);if(!STATE.project||STATE.project.id!==d.project.id)return;STATE.project=d.project;queueRender();if(d.event&&d.event.type==="phase")loadProjects();};
 }
 function queueRender(){if(STATE.drawQueued)return;STATE.drawQueued=true;requestAnimationFrame(()=>{STATE.drawQueued=false;renderAll();});}
-function renderAll(){if(!STATE.project)return;renderHead();renderOutline();drawTree(false);renderInspector();renderChat();renderFindings();renderReport();renderSources();}
+function renderAll(){if(!STATE.project)return;renderHead();renderOutline();drawTree(false);renderInspector();renderChat();renderReport();renderSources();}
 function nodesOf(){return STATE.project?STATE.project.nodes:[];}
 function byId(id){return nodesOf().find(n=>n.id===id);}
 function kids(id){return nodesOf().filter(n=>n.parentId===id).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));}
@@ -765,13 +763,6 @@ $("chatForm").addEventListener("submit",e=>{e.preventDefault();sendChat();});
 $("chatIn").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendChat();}});
 $("chatIn").addEventListener("input",autosize);
 
-function renderFindings(){
-  const ns=nodesOf().slice().sort((a,b)=>prio(b)-prio(a));
-  let h="<tr><th>Piece</th><th>Answer</th><th>Grade</th></tr>";
-  ns.forEach(n=>{h+='<tr class="click" data-node="'+esc(n.id)+'"><td><span class="mono faint">'+esc(n.id)+"</span><div>"+esc(n.title)+'</div><div class="small faint">priority '+prio(n)+"/25</div></td><td class='small'>"+esc(n.finding?n.finding.answer:"—")+"</td><td>"+grade(n.status)+"</td></tr>";});
-  $("findTable").innerHTML=ns.length?h:"<tr><td class='faint'>no findings yet</td></tr>";
-  $("findTable").querySelectorAll("[data-node]").forEach(r=>r.addEventListener("click",()=>select(r.dataset.node,"details")));
-}
 function renderReport(){
   const p=STATE.project;const box=$("reportBody");const r=p.report;let h="";
   if(p.demo)h+='<div class="notice">Demo mode: scripted answers, not research.</div>';

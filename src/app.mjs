@@ -96,7 +96,7 @@ export class App {
     this.demo = env.FRL_DEMO === '1';
     this.factory = new ProviderFactory({ env, fetchImpl });
     this.logs = new EventLog({ dir: logDir ?? path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'logs') });
-    this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), paidCallLimit: Number(env.FRL_PAID_CALL_LIMIT ?? 0) || 0, onLedger: (row) => this.logs.append('model-calls', row) });
+    this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), onLedger: (row) => this.logs.append('model-calls', row) });
     this.search = search ?? buildSearch({ env, fetchImpl });
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects') });
     this.handoffs = new HandoffWriter({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'handoff') });
@@ -207,7 +207,6 @@ export class App {
       search: this.search.describe(),
       ledger: this.router.ledger.slice(-40),
       calls: this.router.calls,
-      paid: { calls: this.router.paidCalls, limit: this.router.paidCallLimit },
       improving: [...this.improver.active.keys()],
       improveAll: this.improver.allStatus(),
     };
