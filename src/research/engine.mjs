@@ -1,8 +1,9 @@
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
+import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
-import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, progress, researchOrder } from './tree.mjs';
+import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding } from './verify.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
@@ -32,9 +33,17 @@ export function normalizeFinding(raw) {
     result: raw.calculation.result,
     unit: String(raw.calculation.unit ?? ''),
   } : null;
+  const items = (Array.isArray(raw?.items) ? raw.items : []).slice(0, 20).map((i) => ({
+    title: String(i?.title ?? '').slice(0, 160),
+    url: String(i?.url ?? '').trim().slice(0, 500),
+    value: i?.value ?? null,
+    unit: String(i?.unit ?? '').slice(0, 20),
+    sourceId: String(i?.sourceId ?? '').replace(/[[\]]/g, ''),
+  })).filter((i) => /^https?:\/\//.test(i.url));
   return {
     answer: String(raw?.answer ?? '').slice(0, 1200),
     claims,
+    items,
     calculation: calc,
     confidence: CONFIDENCE.includes(raw?.confidence) ? raw.confidence : 'low',
     assumptions: strings(raw?.assumptions),
@@ -85,7 +94,7 @@ export class ResearchEngine {
     return project;
   }
 
-  async createProject({ question, templateId, constraints = {}, csvText = '', csvName = '' }) {
+  async createProject({ question, templateId, constraints = {}, csvText = '', csvName = '', expected = '' }) {
     const q = String(question ?? '').trim();
     if (q.length < 8) throw new Error('describe the question in at least one full sentence');
     const chosen = templateId && templateId !== 'auto' ? templateId : suggestTemplate(q);
@@ -100,6 +109,8 @@ export class ResearchEngine {
       decision: '',
       successCriteria: '',
       assumptionsToConfirm: [],
+      acceptance: normalizeAcceptance({}, expected),
+      acceptanceResult: null,
       nodes: [],
       data: null,
       report: null,
@@ -126,21 +137,37 @@ export class ResearchEngine {
     const reply = await this.router.complete({
       purpose: 'decompose',
       tier: 'deep',
-      messages: decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text }),
+      messages: decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected }),
     });
     const tree = normalizeTree(reply.data, project.question);
     if (tree.nodes.length < 2) throw new Error('the model returned an empty issue tree; try again or use a stronger model');
-    Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes });
+    const acceptance = normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected);
+    Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
     this.emit(project, 'tree', `issue tree ready: ${tree.nodes.length} nodes (${reply.provider}/${reply.model})`);
     await this.store.save(project);
+  }
+
+  async buildTree(id) {
+    if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
+    this.running.add(id);
+    try {
+      const project = await this.load(id);
+      if (!project.nodes.length) await this.decompose(project);
+      project.phase = 'tree-ready';
+      this.emit(project, 'phase', 'tree ready — review it, then press Run or start the self-improving loop');
+      return await this.store.save(project);
+    } finally {
+      this.running.delete(id);
+    }
   }
 
   async gatherSources(project, node) {
     const sources = [];
     if (this.search?.enabled) {
+      const direct = node.sourceUrls?.length && this.search.readPages ? await this.search.readPages(node.sourceUrls) : [];
       const queries = [...node.searchQueries, node.title, node.question].filter(Boolean);
-      const web = await this.search.search(queries, { maxSources: 8 });
-      web.forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
+      const web = await this.search.search(queries, { maxSources: 8 - direct.length, exclude: direct.map((d) => d.url) });
+      [...direct, ...web].forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
       if (!web.length && this.search.lastErrors.length) this.emit(project, 'warn', `${node.id}: search failed (${this.search.lastErrors.join('; ').slice(0, 200)})`, { nodeId: node.id });
     }
     return [...sources, ...this.dataSources(project)];
@@ -184,7 +211,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
-        messages: researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint }),
+        messages: researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected }),
       });
       const finding = normalizeFinding(reply.data);
       const critique = await this.critique(node, finding, node.sources, reply.provider);
@@ -221,7 +248,7 @@ export class ResearchEngine {
     const reply = await this.router.complete({
       purpose: 'synthesize',
       tier: 'deep',
-      messages: synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes }),
+      messages: synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected }),
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
@@ -239,7 +266,16 @@ export class ResearchEngine {
       model: `${reply.provider}/${reply.model}`,
       generatedAt: new Date().toISOString(),
     };
+    await this.checkAcceptance(project);
     this.emit(project, 'report', `decision memo ready: ${project.report.verdict}`);
+  }
+
+  async checkAcceptance(project) {
+    const deliverables = collectDeliverables(project.nodes);
+    project.report.deliverables = deliverables;
+    const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
+    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables);
+    if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }
 
   async run(id, { hints = {} } = {}) {
@@ -328,6 +364,8 @@ export class ResearchEngine {
     if (!node) throw new NotFoundError(`node ${nodeId} not found`);
     for (const key of ['title', 'question', 'hypothesis', 'metric', 'unit']) if (typeof changes[key] === 'string') node[key] = changes[key].slice(0, 400);
     if (Array.isArray(changes.searchQueries)) node.searchQueries = strings(changes.searchQueries, 3);
+    if (Array.isArray(changes.sourceUrls)) node.sourceUrls = urlList(changes.sourceUrls);
+    if (typeof changes.instructions === 'string') node.instructions = changes.instructions.slice(0, 2000);
     this.resetWithAncestors(project, nodeId);
     this.emit(project, 'edit', `${nodeId}: edited, will be re-researched`, { nodeId });
     return this.store.save(project);

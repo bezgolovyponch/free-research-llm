@@ -9,6 +9,7 @@ export const TASK_MARKERS = {
   critique: 'TASK=CRITIQUE',
   rollup: 'TASK=ROLLUP',
   synthesize: 'TASK=SYNTHESIZE',
+  variant: 'TASK=IMPROVE_NODE',
 };
 
 function constraintsText(constraints = {}) {
@@ -20,7 +21,7 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function decomposePrompt({ question, template, constraints, dataSummary }) {
+export function decomposePrompt({ question, template, constraints, dataSummary, expected }) {
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -34,6 +35,9 @@ ${question}
 CONSTRAINTS:
 ${constraintsText(constraints)}
 
+EXPECTED RESULT (what the user wants delivered at the end):
+${expected || 'not stated — a decision memo'}
+
 DOMAIN PLAYBOOK (${template.label}) — use as a checklist, adapt to the question:
 - typical drivers: ${template.drivers}
 - typical metrics: ${template.metrics}
@@ -46,10 +50,12 @@ Build an issue tree that answers the QUESTION:
 3. Under each driver 2-4 LEAF sub-questions (parentId = driver id), each answerable by one lookup, calculation, comparison, estimate or data analysis. Max ${MAX_NODES} nodes total.
 4. Every node: id (drivers "D1".."D6", leaves "D1.1" etc.), title (<=8 words), question (specific, with geography/time/units), why (how the answer moves the decision), hypothesis (your best guess to test), metric, unit, method (one of ${METHODS.join('|')}), searchQueries (2-3 precise web queries, include country language terms when useful), dependsOn (ids of OTHER nodes whose answer this needs, e.g. a margin calculation depends on price leaves), impact 1-5 (effect on the decision), uncertainty 1-5 (how unknown it is today).
 5. "assumptionsToConfirm": things the user must confirm.
+5b. "acceptance": machine-checkable criteria taken ONLY from the EXPECTED RESULT: itemCount (number of items/links wanted, else null), urlsLive (true if links are wanted), valueRange ([min,max] if items must have a value such as a price in a range, else null), unit (e.g. EUR), mustMention (words every delivered page must contain, else []).
+5c. "sourceUrls" per node (optional, max 2): exact public pages that answer it directly, e.g. a marketplace search page with the filters in the URL or an official statistics table. Only well-known real sites; never guess deep IDs.
 6. Be brief: every text field at most 15 words, 1-2 searchQueries per node, compact JSON without indentation. List drivers first, then their leaves.
 
 JSON shape:
-{"decision":"","successCriteria":"","assumptionsToConfirm":[""],"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"dependsOn":[],"impact":3,"uncertainty":3}]}`,
+{"decision":"","successCriteria":"","assumptionsToConfirm":[""],"acceptance":{"itemCount":null,"urlsLive":false,"valueRange":null,"unit":"","mustMention":[]},"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"sourceUrls":[],"dependsOn":[],"impact":3,"uncertainty":3}]}`,
     },
   ];
 }
@@ -68,9 +74,16 @@ JSON shape: {"nodes":[{"id":"","parentId":"${node.id}","title":"","question":"",
   ];
 }
 
+const LINKS_PER_SOURCE = 15;
+
+function linksBlock(links = []) {
+  if (!links.length) return '';
+  return `\nLINKS on this page:\n${links.slice(0, LINKS_PER_SOURCE).map((l) => `- ${l.text} <${l.url}>`).join('\n')}`;
+}
+
 function sourcesBlock(sources) {
   if (!sources.length) return 'NO SOURCES were retrieved. Use general knowledge only, mark every number as "assumption": true, and set confidence "low".';
-  return sources.map((s) => `[${s.id}] ${s.title}${s.url ? ` <${s.url}>` : ''}\n${String(s.text || s.snippet || '').slice(0, 1800)}`).join('\n\n');
+  return sources.map((s) => `[${s.id}] ${s.title}${s.url ? ` <${s.url}>` : ''}\n${String(s.text || s.snippet || '').slice(0, 2200)}${linksBlock(s.links)}`).join('\n\n');
 }
 
 function upstreamBlock(upstream) {
@@ -78,7 +91,7 @@ function upstreamBlock(upstream) {
   return upstream.map((u) => `${u.id} (${u.status}): ${u.answer}${u.keyNumbers ? ` | numbers: ${u.keyNumbers}` : ''}`).join('\n');
 }
 
-export function researchPrompt({ question, node, sources, upstream, previousFailures, hint }) {
+export function researchPrompt({ question, node, sources, upstream, previousFailures, hint, expected }) {
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -88,7 +101,7 @@ Today is ${today()}. Overall question: ${question}
 
 SUB-QUESTION ${node.id}: ${node.question}
 Metric: ${node.metric || 'n/a'} (${node.unit || 'unit n/a'}) · method: ${node.method} · hypothesis to test: ${node.hypothesis || 'n/a'}
-${hint ? `User guidance: ${hint}\n` : ''}
+${node.instructions ? `INSTRUCTIONS FOR THIS NODE (follow them): ${node.instructions}\n` : ''}${hint ? `User guidance: ${hint}\n` : ''}${expected ? `The user's expected final result: ${expected}\n` : ''}
 ANSWERS ALREADY ESTABLISHED (use them, cite as their node id in text):
 ${upstreamBlock(upstream)}
 
@@ -101,10 +114,11 @@ RULES:
 - "sourceIds" may only contain ids shown above (${sources.map((s) => s.id).join(', ') || 'none'}). Never invent ids or URLs.
 - If the method is calculation/comparison, provide "calculation": a formula using variable names (letters, digits, _), + - * / ^ ( ) and min/max/abs/round, the numeric value of each input, and the result. The result will be recomputed by machine.
 - confidence "high" only with 2+ independent sources agreeing.
+- If the sub-question asks for concrete items (listings, offers, products, pages, links), return them in "items". An item "url" must be copied exactly from a LINKS list or a source URL above; any other URL is rejected by machine.
 
 JSON shape:
-{"answer":"one or two sentences that directly answer the sub-question, with the key number","claims":[{"text":"","value":null,"unit":"","sourceIds":["S1"],"assumption":false}],"calculation":{"formula":"","inputs":{"name":{"value":0,"unit":"","sourceId":"S1"}},"result":0,"unit":""},"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}
-Omit "calculation" if no arithmetic is involved.`,
+{"answer":"one or two sentences that directly answer the sub-question, with the key number","claims":[{"text":"","value":null,"unit":"","sourceIds":["S1"],"assumption":false}],"calculation":{"formula":"","inputs":{"name":{"value":0,"unit":"","sourceId":"S1"}},"result":0,"unit":""},"items":[{"title":"","url":"","value":null,"unit":"","sourceId":"S1"}],"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}
+Omit "calculation" if no arithmetic is involved; omit "items" if no concrete items are asked for.`,
     },
   ];
 }
@@ -147,7 +161,7 @@ JSON shape: {"answer":"","claims":[{"text":"","sourceIds":[],"assumption":false}
   ];
 }
 
-export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes }) {
+export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected }) {
   const drivers = nodes.filter((n) => n.parentId === 'Q');
   const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}`);
   return [
@@ -158,6 +172,7 @@ export function synthesizePrompt({ question, decision, successCriteria, template
 QUESTION: ${question}
 DECISION: ${decision}
 SUCCESS CRITERIA: ${successCriteria || 'not stated'}
+EXPECTED RESULT: ${expected || 'a decision memo'}
 CONSTRAINTS:
 ${constraintsText(constraints)}
 DECISION RULE: ${template.decisionRule}
@@ -165,10 +180,55 @@ DECISION RULE: ${template.decisionRule}
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
 ${lines.join('\n')}
 
-Write the final decision memo. If the drivers that decide the success criteria are weak, unsupported or answered "unknown", the verdict MUST be "INSUFFICIENT DATA — <the missing inputs>", not NO-GO: missing evidence is not evidence against. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
+Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. If the drivers that decide the success criteria are weak, unsupported or answered "unknown", the verdict MUST be "INSUFFICIENT DATA — <the missing inputs>", not NO-GO: missing evidence is not evidence against. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:
 {"verdict":"GO | NO-GO | GO-IF <condition> | INSUFFICIENT DATA — <what is missing> (one line)","confidence":"low|medium|high","summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
 Drivers: ${drivers.map((d) => d.id).join(', ')}.`,
+    },
+  ];
+}
+
+function acceptanceBlock(result) {
+  if (!result) return 'no machine check defined';
+  const checks = result.checks.map((c) => `- ${c.label}: ${Math.round(c.value * 100)}% (${c.detail})`).join('\n');
+  const bad = result.items.filter((i) => !i.live || i.inRange === false).slice(0, 5).map((i) => `- ${i.url} live=${i.live} inRange=${i.inRange}`).join('\n');
+  return `${checks}${bad ? `\nfailing items:\n${bad}` : ''}`;
+}
+
+export function variantPrompt({ project, node, score, trials }) {
+  const isRoot = node.id === 'Q';
+  const drivers = project.nodes.filter((n) => n.parentId === 'Q').map((n) => `${n.id} [${n.status}] ${n.question}`).join('\n');
+  const sources = (node.sources ?? []).filter((s) => s.url).slice(0, 8).map((s) => `${s.id} ${s.title} <${s.url}> (${(s.links ?? []).length} links)`).join('\n') || 'none';
+  const tried = trials.slice(-6).map((t) => `- ${t.change} -> ${t.outcome} (${t.score})`).join('\n') || 'none';
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.variant}
+You improve ONE piece of a research model so the whole model gets closer to the expected result. A machine will test your change and keep it only if the measured score rises.
+
+QUESTION: ${project.question}
+EXPECTED RESULT: ${project.acceptance?.expected || 'a well-supported decision memo'}
+CURRENT SCORE: ${score.score} (share of verified/supported nodes${score.acceptance !== null ? ` and expected-result checks ${score.acceptance}` : ''})
+EXPECTED-RESULT CHECKS:
+${acceptanceBlock(project.acceptanceResult)}
+
+${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change: add a missing top-level piece ("add") and/or remove a useless one ("remove").` : `PIECE ${node.id} [${node.status}]: ${node.question}
+method: ${node.method} · metric: ${node.metric} ${node.unit} · queries: ${node.searchQueries.join(' | ')} · direct pages: ${(node.sourceUrls ?? []).join(' ') || 'none'}
+instructions: ${node.instructions || 'none'}
+answer: ${node.finding?.answer ?? 'none'}
+failed checks: ${(node.verification?.failures ?? []).join(' | ') || 'none'}
+reviewer: ${(node.critique?.issues ?? []).join(' | ') || 'none'}
+sources it found:
+${sources}
+
+Propose ONE change to this piece: a sharper question, better search queries (local language helps), exact public pages to read directly (sourceUrls, e.g. a marketplace search URL with filters), a different method, extra instructions, or a split into 2-3 smaller pieces ("split").`}
+
+ALREADY TRIED (do not repeat):
+${tried}
+
+Reply with only the fields you change. JSON shape:
+{"change":"one sentence: what and why","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup","instructions":"","split":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"add":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"remove":[""]}`,
     },
   ];
 }

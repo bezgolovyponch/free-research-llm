@@ -1,5 +1,6 @@
 const USER_AGENT = 'free-research-llm/1.0 (+https://github.com/bezgolovyponch/free-research-llm)';
-const PAGE_TEXT_LIMIT = 3500;
+const PAGE_TEXT_LIMIT = 6000;
+const MAX_LINKS = 60;
 
 function domainOf(url) {
   try {
@@ -34,6 +35,42 @@ export class SearchHttpError extends Error {
   get exhausted() {
     return [401, 402, 403, 429, 432, 433].includes(this.status);
   }
+}
+
+function absoluteUrl(href, base) {
+  try {
+    const url = new URL(href.replace(/&amp;/g, '&'), base);
+    if (!/^https?:$/.test(url.protocol)) return '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+function rankLinks(links, base) {
+  const host = domainOf(base);
+  const seen = new Set([absoluteUrl(base, base)]);
+  const unique = links.filter((l) => l.url && l.text && !seen.has(l.url) && seen.add(l.url));
+  const sameSite = unique.filter((l) => domainOf(l.url).endsWith(host) || host.endsWith(domainOf(l.url)));
+  const deep = (l) => new URL(l.url).pathname.split('/').filter(Boolean).length >= 2 || /\d{4,}/.test(l.url);
+  return [...sameSite.filter(deep), ...sameSite.filter((l) => !deep(l)), ...unique.filter((l) => !sameSite.includes(l))].slice(0, MAX_LINKS);
+}
+
+export function extractLinks(html, base) {
+  const links = [];
+  for (const m of String(html ?? '').matchAll(/<a\s[^>]*?href\s*=\s*["']([^"'#][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    links.push({ url: absoluteUrl(m[1], base), text: htmlToText(m[2]).replace(/\s+/g, ' ').slice(0, 100) });
+  }
+  return rankLinks(links, base);
+}
+
+export function extractMarkdownLinks(markdown, base) {
+  const links = [];
+  for (const m of String(markdown ?? '').matchAll(/(?<!!)\[([^\]]{1,160})\]\((https?:\/\/[^)\s]+)\)/g)) {
+    links.push({ url: absoluteUrl(m[2], base), text: m[1].replace(/\s+/g, ' ').trim().slice(0, 100) });
+  }
+  return rankLinks(links, base);
 }
 
 async function fetchJson(fetchImpl, url, init = {}, timeoutMs = 10000) {
@@ -264,27 +301,48 @@ export class SearchService {
     return this.backends.length > 0;
   }
 
-  async fetchText(url, accept, extraHeaders = {}) {
+  async fetchPage(url, accept, extraHeaders = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
+    const timer = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept, ...extraHeaders }, signal: controller.signal });
       const type = res.headers.get('content-type') ?? '';
-      if (!res.ok || !/text\/(html|plain|markdown)/.test(type)) return '';
+      if (!res.ok || !/text\/(html|plain|markdown)/.test(type)) return { text: '', links: [], status: res.status };
       const body = await res.text();
-      return (/html/.test(type) ? htmlToText(body) : body.trim()).slice(0, PAGE_TEXT_LIMIT);
+      const html = /html/.test(type);
+      return {
+        text: (html ? htmlToText(body) : body.trim()).slice(0, PAGE_TEXT_LIMIT),
+        links: html ? extractLinks(body, res.url || url) : [],
+        status: res.status,
+      };
     } catch {
-      return '';
+      return { text: '', links: [], status: 0 };
     } finally {
       clearTimeout(timer);
     }
   }
 
-  async pageText(url) {
-    const direct = await this.fetchText(url, 'text/html,text/plain');
-    if (direct.length >= 400 || !this.jinaReader) return direct;
-    const viaReader = await this.fetchText(`https://r.jina.ai/${url}`, 'text/plain', this.jinaKey ? { authorization: `Bearer ${this.jinaKey}` } : {});
-    return viaReader.length > direct.length ? viaReader : direct;
+  async readPage(url) {
+    const direct = await this.fetchPage(url, 'text/html,text/plain');
+    if (direct.text.length >= 400 || !this.jinaReader) return direct;
+    const viaReader = await this.fetchPage(`https://r.jina.ai/${url}`, 'text/plain', this.jinaKey ? { authorization: `Bearer ${this.jinaKey}` } : {});
+    if (viaReader.text.length <= direct.text.length) return direct;
+    return { text: viaReader.text, links: extractMarkdownLinks(viaReader.text, url), status: viaReader.status, via: 'jina' };
+  }
+
+  async readPages(urls) {
+    const pages = await Promise.all(urls.slice(0, 4).map(async (url) => ({ url, ...(await this.readPage(url)) })));
+    return pages.filter((p) => p.text).map((p) => ({
+      kind: 'web',
+      title: `${domainOf(p.url)} page`,
+      url: p.url,
+      domain: domainOf(p.url),
+      snippet: p.text.slice(0, 300),
+      text: p.text,
+      links: p.links,
+      provider: p.via ? `direct+${p.via}` : 'direct',
+      query: '',
+    }));
   }
 
   rotation() {
@@ -317,8 +375,10 @@ export class SearchService {
     }
     const sources = collected.slice(0, maxSources);
     if (this.fetchPages) {
-      await Promise.all(sources.filter((s) => !s.text).slice(0, 5).map(async (s) => {
-        s.text = await this.pageText(s.url);
+      await Promise.all(sources.slice(0, 5).map(async (s) => {
+        const page = await this.readPage(s.url);
+        s.links = page.links;
+        if (page.text.length > String(s.text ?? '').length) s.text = page.text;
       }));
     }
     return sources.map((s) => ({
@@ -328,6 +388,7 @@ export class SearchService {
       domain: domainOf(s.url),
       snippet: String(s.snippet ?? '').slice(0, 400),
       text: String(s.text || s.snippet || '').slice(0, PAGE_TEXT_LIMIT),
+      links: s.links ?? [],
       provider: s.provider,
       query: s.query,
     }));

@@ -79,6 +79,13 @@ export function createServer(app) {
       app.engine.start(id);
       return { ok: true };
     }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/tree$/, async (req, [id]) => app.engine.buildTree(id)],
+    ['POST', /^\/api\/projects\/([\w-]+)\/improve$/, async (req, [id]) => {
+      await app.engine.load(id);
+      if (app.engine.running.has(id)) throw new ProjectBusyError('stop the run first');
+      return app.improver.start(id, await readJson(req));
+    }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/improve\/stop$/, async (req, [id]) => app.improver.stop(id)],
     ['POST', /^\/api\/projects\/([\w-]+)\/cancel$/, async (req, [id]) => {
       app.engine.cancel(id);
       return { ok: true };

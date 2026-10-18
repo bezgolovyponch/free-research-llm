@@ -15,6 +15,10 @@ function list(value, max = 6) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => text(v, 200)).filter(Boolean).slice(0, max);
 }
 
+export function urlList(value, max = 4) {
+  return list(value, max * 2).filter((u) => /^https?:\/\/[^\s]+\.[^\s]+/.test(u)).slice(0, max);
+}
+
 function safeId(value, index) {
   const id = text(value, 24).replace(/[^A-Za-z0-9._-]/g, '');
   return id && id !== ROOT_ID ? id : `N${index + 1}`;
@@ -32,6 +36,8 @@ export function blankNode(fields) {
     unit: '',
     method: 'lookup',
     searchQueries: [],
+    sourceUrls: [],
+    instructions: '',
     dependsOn: [],
     impact: 3,
     uncertainty: 3,
@@ -98,6 +104,7 @@ export function normalizeTree(raw, question) {
       unit: text(item?.unit, 40),
       method: METHODS.includes(item?.method) ? item.method : 'lookup',
       searchQueries: list(item?.searchQueries, 3),
+      sourceUrls: urlList(item?.sourceUrls),
       dependsOn: list(item?.dependsOn, 6),
       impact: clampScore(item?.impact),
       uncertainty: clampScore(item?.uncertainty),

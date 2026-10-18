@@ -81,9 +81,9 @@ describe('search', () => {
       [/r\.jina\.ai/, () => new Response('Reader text '.repeat(50), { headers: { 'content-type': 'text/plain' } })],
       [/spa\.example/, () => new Response('<div id=app></div>', { headers: { 'content-type': 'text/html' } })],
     ]);
-    const text = await new SearchService({ fetchImpl, backends: [] }).pageText('https://spa.example/');
+    const { text } = await new SearchService({ fetchImpl, backends: [] }).readPage('https://spa.example/');
     expect(text.startsWith('Reader text')).toBe(true);
-    expect(await new SearchService({ fetchImpl, backends: [], jinaReader: false }).pageText('https://spa.example/')).toBe('');
+    expect((await new SearchService({ fetchImpl, backends: [], jinaReader: false }).readPage('https://spa.example/')).text).toBe('');
   });
 });
 

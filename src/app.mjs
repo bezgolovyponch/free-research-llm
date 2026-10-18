@@ -6,6 +6,7 @@ import { ModelRouter } from './llm/router.mjs';
 import { ScriptedProvider } from './llm/scripted-provider.mjs';
 import { ResearchEngine } from './research/engine.mjs';
 import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, SearchService, SearxngBackend, SerperBackend, TavilyBackend, WikipediaBackend } from './search/search.mjs';
+import { ProjectImprover } from './research/improve.mjs';
 import { ProjectStore } from './store.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,6 +97,7 @@ export class App {
     this.search = search ?? buildSearch({ env, fetchImpl });
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects') });
     this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo });
+    this.improver = new ProjectImprover({ engine: this.engine });
     this.fixedProviders = Boolean(providers);
   }
 
@@ -131,6 +133,7 @@ export class App {
       ledger: this.router.ledger.slice(-40),
       calls: this.router.calls,
       paid: { calls: this.router.paidCalls, limit: this.router.paidCallLimit },
+      improving: [...this.improver.active.keys()],
     };
   }
 }

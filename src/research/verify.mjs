@@ -75,6 +75,25 @@ function checkCalculation(finding) {
   }
 }
 
+export function sameUrl(a, b) {
+  const norm = (u) => String(u ?? '').trim().replace(/#.*$/, '').replace(/\/+$/, '').replace(/^https?:\/\/(www\.)?/, '').toLowerCase();
+  return Boolean(a) && norm(a) === norm(b);
+}
+
+function checkItemLinks(finding, sources) {
+  const items = finding?.items ?? [];
+  if (!items.length) return null;
+  const known = sources.flatMap((s) => [s.url, ...(s.links ?? []).map((l) => l.url)]).filter(Boolean);
+  const invented = items.filter((item) => !known.some((url) => sameUrl(url, item.url)));
+  return check(
+    'item-links',
+    'Every listed link was found on a fetched page',
+    invented.length === 0,
+    invented.length ? `${invented.length} of ${items.length} link(s) not seen on any fetched page: ${invented.map((i) => i.url).join(' ').slice(0, 200)}` : `${items.length} link(s) traced to fetched pages`,
+    true,
+  );
+}
+
 function checkConfidence(finding, sources) {
   const cited = new Set((finding?.claims ?? []).flatMap((c) => c.sourceIds ?? []));
   const domains = new Set(sources.filter((s) => cited.has(s.id)).map((s) => s.domain || domainOf(s.url) || s.id));
@@ -101,6 +120,7 @@ export function verifyFinding({ finding, sources = [], critique = null, node = n
     checkCitations(finding, sourceIds),
     checkNumbersSourced(finding),
     checkCalculation(finding),
+    checkItemLinks(finding, sources),
     checkConfidence(finding, sources),
     checkCritique(critique),
   ].filter(Boolean);
