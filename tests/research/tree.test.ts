@@ -61,3 +61,17 @@ describe('listingSpec', () => {
   });
 });
 
+describe('moveListingsToLeaves', () => {
+  it('moves a listings request off a parent into a new data leaf so it actually runs', async () => {
+    const { normalizeTree } = await import('../../src/research/tree.mjs');
+    const tree = normalizeTree({ nodes: [
+      { id: 'D1', parentId: null, question: 'gap?', listings: { scan: true, minEur: 2000, maxEur: 4000 } },
+      { id: 'D1.1', parentId: 'D1', question: 'trend?' },
+    ] }, 'q');
+    const parent = tree.nodes.find((n) => n.id === 'D1');
+    const leaf = tree.nodes.find((n) => n.id === 'D1.0');
+    expect(parent.listings).toBeNull();
+    expect(leaf).toMatchObject({ parentId: 'D1', method: 'data', listings: { scan: true, from: 'DE', to: 'CZ' } });
+  });
+});
+

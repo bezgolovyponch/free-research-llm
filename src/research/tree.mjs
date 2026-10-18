@@ -99,6 +99,28 @@ function fixParents(nodes) {
   }
 }
 
+export function moveListingsToLeaves(nodes) {
+  for (const node of [...nodes]) {
+    if (!node.listings || !nodes.some((n) => n.parentId === node.id)) continue;
+    let id = `${node.id}.0`;
+    while (nodes.some((n) => n.id === id)) id = `${id}0`;
+    nodes.push(blankNode({
+      id,
+      parentId: node.id,
+      title: `Data: ${node.title}`.slice(0, 90),
+      question: node.question,
+      metric: node.metric,
+      unit: node.unit,
+      method: 'data',
+      listings: node.listings,
+      impact: node.impact,
+      uncertainty: node.uncertainty,
+    }));
+    node.listings = null;
+  }
+  return nodes;
+}
+
 export function normalizeTree(raw, question) {
   const input = Array.isArray(raw?.nodes) ? raw.nodes.slice(0, MAX_NODES) : [];
   const seen = new Set();
@@ -126,6 +148,7 @@ export function normalizeTree(raw, question) {
     }));
   });
   fixParents(nodes);
+  moveListingsToLeaves(nodes);
   dropCycles(nodes);
   return {
     decision: text(raw?.decision, 400) || text(question, 400),
