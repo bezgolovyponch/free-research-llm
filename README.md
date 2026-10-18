@@ -26,6 +26,15 @@ question ──► DECOMPOSE (deep model)         MECE issue tree: 3-6 drivers �
 
 Grades: **verified** · **supported** · **weak** · **unsupported**. The grade comes from the checks, never from the model's own confidence.
 
+## What it does
+
+- Takes any question plus an **expected result**, builds an issue tree, and lets you review it first.
+- Each node is researched by free models from real web pages, then **graded by code** (citations, links seen on fetched pages, recomputed formulas, evasive answers, reviewer). See [PROTOCOLS.md](PROTOCOLS.md).
+- **Chat** with any node to change it; **researched suggestions** for new sub-issues; **re-research** any piece.
+- **Self-improving loop** with a time limit: keeps only changes that raise the measured score.
+- **History**, JSONL logs and a facts/claims/hypotheses **knowledge record** per project.
+- `npm run quality` gate + pre-commit hook. Build history: [SESSION-LOG.md](SESSION-LOG.md).
+
 ## Quick start
 
 You need Node.js 20+. There are no runtime dependencies.

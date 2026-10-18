@@ -10,6 +10,8 @@ export const TASK_MARKERS = {
   rollup: 'TASK=ROLLUP',
   synthesize: 'TASK=SYNTHESIZE',
   variant: 'TASK=IMPROVE_NODE',
+  chat: 'TASK=NODE_CHAT',
+  suggest: 'TASK=SUGGEST_SUBISSUES',
 };
 
 function constraintsText(constraints = {}) {
@@ -229,6 +231,75 @@ ${tried}
 
 Reply with only the fields you change. JSON shape:
 {"change":"one sentence: what and why","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup","instructions":"","split":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"add":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"remove":[""]}`,
+    },
+  ];
+}
+
+function nodeSummary(project, node) {
+  if (!node) {
+    const drivers = project.nodes.filter((n) => n.parentId === 'Q').map((n) => `${n.id} [${n.status}] ${n.question}`).join('\n');
+    return `ROOT QUESTION: ${project.question}\nEXPECTED RESULT: ${project.acceptance?.expected || 'a decision memo'}\nPHASE: ${project.phase}\nVERDICT: ${project.report?.verdict ?? 'none yet'}\nTOP-LEVEL PIECES:\n${drivers || 'none yet'}`;
+  }
+  const children = project.nodes.filter((n) => n.parentId === node.id).map((n) => `${n.id} [${n.status}] ${n.question}`).join('\n');
+  return `ROOT QUESTION: ${project.question}
+NODE ${node.id} [${node.status}]: ${node.question}
+method: ${node.method} · metric: ${node.metric} ${node.unit} · queries: ${node.searchQueries.join(' | ')} · direct pages: ${(node.sourceUrls ?? []).join(' ') || 'none'}
+instructions: ${node.instructions || 'none'}
+answer: ${node.finding?.answer ?? 'not researched yet'}
+failed checks: ${(node.verification?.failures ?? []).join(' | ') || 'none'}
+sources: ${(node.sources ?? []).filter((x) => x.url).slice(0, 6).map((x) => `${x.id} ${x.title} <${x.url}>`).join(' ; ') || 'none'}
+children:
+${children || 'none'}`;
+}
+
+export function chatPrompt({ project, node, thread, message }) {
+  const history = thread.slice(-10).map((m) => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
+  const id = node?.id ?? 'Q';
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.chat}
+You are the research assistant for ONE piece of a research tree. Talk with the user about this piece and, when they ask for a change, return actions. You cannot write findings or grades: those come only from research runs that pass machine checks. Never claim a fact is verified unless the node status says verified.
+
+${nodeSummary(project, node)}
+
+CONVERSATION SO FAR:
+${history || 'none'}
+
+USER: ${message}
+
+Allowed actions (use only when the user asks for a change or a re-check):
+- {"type":"edit","nodeId":"${id === 'Q' ? 'D1' : id}","fields":{"question":"","searchQueries":[""],"sourceUrls":[""],"instructions":"","method":"lookup|calculation|comparison|estimate|data"}}
+- {"type":"add","parentId":"${id}","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup"}
+- {"type":"remove","nodeId":""}
+- {"type":"expand","nodeId":"","hint":""}  (break into sub-issues)
+- {"type":"suggest","nodeId":"${id}"}  (research a suggestion list of sub-issues)
+- {"type":"rerun","nodeId":"","hint":""}  (re-research the piece; use last)
+JSON shape: {"reply":"short answer to the user","actions":[]}`,
+    },
+  ];
+}
+
+export function suggestPrompt({ project, node, sources }) {
+  const target = node ? `PIECE ${node.id}: ${node.question}` : `ROOT QUESTION: ${project.question}`;
+  const existing = project.nodes.filter((n) => n.parentId === (node?.id ?? 'Q')).map((n) => `- ${n.question}`).join('\n') || 'none';
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.suggest}
+Suggest 4-6 sub-issues that, answered together, settle the piece below. Base them on the EVIDENCE: each suggestion cites the source ids that show why it matters and quotes a short exact phrase (max 12 words) from that source. Do not repeat existing sub-issues.
+
+${target}
+EXPECTED RESULT: ${project.acceptance?.expected || 'a decision memo'}
+EXISTING SUB-ISSUES:
+${existing}
+
+EVIDENCE:
+${sourcesBlock(sources)}
+
+JSON shape: {"suggestions":[{"title":"","question":"","why":"","method":"lookup|calculation|comparison|estimate|data","searchQueries":[""],"sourceIds":["S1"],"quote":""}]}`,
     },
   ];
 }

@@ -66,11 +66,13 @@ function keyNumbers(finding) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false }) {
+  constructor({ router, search, store, demo = false, rates = null, onEvent = () => {} }) {
     this.router = router;
     this.search = search;
     this.store = store;
     this.demo = demo;
+    this.rates = rates;
+    this.onEvent = onEvent;
     this.listeners = new Map();
     this.running = new Set();
     this.cancelled = new Set();
@@ -85,6 +87,7 @@ export class ResearchEngine {
   emit(project, type, message, extra = {}) {
     const event = { ts: new Date().toISOString(), type, message, ...extra };
     project.log = [...(project.log ?? []), event].slice(-LOG_LIMIT);
+    this.onEvent(project.id, event);
     for (const listener of this.listeners.get(project.id) ?? []) listener(event, project);
   }
 
@@ -273,7 +276,8 @@ export class ResearchEngine {
   async checkAcceptance(project) {
     const deliverables = collectDeliverables(project.nodes);
     project.report.deliverables = deliverables;
-    const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
+    const convert = this.rates ? await this.rates.converter() : undefined;
+    const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }
@@ -357,6 +361,16 @@ export class ResearchEngine {
     project.report = null;
   }
 
+  async updateProject(id, { expected, acceptance } = {}) {
+    if (this.running.has(id)) throw new ProjectBusyError('stop the run before editing');
+    const project = await this.load(id);
+    const nextExpected = typeof expected === 'string' ? expected : project.acceptance?.expected;
+    project.acceptance = normalizeAcceptance(acceptance ?? project.acceptance ?? {}, nextExpected);
+    project.acceptanceResult = null;
+    this.emit(project, 'edit', `expected result updated: ${project.acceptance.expected || 'none'}`);
+    return this.store.save(project);
+  }
+
   async editNode(id, nodeId, changes = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('stop the run before editing');
     const project = await this.load(id);
@@ -381,7 +395,8 @@ export class ResearchEngine {
     while (project.nodes.some((n) => n.id === `${base}${i}`)) i++;
     const question = String(fields.question ?? '').trim();
     if (!question) throw new Error('a sub-question needs text');
-    const node = blankNode({ id: `${base}${i}`, parentId, title: question.slice(0, 60), question, searchQueries: [question] });
+    const queries = strings(fields.searchQueries, 3);
+    const node = blankNode({ id: `${base}${i}`, parentId, title: String(fields.title || question).slice(0, 60), question, why: String(fields.why ?? '').slice(0, 300), searchQueries: queries.length ? queries : [question], sourceUrls: urlList(fields.sourceUrls), method: ['lookup', 'calculation', 'comparison', 'estimate', 'data'].includes(fields.method) ? fields.method : 'lookup' });
     project.nodes.push(node);
     if (parent) this.resetWithAncestors(project, parent.id);
     project.report = null;

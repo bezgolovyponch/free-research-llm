@@ -48,13 +48,37 @@ function absoluteUrl(href, base) {
   }
 }
 
+const STOPWORDS = new Set('the a an and or of in on for to with by from at is are was be what which how many much who when where why does do this that these those per vs into about over under than price prices cost costs current currently 2024 2025 2026 2027'.split(' '));
+
+export function keywords(textValue) {
+  return [...new Set(String(textValue ?? '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !STOPWORDS.has(w)))];
+}
+
+export function isRelevant(result, query) {
+  const wanted = keywords(query);
+  if (!wanted.length) return true;
+  const haystack = new Set(keywords(`${result.title ?? ''} ${result.snippet ?? ''} ${String(result.text ?? '').slice(0, 1500)} ${result.url ?? ''}`));
+  const hits = wanted.filter((w) => haystack.has(w)).length;
+  return hits >= Math.min(2, wanted.length);
+}
+
+function itemScore(link) {
+  let score = 0;
+  if (/\d[\d .,]*\s?(€|eur|zł|pln|kč|czk|\$|£)/i.test(link.text)) score += 3;
+  if (/\d{5,}|[a-z0-9]{8,}\.html?$|\/(id|offer|oferta|inzerat|detail|angebot|listing|ad)[/-]/i.test(link.url)) score += 2;
+  if (link.text.split(' ').length >= 3) score += 1;
+  if (/login|register|cookie|privacy|impressum|kontakt|contact|help|faq|terms|agb|newsletter|app-store|play\.google/i.test(link.url + link.text)) score -= 4;
+  return score;
+}
+
 function rankLinks(links, base) {
   const host = domainOf(base);
   const seen = new Set([absoluteUrl(base, base)]);
   const unique = links.filter((l) => l.url && l.text && !seen.has(l.url) && seen.add(l.url));
   const sameSite = unique.filter((l) => domainOf(l.url).endsWith(host) || host.endsWith(domainOf(l.url)));
   const deep = (l) => new URL(l.url).pathname.split('/').filter(Boolean).length >= 2 || /\d{4,}/.test(l.url);
-  return [...sameSite.filter(deep), ...sameSite.filter((l) => !deep(l)), ...unique.filter((l) => !sameSite.includes(l))].slice(0, MAX_LINKS);
+  const ordered = [...sameSite.filter(deep), ...sameSite.filter((l) => !deep(l)), ...unique.filter((l) => !sameSite.includes(l))];
+  return ordered.map((l, i) => ({ l, i, s: itemScore(l) })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.l).slice(0, MAX_LINKS);
 }
 
 export function extractLinks(html, base) {
@@ -362,6 +386,10 @@ export class SearchService {
           const results = await backend.search(query, this.resultsPerQuery);
           for (const r of results) {
             if (!r.url || seen.has(r.url)) continue;
+            if (backend.fallback && !isRelevant(r, query)) {
+              this.lastErrors.push(`${backend.id}: dropped off-topic "${String(r.title).slice(0, 40)}"`);
+              continue;
+            }
             seen.add(r.url);
             collected.push({ ...r, provider: backend.id, query, fullText: Boolean(backend.fullText) });
           }

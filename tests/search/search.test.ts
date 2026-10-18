@@ -94,3 +94,23 @@ describe('encyclopedia queries', () => {
     expect(encyclopediaQueries('"margin scheme" used car VAT Poland')).toEqual(['margin scheme used car VAT Poland', 'margin scheme used', 'margin scheme']);
   });
 });
+
+describe('links and relevance', () => {
+  it('extracts absolute links and ranks listing-like ones first', async () => {
+    const { extractLinks, extractMarkdownLinks } = await import('../../src/search/search.mjs');
+    const html = '<a href="/login">Login</a><a href="/hilfe">Hilfe</a><a href="/angebot/1234567">VW Golf 1.4 · 2.900 €</a><a href="https://other.example/x">Other</a><a href="#top">top</a>';
+    const links = extractLinks(html, 'https://cars.example/list');
+    expect(links[0]).toEqual({ url: 'https://cars.example/angebot/1234567', text: 'VW Golf 1.4 · 2.900 €' });
+    expect(links.map((l) => l.url)).not.toContain('https://cars.example/list#top');
+    expect(links.at(-1).url).toBe('https://cars.example/login');
+    expect(extractMarkdownLinks('![img](https://x.example/a.png) [Opel Astra 3 500 €](https://cars.example/ad/77777)', 'https://cars.example')).toEqual([{ url: 'https://cars.example/ad/77777', text: 'Opel Astra 3 500 €' }]);
+  });
+
+  it('drops off-topic fallback results and keeps on-topic ones', async () => {
+    const { isRelevant, keywords } = await import('../../src/search/search.mjs');
+    expect(keywords('What is the price of used cars in Germany 2026?')).toEqual(['used', 'cars', 'germany']);
+    expect(isRelevant({ title: 'Hits Radio', snippet: 'a radio station' }, 'used cars Germany')).toBe(false);
+    expect(isRelevant({ title: 'Used car market in Germany', snippet: '' }, 'used cars Germany')).toBe(true);
+  });
+});
+

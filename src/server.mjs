@@ -8,6 +8,7 @@ import { KeychainSecrets } from './secrets.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { TEMPLATES } from './research/templates.mjs';
 import { toMarkdown } from './report.mjs';
+import { knowledgeRecord } from './research/knowledge.mjs';
 
 const MAX_BODY = 8 * 1024 * 1024;
 
@@ -76,10 +77,21 @@ export function createServer(app) {
     ['POST', /^\/api\/projects\/([\w-]+)\/run$/, async (req, [id]) => {
       await app.engine.load(id);
       if (app.engine.running.has(id)) throw new ProjectBusyError('already running');
+      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
       app.engine.start(id);
       return { ok: true };
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/tree$/, async (req, [id]) => app.engine.buildTree(id)],
+    ['PATCH', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => app.engine.updateProject(id, await readJson(req))],
+    ['GET', /^\/api\/projects\/([\w-]+)\/logs$/, async (req, [id]) => app.logs.read(`project-${id}`)],
+    ['GET', /^\/api\/logs\/model-calls$/, async () => app.logs.read('model-calls')],
+    ['GET', /^\/api\/history$/, async () => app.history()],
+    ['GET', /^\/api\/projects\/([\w-]+)\/knowledge$/, async (req, [id]) => knowledgeRecord(await app.engine.load(id))],
+    ['POST', /^\/api\/projects\/([\w-]+)\/chat$/, async (req, [id]) => {
+      const body = await readJson(req);
+      return app.chat.send(id, body.nodeId || 'Q', body.message);
+    }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/suggest$/, async (req, [id, nodeId]) => app.suggester.suggest(id, nodeId)],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve$/, async (req, [id]) => {
       await app.engine.load(id);
       if (app.engine.running.has(id)) throw new ProjectBusyError('stop the run first');
@@ -154,6 +166,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   if (fromKeychain.length) console.log(`  keys from macOS Keychain: ${fromKeychain.join(', ')}`);
   const status = app.status();
   const ready = status.providers.filter((p) => p.state === 'ready');
+  void app.logs.append('history', { type: 'session', message: `app started · models: ${ready.map((p) => p.id).join(', ') || 'none'} · search: ${status.search.backends.join(', ')}` });
   console.log(`\n  Free Research LLM is running → ${url}\n`);
   console.log(ready.length ? `  models: ${ready.map((p) => `${p.id} (${p.fast})`).join(', ')}` : '  models: NONE connected yet — run ./keys.command (or open Setup in the page)');
   if (ready.length) console.log(`  route deep: ${status.route.deep.join(' → ')}\n  route fast: ${status.route.fast.join(' → ')}`);

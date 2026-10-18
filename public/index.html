@@ -114,6 +114,13 @@
   details.acc{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin-bottom:10px}
   details.acc summary{cursor:pointer; font-weight:700}
   kbd{background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:12px}
+  .chat{border:1px solid var(--line); border-radius:10px; background:var(--panel2); padding:8px; max-height:300px; overflow:auto; margin:6px 0}
+  .msg{margin:6px 0; padding:7px 10px; border-radius:8px; font-size:13px; white-space:pre-wrap}
+  .msg.user{background:var(--panel); border:1px solid var(--line); margin-left:28px}
+  .msg.assistant{background:transparent; border:1px solid var(--acc); margin-right:28px}
+  .msg .meta{font-size:11px; color:var(--dim); margin-top:3px}
+  .sugg{border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:6px 0; background:var(--panel2)}
+  .gq{color:var(--gr)} .gc{color:var(--tl)} .gu{color:var(--am)}
   pre.cmd{background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px; white-space:pre-wrap; font-size:12px; margin:6px 0}
 </style>
 </head>
@@ -126,6 +133,7 @@
     <button data-t="findings">3 · Findings</button>
     <button data-t="report">4 · Report</button>
     <button data-t="sources">5 · Sources</button>
+    <button data-t="history">History</button>
     <button data-t="setup">Setup</button>
     <button data-t="guide">Guide</button>
   </nav>
@@ -148,11 +156,14 @@
         <h3>Your question</h3>
         <textarea id="inQuestion" placeholder="e.g. Is it profitable to buy used 2015-2019 Toyota RAV4 hybrids in Germany and resell them in Poland?"></textarea>
         <div class="row" style="margin-top:6px"><button class="btn dim sm" id="useExample">Use the example for this type</button><span class="small muted" id="templateHint"></span></div>
+        <h3>Expected result (what must be delivered at the end)</h3>
+        <input type="text" id="inExpected" placeholder="e.g. 10 links to real marketplace listings priced 2000-4000 EUR · or · a GO/NO-GO with net margin per car in EUR">
+        <p class="small muted" style="margin-top:4px">The model turns this into checks that code runs on the final output (item count, live links, value range, required words). The self-improving loop optimises for them.</p>
         <h3>Details (optional, but they make the answer sharper)</h3>
         <div class="grid2" id="fields"></div>
         <h3>Your own data (optional)</h3>
         <div class="row"><input type="file" id="inCsv" accept=".csv,.tsv,.txt"><span class="small muted" id="csvInfo">CSV with a header row: for example car listings, bookings, invoices. The app profiles it and cites it as source D1.</span></div>
-        <div class="row" style="margin-top:16px"><button class="btn" id="btnStart">Research it →</button><span class="small muted">Runs in the background. Watch it live in the Tree tab.</span></div>
+        <div class="row" style="margin-top:16px"><button class="btn" id="btnTree">Build the tree first →</button><button class="btn ghost" id="btnStart">Build and research at once</button><span class="small muted">Tree first lets you review, chat with nodes, add researched sub-issues, or start the self-improving loop before research.</span></div>
       </div>
       <div class="card"><h3 style="margin-top:0">Recent projects</h3><div id="recent" class="small muted">none yet</div></div>
     </div>
@@ -201,6 +212,15 @@
     </div>
   </section>
 
+  <section id="tab-history" class="tab">
+    <div class="wrap">
+      <h2>History: sessions and researches</h2>
+      <p class="lead">Every app session, research run, expected-result check and self-improving loop, newest first. Full per-project event logs and model-call logs are kept in <span class="mono">data/logs/</span> as JSONL.</p>
+      <div class="card tablewrap" style="padding:6px"><table id="histProjects"></table></div>
+      <div class="card"><h3 style="margin-top:0">Timeline</h3><div id="histEvents" class="small"></div></div>
+    </div>
+  </section>
+
   <section id="tab-setup" class="tab">
     <div class="wrap">
       <h2>Setup: connect free models and search</h2>
@@ -238,8 +258,9 @@
       <div class="card">
         <h3 style="margin-top:0">B · Solve an issue</h3>
         <ol class="steps">
-          <li><b>Ask</b>: pick the problem type (or Auto). Write the decision in one or two sentences with <i>where, when, how much, what counts as success</i>. Fill the detail fields. Attach a CSV if you have one.</li>
-          <li>Click <b>Research it</b>. The <b>Tree</b> tab shows the question decomposed into 3–6 drivers, each with 2–4 sub-questions, plus dependencies such as "margin needs both prices".</li>
+          <li><b>Ask</b>: pick the problem type (or Auto). Write the decision in one or two sentences with <i>where, when, how much, what counts as success</i>, and the <b>expected result</b> (e.g. "10 links to real listings priced 2000-4000 EUR"). Fill the detail fields. Attach a CSV if you have one.</li>
+          <li>Click <b>Build the tree first</b>. Review it: click any node to <b>chat</b> with it, set its <b>instructions</b> and pages to read, or press <b>🔎 Suggest researched sub-issues</b> and add the ones you want. Then press <b>▶ Run</b>, or on the Q root start the <b>self-improving loop</b> for N hours.</li>
+          <li>The tree: The <b>Tree</b> tab shows the question decomposed into 3–6 drivers, each with 2–4 sub-questions, plus dependencies such as "margin needs both prices".</li>
           <li>Watch the nodes change colour: grey (pending), blue (researching), then the grade. Each leaf gets web sources, an answer with cited claims, a machine-recomputed calculation, and an independent reviewer pass. A leaf that fails the checks is retried once on the stronger model.</li>
           <li>Fix the tree where it is wrong. Click a node to <b>edit</b> its question, <b>add</b> a sub-question, <b>break it down</b> further or <b>re-research</b> it with a hint (e.g. "use otomoto.pl prices, 2026"). Only that branch is redone.</li>
           <li>Read <b>Report</b>: verdict (GO / NO-GO / GO-IF), key numbers, scenarios, what flips the decision, risks and next steps. Download it as Markdown.</li>
@@ -287,6 +308,7 @@ function gotoTab(name){
   document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===name));
   if(name==="tree")drawTree(true);
   if(name==="setup")loadStatus();
+  if(name==="history")loadHistory();
   syncHash(name);
 }
 function syncHash(tab){
@@ -365,17 +387,21 @@ $("inCsv").addEventListener("change",async(e)=>{
   STATE.csv={name:f.name,text:await f.text()};
   $("csvInfo").textContent=f.name+" · "+Math.round(f.size/1024)+" KB loaded, cited as D1";
 });
-$("btnStart").addEventListener("click",async()=>{
+async function createProject(treeOnly){
   const question=$("inQuestion").value.trim();
   if(question.length<8){toast("write the question as a full sentence first");return;}
   const constraints={};document.querySelectorAll("#fields input").forEach(i=>{if(i.value.trim())constraints[i.dataset.k]=i.value.trim();});
-  $("btnStart").disabled=true;
+  $("btnStart").disabled=true;$("btnTree").disabled=true;
   try{
-    const p=await api("/api/projects",{method:"POST",body:{question,templateId:STATE.templateId,constraints,csvText:STATE.csv?STATE.csv.text:"",csvName:STATE.csv?STATE.csv.name:""}});
-    await loadProjects();openProject(p.id);gotoTab("tree");toast("started: decomposing your question");
+    const p=await api("/api/projects",{method:"POST",body:{question,expected:$("inExpected").value.trim(),templateId:STATE.templateId,constraints,csvText:STATE.csv?STATE.csv.text:"",csvName:STATE.csv?STATE.csv.name:"",autoRun:!treeOnly}});
+    await loadProjects();openProject(p.id);gotoTab("tree");
+    if(treeOnly){toast("building the tree…");api("/api/projects/"+p.id+"/tree",{method:"POST"}).then(()=>toast("tree ready: review it, then Run or start the loop")).catch(e=>toast(e.message));}
+    else toast("started: decomposing your question");
   }catch(e){toast(e.message);if(/Setup/.test(e.message))gotoTab("setup");}
-  finally{$("btnStart").disabled=false;}
-});
+  finally{$("btnStart").disabled=false;$("btnTree").disabled=false;}
+}
+$("btnStart").addEventListener("click",()=>createProject(false));
+$("btnTree").addEventListener("click",()=>createProject(true));
 
 async function loadProjects(){
   let list=[];try{list=await api("/api/projects");}catch(e){return;}
@@ -419,7 +445,7 @@ function renderRunbar(){
   const p=STATE.project;
   if(!p){$("phase").textContent="no project — start one in Ask";$("progBar").style.width="0%";$("progText").textContent="";return;}
   const ns=p.nodes;const fin=ns.filter(n=>!["pending","researching"].includes(n.status)).length;
-  const running=["decomposing","researching","synthesizing"].includes(p.phase);
+  const running=["decomposing","researching","synthesizing"].includes(p.phase)||(STATE.status&&(STATE.status.improving||[]).includes(p.id));
   $("phase").innerHTML=(running?'<span class="pulse" style="color:var(--bl)">● </span>':"")+esc(p.phase)+(p.demo?' <span style="color:var(--am)">DEMO</span>':"");
   $("progBar").style.width=(ns.length?Math.round(100*fin/ns.length):0)+"%";
   const last=(p.log||[]).slice(-1)[0];
@@ -506,9 +532,10 @@ function renderSide(){
   if(!p){side.innerHTML='<h2>No project</h2><p class="muted">Start with <b>Ask</b>.</p>';return;}
   const n=STATE.selected&&STATE.selected!=="Q"?byId(STATE.selected):null;
   if(!n){
-    side.innerHTML='<h2>'+esc(p.question)+'</h2>'+(p.decision?'<div class="kv"><b class="k">Decision</b>'+esc(p.decision)+"</div>":"")+(p.successCriteria?'<div class="kv"><b class="k">Success criteria</b>'+esc(p.successCriteria)+"</div>":"")+(p.report?'<div class="kv"><b class="k">Verdict</b><b>'+esc(p.report.verdict)+'</b> <span class="small muted">('+esc(p.report.confidence)+' confidence)</span><div><a href="#" id="toReport">open full report →</a></div></div>':"")+(p.error?'<div class="notice err">'+esc(p.error)+"</div>":"")+(p.assumptionsToConfirm&&p.assumptionsToConfirm.length?'<div class="kv"><b class="k">Please confirm</b>'+p.assumptionsToConfirm.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>":"")+'<h3>Drivers</h3>'+kids("Q").map(subBtn).join("")+'<div class="row" style="margin-top:8px"><button class="btn dim sm" id="addDriver">+ add driver question</button></div><h3>Live log</h3><div id="log">'+(p.log||[]).slice(-60).reverse().map(l=>'<div title="'+esc(l.message)+'"><span class="muted mono">'+esc(l.ts.slice(11,19))+"</span> "+esc(l.message)+"</div>").join("")+"</div>";
+    side.innerHTML='<h2>'+esc(p.question)+'</h2>'+(p.decision?'<div class="kv"><b class="k">Decision</b>'+esc(p.decision)+"</div>":"")+(p.successCriteria?'<div class="kv"><b class="k">Success criteria</b>'+esc(p.successCriteria)+"</div>":"")+(p.report?'<div class="kv"><b class="k">Verdict</b><b>'+esc(p.report.verdict)+'</b> <span class="small muted">('+esc(p.report.confidence)+' confidence)</span><div><a href="#" id="toReport">open full report →</a></div></div>':"")+(p.error?'<div class="notice err">'+esc(p.error)+"</div>":"")+(p.assumptionsToConfirm&&p.assumptionsToConfirm.length?'<div class="kv"><b class="k">Please confirm</b>'+p.assumptionsToConfirm.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>":"")+expectedHtml(p)+improveHtml(p)+'<h3>Drivers</h3>'+kids("Q").map(subBtn).join("")+'<div class="row" style="margin-top:8px"><button class="btn dim sm" id="addDriver">+ add driver question</button><button class="btn ghost sm" data-suggest="Q">🔎 Suggest researched top-level pieces</button></div>'+suggestionsHtml(p.rootSuggestions,"Q")+chatHtml("Q")+'<h3>Live log</h3><div id="log">'+(p.log||[]).slice(-60).reverse().map(l=>'<div title="'+esc(l.message)+'"><span class="muted mono">'+esc(l.ts.slice(11,19))+"</span> "+esc(l.message)+"</div>").join("")+"</div>";
     const tr=$("toReport");if(tr)tr.addEventListener("click",e=>{e.preventDefault();gotoTab("report");});
     $("addDriver").addEventListener("click",()=>addChild("Q"));
+    bindExpected(p);bindImprove(p);bindSuggestions(side,"Q");bindChat("Q");
     side.querySelectorAll("[data-node]").forEach(b=>b.addEventListener("click",()=>{STATE.selected=b.dataset.node;renderSide();drawTree(true);}));
     return;
   }
@@ -526,9 +553,11 @@ function renderSide(){
     if(f.assumptions.length)h+='<div class="kv"><b class="k">Assumptions</b>'+f.assumptions.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>";
     if(f.gaps.length)h+='<div class="kv"><b class="k">Gaps (data that would settle it)</b>'+f.gaps.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>";
   }
+  if(f&&f.items&&f.items.length)h+='<div class="kv"><b class="k">Items found (links checked against fetched pages)</b>'+f.items.map(i=>{const u=safeUrl(i.url);return '<div class="small">• '+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(trunc(i.title||u,80))+"</a>":esc(i.title))+(i.value!=null?" · <b>"+esc(i.value)+" "+esc(i.unit||"")+"</b>":"")+"</div>";}).join("")+"</div>";
   if(v&&v.checks)h+='<div class="kv"><b class="k">Checks</b>'+v.checks.map(ch=>'<div class="check"><span class="'+(ch.passed?"y":"n")+'">'+(ch.passed?"✓":"✗")+"</span> "+esc(ch.label)+' <span class="small muted">— '+esc(ch.detail)+"</span></div>").join("")+"</div>";
   if(c)h+='<div class="kv"><b class="k">Independent reviewer</b><span class="small">'+(c.agree?"agrees":"disagrees")+" · severity "+esc(c.severity)+(c.issues.length?"<br>"+c.issues.map(esc).join("<br>"):"")+"</span></div>";
-  h+='<h3>Act on this node</h3><input type="text" id="hint" placeholder="hint for re-research, e.g. use otomoto.pl prices from 2026"><div class="row" style="margin-top:8px"><button class="btn sm" id="actRerun">↻ Re-research</button><button class="btn ghost sm" id="actExpand">⤵ Break down further</button><button class="btn dim sm" id="actEdit">✎ Edit question</button><button class="btn dim sm" id="actAdd">+ Sub-question</button><button class="btn danger sm" id="actDel">Remove</button></div>';
+  h+='<h3>Instructions for this node</h3><textarea id="nodeInstr" style="min-height:60px" placeholder="any instruction, knowledge or method: e.g. use only listings from the last 30 days; prices on otomoto are in PLN; compute margin as sell - buy - 900">'+esc(n.instructions||"")+'</textarea><label class="f" style="margin-top:6px">Pages to read directly (one URL per line)</label><textarea id="nodeUrls" style="min-height:44px" placeholder="https://www.autoscout24.de/lst?priceto=4000&pricefrom=2000">'+esc((n.sourceUrls||[]).join("\n"))+'</textarea><div class="row" style="margin-top:6px"><button class="btn dim sm" id="actSaveInstr">Save (node will be re-researched)</button></div>';
+  h+='<h3>Act on this node</h3><input type="text" id="hint" placeholder="hint for re-research, e.g. use otomoto.pl prices from 2026"><div class="row" style="margin-top:8px"><button class="btn sm" id="actRerun">↻ Re-research</button><button class="btn ghost sm" id="actExpand">⤵ Break down further</button><button class="btn dim sm" id="actEdit">✎ Edit question</button><button class="btn dim sm" id="actAdd">+ Sub-question</button><button class="btn danger sm" id="actDel">Remove</button><button class="btn ghost sm" data-suggest="'+esc(n.id)+'">🔎 Suggest researched sub-issues</button></div>'+suggestionsHtml(n.suggestions,n.id)+chatHtml(n.id);
   const ch=kids(n.id);
   if(ch.length)h+="<h3>Sub-questions ("+ch.length+")</h3>"+ch.sort((a,b)=>prio(b)-prio(a)).map(subBtn).join("");
   side.innerHTML=h;
@@ -539,7 +568,53 @@ function renderSide(){
   $("actExpand").addEventListener("click",async(e)=>{e.target.disabled=true;toast("breaking "+n.id+" down…");try{const pr=await api(base+"/expand",{method:"POST",body:{hint:$("hint").value}});STATE.project=pr;STATE.view=null;renderAll();toast("added sub-questions; press Run to research them");}catch(err){toast(err.message);}finally{e.target.disabled=false;}});
   $("actEdit").addEventListener("click",async()=>{const q=prompt("Edit the question for "+n.id,n.question);if(!q)return;try{STATE.project=await api(base,{method:"PATCH",body:{question:q,title:trunc(q,60)}});renderAll();toast("edited; press Run to re-research");}catch(e){toast(e.message);}});
   $("actAdd").addEventListener("click",()=>addChild(n.id));
+  $("actSaveInstr").addEventListener("click",async()=>{try{STATE.project=await api(base,{method:"PATCH",body:{instructions:$("nodeInstr").value,sourceUrls:$("nodeUrls").value.split(/\s+/).filter(Boolean)}});renderAll();toast("saved; press Run to re-research");}catch(e){toast(e.message);}});
+  bindSuggestions(side,n.id);bindChat(n.id);
   $("actDel").addEventListener("click",async()=>{if(!confirm("Remove "+n.id+" and its sub-questions?"))return;try{STATE.project=await api(base,{method:"DELETE"});STATE.selected=null;STATE.view=null;renderAll();}catch(e){toast(e.message);}});
+}
+function expectedHtml(p){
+  const a=p.acceptance||{};const r=p.acceptanceResult;
+  let h='<div class="kv"><b class="k">Expected result</b>'+(a.expected?esc(a.expected):'<span class="muted">not set — the memo is the result</span>')+' <a href="#" id="editExpected" class="small">edit</a>';
+  const spec=[a.itemCount?a.itemCount+" items":"",a.urlsLive?"live links":"",a.valueRange?"value "+a.valueRange.join("–")+" "+(a.unit||""):"",a.mustMention&&a.mustMention.length?"mentions "+a.mustMention.join(", "):""].filter(Boolean);
+  if(spec.length)h+='<div class="small muted">machine checks: '+esc(spec.join(" · "))+"</div>";
+  if(r)h+=r.checks.map(c=>'<div class="check"><span class="'+(c.passed?"y":"n")+'">'+(c.passed?"✓":"✗")+"</span> "+esc(c.label)+' <b>'+Math.round(c.value*100)+'%</b> <span class="small muted">— '+esc(c.detail)+"</span></div>").join("");
+  return h+"</div>";
+}
+function bindExpected(p){const a=$("editExpected");if(!a)return;a.addEventListener("click",async e=>{e.preventDefault();const v=prompt("Expected result (what must be delivered)",(p.acceptance||{}).expected||"");if(v==null)return;try{STATE.project=await api("/api/projects/"+p.id,{method:"PATCH",body:{expected:v}});renderAll();toast("saved; checks apply on the next run");}catch(err){toast(err.message);}});}
+function improveHtml(p){
+  const i=p.improve||{};const active=(STATE.status&&(STATE.status.improving||[]).includes(p.id))||i.active;
+  let h='<h3>Self-improving loop</h3><div class="card" style="padding:10px;margin:0"><div class="small muted">Changes one piece at a time (question, searches, direct pages, instructions, split), tests the piece, then the whole model, and keeps the change only if the measured score rises. Free models only.</div>';
+  h+='<div class="row" style="margin-top:8px"><label class="small">hours</label><input type="text" id="impHours" value="'+esc(i.hours||1)+'" style="width:70px"><button class="btn sm" id="impStart"'+(active?" disabled":"")+'>▶ Start loop</button><button class="btn danger sm" id="impStop"'+(active?"":" disabled")+'>■ Stop</button></div>';
+  if(i.baseline!=null)h+='<div class="small" style="margin-top:6px">'+(active?'<span class="pulse" style="color:var(--bl)">● running</span> until '+esc((i.deadline||"").slice(11,16)):"<b>"+esc(i.stopReason||"idle")+"</b>")+" · baseline <b>"+esc(i.baseline)+"</b> → best <b>"+esc(i.best)+"</b> · "+(i.trials||[]).length+" trials, "+(i.trials||[]).filter(t=>t.outcome==="kept").length+" kept</div>";
+  if(i.error)h+='<div class="notice err small">'+esc(i.error)+"</div>";
+  if((i.trials||[]).length)h+='<div id="log" style="max-height:140px">'+i.trials.slice(-15).reverse().map(t=>'<div title="'+esc(t.change+(t.detail?" — "+t.detail:""))+'"><span class="mono">'+esc(t.nodeId)+"</span> <b style=\"color:"+(t.outcome==="kept"?"var(--gr)":"var(--dim)")+"\">"+esc(t.outcome)+"</b> "+esc(t.score)+" · "+esc(t.change)+"</div>").join("")+"</div>";
+  return h+"</div>";
+}
+function bindImprove(p){
+  $("impStart").addEventListener("click",async()=>{try{await api("/api/projects/"+p.id+"/improve",{method:"POST",body:{hours:Number($("impHours").value)||1}});toast("loop started");loadStatus();}catch(e){toast(e.message);}});
+  $("impStop").addEventListener("click",async()=>{try{await api("/api/projects/"+p.id+"/improve/stop",{method:"POST"});toast("stopping after the current step");setTimeout(loadStatus,1500);}catch(e){toast(e.message);}});
+}
+function suggestionsHtml(sg,parentId){
+  if(!sg||!sg.items||!sg.items.length)return"";
+  const g={quoted:'<span class="gq">● quoted from source</span>',cited:'<span class="gc">● cites a source</span>',ungrounded:'<span class="gu">● not grounded</span>'};
+  return '<div class="kv"><b class="k">Researched suggestions</b>'+sg.items.map((it,k)=>'<div class="sugg"><b>'+esc(it.question)+'</b><div class="small muted">'+esc(it.why)+'</div><div class="small">'+g[it.grounded]+(it.sourceIds.length?" · "+it.sourceIds.map(id=>{const s=(sg.sources||[]).find(x=>x.id===id);const u=s&&safeUrl(s.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">['+esc(id)+"]</a>":"["+esc(id)+"]";}).join(" "):"")+(it.quote?' · <i>"'+esc(it.quote)+'"</i>':"")+'</div><button class="btn dim sm" style="margin-top:4px" data-add-sugg="'+k+'" data-parent="'+esc(parentId)+'">+ add as sub-issue</button></div>').join("")+"</div>";
+}
+function bindSuggestions(root,id){
+  root.querySelectorAll('[data-suggest="'+id+'"]').forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;toast("searching and suggesting…");try{await api("/api/projects/"+STATE.project.id+"/nodes/"+encodeURIComponent(id)+"/suggest",{method:"POST"});STATE.project=await api("/api/projects/"+STATE.project.id);renderAll();}catch(e){toast(e.message);}finally{b.disabled=false;}}));
+  root.querySelectorAll('[data-add-sugg][data-parent="'+id+'"]').forEach(b=>b.addEventListener("click",async()=>{
+    const sg=id==="Q"?STATE.project.rootSuggestions:byId(id).suggestions;const it=sg.items[Number(b.dataset.addSugg)];
+    try{STATE.project=await api("/api/projects/"+STATE.project.id+"/nodes/"+encodeURIComponent(id)+"/children",{method:"POST",body:{question:it.question,title:it.title,why:it.why,method:it.method,searchQueries:it.searchQueries}});STATE.view=null;renderAll();toast("added; press Run to research it");}catch(e){toast(e.message);}
+  }));
+}
+function chatHtml(key){
+  const th=((STATE.project.chats||{})[key])||[];
+  return '<h3>Chat with '+(key==="Q"?"the whole project":"this node")+'</h3><div class="chat" id="chatBox">'+(th.length?th.map(m=>'<div class="msg '+(m.role==="user"?"user":"assistant")+'">'+esc(m.content)+((m.actions&&m.actions.length)||m.model?'<div class="meta">'+(m.model?esc(m.model):"")+(m.actions&&m.actions.length?" · actions: "+m.actions.map(a=>esc(a.type+" "+(a.nodeId||""))+(a.ok?" ✓":" ✗ "+esc(a.error||""))).join(", "):"")+"</div>":"")+"</div>").join(""):'<div class="small muted">Ask about this piece, tell it what to change ("search otomoto in Polish", "split by fuel type", "re-research with 2026 prices"). It can edit, add, split, suggest and re-research nodes; findings still pass the machine checks.</div>')+'</div><div class="row"><input type="text" id="chatIn" placeholder="message…" style="flex:1"><button class="btn sm" id="chatSend">Send</button></div>';
+}
+function bindChat(key){
+  const box=$("chatBox");if(box)box.scrollTop=box.scrollHeight;
+  const send=async()=>{const m=$("chatIn").value.trim();if(!m)return;$("chatSend").disabled=true;$("chatIn").value="";toast("thinking…");try{await api("/api/projects/"+STATE.project.id+"/chat",{method:"POST",body:{nodeId:key,message:m}});STATE.project=await api("/api/projects/"+STATE.project.id);renderAll();}catch(e){toast(e.message);}finally{const b=$("chatSend");if(b)b.disabled=false;}};
+  $("chatSend").addEventListener("click",send);
+  $("chatIn").addEventListener("keydown",e=>{if(e.key==="Enter")send();});
 }
 async function addChild(parentId){
   const q=prompt("New sub-question under "+parentId);if(!q)return;
@@ -559,9 +634,11 @@ function renderReport(){
   const p=STATE.project;const box=$("reportBody");
   if(!p){box.innerHTML='<p class="muted">No report yet. Start a project in Ask.</p>';return;}
   const r=p.report;
-  let h='<div class="row" style="justify-content:space-between"><h2>'+esc(p.question)+'</h2><div class="row"><a class="btn dim sm" style="text-decoration:none" href="/api/projects/'+encodeURIComponent(p.id)+'/report.md">⬇ Markdown</a><button class="btn dim sm" onclick="window.print()">Print / PDF</button></div></div>';
+  let h='<div class="row" style="justify-content:space-between"><h2>'+esc(p.question)+'</h2><div class="row"><a class="btn dim sm" style="text-decoration:none" href="/api/projects/'+encodeURIComponent(p.id)+'/report.md">⬇ Markdown</a><a class="btn dim sm" style="text-decoration:none" href="/api/projects/'+encodeURIComponent(p.id)+'/logs" target="_blank">Logs</a><button class="btn dim sm" onclick="window.print()">Print / PDF</button></div></div>';
   if(p.demo)h+='<div class="notice">DEMO MODE: these are scripted answers, not research.</div>';
   if(!r){box.innerHTML=h+'<p class="muted">The memo is written after all sub-questions are researched. Phase: <b>'+esc(p.phase)+"</b>.</p>";return;}
+  const ar=p.acceptanceResult;
+  if(ar)h+='<div class="card tablewrap"><h3 style="margin-top:0">Expected result · '+Math.round(ar.score*100)+'% met</h3>'+ar.checks.map(c=>'<div class="check"><span class="'+(c.passed?"y":"n")+'">'+(c.passed?"✓":"✗")+"</span> "+esc(c.label)+" <b>"+Math.round(c.value*100)+'%</b> <span class="small muted">'+esc(c.detail)+"</span></div>").join("")+(ar.items.length?'<table style="margin-top:8px"><tr><th>Item</th><th>Live</th><th>In range</th><th>From</th></tr>'+ar.items.map(i=>{const u=safeUrl(i.url);return "<tr><td>"+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(trunc(i.title||u,70))+"</a>":esc(i.title))+"</td><td>"+(i.live?"✓":"✗")+"</td><td>"+(i.inRange==null?"—":i.inRange?"✓":"✗")+'</td><td class="mono">'+esc(i.nodeId)+"</td></tr>";}).join("")+"</table>":'<p class="small muted">No items passed the link check yet.</p>')+"</div>";
   h+='<div class="card"><div class="small muted">Verdict · '+esc(r.confidence)+' confidence</div><div class="verdict">'+esc(r.verdict)+"</div><p>"+esc(r.summary)+"</p></div>";
   if(r.keyNumbers.length)h+='<div class="card tablewrap"><h3 style="margin-top:0">Key numbers</h3><table><tr><th>Metric</th><th>Value</th><th>From</th></tr>'+r.keyNumbers.map(k=>"<tr><td>"+esc(k.label)+"</td><td><b>"+esc(k.value)+" "+esc(k.unit||"")+'</b></td><td class="mono"><a href="#" data-node="'+esc(k.nodeId||"")+'">'+esc(k.nodeId||"")+"</a></td></tr>").join("")+"</table></div>";
   if(r.scenarios.length)h+='<div class="card"><h3 style="margin-top:0">Scenarios</h3>'+r.scenarios.map(s=>"<p><b>"+esc(s.name)+":</b> "+esc(s.outcome)+' <span class="small muted">— assumes '+esc(s.assumptions)+"</span></p>").join("")+"</div>";
@@ -578,6 +655,15 @@ function renderSources(){
   $("sourceList").innerHTML=ns.length?ns.map(n=>'<details class="acc"><summary><span class="mono">'+esc(n.id)+"</span> "+esc(n.title)+' <span class="small muted">('+n.sources.length+")</span></summary>"+n.sources.map(s=>{const u=safeUrl(s.url);return '<div style="margin:8px 0"><b class="mono">['+esc(s.id)+"]</b> "+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(s.title)+"</a>":esc(s.title))+' <span class="small muted">'+esc(s.domain||"")+(s.query?" · query: "+esc(s.query):"")+'</span><div class="small muted">'+esc(trunc(s.snippet||s.text,260))+"</div></div>";}).join("")+"</details>").join(""):'<p class="muted">No sources yet.</p>';
 }
 
+async function loadHistory(){
+  let h;try{h=await api("/api/history");}catch(e){toast(e.message);return;}
+  let t="<tr><th>Started</th><th>Question → expected</th><th>Phase / verdict</th><th>Nodes ok</th><th>Expected met</th><th>Loop</th><th></th></tr>";
+  h.projects.forEach(p=>{t+='<tr class="click" data-open="'+esc(p.id)+'"><td class="small mono">'+esc((p.createdAt||"").slice(0,16).replace("T"," "))+"</td><td>"+esc(trunc(p.question,90))+(p.expected?'<div class="small muted">→ '+esc(trunc(p.expected,90))+"</div>":"")+"</td><td class='small'>"+esc(p.phase)+(p.verdict?"<div>"+esc(trunc(p.verdict,60))+"</div>":"")+"</td><td>"+p.good+"/"+p.nodes+"</td><td>"+(p.expectedScore==null?"—":Math.round(p.expectedScore*100)+"%")+"</td><td class='small'>"+(p.loop?esc(p.loop.baseline)+" → "+esc(p.loop.best)+" ("+p.loop.kept+"/"+p.loop.trials+" kept)":"—")+'</td><td><a class="small" href="/api/projects/'+encodeURIComponent(p.id)+'/knowledge" target="_blank">knowledge</a> · <a class="small" href="/api/projects/'+encodeURIComponent(p.id)+'/logs" target="_blank">log</a></td></tr>';});
+  $("histProjects").innerHTML=h.projects.length?t:"<tr><td class='muted'>no research yet</td></tr>";
+  $("histProjects").querySelectorAll("tr[data-open]").forEach(r=>r.addEventListener("click",e=>{if(e.target.tagName==="A")return;openProject(r.dataset.open);gotoTab("tree");}));
+  $("histEvents").innerHTML=h.events.length?h.events.slice(0,300).map(e=>'<div><span class="mono muted">'+esc(e.ts.slice(0,19).replace("T"," "))+"</span> <b>"+esc(e.type)+"</b> "+(e.projectId?'<span class="mono">'+esc(trunc(e.projectId,28))+"</span> ":"")+esc(e.message)+"</div>").join(""):'<span class="muted">no events yet</span>';
+}
+
 (async function boot(){
   try{STATE.templates=await api("/api/templates");}catch(e){}
   renderTemplates();
@@ -588,7 +674,7 @@ function renderSources(){
   if(hp.get("n"))STATE.selected=hp.get("n");
   if(hp.get("t"))gotoTab(hp.get("t"));
   renderAll();
-  setInterval(()=>{if($("tab-setup").classList.contains("on"))loadStatus();},5000);
+  setInterval(()=>{if($("tab-setup").classList.contains("on")||(STATE.project&&STATE.project.improve&&STATE.project.improve.active))loadStatus();},5000);
 })();
 </script>
 </body>

@@ -21,8 +21,9 @@ To try the flow before you have a key, run `npm run demo`. Every answer is scrip
 1. **Ask tab: pick the problem type**: Car arbitrage, Glamping/hospitality location, Taxes, Market size, Any analytical question, or Auto-detect.
 2. **Write the decision in 1–2 sentences.** Include *where, when, how much, and what counts as success*. Click "Use the example for this type" to see a strong question.
 3. **Fill the detail fields.** For example: buy market and sell market, regions and capex, or country, tax year and income. Empty fields become assumptions that the memo lists for you to confirm.
-4. **Optional: attach a CSV**, such as listings, bookings or invoices. The app profiles every column (count, min, p10, median, mean, p90, max, top values) and cites it as source **D1**.
-5. Click **Research it →**. The **Tree** tab opens:
+4. **Write the expected result**: what must exist at the end, e.g. "10 links to real listings priced 2000-4000 EUR" or "ranked list of 3 cities with rent per m² in EUR". The model turns it into checks that code runs on the final output (item count, live links, value range, required words).
+4b. **Optional: attach a CSV**, such as listings, bookings or invoices. The app profiles every column (count, min, p10, median, mean, p90, max, top values) and cites it as source **D1**.
+5. Click **Build the tree first →** (recommended) or **Build and research at once**. The **Tree** tab opens:
    - The **Q** node on the right is your question. **Drivers** sit in the middle and **sub-questions** on the left. Dashed purple lines mean "needs the answer of".
    - Node size is **impact × uncertainty**, so the biggest nodes are the ones most worth getting right.
    - Colours: grey pending → blue researching → **green verified / teal supported / amber weak / red unsupported**.
@@ -34,6 +35,10 @@ To try the flow before you have a key, run `npm run demo`. Every answer is scrip
    - **⤵ Break down further.** Splits a node that is too broad into 2–4 sub-questions.
    - **+ Sub-question / Remove.** Adds a missing factor or drops an irrelevant one.
    - Then press **▶ Run / resume**. Only changed branches are re-researched.
+8b. **Chat with any node.** Click a node (or the Q root) and use **Chat**: ask why it was graded that way, or tell it what to change ("search otomoto in Polish", "split by fuel type", "re-research with 2026 prices"). It edits, adds, splits, suggests and re-researches nodes; its words never become findings: only research that passes the gates does.
+8c. **🔎 Suggest researched sub-issues.** On any node or on the root. It searches first, then proposes 4–6 sub-issues, each marked **quoted from source**, **cites a source** or **not grounded**. Click **+ add as sub-issue** on the ones you want.
+8d. **Instructions and direct pages.** Every node has an Instructions box (any rule, knowledge or method in plain words) and a list of pages to read directly. Save, then **Run**.
+8e. **Self-improving loop.** On the Q root: set hours, press **▶ Start loop**. It changes one piece at a time, tests the piece and then the whole model, and keeps a change only if the measured score rises. Every trial is listed; **■ Stop** ends it.
 9. **Report tab:** verdict, key numbers (click one to jump to its node), scenarios, *what flips the decision*, next steps, risks and open questions. Use **⬇ Markdown** or **Print / PDF** to export it.
 10. **Close the gaps.** Amber and red nodes, plus the memo's open questions, are your to-do list. Fetch the missing data, upload it as CSV, re-run with a hint, and repeat until the deciding nodes are green.
 
@@ -58,9 +63,15 @@ Rules of thumb: give one decision per project; state numbers with currency and y
 | Tree is off-topic | Make the question more specific, edit the drivers, or delete them and add your own. |
 | Port 4600 busy | Start with `PORT=4700 npm start`. |
 
-## E. Run the tests
+## E. History and logs
+
+- **History** tab: every session, research, verdict, expected-result score and loop, newest first. Each project links its **knowledge** record (facts / claims / hypotheses with evidence) and its full **log**.
+- Files: `data/logs/history.jsonl`, `data/logs/project-<id>.jsonl`, `data/logs/model-calls.jsonl`, `data/logs/quality.jsonl`.
+
+## F. Check and ship changes
 
 ```bash
-npm install     # once, installs vitest (dev only)
-npm test
+npm install       # once: installs vitest and activates the pre-commit gate
+npm run quality   # syntax, secrets, no comments, a test per module, full test suite
 ```
+A commit is refused while the gate fails. Rules: [PROTOCOLS.md](PROTOCOLS.md). Build history: [SESSION-LOG.md](SESSION-LOG.md).

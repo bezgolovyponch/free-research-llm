@@ -128,6 +128,7 @@ export class ProjectImprover {
     const improve = { trials: [], ...(project.improve ?? {}), ...patch };
     if (trial) improve.trials = [...improve.trials, trial].slice(-MAX_TRIALS_KEPT);
     project.improve = improve;
+    if ('active' in patch) this.engine.emit(project, 'improve-state', patch.active ? `self-improving loop started for ${improve.hours} h` : `self-improving loop ended: ${patch.stopReason ?? patch.error ?? 'stopped'} · baseline ${improve.baseline} → best ${improve.best}`);
     if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}`, { nodeId: trial.nodeId });
     await this.engine.store.save(project);
     return improve;

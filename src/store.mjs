@@ -56,7 +56,21 @@ export class ProjectStore {
     const projects = await Promise.all(files.map((f) => this.get(f.slice(0, -5)).catch(() => null)));
     return projects
       .filter(Boolean)
-      .map((p) => ({ id: p.id, question: p.question, templateId: p.templateId, phase: p.phase, verdict: p.report?.verdict ?? null, demo: Boolean(p.demo), updatedAt: p.updatedAt }))
+      .map((p) => ({
+        id: p.id,
+        question: p.question,
+        templateId: p.templateId,
+        phase: p.phase,
+        verdict: p.report?.verdict ?? null,
+        demo: Boolean(p.demo),
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        expected: p.acceptance?.expected ?? '',
+        expectedScore: p.acceptanceResult?.score ?? null,
+        nodes: (p.nodes ?? []).length,
+        good: (p.nodes ?? []).filter((n) => ['verified', 'supported'].includes(n.status)).length,
+        loop: p.improve ? { baseline: p.improve.baseline ?? null, best: p.improve.best ?? null, trials: (p.improve.trials ?? []).length, kept: (p.improve.trials ?? []).filter((t) => t.outcome === 'kept').length } : null,
+      }))
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   }
 

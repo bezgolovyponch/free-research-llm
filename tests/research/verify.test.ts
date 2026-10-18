@@ -67,3 +67,24 @@ describe('concrete answers', () => {
     expect(qualitative.checks.some((c) => c.id === 'concrete')).toBe(false);
   });
 });
+
+describe('verify: links and non-answers', () => {
+  const sources = [{ id: 'S1', kind: 'web', url: 'https://cars.example/list', domain: 'cars.example', links: [{ url: 'https://cars.example/ad/123456', text: 'Golf 2.900 €' }] }];
+
+  it('rejects an item link that was not on any fetched page', async () => {
+    const { verifyFinding, sameUrl } = await import('../../src/research/verify.mjs');
+    const ok = verifyFinding({ finding: { answer: 'Golf for 2,900 EUR', claims: [{ text: 'Golf 2900 EUR', sourceIds: ['S1'] }], items: [{ url: 'https://www.cars.example/ad/123456/' }] }, sources });
+    expect(ok.checks.find((c) => c.id === 'item-links').passed).toBe(true);
+    const bad = verifyFinding({ finding: { answer: 'Golf for 2,900 EUR', claims: [{ text: 'Golf 2900 EUR', sourceIds: ['S1'] }], items: [{ url: 'https://cars.example/ad/999' }] }, sources });
+    expect(bad.grade).toBe('unsupported');
+    expect(sameUrl('https://www.a.example/x/#top', 'http://a.example/x')).toBe(true);
+  });
+
+  it('fails the concrete-answer check for evasive answers', async () => {
+    const { verifyFinding } = await import('../../src/research/verify.mjs');
+    for (const answer of ['Based on the available evidence, we cannot determine the number.', 'No verifiable marketplace listings are available in the provided evidence.', 'The evidence does not contain prices.']) {
+      expect(verifyFinding({ finding: { answer, claims: [] }, sources }).checks.find((c) => c.id === 'concrete').passed).toBe(false);
+    }
+  });
+});
+

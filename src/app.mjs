@@ -7,6 +7,10 @@ import { ScriptedProvider } from './llm/scripted-provider.mjs';
 import { ResearchEngine } from './research/engine.mjs';
 import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, SearchService, SearxngBackend, SerperBackend, TavilyBackend, WikipediaBackend } from './search/search.mjs';
 import { ProjectImprover } from './research/improve.mjs';
+import { NodeChat } from './research/chat.mjs';
+import { SubIssueSuggester } from './research/suggest.mjs';
+import { ExchangeRates } from './research/rates.mjs';
+import { EventLog } from './logs.mjs';
 import { ProjectStore } from './store.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -86,19 +90,34 @@ export function buildSearch({ env, fetchImpl }) {
   return new SearchService({ backends, fetchImpl, fetchPages: env.FRL_FETCH_PAGES !== '0', jinaReader: env.FRL_JINA_READER !== '0', jinaKey: env.JINA_API_KEY || '' });
 }
 
+const HISTORY_EVENT = /^(created|report|acceptance|improve-state|error):|^phase:(done|stopped|tree ready)/;
+
 export class App {
-  constructor({ env = process.env, fetchImpl = fetch, dataDir, providers, search } = {}) {
+  constructor({ env = process.env, fetchImpl = fetch, dataDir, logDir, providers, search } = {}) {
     this.env = env;
     this.fetchImpl = fetchImpl;
     this.sessionSearchEnv = {};
     this.demo = env.FRL_DEMO === '1';
     this.factory = new ProviderFactory({ env, fetchImpl });
-    this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), paidCallLimit: Number(env.FRL_PAID_CALL_LIMIT ?? 0) || 0 });
+    this.logs = new EventLog({ dir: logDir ?? path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'logs') });
+    this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), paidCallLimit: Number(env.FRL_PAID_CALL_LIMIT ?? 0) || 0, onLedger: (row) => this.logs.append('model-calls', row) });
     this.search = search ?? buildSearch({ env, fetchImpl });
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects') });
-    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo });
+    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates: new ExchangeRates({ fetchImpl }), onEvent: (projectId, event) => this.recordEvent(projectId, event) });
+    this.suggester = new SubIssueSuggester({ engine: this.engine });
+    this.chat = new NodeChat({ engine: this.engine, suggester: this.suggester });
     this.improver = new ProjectImprover({ engine: this.engine });
     this.fixedProviders = Boolean(providers);
+  }
+
+  recordEvent(projectId, event) {
+    void this.logs.append(`project-${projectId}`, event);
+    if (HISTORY_EVENT.test(`${event.type}:${event.message}`)) void this.logs.append('history', { projectId, type: event.type, message: event.message });
+  }
+
+  async history() {
+    const [sessions, projects] = await Promise.all([this.logs.read('history', 1000), this.store.list()]);
+    return { events: sessions.reverse(), projects };
   }
 
   async refreshProviders() {

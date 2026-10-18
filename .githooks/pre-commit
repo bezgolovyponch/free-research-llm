@@ -1,0 +1,5 @@
+#!/bin/sh
+npm run --silent quality || {
+  echo "commit refused: the quality gate failed (see above). Fix it, then commit again."
+  exit 1
+}

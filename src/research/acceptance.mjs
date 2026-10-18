@@ -73,11 +73,16 @@ export function collectDeliverables(nodes) {
   return items;
 }
 
-function inRange(amounts, spec, itemValue) {
+const identity = (value) => value;
+
+export function inRange(amounts, spec, itemValue, convert = identity) {
   const [min, max] = spec.valueRange;
   const wanted = currencyOf(spec.unit);
-  const candidates = itemValue !== null && itemValue !== undefined && !wanted ? [{ value: Number(itemValue), currency: '' }] : amounts.filter((a) => !wanted || a.currency === wanted);
-  return candidates.some((a) => a.value >= min && a.value <= max);
+  if (!wanted) return [...amounts, ...(itemValue !== null && itemValue !== undefined ? [{ value: Number(itemValue) }] : [])].some((a) => a.value >= min && a.value <= max);
+  return amounts.some((a) => {
+    const value = convert(a.value, a.currency, wanted);
+    return value !== null && value >= min && value <= max;
+  });
 }
 
 function isDeepLink(url) {
@@ -90,8 +95,9 @@ function isDeepLink(url) {
 }
 
 export class AcceptanceChecker {
-  constructor({ readPage }) {
+  constructor({ readPage, convert = identity }) {
     this.readPage = readPage;
+    this.convert = convert;
   }
 
   async inspect(item, spec) {
@@ -102,7 +108,7 @@ export class AcceptanceChecker {
     return {
       ...item,
       live,
-      inRange: spec.valueRange ? live && inRange(amounts, spec, item.value) : null,
+      inRange: spec.valueRange ? live && inRange(amounts, spec, item.value, this.convert) : null,
       mentions: spec.mustMention.length ? spec.mustMention.filter((m) => pageText.toLowerCase().includes(m.toLowerCase())).length / spec.mustMention.length : null,
     };
   }

@@ -24,10 +24,12 @@ async function waitFor(id: string, phase: string) {
   throw new Error(`project never reached ${phase}`);
 }
 
+let app: App;
+
 beforeAll(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-server-'));
   const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ enabled: false, backends: [], lastErrors: [] }) };
-  const app = new App({ env: {}, dataDir: dir, providers: [new ScriptedProvider()], search });
+  app = new App({ env: {}, dataDir: dir, providers: [new ScriptedProvider()], search });
   const started = await startServer({ app, port: 0 });
   base = started.url;
   close = () => started.server.close();
@@ -35,7 +37,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   close();
-  await fs.rm(dir, { recursive: true, force: true });
+  await app.logs.queue;
+  await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
 });
 
 describe('HTTP server', () => {

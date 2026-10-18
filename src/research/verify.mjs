@@ -46,7 +46,7 @@ function checkNumbersSourced(finding) {
   );
 }
 
-const NON_ANSWER = /not possible to (determine|say|calculate)|cannot be (determined|calculated|established)|unable to (determine|find|calculate)|(insufficient|no|missing) (data|evidence|information)|not (available|provided) in the (evidence|sources)/i;
+const NON_ANSWER = /(?:not possible|impossible|unable|cannot|can't|could not|couldn't) (?:to )?(?:be )?(?:determine|determined|say|calculate|calculated|establish|established|find|found|identify|verify|confirm|provide)|(?:insufficient|no|missing|lack of) (?:verifiable |reliable |relevant |concrete |specific )?(?:data|evidence|information|listings|sources|figures)|no verifiable|not (?:available|provided|present|found|mentioned) in the (?:provided |available )?(?:evidence|sources|data)|evidence (?:does not|doesn't) (?:contain|provide|include|mention)/i;
 
 function expectsNumber(node) {
   return Boolean(node && (node.unit || ['calculation', 'comparison', 'data'].includes(node.method)));

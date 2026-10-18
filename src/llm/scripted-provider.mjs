@@ -66,6 +66,19 @@ const RESPONDERS = {
     const ids = [...between(prompt, 'SUB-FINDINGS:', 'Combine').matchAll(/^(\S+) \[/gm)].map((m) => m[1]);
     return { answer: `DEMO roll-up of ${ids.join(', ')}: positive margin of 300 EUR.`, claims: [{ text: 'Margin 300 EUR per unit', sourceIds: ids, assumption: false }], confidence: 'medium', assumptions: [], gaps: [] };
   },
+  [TASK_MARKERS.chat]: (prompt) => {
+    const wantsRerun = /USER: .*re-?research|USER: .*again/i.test(prompt);
+    const node = between(prompt, 'NODE ', ' [');
+    return { reply: `DEMO assistant: noted.${wantsRerun && node ? ` Re-researching ${node}.` : ''}`, actions: wantsRerun && node ? [{ type: 'rerun', nodeId: node, hint: 'demo hint' }] : [] };
+  },
+  [TASK_MARKERS.suggest]: (prompt) => {
+    const ids = sourceIds(prompt.replace('EVIDENCE:', 'EVIDENCE\n').replace('JSON shape', 'RULES:'));
+    return { suggestions: [
+      { title: 'Demand check', question: 'How many buyers search for this each month?', why: 'sizes demand', method: 'lookup', searchQueries: ['monthly demand'], sourceIds: ids.slice(0, 1), quote: '' },
+      { title: 'Cost check', question: 'What is the all-in cost per unit?', why: 'sets margin', method: 'calculation', searchQueries: ['unit cost'], sourceIds: [], quote: '' },
+    ] };
+  },
+  [TASK_MARKERS.variant]: () => ({ change: 'DEMO: sharper search queries', searchQueries: ['demo sharper query'] }),
   [TASK_MARKERS.synthesize]: () => ({
     verdict: 'GO-IF (DEMO) — margin stays above 0 after real costs are confirmed',
     confidence: 'low',
