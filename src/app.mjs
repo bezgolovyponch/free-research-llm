@@ -12,6 +12,8 @@ import { SubIssueSuggester } from './research/suggest.mjs';
 import { ExchangeRates } from './research/rates.mjs';
 import { EventLog } from './logs.mjs';
 import { AppChat } from './appchat.mjs';
+import { HandoffWriter } from './research/handoff.mjs';
+import { appendAppMessage } from './research/notify.mjs';
 import { MarketplaceService } from './search/marketplaces.mjs';
 import { RobotsPolicy } from './search/robots.mjs';
 import { ProjectStore } from './store.mjs';
@@ -97,9 +99,10 @@ export class App {
     this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), paidCallLimit: Number(env.FRL_PAID_CALL_LIMIT ?? 0) || 0, onLedger: (row) => this.logs.append('model-calls', row) });
     this.search = search ?? buildSearch({ env, fetchImpl });
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects') });
+    this.handoffs = new HandoffWriter({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'handoff') });
     const rates = new ExchangeRates({ fetchImpl });
     this.markets = env.FRL_MARKETPLACES === '0' ? null : new MarketplaceService({ fetchImpl, rates, robots: new RobotsPolicy({ fetchImpl }) });
-    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, markets: this.markets, marketHistory: new EventLog({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'market') }), onEvent: (projectId, event) => this.recordEvent(projectId, event) });
+    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, markets: this.markets, marketHistory: new EventLog({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'market') }), onEvent: (projectId, event) => this.recordEvent(projectId, event), onStop: (project, options) => this.saveHandoff(project, options) });
     this.improver = new ProjectImprover({ engine: this.engine });
     this.suggester = new SubIssueSuggester({ engine: this.engine });
     this.chat = new NodeChat({ engine: this.engine, suggester: this.suggester, improver: this.improver });
@@ -111,6 +114,46 @@ export class App {
       statusOf: () => ({ models: this.router.status().filter((p) => p.state === 'ready').map((p) => p.id), search: this.search.describe().backends, improving: [...this.improver.active.keys()] }),
     });
     this.fixedProviders = Boolean(providers);
+  }
+
+  async saveHandoff(project, { reason, resume = {} } = {}) {
+    const record = await this.handoffs.write(project, { reason, resume });
+    appendAppMessage(project, `Progress saved (${reason}). ${record.progress.passing}/${record.progress.total} pieces pass${record.expectedResult ? `, expected result ${Math.round(record.expectedResult.score * 100)}% met` : ''}. Next: ${record.nextSteps[0] ?? 'nothing pending'}. Full handoff: More → Handoff notes.`);
+    void this.logs.append('history', { projectId: project.id, type: 'handoff', message: `${reason} · ${record.progress.passing}/${record.progress.total} passing${record.resume.loopHoursLeft ? ` · loop resumes with ${record.resume.loopHoursLeft.toFixed(1)} h` : record.resume.wasRunning ? ' · run resumes on start' : ''}` });
+    return record;
+  }
+
+  async shutdown() {
+    await this.improver.shutdown();
+    for (const id of [...this.engine.running]) {
+      if (this.improver.isActive(id)) continue;
+      this.engine.cancel(id);
+      try {
+        const project = await this.engine.load(id);
+        await this.saveHandoff(project, { reason: 'app stopped', resume: { wasRunning: true } });
+        await this.store.save(project);
+      } catch {
+        continue;
+      }
+    }
+    await this.logs.queue;
+  }
+
+  async resumeInterrupted() {
+    const resumed = [];
+    for (const record of await this.handoffs.resumable()) {
+      try {
+        const project = await this.engine.load(record.projectId);
+        if (record.resume.loopHoursLeft > 0.05) this.improver.start(project.id, { hours: record.resume.loopHoursLeft });
+        else this.engine.start(project.id);
+        await this.handoffs.clearResume(project.id);
+        resumed.push(project.id);
+        void this.logs.append('history', { projectId: project.id, type: 'session', message: record.resume.loopHoursLeft > 0.05 ? `loop resumed after restart (${record.resume.loopHoursLeft.toFixed(1)} h)` : 'research run resumed after restart' });
+      } catch {
+        continue;
+      }
+    }
+    return resumed;
   }
 
   recordEvent(projectId, event) {

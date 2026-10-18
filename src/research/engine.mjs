@@ -72,7 +72,9 @@ function keyNumbers(finding) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, onEvent = () => {}, markets = null, marketHistory = null }) {
+  constructor({ router, search, store, demo = false, rates = null, onEvent = () => {}, markets = null, marketHistory = null, onStop = async () => {} }) {
+    this.onStop = onStop;
+    this.quiet = new Set();
     this.markets = markets;
     this.marketHistory = marketHistory;
     this.router = router;
@@ -373,6 +375,7 @@ export class ResearchEngine {
           project.phase = 'cancelled';
           this.running.delete(id);
           this.emit(project, 'phase', 'stopped by user');
+          if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
           return await this.store.save(project);
         }
         const node = byId.get(nodeId);
@@ -393,12 +396,14 @@ export class ResearchEngine {
       this.running.delete(id);
       this.emit(project, 'phase', 'done');
       appendAppMessage(project, runSummary(project));
+      if (!this.quiet.has(id)) await this.onStop(project, { reason: 'research finished' });
       return await this.store.save(project);
     } catch (error) {
       if (project) {
         project.phase = 'error';
         project.error = error.message;
         appendAppMessage(project, `Research stopped with an error: ${error.message}. Press Run to resume; finished nodes are kept.`);
+        if (!this.quiet.has(id)) await this.onStop(project, { reason: `error: ${error.message}` }).catch(() => {});
         this.emit(project, 'error', error.message);
         await this.store.save(project);
       }

@@ -102,3 +102,29 @@ describe('ProjectImprover.startAll', () => {
   });
 });
 
+describe('ProjectImprover handoffs', () => {
+  it('writes a handoff when the loop ends and, on shutdown, saves the remaining hours without a half-applied change', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-handoff-'));
+    const stops: Array<{ reason: string; resume?: { loopHoursLeft?: number } }> = [];
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), onStop: async (_p: unknown, options: { reason: string }) => { stops.push(options); } });
+    const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    let clock = 0;
+    const improver = new ProjectImprover({ engine, now: () => (clock += 2000), sleep: async () => {} });
+    improver.start(project.id, { hours: 0.05 });
+    for (let i = 0; i < 500 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(stops.map((s) => s.reason)).toEqual(['loop ended']);
+
+    clock = 0;
+    const second = new ProjectImprover({ engine, now: () => clock, sleep: async () => {} });
+    second.start(project.id, { hours: 4 });
+    await new Promise((r) => setTimeout(r, 30));
+    await second.shutdown();
+    expect(stops.at(-1)).toMatchObject({ reason: 'app stopped', resume: { loopHoursLeft: 4 } });
+    for (let i = 0; i < 500 && second.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(stops.filter((s) => s.reason === 'loop stopped by user')).toEqual([]);
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+

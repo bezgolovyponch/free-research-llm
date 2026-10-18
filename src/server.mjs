@@ -99,6 +99,7 @@ export function createServer(app, gate = new AccessGate()) {
     ['GET', /^\/api\/history$/, async () => app.history()],
     ['GET', /^\/api\/chat$/, async () => app.appChat.thread()],
     ['POST', /^\/api\/chat$/, async (req) => app.appChat.send((await readJson(req)).message)],
+    ['GET', /^\/api\/projects\/([\w-]+)\/handoff$/, async (req, [id]) => (await app.handoffs.read(id)) ?? { projectId: id, note: 'no handoff yet: one is written every time a run or loop stops' }],
     ['GET', /^\/api\/projects\/([\w-]+)\/knowledge$/, async (req, [id]) => knowledgeRecord(await app.engine.load(id))],
     ['POST', /^\/api\/projects\/([\w-]+)\/chat$/, async (req, [id]) => {
       const body = await readJson(req);
@@ -159,6 +160,8 @@ export function createServer(app, gate = new AccessGate()) {
       }
       const events = url.pathname.match(/^\/api\/projects\/([\w-]+)\/events$/);
       if (req.method === 'GET' && events) return await serveEvents(req, res, events[1]);
+      const handoff = url.pathname.match(/^\/api\/projects\/([\w-]+)\/handoff\.md$/);
+      if (req.method === 'GET' && handoff) return send(res, 200, (await app.handoffs.markdown(handoff[1])) ?? '# No handoff yet\n\nOne is written every time a run or loop stops.\n', 'text/markdown; charset=utf-8');
       const report = url.pathname.match(/^\/api\/projects\/([\w-]+)\/report\.md$/);
       if (req.method === 'GET' && report) {
         const project = await app.engine.load(report[1]);
@@ -199,6 +202,22 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const ready = status.providers.filter((p) => p.state === 'ready');
   void app.logs.append('history', { type: 'session', message: `app started · models: ${ready.map((p) => p.id).join(', ') || 'none'} · search: ${status.search.backends.join(', ')}` });
   console.log(`\n  Free Research LLM is running → ${url}\n`);
+  let stopping = false;
+  const stop = async (signal) => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`  ${signal}: saving handoffs for running work…`);
+    await app.shutdown();
+    void app.logs.append('history', { type: 'session', message: `app stopped (${signal}); state saved` });
+    await app.logs.queue;
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => void stop('SIGTERM'));
+  process.on('SIGINT', () => void stop('SIGINT'));
+  if (process.env.FRL_AUTO_RESUME !== '0') {
+    const resumed = await app.resumeInterrupted();
+    if (resumed.length) console.log(`  resumed after restart: ${resumed.join(', ')}`);
+  }
   console.log(ready.length ? `  models: ${ready.map((p) => `${p.id} (${p.fast})`).join(', ')}` : '  models: NONE connected yet — run ./keys.command (or open Setup in the page)');
   if (ready.length) console.log(`  route deep: ${status.route.deep.join(' → ')}\n  route fast: ${status.route.fast.join(' → ')}`);
   console.log(`  search: ${status.search.backends.join(', ') || 'off'}${status.demo ? '\n  DEMO MODE: scripted answers, not real research' : ''}\n`);

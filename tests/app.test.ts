@@ -54,3 +54,31 @@ describe('App composition', () => {
     expect(app.status().searchKeys.find((k: { env: string }) => k.env === 'EXA_API_KEY').set).toBe(true);
   });
 });
+
+describe('App save and resume', () => {
+  it('saves a handoff for an interrupted run on shutdown and resumes it on the next start', async () => {
+    const fsp = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { App } = await import('../src/app.mjs');
+    const { ScriptedProvider } = await import('../src/llm/scripted-provider.mjs');
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'frl-app-resume-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ backends: [] }) };
+    const first = new App({ env: { FRL_MARKETPLACES: '0' }, dataDir: dir, providers: [new ScriptedProvider()], search });
+    const project = await first.engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    first.engine.running.add(project.id);
+    await first.shutdown();
+    first.engine.running.delete(project.id);
+    expect((await first.handoffs.read(project.id)).resume).toEqual({ wasRunning: true });
+    expect((await first.engine.load(project.id)).chats.Q.at(-1).content).toMatch(/^Progress saved \(app stopped\)/);
+
+    const second = new App({ env: { FRL_MARKETPLACES: '0' }, dataDir: dir, providers: [new ScriptedProvider()], search });
+    expect(await second.resumeInterrupted()).toEqual([project.id]);
+    for (let i = 0; i < 300 && second.engine.running.has(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    expect((await second.engine.load(project.id)).phase).toBe('done');
+    expect(await second.handoffs.resumable()).toEqual([]);
+    await second.logs.queue;
+    await fsp.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+

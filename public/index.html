@@ -297,6 +297,7 @@
               <button id="mEditExpected">Edit expected result</button>
               <button id="mResetAll">Re-research everything (keep tree)</button>
               <button id="mRebuild">Rebuild the tree</button>
+              <a id="mHandoff" href="#" target="_blank">Handoff notes (.md)</a>
               <a id="mReport" href="#">Download report (.md)</a>
               <a id="mKnowledge" href="#" target="_blank">Knowledge record (JSON)</a>
               <a id="mLogs" href="#" target="_blank">Event log (JSON)</a>
@@ -559,6 +560,7 @@ function renderHead(){
   $("btnRun").disabled=running||looping;$("btnStop").disabled=!running&&!looping;
   $("btnLoop").textContent=looping?"Loop running":"Improve loop";
   $("mReport").href="/api/projects/"+encodeURIComponent(p.id)+"/report.md";
+  $("mHandoff").href="/api/projects/"+encodeURIComponent(p.id)+"/handoff.md";
   $("mKnowledge").href="/api/projects/"+encodeURIComponent(p.id)+"/knowledge";
   $("mLogs").href="/api/projects/"+encodeURIComponent(p.id)+"/logs";
   renderLoopBox();

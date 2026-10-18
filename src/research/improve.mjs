@@ -117,6 +117,25 @@ export class ProjectImprover {
     return state ? Math.max(0, (state.deadline - this.now()) / 3600000) : 0;
   }
 
+  async saveHandoff(id, reason, resume = {}) {
+    try {
+      const project = await this.engine.load(id);
+      await this.engine.onStop(project, { reason, resume });
+      await this.engine.store.save(project);
+    } catch {
+      return;
+    }
+  }
+
+  async shutdown() {
+    for (const [id, state] of this.active) {
+      state.stopped = true;
+      state.shutdown = true;
+      if (state.before) await this.restore(id, state.before).catch(() => {});
+      await this.saveHandoff(id, 'app stopped', { loopHoursLeft: Math.max(0, (state.deadline - this.now()) / 3600000) });
+    }
+  }
+
   async restore(id, before) {
     const current = await this.engine.load(id);
     await this.engine.store.save({ ...before, chats: current.chats, log: current.log, improve: current.improve });
@@ -132,12 +151,15 @@ export class ProjectImprover {
     const state = { stopped: false, deadline: this.now() + h * 3600 * 1000, hours: h };
     this.active.set(id, state);
     void (async () => {
+      this.engine.quiet.add(id);
       try {
         await this.loop(id, state);
       } catch (error) {
         await this.record(id, { active: false, error: error.message });
       } finally {
         this.active.delete(id);
+        this.engine.quiet.delete(id);
+        if (!state.shutdown) await this.saveHandoff(id, state.stopped ? 'loop stopped by user' : 'loop ended');
       }
     })();
     return { ok: true, deadline: new Date(state.deadline).toISOString() };
@@ -180,12 +202,15 @@ export class ProjectImprover {
         const slice = { stopped: false, deadline: Math.min(state.deadline, this.now() + sliceMs), hours: round(sliceMs / 3600000) };
         state.current = id;
         this.active.set(id, slice);
+        this.engine.quiet.add(id);
         try {
           await this.loop(id, slice);
         } catch (error) {
           await this.record(id, { active: false, error: error.message });
         } finally {
           this.active.delete(id);
+          this.engine.quiet.delete(id);
+          if (!slice.shutdown) await this.saveHandoff(id, 'improve-all slice ended');
         }
       }
       state.rounds += 1;
@@ -250,6 +275,7 @@ export class ProjectImprover {
 
   async trial(id, nodeId, best, state) {
     const before = await this.engine.load(id);
+    state.before = before;
     const base = { at: new Date(this.now()).toISOString(), nodeId, before: best.score };
     try {
       const variant = await this.propose(before, nodeId, best);
