@@ -13,6 +13,7 @@ export class KeychainSecrets {
   constructor({ platform = process.platform, run = promisify(execFile) } = {}) {
     this.platform = platform;
     this.run = run;
+    this.loaded = new Set();
   }
 
   async read(name) {
@@ -33,8 +34,28 @@ export class KeychainSecrets {
       if (value) {
         env[name] = value;
         loaded.push(name);
+        this.loaded.add(name);
       }
     }
     return loaded;
+  }
+
+  async refresh(env, names = secretNames()) {
+    if (this.platform !== 'darwin') return [];
+    const changed = [];
+    for (const name of names) {
+      if (env[name] && !this.loaded.has(name)) continue;
+      const value = await this.read(name);
+      if (value && value !== env[name]) {
+        env[name] = value;
+        this.loaded.add(name);
+        changed.push(name);
+      } else if (!value && this.loaded.has(name)) {
+        delete env[name];
+        this.loaded.delete(name);
+        changed.push(name);
+      }
+    }
+    return changed;
   }
 }

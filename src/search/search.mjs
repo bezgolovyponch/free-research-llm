@@ -35,6 +35,10 @@ export class SearchHttpError extends Error {
   get exhausted() {
     return [401, 402, 403, 429, 432, 433].includes(this.status);
   }
+
+  get invalidKey() {
+    return [401, 403].includes(this.status);
+  }
 }
 
 function absoluteUrl(href, base) {
@@ -306,6 +310,17 @@ export class WikipediaBackend {
   }
 }
 
+export const KEYED_SEARCH_BACKENDS = [
+  ['LANGSEARCH_API_KEY', LangSearchBackend],
+  ['TAVILY_API_KEY', TavilyBackend],
+  ['EXA_API_KEY', ExaBackend],
+  ['LINKUP_API_KEY', LinkupBackend],
+  ['JINA_API_KEY', JinaSearchBackend],
+  ['FIRECRAWL_API_KEY', FirecrawlBackend],
+  ['SERPER_API_KEY', SerperBackend],
+  ['BRAVE_API_KEY', BraveBackend],
+];
+
 export class SearchService {
   constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000 }) {
     this.backends = backends;
@@ -313,6 +328,7 @@ export class SearchService {
     this.now = now;
     this.blockMs = blockMs;
     this.blockedUntil = new Map();
+    this.health = new Map();
     this.cursor = 0;
     this.fetchImpl = fetchImpl;
     this.fetchPages = fetchPages;
@@ -384,6 +400,7 @@ export class SearchService {
       for (const backend of this.rotation()) {
         try {
           const results = await backend.search(query, this.resultsPerQuery);
+          this.health.set(backend.id, { ok: true, at: new Date(this.now()).toISOString(), results: results.length });
           for (const r of results) {
             if (!r.url || seen.has(r.url)) continue;
             if (backend.fallback && !isRelevant(r, query)) {
@@ -396,7 +413,8 @@ export class SearchService {
           if (results.length) break;
         } catch (error) {
           this.lastErrors.push(`${backend.id}: ${error.message}`);
-          if (error.exhausted) this.blockedUntil.set(backend.id, this.now() + this.blockMs);
+          if (error.exhausted) this.blockedUntil.set(backend.id, error.invalidKey ? Infinity : this.now() + this.blockMs);
+          this.health.set(backend.id, { ok: false, at: new Date(this.now()).toISOString(), error: error.invalidKey ? `invalid key (${error.message}) — fix it with ./keys.command check` : error.message });
         }
       }
       if (collected.length >= maxSources) break;
@@ -424,6 +442,6 @@ export class SearchService {
 
   describe() {
     const blocked = this.backends.filter((b) => (this.blockedUntil.get(b.id) ?? 0) > this.now()).map((b) => b.id);
-    return { enabled: this.enabled, backends: this.backends.map((b) => b.id), blocked, lastErrors: this.lastErrors };
+    return { enabled: this.enabled, backends: this.backends.map((b) => b.id), blocked, health: Object.fromEntries(this.health), lastErrors: this.lastErrors };
   }
 }

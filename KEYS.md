@@ -83,7 +83,7 @@ cd ~/Documents/research/free-research-llm-main
 ```
 It walks the list. For each line, paste the key (it stays invisible) and press **Enter**. Press **Enter** on an empty line to skip a key, or type `-` to delete a saved one. You can run it again any time to add or replace keys.
 
-Search keys only (model keys already saved): `./keys.command search`.
+Search keys only (model keys already saved): `./keys.command search`. Each key is tested the moment you paste it; a key whose first characters were lost while pasting is repaired automatically. To re-test every saved key: `./keys.command check`. A running app reloads the keys itself (no restart).
 
 **Step 2b. Optional, unlimited search: SearXNG on your Mac.** Install and open Docker Desktop (https://www.docker.com/products/docker-desktop/), wait for "Engine running", then:
 ```bash

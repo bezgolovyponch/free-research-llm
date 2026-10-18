@@ -23,11 +23,55 @@ KEYS=(
 )
 SEARCH_ONLY="LANGSEARCH_API_KEY TAVILY_API_KEY EXA_API_KEY LINKUP_API_KEY JINA_API_KEY FIRECRAWL_API_KEY SERPER_API_KEY SEARXNG_URL"
 
+cd "${0:A:h}"
+
+mask() { local v="$1"; if (( ${#v} <= 10 )); then echo "${#v} chars"; else echo "${v[1,6]}…${v[-4,-1]} (${#v} chars)"; fi; }
+
+save_checked() {
+  local NAME="$1" RAW="$2" OUT STATE CLEAN MSG ANSWER
+  OUT=$(printf '%s' "$RAW" | node scripts/check-key.mjs "$NAME")
+  STATE=$(sed -n 1p <<< "$OUT"); CLEAN=$(sed -n 2p <<< "$OUT"); MSG=$(sed -n 3p <<< "$OUT")
+  echo "        got $(mask "$CLEAN")"
+  case "$STATE" in
+    ok) security add-generic-password -U -s "$SERVICE" -a "$NAME" -w "$CLEAN" && echo "        ✓ works ($MSG) — saved" ;;
+    repaired) security add-generic-password -U -s "$SERVICE" -a "$NAME" -w "$CLEAN" && echo "        ✓ repaired and saved: $MSG" ;;
+    unchecked) security add-generic-password -U -s "$SERVICE" -a "$NAME" -w "$CLEAN" && echo "        saved ($MSG)" ;;
+    *)
+      echo "        ✗ this key does not work: $MSG"
+      read -r "ANSWER?        save it anyway? (y/N) "
+      [[ "$ANSWER" == [yY]* ]] && security add-generic-password -U -s "$SERVICE" -a "$NAME" -w "$CLEAN" && echo "        saved"
+      return 1 ;;
+  esac
+}
+
+reload_app() {
+  if curl -s -m 5 -X POST "http://127.0.0.1:${PORT:-4600}/api/keys/reload" >/dev/null 2>&1; then
+    echo "The running app reloaded the keys (no restart needed)."
+  else
+    echo "Start the app with ./start.command or: npm start"
+  fi
+}
+
+if [[ "$1" == "check" ]]; then
+  echo ""
+  echo "Checking every saved key (each one is tested against its provider; a key cut off while pasting is repaired):"
+  for entry in "${KEYS[@]}"; do
+    NAME="${entry%%|*}"
+    VALUE=$(security find-generic-password -s "$SERVICE" -a "$NAME" -w 2>/dev/null) || continue
+    echo "$NAME"
+    save_checked "$NAME" "$VALUE" < /dev/null
+    VALUE=""
+  done
+  echo ""
+  reload_app
+  exit 0
+fi
+
 echo ""
 echo "Free Research LLM - key setup"
 echo "Keys are stored in your macOS Keychain (service: $SERVICE), not in any file."
 echo "For each line: open the link, create a key, paste it here (input is hidden), press Enter."
-echo "Press Enter on an empty line to skip. Type - to delete a stored key."
+echo "Each key is tested right away. Press Enter on an empty line to skip. Type - to delete a stored key."
 echo ""
 for entry in "${KEYS[@]}"; do
   NAME="${entry%%|*}"; REST="${entry#*|}"; LABEL="${REST%%|*}"; URL="${REST#*|}"
@@ -40,10 +84,10 @@ for entry in "${KEYS[@]}"; do
   if [[ "$VALUE" == "-" ]]; then
     security delete-generic-password -s "$SERVICE" -a "$NAME" >/dev/null 2>&1 && echo "        deleted"
   elif [[ -n "$VALUE" ]]; then
-    security add-generic-password -U -s "$SERVICE" -a "$NAME" -w "$VALUE" && echo "        saved"
+    save_checked "$NAME" "$VALUE"
   fi
   VALUE=""
 done
 echo ""
-echo "Done. Start the app with ./start.command or: npm start"
+reload_app
 read -r "?Press Enter to close"

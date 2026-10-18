@@ -55,6 +55,7 @@ export function createServer(app) {
       await app.refreshProviders();
       return app.status();
     }],
+    ['POST', /^\/api\/keys\/reload$/, async () => app.reloadKeys()],
     ['POST', /^\/api\/keys$/, async (req) => {
       const body = await readJson(req);
       await app.setKey(body.provider, body.key, body.baseURL);
@@ -163,8 +164,9 @@ export async function startServer({ app = new App(), port = Number(process.env.P
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const fromKeychain = await new KeychainSecrets().fillMissing(process.env);
-  const { app, url } = await startServer();
+  const secrets = new KeychainSecrets();
+  const fromKeychain = await secrets.fillMissing(process.env);
+  const { app, url } = await startServer({ app: new App({ secrets }) });
   if (fromKeychain.length) console.log(`  keys from macOS Keychain: ${fromKeychain.join(', ')}`);
   const status = app.status();
   const ready = status.providers.filter((p) => p.state === 'ready');

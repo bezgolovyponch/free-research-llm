@@ -5,7 +5,7 @@ import { OpenAICompatibleProvider } from './llm/provider.mjs';
 import { ModelRouter } from './llm/router.mjs';
 import { ScriptedProvider } from './llm/scripted-provider.mjs';
 import { ResearchEngine } from './research/engine.mjs';
-import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, SearchService, SearxngBackend, SerperBackend, TavilyBackend, WikipediaBackend } from './search/search.mjs';
+import { KEYED_SEARCH_BACKENDS, SearchService, SearxngBackend, WikipediaBackend } from './search/search.mjs';
 import { ProjectImprover } from './research/improve.mjs';
 import { NodeChat } from './research/chat.mjs';
 import { SubIssueSuggester } from './research/suggest.mjs';
@@ -72,16 +72,6 @@ export class ProviderFactory {
   }
 }
 
-const KEYED_SEARCH_BACKENDS = [
-  ['LANGSEARCH_API_KEY', LangSearchBackend],
-  ['TAVILY_API_KEY', TavilyBackend],
-  ['EXA_API_KEY', ExaBackend],
-  ['LINKUP_API_KEY', LinkupBackend],
-  ['JINA_API_KEY', JinaSearchBackend],
-  ['FIRECRAWL_API_KEY', FirecrawlBackend],
-  ['SERPER_API_KEY', SerperBackend],
-  ['BRAVE_API_KEY', BraveBackend],
-];
 
 export function buildSearch({ env, fetchImpl }) {
   const backends = KEYED_SEARCH_BACKENDS.filter(([name]) => env[name]).map(([name, Backend]) => new Backend({ apiKey: env[name], fetchImpl }));
@@ -93,7 +83,8 @@ export function buildSearch({ env, fetchImpl }) {
 const HISTORY_EVENT = /^(created|report|acceptance|improve-state|error):|^phase:(done|stopped|tree ready)/;
 
 export class App {
-  constructor({ env = process.env, fetchImpl = fetch, dataDir, logDir, providers, search } = {}) {
+  constructor({ env = process.env, fetchImpl = fetch, dataDir, logDir, providers, search, secrets = null } = {}) {
+    this.secrets = secrets;
     this.env = env;
     this.fetchImpl = fetchImpl;
     this.sessionSearchEnv = {};
@@ -128,6 +119,16 @@ export class App {
     this.engine.demo = this.demo && !live.length;
     this.router.setProviders(providers);
     return this.router.status();
+  }
+
+  async reloadKeys() {
+    const changed = this.secrets ? await this.secrets.refresh(this.env) : [];
+    this.search = buildSearch({ env: { ...this.env, ...this.sessionSearchEnv }, fetchImpl: this.fetchImpl });
+    this.engine.search = this.search;
+    this.factory.env = this.env;
+    await this.refreshProviders();
+    void this.logs.append('history', { type: 'session', message: `keys reloaded${changed.length ? `: ${changed.join(', ')}` : ' (no change)'} · search: ${this.search.describe().backends.join(', ')}` });
+    return { changed, status: this.status() };
   }
 
   async setKey(providerId, key, baseURL) {

@@ -114,3 +114,19 @@ describe('links and relevance', () => {
   });
 });
 
+describe('search health', () => {
+  it('benches an engine with an invalid key for the whole session and reports why', async () => {
+    const { SearchService, SearchHttpError } = await import('../../src/search/search.mjs');
+    const bad = { id: 'langsearch', async search() { throw new SearchHttpError(401); } };
+    const good = { id: 'tavily', async search(q: string) { return [{ title: 't', url: `https://t.example/${q}`, text: 'x' }]; } };
+    let now = 0;
+    const service = new SearchService({ backends: [bad, good], fetchPages: false, now: () => now });
+    await service.search(['q1']);
+    now = 10 * 60 * 60 * 1000;
+    expect(service.rotation().map((b) => b.id)).toEqual(['tavily']);
+    const health = service.describe().health;
+    expect(health.langsearch).toMatchObject({ ok: false, error: expect.stringMatching(/invalid key/) });
+    expect(health.tavily).toMatchObject({ ok: true, results: 1 });
+  });
+});
+

@@ -235,6 +235,7 @@
           <input type="text" id="keyUrl" placeholder="base URL (custom only)" style="flex:1; min-width:180px; display:none">
           <button class="btn" id="btnKey">Connect</button>
           <button class="btn dim" id="btnRefresh">Re-check providers</button>
+          <button class="btn dim" id="btnReload">Reload keys from Keychain</button>
         </div>
         <p class="small muted" id="keyHelp" style="margin-top:6px"></p>
       </div>
@@ -350,7 +351,8 @@ function renderSetup(){
   $("routeInfo").innerHTML=(r.deep.length?"<b>Deep</b> (decompose, hard retries, memo): "+r.deep.map(esc).join(" → ")+"<br><b>Fast</b> (research each sub-question): "+r.fast.map(esc).join(" → ")+"<br>":"<span style='color:var(--rd)'>No ready provider yet.</span><br>")+"<span class='muted'>The first ready provider answers. On a rate limit (429) the next one takes over, and the reviewer always uses a different provider than the writer. Change the order with FRL_DEEP_ORDER / FRL_FAST_ORDER.</span>";
   if(cur)sel.value=cur;
   updateKeyHelp();
-  $("searchInfo").innerHTML="Active: <b>"+esc(s.search.backends.join(", ")||"none")+"</b>. Wikipedia works without a key. Engines take turns per query; an engine out of quota is benched for 1 hour. For real web results add <b>LangSearch</b> (free) and <b>Tavily</b> (1,000/month), or run <span class='mono'>./searxng.command</span> (unlimited, Docker): paste above under \"Web search\", or save with <span class='mono'>keys.command search</span>."+(s.search.blocked&&s.search.blocked.length?'<div>benched (quota): '+esc(s.search.blocked.join(', '))+'</div>':'')+(s.search.lastErrors.length?'<div style="color:var(--rd)">last errors: '+esc(s.search.lastErrors.join("; "))+"</div>":"");
+  const hl=s.search.health||{};
+  $("searchInfo").innerHTML='<table style="margin-bottom:8px"><tr><th>Engine</th><th>State</th></tr>'+s.search.backends.map(b=>{const h=hl[b];const benched=(s.search.blocked||[]).includes(b);return "<tr><td class='mono'>"+esc(b)+"</td><td>"+(h?(h.ok?'<span style="color:var(--gr)">● working</span> <span class="small muted">last '+esc(h.at.slice(11,19))+"</span>":'<span style="color:var(--rd)">● '+esc(h.error)+"</span>"):'<span class="muted">○ not used yet</span>')+(benched?' <span style="color:var(--am)">(benched)</span>':"")+"</td></tr>";}).join("")+"</table>Active: <b>"+esc(s.search.backends.join(", ")||"none")+"</b>. Wikipedia works without a key. Engines take turns per query; an engine out of quota is benched for 1 hour. For real web results add <b>LangSearch</b> (free) and <b>Tavily</b> (1,000/month), or run <span class='mono'>./searxng.command</span> (unlimited, Docker): paste above under \"Web search\", or save with <span class='mono'>keys.command search</span>."+(s.search.blocked&&s.search.blocked.length?'<div>benched (quota): '+esc(s.search.blocked.join(', '))+'</div>':'')+(s.search.lastErrors.length?'<div style="color:var(--rd)">last errors: '+esc(s.search.lastErrors.join("; "))+"</div>":"");
   let l="<tr><th>time</th><th>purpose</th><th>tier</th><th>provider/model</th><th>result</th></tr>";
   s.ledger.slice().reverse().forEach(r=>{l+="<tr><td class='small mono'>"+esc(r.ts.slice(11,19))+"</td><td>"+esc(r.purpose)+"</td><td>"+esc(r.tier)+"</td><td class='small mono'>"+esc(r.provider+(r.model?"/"+r.model:""))+"</td><td class='small'>"+(r.ok?'<span style="color:var(--gr)">ok</span> '+r.ms+"ms":'<span style="color:var(--rd)">'+esc(trunc(r.error,90))+"</span>")+"</td></tr>";});
   $("ledgerTable").innerHTML=s.ledger.length?l:"<tr><td class='muted'>no calls yet</td></tr>";
@@ -369,6 +371,7 @@ $("btnKey").addEventListener("click",async()=>{
   try{await api("/api/keys",{method:"POST",body:{provider:$("keyProvider").value,key,baseURL:$("keyUrl").value.trim()}});$("keyValue").value="";await loadStatus();const p=STATE.status.providers.find(x=>x.id===$("keyProvider").value);toast(p?(p.state==="ready"?p.label+" connected":"not connected: "+p.detail):"search key set for this session");}
   catch(e){toast(e.message);}finally{$("btnKey").disabled=false;}
 });
+$("btnReload").addEventListener("click",async()=>{try{const r=await api("/api/keys/reload",{method:"POST"});await loadStatus();toast(r.changed.length?"reloaded: "+r.changed.join(", "):"keys reloaded (no change)");}catch(e){toast(e.message);}});
 $("btnRefresh").addEventListener("click",async()=>{try{await api("/api/providers/refresh",{method:"POST"});await loadStatus();toast("providers re-checked");}catch(e){toast(e.message);}});
 
 function currentTemplate(){return STATE.templates.find(t=>t.id===STATE.templateId)||null;}
