@@ -10,7 +10,8 @@ describe('cleanKey and formatHint', () => {
   it('spots a key whose first characters were lost when pasting', () => {
     expect(formatHint('LANGSEARCH_API_KEY', 'k-c0ffee')).toMatchObject({ problem: 'cut', fixed: 'sk-c0ffee' });
     expect(formatHint('GROQ_API_KEY', 'sk_abc')).toMatchObject({ problem: 'cut', fixed: 'gsk_abc' });
-    expect(formatHint('GEMINI_API_KEY', 'zzz')).toMatchObject({ problem: 'prefix' });
+    expect(formatHint('TAVILY_API_KEY', 'zzz')).toMatchObject({ problem: 'prefix' });
+    expect(formatHint('GEMINI_API_KEY', 'AQ.newformat')).toBeNull();
     expect(formatHint('GROQ_API_KEY', 'gsk_ok')).toBeNull();
   });
 });

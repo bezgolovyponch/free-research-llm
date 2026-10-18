@@ -8,6 +8,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/cli.mjs', 'src/loop/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
 const SECRET_PATTERNS = [
   ['google-api-key', /AIza[0-9A-Za-z_-]{35}/],
+  ['google-auth-key', /\bAQ\.[0-9A-Za-z_-]{40,}/],
   ['groq-key', /gsk_[0-9A-Za-z]{40,}/],
   ['openrouter-key', /sk-or-v1-[0-9a-f]{40,}/],
   ['cerebras-key', /csk-[0-9a-z]{40,}/],

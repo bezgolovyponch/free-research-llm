@@ -2,7 +2,6 @@ import { PROVIDER_PRESETS } from './llm/presets.mjs';
 import { KEYED_SEARCH_BACKENDS } from './search/search.mjs';
 
 export const KEY_PREFIXES = {
-  GEMINI_API_KEY: 'AIza',
   GROQ_API_KEY: 'gsk_',
   OPENROUTER_API_KEY: 'sk-or-',
   CEREBRAS_API_KEY: 'csk-',

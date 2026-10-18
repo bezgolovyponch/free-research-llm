@@ -130,3 +130,16 @@ describe('search health', () => {
   });
 });
 
+describe('relevance on every engine', () => {
+  it('drops off-topic results from keyed engines too', async () => {
+    const { SearchService } = await import('../../src/search/search.mjs');
+    const engine = { id: 'langsearch', async search() { return [
+      { title: 'Brno population', url: 'https://wpr.example/czechia/brno', text: 'Brno population 2025 is about 400,000' },
+      { title: 'Rio Branco population', url: 'https://wpr.example/brazil/rio-branco', text: 'population of Rio Branco' },
+    ]; } };
+    const service = new SearchService({ backends: [engine], fetchPages: false });
+    const sources = await service.search(['Brno population 2025']);
+    expect(sources.map((s) => s.url)).toEqual(['https://wpr.example/czechia/brno']);
+  });
+});
+

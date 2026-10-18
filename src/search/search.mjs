@@ -403,7 +403,7 @@ export class SearchService {
           this.health.set(backend.id, { ok: true, at: new Date(this.now()).toISOString(), results: results.length });
           for (const r of results) {
             if (!r.url || seen.has(r.url)) continue;
-            if (backend.fallback && !isRelevant(r, query)) {
+            if (!isRelevant(r, query)) {
               this.lastErrors.push(`${backend.id}: dropped off-topic "${String(r.title).slice(0, 40)}"`);
               continue;
             }
