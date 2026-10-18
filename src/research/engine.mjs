@@ -1,4 +1,5 @@
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
+import { followUpQueries, mergeSources } from './followup.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, progress, researchOrder } from './tree.mjs';
@@ -8,7 +9,7 @@ const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0 };
 const LOG_LIMIT = 300;
-const MAX_ATTEMPTS = 2;
+const MAX_ATTEMPTS = 3;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -138,11 +139,23 @@ export class ResearchEngine {
     const sources = [];
     if (this.search?.enabled) {
       const queries = [...node.searchQueries, node.title, node.question].filter(Boolean);
-      const web = await this.search.search(queries, { maxSources: 6 });
+      const web = await this.search.search(queries, { maxSources: 8 });
       web.forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
       if (!web.length && this.search.lastErrors.length) this.emit(project, 'warn', `${node.id}: search failed (${this.search.lastErrors.join('; ').slice(0, 200)})`, { nodeId: node.id });
     }
     return [...sources, ...this.dataSources(project)];
+  }
+
+  async searchGaps(project, node) {
+    if (!this.search?.enabled || !node.finding) return;
+    const queries = followUpQueries(node, node.finding, [...node.searchQueries, ...(node.followUpQueries ?? [])]);
+    if (!queries.length) return;
+    node.followUpQueries = [...(node.followUpQueries ?? []), ...queries];
+    this.emit(project, 'node', `${node.id}: searching the gaps — ${queries.join(' | ').slice(0, 160)}`, { nodeId: node.id });
+    const found = await this.search.search(queries, { maxSources: 4, exclude: node.sources.map((s) => s.url).filter(Boolean) });
+    const { sources, added } = mergeSources(node.sources, found);
+    node.sources = sources;
+    this.emit(project, 'node', `${node.id}: ${added.length} new source(s) from gap search`, { nodeId: node.id });
   }
 
   upstreamFor(project, node) {
@@ -167,6 +180,7 @@ export class ResearchEngine {
     let failures = [];
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const tier = attempt === 1 ? 'fast' : 'deep';
+      if (attempt > 1) await this.searchGaps(project, node);
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
@@ -179,7 +193,7 @@ export class ResearchEngine {
       this.emit(project, 'node', `${node.id}: ${verification.grade} (attempt ${attempt}, ${tier} tier, ${reply.provider})`, { nodeId: node.id });
       if (!needsEscalation(verification)) return;
       failures = [...verification.failures, ...(critique?.issues ?? [])];
-      if (attempt < MAX_ATTEMPTS) this.emit(project, 'escalate', `${node.id}: checks failed, escalating to deep tier`, { nodeId: node.id });
+      if (attempt < MAX_ATTEMPTS) this.emit(project, 'escalate', `${node.id}: checks failed, searching the gaps and escalating to deep tier`, { nodeId: node.id });
     }
   }
 

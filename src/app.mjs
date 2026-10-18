@@ -5,7 +5,7 @@ import { OpenAICompatibleProvider } from './llm/provider.mjs';
 import { ModelRouter } from './llm/router.mjs';
 import { ScriptedProvider } from './llm/scripted-provider.mjs';
 import { ResearchEngine } from './research/engine.mjs';
-import { BraveBackend, ExaBackend, SearchService, SearxngBackend, SerperBackend, TavilyBackend, WikipediaBackend } from './search/search.mjs';
+import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, SearchService, SearxngBackend, SerperBackend, TavilyBackend, WikipediaBackend } from './search/search.mjs';
 import { ProjectStore } from './store.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,15 +67,22 @@ export class ProviderFactory {
   }
 }
 
+const KEYED_SEARCH_BACKENDS = [
+  ['LANGSEARCH_API_KEY', LangSearchBackend],
+  ['TAVILY_API_KEY', TavilyBackend],
+  ['EXA_API_KEY', ExaBackend],
+  ['LINKUP_API_KEY', LinkupBackend],
+  ['JINA_API_KEY', JinaSearchBackend],
+  ['FIRECRAWL_API_KEY', FirecrawlBackend],
+  ['SERPER_API_KEY', SerperBackend],
+  ['BRAVE_API_KEY', BraveBackend],
+];
+
 export function buildSearch({ env, fetchImpl }) {
-  const backends = [];
-  if (env.TAVILY_API_KEY) backends.push(new TavilyBackend({ apiKey: env.TAVILY_API_KEY, fetchImpl }));
-  if (env.EXA_API_KEY) backends.push(new ExaBackend({ apiKey: env.EXA_API_KEY, fetchImpl }));
-  if (env.SERPER_API_KEY) backends.push(new SerperBackend({ apiKey: env.SERPER_API_KEY, fetchImpl }));
-  if (env.BRAVE_API_KEY) backends.push(new BraveBackend({ apiKey: env.BRAVE_API_KEY, fetchImpl }));
+  const backends = KEYED_SEARCH_BACKENDS.filter(([name]) => env[name]).map(([name, Backend]) => new Backend({ apiKey: env[name], fetchImpl }));
   if (env.SEARXNG_URL) backends.push(new SearxngBackend({ baseURL: env.SEARXNG_URL, fetchImpl }));
   if (env.FRL_WIKIPEDIA !== '0') backends.push(new WikipediaBackend({ fetchImpl, lang: env.FRL_WIKIPEDIA_LANG || 'en' }));
-  return new SearchService({ backends, fetchImpl, fetchPages: env.FRL_FETCH_PAGES !== '0', jinaReader: env.FRL_JINA_READER !== '0' });
+  return new SearchService({ backends, fetchImpl, fetchPages: env.FRL_FETCH_PAGES !== '0', jinaReader: env.FRL_JINA_READER !== '0', jinaKey: env.JINA_API_KEY || '' });
 }
 
 export class App {

@@ -81,6 +81,41 @@ describe('ResearchEngine', () => {
     expect(done.log.some((l: { type: string }) => l.type === 'escalate')).toBe(true);
   });
 
+  it('searches the gaps of a failed answer before the deep-tier retry', async () => {
+    const scripted = new ScriptedProvider();
+    let poisoned = false;
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }>; tier: string }) {
+        const prompt = args.messages.at(-1)!.content;
+        if (!poisoned && prompt.includes(TASK_MARKERS.research)) {
+          poisoned = true;
+          return { content: JSON.stringify({ answer: 'unknown', claims: [{ text: 'price 5', sourceIds: ['S99'] }], confidence: 'low', gaps: ['median 2026 asking price RAV4 hybrid Germany'] }), model: 'm', provider: 'demo', usage: {} };
+        }
+        return scripted.chat(args);
+      },
+    };
+    const calls: Array<{ queries: string[]; exclude: string[] }> = [];
+    const recordingSearch = {
+      ...fakeSearch,
+      async search(queries: string[], options: { exclude?: string[] } = {}) {
+        calls.push({ queries, exclude: options.exclude ?? [] });
+        return calls.length === 1 || !options.exclude ? fakeSearch.search(queries) : [{ kind: 'web', title: 'Gap', url: 'https://gap.example/p', domain: 'gap.example', snippet: 's', text: 'RAV4 median 21,500 EUR' }];
+      },
+    };
+    const { engine } = engineWith(provider, recordingSearch);
+    const project = await engine.createProject({ question: 'Is buying used RAV4 hybrids in Germany to resell in Poland profitable?' });
+    const done = await engine.run(project.id);
+    const retried = done.nodes.find((n: { attempts: number }) => n.attempts === 2);
+    const gapCall = calls.find((c) => c.exclude.length);
+    expect(gapCall?.queries[0]).toBe('median 2026 asking price RAV4 hybrid Germany');
+    expect(gapCall?.exclude).toEqual(['https://one.example/a', 'https://two.example/b']);
+    expect(retried.followUpQueries).toContain('median 2026 asking price RAV4 hybrid Germany');
+    expect(retried.sources.map((s: { id: string }) => s.id)).toEqual(['S1', 'S2', 'S3']);
+  });
+
   it('marks a node failed but finishes the run when one call breaks', async () => {
     const provider = new ScriptedProvider({ failures: { [TASK_MARKERS.rollup]: [new ProviderError('bad request', { status: 400 })] } });
     const { engine } = engineWith(provider);

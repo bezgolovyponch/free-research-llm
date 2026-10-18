@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BraveBackend, ExaBackend, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, htmlToText } from '../../src/search/search.mjs';
+import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, htmlToText } from '../../src/search/search.mjs';
 import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
 
 describe('search', () => {
@@ -38,6 +38,42 @@ describe('search', () => {
     expect(await new SerperBackend({ apiKey: 'sk', fetchImpl }).search('q', 3)).toEqual([{ title: 'S', url: 'https://s.example/', snippet: 'serp' }]);
     expect((fetchImpl.calls[0].init.headers as Record<string, string>)['x-api-key']).toBe('ek');
     expect(JSON.parse(String(fetchImpl.calls[1].init.body))).toEqual({ q: 'q', num: 3 });
+  });
+
+  it('maps LangSearch, Linkup, Jina and Firecrawl results with bearer auth', async () => {
+    const fetchImpl = fakeFetch([
+      [/langsearch/, () => jsonResponse({ data: { webPages: { value: [{ name: 'L', url: 'https://l.example/', text: 'lang text' }] } } })],
+      [/linkup/, () => jsonResponse({ results: [{ type: 'text', name: 'K', url: 'https://k.example/', content: 'link text' }] })],
+      [/s\.jina\.ai/, () => jsonResponse({ data: [{ title: 'J', url: 'https://j.example/', description: 'd', content: 'jina text' }] })],
+      [/firecrawl/, () => jsonResponse({ success: true, data: { web: [{ title: 'F', url: 'https://f.example/', description: 'fire' }] } })],
+    ]);
+    expect(await new LangSearchBackend({ apiKey: 'lk', fetchImpl }).search('q', 3)).toEqual([{ title: 'L', url: 'https://l.example/', snippet: 'lang text', text: 'lang text' }]);
+    expect(await new LinkupBackend({ apiKey: 'kk', fetchImpl }).search('q', 3)).toEqual([{ title: 'K', url: 'https://k.example/', snippet: 'link text', text: 'link text' }]);
+    expect(await new JinaSearchBackend({ apiKey: 'jk', fetchImpl }).search('q', 3)).toEqual([{ title: 'J', url: 'https://j.example/', snippet: 'd', text: 'jina text' }]);
+    expect(await new FirecrawlBackend({ apiKey: 'fk', fetchImpl }).search('q', 3)).toEqual([{ title: 'F', url: 'https://f.example/', snippet: 'fire' }]);
+    expect(fetchImpl.calls.map((c) => (c.init.headers as Record<string, string>).authorization)).toEqual(['Bearer lk', 'Bearer kk', 'Bearer jk', 'Bearer fk']);
+    expect(JSON.parse(String(fetchImpl.calls[0].init.body))).toMatchObject({ query: 'q', count: 3 });
+    expect(JSON.parse(String(fetchImpl.calls[1].init.body))).toEqual({ q: 'q', depth: 'fast', outputType: 'searchResults' });
+  });
+
+  it('rotates the first backend per query, keeps Wikipedia last and blocks exhausted backends', async () => {
+    let now = 0;
+    const hit = (id: string) => ({ id, async search(q: string) { return [{ title: id, url: `https://${id}.example/${q}`, text: 'x' }]; } });
+    const broken = { id: 'broken', async search() { const { SearchHttpError } = await import('../../src/search/search.mjs'); throw new SearchHttpError(429); } };
+    const wiki = { ...hit('wiki'), fallback: true };
+    const service = new SearchService({ backends: [broken, hit('a'), hit('b'), wiki], fetchPages: false, now: () => now });
+    const sources = await service.search(['q1', 'q2', 'q3'], { maxSources: 3 });
+    expect(sources.map((s) => s.provider)).toEqual(['a', 'b', 'a']);
+    expect(service.describe().blocked).toEqual(['broken']);
+    now = 2 * 60 * 60 * 1000;
+    expect(service.rotation().map((b) => b.id)).toContain('broken');
+    expect(service.rotation().at(-1).id).toBe('wiki');
+  });
+
+  it('skips excluded URLs', async () => {
+    const backend = { id: 'a', async search() { return [{ title: 'old', url: 'https://old.example' }, { title: 'new', url: 'https://new.example', text: 't' }]; } };
+    const sources = await new SearchService({ backends: [backend], fetchPages: false }).search(['q'], { exclude: ['https://old.example'] });
+    expect(sources.map((s) => s.url)).toEqual(['https://new.example']);
   });
 
   it('falls back to the Jina reader when a page yields too little text', async () => {

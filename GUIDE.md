@@ -8,7 +8,7 @@
    git clone https://github.com/bezgolovyponch/free-research-llm.git
    cd free-research-llm
    ```
-3. **Get free keys and save them.** The full list with verified limits and exact clicks is in **[KEYS.md](KEYS.md)**. In short: create **Gemini**, **Groq** and **Tavily** keys (more is better: Mistral, Cerebras, NVIDIA, Exa), then double-click **`keys.command`** and paste each key when asked. They are stored in the macOS Keychain, not in a file.
+3. **Get free keys and save them.** The full list with verified limits and exact clicks is in **[KEYS.md](KEYS.md)**. In short: create **Gemini**, **Groq**, **LangSearch** and **Tavily** keys (more is better: Mistral, Cerebras, NVIDIA, Exa, Jina; unlimited search: `./searxng.command`), then double-click **`keys.command`** and paste each key when asked. They are stored in the macOS Keychain, not in a file.
 4. Alternative without the Keychain: put `export GROQ_API_KEY="…"` lines in `~/.zshrc`, or paste keys in the app's **Setup** tab, which keeps them for the current session only.
 5. Fully offline option: install Ollama (https://ollama.com/download), then run `ollama pull qwen2.5:7b`. It needs no key.
 6. **Start the app:** run `npm start`, or on a Mac double-click `start.command`. Open **http://127.0.0.1:4600**.

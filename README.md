@@ -13,7 +13,7 @@ question ──► DECOMPOSE (deep model)         MECE issue tree: 3-6 drivers �
               │                              dependencies, impact × uncertainty priority
               ▼
          for each sub-question, in dependency order:
-           SEARCH   web (Tavily / Brave / SearXNG / Wikipedia) + your CSV (source D1)
+           SEARCH   web (LangSearch / Tavily / Exa / Linkup / Jina / Firecrawl / SearXNG / Wikipedia, rotated) + gap re-search + your CSV (D1)
            ANSWER   fast free model, every number cited [S#] or labelled an assumption
            REVIEW   a different provider critiques it (verifier ≠ doer)
            CHECK    mechanical: cited ids exist · numbers sourced · calculation recomputed by machine
@@ -52,9 +52,9 @@ Reports are written to `reports/<project>.md`.
 
 ## Keys and routing
 
-**[KEYS.md](KEYS.md)** lists which free keys to get (verified 2026-10-17), the exact clicks for each, and how the router uses them. Short version: get **Gemini + Groq + Tavily**, then double-click **`keys.command`** to save them in the macOS Keychain. Optional extras: Mistral, Cerebras, NVIDIA, Exa, OpenRouter, SambaNova, Cloudflare, Cohere, Puter.
+**[KEYS.md](KEYS.md)** lists which free keys to get (verified 2026-10-17), the exact clicks for each, and how the router uses them. Short version: get **Gemini + Groq + LangSearch + Tavily**, then double-click **`keys.command`** to save them in the macOS Keychain. Optional extras: Mistral, Cerebras, NVIDIA, Exa, OpenRouter, SambaNova, Cloudflare, Cohere, Puter.
 
-Supported providers: Gemini, Groq, Cerebras, Mistral, NVIDIA, SambaNova, OpenRouter (`:free` only), Cloudflare Workers AI, Cohere, Puter, Ollama (local), any custom OpenAI-compatible endpoint, and DeepSeek (paid; used only if `FRL_PAID_CALL_LIMIT` > 0). Search: Tavily, Exa, Serper, Brave, SearXNG and Wikipedia, plus the Jina reader for pages that return too little text.
+Supported providers: Gemini, Groq, Cerebras, Mistral, NVIDIA, SambaNova, OpenRouter (`:free` only), Cloudflare Workers AI, Cohere, Puter, Ollama (local), any custom OpenAI-compatible endpoint, and DeepSeek (paid; used only if `FRL_PAID_CALL_LIMIT` > 0). Search: LangSearch, Tavily, Exa, Linkup, Jina, Firecrawl, Serper, Brave, SearXNG (local Docker, `./searxng.command`) and Wikipedia, plus the Jina reader for pages that return too little text.
 
 The **deep** role (issue tree, retries, memo) and the **fast** role (research every sub-question) each have their own provider order, and the reviewer always uses a different provider. Keys are read from the shell environment first, then from the macOS Keychain. They are never read from or written to a project file.
 
@@ -69,7 +69,7 @@ Model IDs are not hard-coded. Each provider's `/models` list is read at start an
 | `src/app.mjs` | composition root: providers, search, store, engine |
 | `src/llm/` | provider presets, OpenAI-compatible client, failover router, scripted demo provider |
 | `src/research/` | engine, prompts, issue tree, mechanical verifier, safe calculator, domain templates, JSON extraction |
-| `src/search/` | Tavily, Brave, SearXNG, Wikipedia backends + page text fetch |
+| `src/search/` | search backends, per-query rotation, quota benching, page text fetch |
 | `src/secrets.mjs` | loads missing keys from the macOS Keychain (`keys.command` writes them) |
 | `src/data/csv.mjs` | CSV parsing + column profiling (your data becomes source D1) |
 | `public/index.html` | the decomposition UI (single file, no external resources) |
@@ -79,5 +79,5 @@ Model IDs are not hard-coded. Each provider's `/models` list is read at start an
 ## Honest limits
 
 - Free models are weaker than frontier models. The checks catch invented sources and bad arithmetic, but they cannot prove that a cited page says what the claim says. The reviewer pass reduces that risk without removing it.
-- Wikipedia-only search is thin for prices and listings. Add a free Tavily key for real web results, or upload listings as CSV.
+- Wikipedia-only search is thin for prices and listings. Add free LangSearch and Tavily keys (or run `./searxng.command`) for real web results, or upload listings as CSV.
 - Tax and legal answers are research, not advice. Confirm with a licensed advisor before filing.

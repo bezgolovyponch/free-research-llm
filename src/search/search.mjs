@@ -25,12 +25,23 @@ export function htmlToText(html) {
     .trim();
 }
 
+export class SearchHttpError extends Error {
+  constructor(status) {
+    super(`HTTP ${status}`);
+    this.status = status;
+  }
+
+  get exhausted() {
+    return [401, 402, 403, 429, 432, 433].includes(this.status);
+  }
+}
+
 async function fetchJson(fetchImpl, url, init = {}, timeoutMs = 10000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetchImpl(url, { ...init, signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new SearchHttpError(res.status);
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -104,6 +115,75 @@ export class SerperBackend {
   }
 }
 
+export class LangSearchBackend {
+  constructor({ apiKey, fetchImpl }) {
+    this.id = 'langsearch';
+    this.apiKey = apiKey;
+    this.fetchImpl = fetchImpl;
+    this.fullText = true;
+  }
+
+  async search(query, limit) {
+    const body = await fetchJson(this.fetchImpl, 'https://api.langsearch.com/v1/web-search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ query, count: limit, freshness: 'noLimit', contents: { text: { maxCharacters: PAGE_TEXT_LIMIT } } }),
+    }, 20000);
+    return (body.data?.webPages?.value ?? []).map((r) => ({ title: r.name ?? r.url, url: r.url, snippet: String(r.snippet ?? r.text ?? '').slice(0, 300), text: String(r.text ?? r.snippet ?? '').slice(0, PAGE_TEXT_LIMIT) }));
+  }
+}
+
+export class LinkupBackend {
+  constructor({ apiKey, fetchImpl }) {
+    this.id = 'linkup';
+    this.apiKey = apiKey;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async search(query, limit) {
+    const body = await fetchJson(this.fetchImpl, 'https://api.linkup.so/v1/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ q: query, depth: 'fast', outputType: 'searchResults' }),
+    }, 20000);
+    return (body.results ?? []).filter((r) => r.url).slice(0, limit).map((r) => ({ title: r.name ?? r.url, url: r.url, snippet: String(r.content ?? '').slice(0, 400), text: String(r.content ?? '').slice(0, PAGE_TEXT_LIMIT) }));
+  }
+}
+
+export class JinaSearchBackend {
+  constructor({ apiKey, fetchImpl }) {
+    this.id = 'jina';
+    this.apiKey = apiKey;
+    this.fetchImpl = fetchImpl;
+    this.fullText = true;
+  }
+
+  async search(query, limit) {
+    const body = await fetchJson(this.fetchImpl, `https://s.jina.ai/?q=${encodeURIComponent(query)}`, {
+      headers: { accept: 'application/json', authorization: `Bearer ${this.apiKey}` },
+    }, 30000);
+    return (body.data ?? []).slice(0, limit).map((r) => ({ title: r.title ?? r.url, url: r.url, snippet: String(r.description ?? '').slice(0, 400), text: String(r.content ?? r.description ?? '').slice(0, PAGE_TEXT_LIMIT) }));
+  }
+}
+
+export class FirecrawlBackend {
+  constructor({ apiKey, fetchImpl }) {
+    this.id = 'firecrawl';
+    this.apiKey = apiKey;
+    this.fetchImpl = fetchImpl;
+  }
+
+  async search(query, limit) {
+    const body = await fetchJson(this.fetchImpl, 'https://api.firecrawl.dev/v2/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ query, limit }),
+    }, 20000);
+    const web = Array.isArray(body.data) ? body.data : body.data?.web ?? [];
+    return web.slice(0, limit).map((r) => ({ title: r.title ?? r.url, url: r.url, snippet: String(r.description ?? '').slice(0, 400) }));
+  }
+}
+
 export class SearxngBackend {
   constructor({ baseURL, fetchImpl }) {
     this.id = 'searxng';
@@ -132,6 +212,7 @@ export function encyclopediaQueries(query) {
 export class WikipediaBackend {
   constructor({ fetchImpl, lang = 'en' }) {
     this.id = 'wikipedia';
+    this.fallback = true;
     this.fetchImpl = fetchImpl;
     this.lang = lang;
     this.fullText = true;
@@ -165,8 +246,13 @@ export class WikipediaBackend {
 }
 
 export class SearchService {
-  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4 }) {
+  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000 }) {
     this.backends = backends;
+    this.jinaKey = jinaKey;
+    this.now = now;
+    this.blockMs = blockMs;
+    this.blockedUntil = new Map();
+    this.cursor = 0;
     this.fetchImpl = fetchImpl;
     this.fetchPages = fetchPages;
     this.jinaReader = jinaReader;
@@ -178,11 +264,11 @@ export class SearchService {
     return this.backends.length > 0;
   }
 
-  async fetchText(url, accept) {
+  async fetchText(url, accept, extraHeaders = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
-      const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept }, signal: controller.signal });
+      const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept, ...extraHeaders }, signal: controller.signal });
       const type = res.headers.get('content-type') ?? '';
       if (!res.ok || !/text\/(html|plain|markdown)/.test(type)) return '';
       const body = await res.text();
@@ -197,16 +283,23 @@ export class SearchService {
   async pageText(url) {
     const direct = await this.fetchText(url, 'text/html,text/plain');
     if (direct.length >= 400 || !this.jinaReader) return direct;
-    const viaReader = await this.fetchText(`https://r.jina.ai/${url}`, 'text/plain');
+    const viaReader = await this.fetchText(`https://r.jina.ai/${url}`, 'text/plain', this.jinaKey ? { authorization: `Bearer ${this.jinaKey}` } : {});
     return viaReader.length > direct.length ? viaReader : direct;
   }
 
-  async search(queries, { maxSources = 6 } = {}) {
-    const seen = new Set();
+  rotation() {
+    const live = this.backends.filter((b) => (this.blockedUntil.get(b.id) ?? 0) <= this.now());
+    const primary = live.filter((b) => !b.fallback);
+    const start = primary.length ? this.cursor++ % primary.length : 0;
+    return [...primary.slice(start), ...primary.slice(0, start), ...live.filter((b) => b.fallback)];
+  }
+
+  async search(queries, { maxSources = 6, exclude = [] } = {}) {
+    const seen = new Set(exclude);
     const collected = [];
     this.lastErrors = [];
     for (const query of queries.filter(Boolean)) {
-      for (const backend of this.backends) {
+      for (const backend of this.rotation()) {
         try {
           const results = await backend.search(query, this.resultsPerQuery);
           for (const r of results) {
@@ -217,13 +310,14 @@ export class SearchService {
           if (results.length) break;
         } catch (error) {
           this.lastErrors.push(`${backend.id}: ${error.message}`);
+          if (error.exhausted) this.blockedUntil.set(backend.id, this.now() + this.blockMs);
         }
       }
       if (collected.length >= maxSources) break;
     }
     const sources = collected.slice(0, maxSources);
     if (this.fetchPages) {
-      await Promise.all(sources.filter((s) => !s.text).slice(0, 3).map(async (s) => {
+      await Promise.all(sources.filter((s) => !s.text).slice(0, 5).map(async (s) => {
         s.text = await this.pageText(s.url);
       }));
     }
@@ -240,6 +334,7 @@ export class SearchService {
   }
 
   describe() {
-    return { enabled: this.enabled, backends: this.backends.map((b) => b.id), lastErrors: this.lastErrors };
+    const blocked = this.backends.filter((b) => (this.blockedUntil.get(b.id) ?? 0) > this.now()).map((b) => b.id);
+    return { enabled: this.enabled, backends: this.backends.map((b) => b.id), blocked, lastErrors: this.lastErrors };
   }
 }

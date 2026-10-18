@@ -1,6 +1,6 @@
 # KEYS — which free keys to get, where, and where to paste them
 
-Checked against each provider's own docs on **2026-10-17**. Free tiers change often; if a number below looks wrong, the provider's page wins.
+Checked against each provider's own docs on **2026-10-18**. Free tiers change often; if a number below looks wrong, the provider's page wins.
 
 ## The recommended set
 
@@ -8,11 +8,16 @@ Checked against each provider's own docs on **2026-10-17**. Free tiers change of
 |---|---|---|---|---|
 | **1 — must** | **Gemini** | best free main model: writes the issue tree and the memo | per-model RPM/RPD shown in your AI Studio dashboard | no |
 | **1 — must** | **Groq** | fastest; researches most sub-questions | `gpt-oss-120b` / `gpt-oss-20b`: 30 req/min, 1,000 req/day, 8K tokens/min, 200K tokens/day | no |
-| **1 — must** | **Tavily** | real web search (without it: Wikipedia only) | 1,000 credits/month | no |
+| **1 — must** | **LangSearch** | free web search with full page text; carries most queries | free plan, 5 req/s for new accounts; daily token limits shown in your dashboard (no monthly cap published) | no |
+| **1 — must** | **Tavily** | second search engine, full page text | 1,000 credits/month | no |
+| **1 — must** | **SearXNG** (open source, on your Mac) | unlimited metasearch (Google/Bing/DDG/… results), no key | none — runs in Docker on 127.0.0.1:8888 | no |
 | 2 — strongly | **Mistral** | huge free volume, good backup for both roles | 1 req/s, 500K tokens/min, 1B tokens/month per model (third-party summary of the Experiment plan) | no — **phone verification**, and your requests may be used for training |
 | 2 — strongly | **Cerebras** | very fast `gpt-oss-120b`, `qwen-3.8-27b` | 5 req/min, 1M tokens/day | no |
 | 2 — strongly | **NVIDIA build** | 100+ models, independent reviewer | ~40 req/min (community-reported, not an SLA); prototyping use | no |
-| 3 — nice | **Exa** | second search engine, returns full page text | $10 credit/month (~1,400 searches) | no |
+| 3 — nice | **Exa** | semantic search, returns full page text | $10 credit/month (~1,400 searches) | no |
+| 3 — nice | **Linkup** | search for agents | €5 free; $20/month top-up for sign-ups with a work email | no |
+| 3 — nice | **Jina** | `s.jina.ai` search + a key for the page reader (higher limits) | 10M tokens **once** (~1,000 searches), 100 req/min | no |
+| 3 — nice | **Firecrawl** | search (open source, self-hostable) | free monthly credits (search costs 2 credits per 10 results) | no |
 | 3 — nice | **OpenRouter** | extra free models | 20 req/min; 50 req/day (1,000/day after buying $10 credit) | no |
 | 3 — nice | **Serper** | Google results | 2,500 queries **once** (not monthly) | no |
 | 4 — optional | SambaNova | DeepSeek-V3.2 for free | 20 req/min, **20 req/day**, 200K tokens/day | no |
@@ -22,9 +27,10 @@ Checked against each provider's own docs on **2026-10-17**. Free tiers change of
 | built in | **Pollinations** (no key) | works with zero keys, so the app always has a model | anonymous: **1 reply per 30 s per IP** (HTTP 402 `FREE_LIMIT`), model `gpt-oss-20b`; prompts go to a public third-party API. Off: `FRL_POLLINATIONS=0`. A free key from https://enter.pollinations.ai raises limits (`POLLINATIONS_API_KEY`) | no |
 | skip | ~~GitHub Models~~ | **retired 2026-07-30** | — | — |
 | skip | Hugging Face | free accounts get **no** monthly inference credits now | — | — |
-| skip | Brave Search | free plan replaced by $5/month credit that **requires a card** | — | yes |
+| skip | Brave Search | free plan removed Feb 2026: $5/month credit (~1,000 searches) but **a card is required** and use above it is billed. Works in the app (`BRAVE_API_KEY`) if you accept that | — | yes |
+| skip | Google Custom Search JSON API | **closed to new customers**; shuts down 2027-01-01 | — | — |
 
-**Minimum that works well: Gemini + Groq + Tavily. Best free setup: add Mistral, Cerebras, NVIDIA and Exa.**
+**Minimum that works well: Gemini + Groq + LangSearch + Tavily. Best free setup: add SearXNG, Mistral, Cerebras, NVIDIA, Exa and Jina.**
 
 ## How the app routes between them
 
@@ -39,8 +45,12 @@ REVIEWER   always a different provider than the one that wrote the answer
 ON 429/402 that provider cools down (honours Retry-After or the "retry after" text); the next one answers;
 CUT OFF    a reply stopped by the token limit is re-asked with double the budget (up to 16K);
            if every provider is cooling, the app waits up to 65 s, then stops cleanly (press Run / resume later)
-SEARCH     tavily → exa → serper → brave → searxng → wikipedia (first one that returns results wins);
-           pages that return too little text are re-read through the free Jina reader
+SEARCH     every keyed engine takes turns: query 1 starts at langsearch, query 2 at tavily, query 3 at exa, …
+           (langsearch, tavily, exa, linkup, jina, firecrawl, serper, brave, searxng); if one fails the next answers;
+           an engine that says 401/402/403/429/432 is benched for 1 hour; wikipedia is the last resort;
+           pages that return too little text are re-read through the Jina reader
+GAP LOOP   a sub-answer that fails the checks: its "gaps" become new searches (new URLs only),
+           then the deep model retries with the extra evidence — up to 3 attempts per sub-question
 ```
 
 Providers without a key are skipped automatically. To change the order:
@@ -55,6 +65,10 @@ Providers without a key are skipped automatically. To change the order:
 | 1 | https://aistudio.google.com/apikey → **Create API key** | key starting `AIza…` |
 | 2 | https://console.groq.com/keys → **Create API Key** | key starting `gsk_…` |
 | 3 | https://app.tavily.com → API Keys (a default key is already there) | key starting `tvly-…` |
+| 3a | https://langsearch.com → sign in → **API Keys** → create | key starting `sk-…` |
+| 3b | https://jina.ai/api-dashboard → **API key & billing** (a key is shown) | key starting `jina_…` |
+| 3c | https://app.linkup.so → API key | the key |
+| 3d | https://www.firecrawl.dev/app/api-keys | key starting `fc-…` |
 | 4 | https://console.mistral.ai/api-keys → choose the free **Experiment** plan, verify phone → **Create new key** | the key |
 | 5 | https://cloud.cerebras.ai → **API Keys** | key starting `csk-…` |
 | 6 | https://build.nvidia.com → sign in → open any model → **Get API Key** | key starting `nvapi-…` |
@@ -68,6 +82,14 @@ cd ~/Documents/research/free-research-llm-main
 ./keys.command
 ```
 It walks the list. For each line, paste the key (it stays invisible) and press **Enter**. Press **Enter** on an empty line to skip a key, or type `-` to delete a saved one. You can run it again any time to add or replace keys.
+
+Search keys only (model keys already saved): `./keys.command search`.
+
+**Step 2b. Optional, unlimited search: SearXNG on your Mac.** Install and open Docker Desktop (https://www.docker.com/products/docker-desktop/), wait for "Engine running", then:
+```bash
+./searxng.command
+```
+It starts the open-source SearXNG container on http://127.0.0.1:8888 (only this Mac can reach it) with JSON output on, and saves `SEARXNG_URL` in the Keychain. It restarts with Docker. Stop it: `docker rm -f frl-searxng`.
 
 **Step 3. Start the app.** Double-click **`start.command`**, or run `npm start` in the folder. The terminal prints which keys came from the Keychain and the live route, for example:
 ```
@@ -107,6 +129,13 @@ route fast: groq → gemini → mistral
 - GitHub Models retirement: https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models
 - Hugging Face credits: https://huggingface.co/docs/inference-providers/pricing
 - Tavily free credits: https://docs.tavily.com/documentation/api-credits
+- LangSearch API and free plan: https://docs.langsearch.com/api/web-search-api.md · https://docs.langsearch.com/limits/api-limits.md
+- Linkup search endpoint and credits: https://docs.linkup.so/pages/documentation/endpoints/search/overview.md · https://docs.linkup.so/pages/documentation/platform/pricing.md
+- Jina free tokens and limits: https://jina.ai/reader · https://apis.io/rate-limits/jina-ai/jina-ai-rate-limits/
+- Firecrawl search: https://docs.firecrawl.dev/api-reference/endpoint/search
+- SearXNG Docker and JSON format: https://docs.searxng.org/admin/installation-docker.html · https://docs.searxng.org/admin/settings/settings_search.html · https://docs.searxng.org/admin/settings/settings_server.html
+- Brave free tier removal: https://www.implicator.ai/brave-drops-free-search-api-tier-puts-all-developers-on-metered-billing/
+- Google Custom Search API closure: https://brave.com/learn/google-api-shutdown/
 - Exa API: https://exa.ai/docs/reference/search · free credits: https://www.tinyfish.ai/blog/exa-pricing
 - Serper: https://serper.dev/
 - Brave plan change: https://parallel.ai/articles/best-free-web-search-api

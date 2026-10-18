@@ -172,10 +172,15 @@ export const ROUTE_ORDER = {
 };
 
 export const SEARCH_KEYS = [
+  { env: 'LANGSEARCH_API_KEY', label: 'LangSearch web search (free, no monthly cap, full page text)', signup: 'https://langsearch.com/api-keys' },
   { env: 'TAVILY_API_KEY', label: 'Tavily search (1,000 credits/month free)', signup: 'https://app.tavily.com' },
   { env: 'EXA_API_KEY', label: 'Exa search ($10/month free credit)', signup: 'https://dashboard.exa.ai/api-keys' },
+  { env: 'LINKUP_API_KEY', label: 'Linkup search (€5 free, $20/month with a work email)', signup: 'https://app.linkup.so' },
+  { env: 'JINA_API_KEY', label: 'Jina search + reader (10M free tokens once, ~1,000 searches)', signup: 'https://jina.ai/api-dashboard' },
+  { env: 'FIRECRAWL_API_KEY', label: 'Firecrawl search (free monthly credits)', signup: 'https://www.firecrawl.dev/app/api-keys' },
   { env: 'SERPER_API_KEY', label: 'Serper Google search (2,500 free queries once)', signup: 'https://serper.dev/api-key' },
   { env: 'BRAVE_API_KEY', label: 'Brave search ($5/month credit, card required)', signup: 'https://api-dashboard.search.brave.com' },
+  { env: 'SEARXNG_URL', label: 'SearXNG on this Mac (unlimited, run ./searxng.command)', signup: 'http://127.0.0.1:8888' },
 ];
 
 export const NON_CHAT_MODEL = /embed|whisper|tts|audio|image|vision-only|guard|moderation|rerank|transcribe|aqa|imagen|veo|lyria|native-audio|computer-use|robotics|orpheus|playai|compound|ocr|reward|parakeet|retriever|nemoguard|safety|clip|kosmos|deplot|paligemma|vila|neva|flux|stable-diffusion|bge-|m2m|translate/i;
