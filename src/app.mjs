@@ -153,6 +153,7 @@ export class App {
       calls: this.router.calls,
       paid: { calls: this.router.paidCalls, limit: this.router.paidCallLimit },
       improving: [...this.improver.active.keys()],
+      improveAll: this.improver.allStatus(),
     };
   }
 }

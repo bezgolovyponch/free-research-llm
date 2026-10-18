@@ -216,6 +216,7 @@
     <div class="wrap">
       <h2>History: sessions and researches</h2>
       <p class="lead">Every app session, research run, expected-result check and self-improving loop, newest first. Full per-project event logs and model-call logs are kept in <span class="mono">data/logs/</span> as JSONL.</p>
+      <div class="card"><h3 style="margin-top:0">Self-improving loop over all researches</h3><p class="small muted">Cycles through every research (new ones join the next round). Each gets a time slice: the loop changes one piece at a time and keeps a change only if the measured score rises. Free models only.</p><div class="row"><label class="small">hours</label><input type="text" id="allHours" value="8" style="width:70px"><label class="small">minutes per research</label><input type="text" id="allSlice" value="20" style="width:70px"><button class="btn sm" id="allStart">▶ Improve all</button><button class="btn danger sm" id="allStop">■ Stop</button></div><div class="small" id="allInfo" style="margin-top:6px"></div></div>
       <div class="card tablewrap" style="padding:6px"><table id="histProjects"></table></div>
       <div class="card"><h3 style="margin-top:0">Timeline</h3><div id="histEvents" class="small"></div></div>
     </div>
@@ -656,13 +657,20 @@ function renderSources(){
 }
 
 async function loadHistory(){
-  let h;try{h=await api("/api/history");}catch(e){toast(e.message);return;}
+  let h;try{h=await api("/api/history");STATE.status=await api("/api/status");}catch(e){toast(e.message);return;}
+  const all=STATE.status.improveAll||{};
+  $("allInfo").innerHTML=all.active?'<span class="pulse" style="color:var(--bl)">● running</span> until '+esc(all.deadline.slice(0,16).replace("T"," "))+" · round "+(all.rounds+1)+(all.current?" · now improving <span class='mono'>"+esc(trunc(all.current,40))+"</span>":""):"idle";
+  $("allStart").disabled=!!all.active;$("allStop").disabled=!all.active;
   let t="<tr><th>Started</th><th>Question → expected</th><th>Phase / verdict</th><th>Nodes ok</th><th>Expected met</th><th>Loop</th><th></th></tr>";
   h.projects.forEach(p=>{t+='<tr class="click" data-open="'+esc(p.id)+'"><td class="small mono">'+esc((p.createdAt||"").slice(0,16).replace("T"," "))+"</td><td>"+esc(trunc(p.question,90))+(p.expected?'<div class="small muted">→ '+esc(trunc(p.expected,90))+"</div>":"")+"</td><td class='small'>"+esc(p.phase)+(p.verdict?"<div>"+esc(trunc(p.verdict,60))+"</div>":"")+"</td><td>"+p.good+"/"+p.nodes+"</td><td>"+(p.expectedScore==null?"—":Math.round(p.expectedScore*100)+"%")+"</td><td class='small'>"+(p.loop?esc(p.loop.baseline)+" → "+esc(p.loop.best)+" ("+p.loop.kept+"/"+p.loop.trials+" kept)":"—")+'</td><td><a class="small" href="/api/projects/'+encodeURIComponent(p.id)+'/knowledge" target="_blank">knowledge</a> · <a class="small" href="/api/projects/'+encodeURIComponent(p.id)+'/logs" target="_blank">log</a></td></tr>';});
   $("histProjects").innerHTML=h.projects.length?t:"<tr><td class='muted'>no research yet</td></tr>";
   $("histProjects").querySelectorAll("tr[data-open]").forEach(r=>r.addEventListener("click",e=>{if(e.target.tagName==="A")return;openProject(r.dataset.open);gotoTab("tree");}));
   $("histEvents").innerHTML=h.events.length?h.events.slice(0,300).map(e=>'<div><span class="mono muted">'+esc(e.ts.slice(0,19).replace("T"," "))+"</span> <b>"+esc(e.type)+"</b> "+(e.projectId?'<span class="mono">'+esc(trunc(e.projectId,28))+"</span> ":"")+esc(e.message)+"</div>").join(""):'<span class="muted">no events yet</span>';
 }
+
+$("allStart").addEventListener("click",async()=>{try{await api("/api/improve-all",{method:"POST",body:{hours:Number($("allHours").value)||8,sliceMinutes:Number($("allSlice").value)||20}});toast("improving all researches");loadHistory();}catch(e){toast(e.message);}});
+$("allStop").addEventListener("click",async()=>{try{await api("/api/improve-all/stop",{method:"POST"});toast("stopping after the current step");setTimeout(loadHistory,1500);}catch(e){toast(e.message);}});
+setInterval(()=>{if($("tab-history").classList.contains("on"))loadHistory();},10000);
 
 (async function boot(){
   try{STATE.templates=await api("/api/templates");}catch(e){}

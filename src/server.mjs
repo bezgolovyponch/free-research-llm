@@ -98,6 +98,8 @@ export function createServer(app) {
       return app.improver.start(id, await readJson(req));
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve\/stop$/, async (req, [id]) => app.improver.stop(id)],
+    ['POST', /^\/api\/improve-all$/, async (req) => app.improver.startAll(await readJson(req))],
+    ['POST', /^\/api\/improve-all\/stop$/, async () => app.improver.stopAll()],
     ['POST', /^\/api\/projects\/([\w-]+)\/cancel$/, async (req, [id]) => {
       app.engine.cancel(id);
       return { ok: true };

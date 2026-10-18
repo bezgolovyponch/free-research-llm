@@ -65,3 +65,28 @@ describe('ProjectImprover', () => {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 });
+
+describe('ProjectImprover.startAll', () => {
+  it('cycles every non-demo research with a time slice each and stops at the overall limit', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-all-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }) });
+    const a = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    const b = await engine.createProject({ question: 'Which e-bike rental size breaks even in Prague?' });
+    let clock = 0;
+    const improver = new ProjectImprover({ engine, now: () => (clock += 2000), sleep: async () => {} });
+    improver.startAll({ hours: 0.2, sliceMinutes: 2 });
+    expect(improver.allStatus().active).toBe(true);
+    expect(() => improver.startAll()).toThrow(/already running/);
+    for (let i = 0; i < 1000 && improver.allStatus().active; i++) await new Promise((r) => setTimeout(r, 10));
+    for (const id of [a.id, b.id]) {
+      const saved = await engine.load(id);
+      expect(saved.improve.baseline).toBeGreaterThan(0);
+      expect(saved.improve.trials.length).toBeGreaterThan(0);
+      expect(saved.improve.active).toBe(false);
+    }
+    expect(improver.stopAll()).toEqual({ ok: false });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+

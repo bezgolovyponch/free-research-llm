@@ -7,6 +7,7 @@ const MAX_HOURS = 72;
 const MAX_TRIALS_KEPT = 200;
 const QUOTA_PAUSE_MS = 5 * 60 * 1000;
 const MIN_GAIN = 0.001;
+const DEFAULT_SLICE_MINUTES = 20;
 const QUOTA_ERROR = /no model provider|cooling down|rate limit|quota/i;
 
 function round(value) {
@@ -113,6 +114,56 @@ export class ProjectImprover {
       }
     })();
     return { ok: true, deadline: new Date(state.deadline).toISOString() };
+  }
+
+  startAll({ hours = 8, sliceMinutes = DEFAULT_SLICE_MINUTES } = {}) {
+    if (this.all) throw new Error('the loop over all researches is already running');
+    const h = Math.min(MAX_HOURS, Math.max(0.05, Number(hours) || 8));
+    const sliceMs = Math.max(1, Number(sliceMinutes) || DEFAULT_SLICE_MINUTES) * 60 * 1000;
+    const state = { stopped: false, deadline: this.now() + h * 3600 * 1000, hours: h, current: null, rounds: 0 };
+    this.all = state;
+    void (async () => {
+      try {
+        await this.cycle(state, sliceMs);
+      } finally {
+        this.all = null;
+      }
+    })();
+    return { ok: true, deadline: new Date(state.deadline).toISOString() };
+  }
+
+  stopAll() {
+    if (!this.all) return { ok: false };
+    this.all.stopped = true;
+    for (const id of this.active.keys()) this.stop(id);
+    return { ok: true };
+  }
+
+  allStatus() {
+    return this.all ? { active: true, deadline: new Date(this.all.deadline).toISOString(), current: this.all.current, rounds: this.all.rounds } : { active: false };
+  }
+
+  async cycle(state, sliceMs) {
+    while (this.live(state)) {
+      const ids = (await this.engine.store.list()).filter((p) => !p.demo).map((p) => p.id);
+      if (!ids.length) break;
+      for (const id of ids) {
+        if (!this.live(state)) break;
+        if (this.active.has(id) || this.engine.running.has(id)) continue;
+        const slice = { stopped: false, deadline: Math.min(state.deadline, this.now() + sliceMs), hours: round(sliceMs / 3600000) };
+        state.current = id;
+        this.active.set(id, slice);
+        try {
+          await this.loop(id, slice);
+        } catch (error) {
+          await this.record(id, { active: false, error: error.message });
+        } finally {
+          this.active.delete(id);
+        }
+      }
+      state.rounds += 1;
+    }
+    state.current = null;
   }
 
   stop(id) {
