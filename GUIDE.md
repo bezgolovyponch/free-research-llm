@@ -68,10 +68,18 @@ Rules of thumb: give one decision per project; state numbers with currency and y
 - **History** tab: every session, research, verdict, expected-result score and loop, newest first. Each project links its **knowledge** record (facts / claims / hypotheses with evidence) and its full **log**.
 - Files: `data/logs/history.jsonl`, `data/logs/project-<id>.jsonl`, `data/logs/model-calls.jsonl`, `data/logs/quality.jsonl`.
 
-## F. Check and ship changes
+## F. Open it from your phone or another computer
+
+1. Once: `npm link` (makes the `frl` command available everywhere).
+2. `frl install` (macOS): the app runs in the background, starts at login and restarts if it stops. It accepts other devices only with an access token kept in the Keychain.
+3. `frl url` prints the links: this Mac, your Wi-Fi (phone, other PC) and, if Tailscale is installed on both devices, a link that works from anywhere. Open the link once on the other device; it remembers the token.
+4. Other computer with its own copy: on this Mac `frl keys export` (choose a passphrase), on the other computer `frl keys import` (paste the bundle, type the passphrase). Keys go to that computer's key store (macOS Keychain, Linux secret-tool, Windows user environment). The bundle is encrypted (AES-256-GCM, scrypt); send the passphrase separately.
+5. Other commands: `frl status`, `frl logs`, `frl token --rotate`, `frl uninstall`, `frl start [--remote]`.
+
+## G. Check and ship changes
 
 ```bash
 npm install       # once: installs vitest and activates the pre-commit gate
-npm run quality   # syntax, secrets, no comments, a test per module, full test suite
+npm run quality   # syntax, secrets, no comments, a test per module, unit tests, mobile e2e (iPhone + Pixel)
 ```
 A commit is refused while the gate fails. Rules: [PROTOCOLS.md](PROTOCOLS.md). Build history: [SESSION-LOG.md](SESSION-LOG.md).

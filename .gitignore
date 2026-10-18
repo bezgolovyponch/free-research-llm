@@ -227,3 +227,5 @@ node_modules/
 .DS_Store
 /loop/state.json
 /loop/history.jsonl
+test-results/
+playwright-report/

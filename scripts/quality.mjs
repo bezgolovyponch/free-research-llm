@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const UNTESTED_ENTRYPOINTS = new Set(['src/cli.mjs', 'src/loop/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
+const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/loop/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
 const SECRET_PATTERNS = [
   ['google-api-key', /AIza[0-9A-Za-z_-]{35}/],
   ['google-auth-key', /\bAQ\.[0-9A-Za-z_-]{40,}/],
@@ -74,6 +74,13 @@ const gates = {
       .filter((f) => f.startsWith('src/') && !UNTESTED_ENTRYPOINTS.has(f))
       .filter((f) => !fs.existsSync(path.join(ROOT, `tests/${f.slice(4, -4)}.test.ts`)));
     return { passed: missing.length === 0, detail: missing.length ? `no test file for: ${missing.join(', ')}` : 'every logic module has a matching test file' };
+  },
+
+  e2e() {
+    if (!fs.existsSync(path.join(ROOT, 'node_modules/@playwright/test'))) return { passed: true, detail: 'skipped: Playwright not installed (npm install, npx playwright install chromium webkit)' };
+    const result = run('npx', ['playwright', 'test', '--reporter=line']);
+    const summary = `${result.stdout}${result.stderr}`.match(/(\d+ passed[^\n]*|\d+ failed[^\n]*)/g);
+    return { passed: result.status === 0, detail: summary ? summary.join(', ') : `${result.stdout}${result.stderr}`.slice(-300) };
   },
 
   tests() {

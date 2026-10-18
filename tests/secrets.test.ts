@@ -16,8 +16,20 @@ describe('KeychainSecrets', () => {
     expect(calls[0]).toEqual(['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', 'GROQ_API_KEY', '-w']);
   });
 
-  it('does nothing off macOS and knows every provider and search key name', async () => {
-    expect(await new KeychainSecrets({ platform: 'linux', run: async () => ({ stdout: 'x' }) }).fillMissing({})).toEqual([]);
+  it('uses the right key store per platform and nothing on unknown platforms', async () => {
+    const calls: Array<[string, string[], unknown]> = [];
+    const run = async (cmd: string, args: string[], opts?: unknown) => {
+      calls.push([cmd, args, opts]);
+      return { stdout: cmd === 'reg' ? '    GROQ_API_KEY    REG_SZ    gsk_win\r\n' : 'value\n' };
+    };
+    expect(await new KeychainSecrets({ platform: 'linux', run }).read('GROQ_API_KEY')).toBe('value');
+    await new KeychainSecrets({ platform: 'linux', run }).write('GROQ_API_KEY', 'gsk_x');
+    expect(calls.at(-1)).toEqual(['secret-tool', ['store', '--label', 'free-research-llm GROQ_API_KEY', 'service', 'free-research-llm', 'account', 'GROQ_API_KEY'], { input: 'gsk_x' }]);
+    expect(await new KeychainSecrets({ platform: 'win32', run }).read('GROQ_API_KEY')).toBe('gsk_win');
+    await new KeychainSecrets({ platform: 'win32', run }).write('GROQ_API_KEY', 'gsk_y');
+    expect(calls.at(-1)).toEqual(['setx', ['GROQ_API_KEY', 'gsk_y'], undefined]);
+    expect(await new KeychainSecrets({ platform: 'aix', run }).fillMissing({})).toEqual([]);
+    expect(new KeychainSecrets({ platform: 'darwin', run }).label).toBe('macOS Keychain');
     expect(secretNames()).toEqual(expect.arrayContaining(['GEMINI_API_KEY', 'MISTRAL_API_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'PUTER_AUTH_TOKEN', 'TAVILY_API_KEY', 'SERPER_API_KEY']));
   });
 });

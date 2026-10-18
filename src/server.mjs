@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { App, ROOT_DIR } from './app.mjs';
 import { KeychainSecrets } from './secrets.mjs';
+import { AccessGate, newAccessToken } from './auth.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { TEMPLATES } from './research/templates.mjs';
 import { toMarkdown } from './report.mjs';
@@ -48,7 +49,12 @@ function statusFor(error) {
   return 400;
 }
 
-export function createServer(app) {
+function deny(res, reason) {
+  res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Access needed</title><body style="font:16px system-ui;padding:24px;max-width:560px"><h2>Free Research LLM</h2><p>${reason}.</p><p>On the Mac that runs the app, run <code>frl url</code> and open the link it prints.</p></body>`);
+}
+
+export function createServer(app, gate = new AccessGate()) {
   const routes = [
     ['GET', /^\/api\/status$/, async () => app.status()],
     ['POST', /^\/api\/providers\/refresh$/, async () => {
@@ -137,6 +143,12 @@ export function createServer(app) {
 
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    const access = gate.decide(req, url);
+    if (!access.allowed) return deny(res, access.reason);
+    if (access.setCookie) {
+      res.writeHead(302, { 'set-cookie': access.setCookie, location: url.pathname + url.hash });
+      return res.end();
+    }
     try {
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         return send(res, 200, await fs.readFile(path.join(ROOT_DIR, 'public', 'index.html'), 'utf8'), 'text/html; charset=utf-8');
@@ -160,17 +172,24 @@ export function createServer(app) {
   });
 }
 
-export async function startServer({ app = new App(), port = Number(process.env.PORT || 4600), host = process.env.HOST || '127.0.0.1' } = {}) {
+export async function startServer({ app = new App(), port = Number(process.env.PORT || 4600), host = process.env.HOST || '127.0.0.1', token = '' } = {}) {
   await app.refreshProviders();
-  const server = createServer(app);
+  const server = createServer(app, new AccessGate({ token }));
   await new Promise((resolve) => server.listen(port, host, resolve));
   return { app, server, url: `http://${host === '0.0.0.0' ? 'localhost' : host}:${server.address().port}` };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const secrets = new KeychainSecrets();
-  const fromKeychain = await secrets.fillMissing(process.env);
-  const { app, url } = await startServer({ app: new App({ secrets }) });
+  const fromKeychain = process.env.FRL_KEYCHAIN === '0' ? [] : await secrets.fillMissing(process.env);
+  const remote = process.env.HOST && process.env.HOST !== '127.0.0.1' && process.env.HOST !== 'localhost';
+  let token = process.env.FRL_ACCESS_TOKEN || '';
+  if (remote && !token) {
+    token = newAccessToken();
+    await secrets.write('FRL_ACCESS_TOKEN', token);
+  }
+  const { app, url } = await startServer({ app: new App({ secrets, dataDir: process.env.FRL_DATA_DIR || undefined }), token: remote ? token : '' });
+  if (remote) console.log('  remote access ON: other devices need the token link from "frl url"');
   if (fromKeychain.length) console.log(`  keys from macOS Keychain: ${fromKeychain.join(', ')}`);
   const status = app.status();
   const ready = status.providers.filter((p) => p.state === 'ready');
