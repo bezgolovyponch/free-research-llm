@@ -12,6 +12,7 @@ export const TASK_MARKERS = {
   variant: 'TASK=IMPROVE_NODE',
   chat: 'TASK=NODE_CHAT',
   suggest: 'TASK=SUGGEST_SUBISSUES',
+  appChat: 'TASK=APP_CHAT',
 };
 
 function constraintsText(constraints = {}) {
@@ -303,6 +304,38 @@ EVIDENCE:
 ${sourcesBlock(sources)}
 
 JSON shape: {"suggestions":[{"title":"","question":"","why":"","method":"lookup|calculation|comparison|estimate|data","searchQueries":[""],"sourceIds":["S1"],"quote":""}]}`,
+    },
+  ];
+}
+
+export function appChatPrompt({ projects, status, thread, message }) {
+  const list = projects.slice(0, 25).map((p) => `${p.id} | ${p.phase} | ${p.good}/${p.nodes} ok | expected ${p.expectedScore === null || p.expectedScore === undefined ? 'n/a' : `${Math.round(p.expectedScore * 100)}%`} | ${p.question}`).join('\n') || 'none';
+  const history = thread.slice(-10).map((m) => `${m.role === 'app' ? 'APP REPORT' : m.role.toUpperCase()}: ${String(m.content).slice(0, 1200)}`).join('\n');
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.appChat}
+You are the assistant for the whole research application. You see every research, the connected free models and search engines. Answer questions about them and, when asked, start or steer work with actions. You never write findings: research runs do, and machine checks grade them.
+
+RESEARCHES (id | phase | pieces passing | expected result met | question):
+${list}
+
+MODELS READY: ${status.models.join(', ') || 'none'}
+SEARCH: ${status.search.join(', ') || 'none'}
+LOOPS RUNNING: ${status.improving.join(', ') || 'none'}
+
+CONVERSATION SO FAR:
+${history || 'none'}
+
+USER: ${message}
+
+Allowed actions (use ids from the list above):
+- {"type":"create","question":"","expected":""}  (new research; its tree is built for review)
+- {"type":"improve","projectId":"","hours":2}  (start the self-improving loop)
+- {"type":"stop","projectId":""}  (stop a loop or run)
+- {"type":"open","projectId":""}  (show a research to the user)
+JSON shape: {"reply":"short answer to the user","actions":[]}`,
     },
   ];
 }

@@ -11,6 +11,7 @@ import { NodeChat } from './research/chat.mjs';
 import { SubIssueSuggester } from './research/suggest.mjs';
 import { ExchangeRates } from './research/rates.mjs';
 import { EventLog } from './logs.mjs';
+import { AppChat } from './appchat.mjs';
 import { MarketplaceService } from './search/marketplaces.mjs';
 import { RobotsPolicy } from './search/robots.mjs';
 import { ProjectStore } from './store.mjs';
@@ -102,6 +103,13 @@ export class App {
     this.improver = new ProjectImprover({ engine: this.engine });
     this.suggester = new SubIssueSuggester({ engine: this.engine });
     this.chat = new NodeChat({ engine: this.engine, suggester: this.suggester, improver: this.improver });
+    this.appChat = new AppChat({
+      engine: this.engine,
+      improver: this.improver,
+      router: this.router,
+      file: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'chat', 'app-chat.json'),
+      statusOf: () => ({ models: this.router.status().filter((p) => p.state === 'ready').map((p) => p.id), search: this.search.describe().backends, improving: [...this.improver.active.keys()] }),
+    });
     this.fixedProviders = Boolean(providers);
   }
 

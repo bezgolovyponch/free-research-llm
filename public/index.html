@@ -178,7 +178,14 @@
   .loglist div{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 
   #chatDock{flex:0 0 46%; display:flex; flex-direction:column; border-top:1px solid var(--line); min-height:220px; background:var(--panel2)}
-  #chatHead{display:flex; justify-content:space-between; gap:8px; padding:8px 14px; font-size:12px; font-weight:700; color:var(--dim); border-bottom:1px solid var(--line)}
+  #chatHead{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 10px; font-size:12px; font-weight:700; color:var(--dim); border-bottom:1px solid var(--line)}
+  #chatScopes button{padding:5px 12px; font-size:12px}
+  #chatScopes button:disabled{opacity:.4; cursor:not-allowed}
+  .files{display:grid; gap:6px; margin-top:6px}
+  .file{display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel2); font-size:13px}
+  .file .n{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .drop{display:flex; align-items:center; justify-content:center; gap:8px; border:1px dashed var(--edge); border-radius:8px; padding:10px; color:var(--dim); font-size:13px; cursor:pointer; text-align:center}
+  .drop:hover,.drop.over{border-color:var(--acc); color:var(--acc); background:var(--acc-soft)}
   #chatMsgs{flex:1 1 auto; overflow:auto; padding:10px 12px; min-height:0}
   .msg{max-width:88%; margin:6px 0; padding:8px 11px; border-radius:12px; font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; width:fit-content}
   .msg.user{margin-left:auto; background:var(--acc); color:var(--acc-ink); border-bottom-right-radius:4px}
@@ -324,7 +331,8 @@
           </div>
           <div id="inspBody"></div>
           <div id="chatDock">
-            <div id="chatHead"><span id="chatTitle">Chat</span><span id="chatState" class="faint"></span></div>
+            <div id="chatHead"><div class="seg" id="chatScopes"><button data-scope="node" id="scopeNode">Piece</button><button data-scope="research" class="on">Research</button><button data-scope="app">App</button></div><span id="chatState" class="faint"></span></div>
+            <div id="chatTitle" class="small faint" style="padding:6px 14px 0"></div>
             <div id="chatMsgs"></div>
             <form id="chatForm" autocomplete="off"><textarea id="chatIn" rows="1" placeholder="Message… Enter sends · Shift+Enter new line" aria-label="Chat message" title="Your message takes priority: a running loop or run pauses, your change is applied, then it resumes."></textarea><button class="btn primary" id="chatSend" type="submit">Send</button></form>
           </div>
@@ -503,7 +511,7 @@ $("inQuestion").addEventListener("keydown",e=>{if(e.key==="Enter"&&(e.metaKey||e
 
 function groupProjects(list,filter){
   const f=String(filter||"").trim().toLowerCase();const groups=new Map();
-  for(const p of list){if(f&&!p.question.toLowerCase().includes(f))continue;const key=p.question.toLowerCase().replace(/\s+/g," ").trim();if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}
+  for(const p of list){const q=String(p.question||"");if(f&&!q.toLowerCase().includes(f))continue;const key=q.toLowerCase().replace(/\s+/g," ").trim();if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}
   return [...groups.values()].map(runs=>({latest:runs[0],runs}));
 }
 async function loadProjects(){try{STATE.projects=await api("/api/projects");}catch(e){return;}renderProjectList();}
@@ -535,7 +543,7 @@ function nodesOf(){return STATE.project?STATE.project.nodes:[];}
 function byId(id){return nodesOf().find(n=>n.id===id);}
 function kids(id){return nodesOf().filter(n=>n.parentId===id).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));}
 function prio(n){return n.impact*n.uncertainty;}
-function select(id,mode){STATE.selected=byId(id)?id:"Q";renderOutline();drawTree(false);renderInspector();renderChat();syncHash();if(mode)openInspector(mode);}
+function select(id,mode){STATE.selected=byId(id)?id:"Q";CHAT.scope=STATE.selected==="Q"?(CHAT.scope==="app"?"app":"research"):"node";renderOutline();drawTree(false);renderInspector();renderChat();syncHash();if(mode)openInspector(mode);}
 
 function renderHead(){
   const p=STATE.project;const ns=p.nodes;
@@ -670,6 +678,8 @@ function renderInspector(){
   if(v&&v.checks)h+='<div class="kv"><div class="k">Checks</div>'+v.checks.map(ch=>'<div class="check"><span class="'+(ch.passed?"y":"n")+'">'+(ch.passed?"✓":"✗")+'</span><span>'+esc(ch.label)+' <span class="small faint">— '+esc(ch.detail)+"</span></span></div>").join("")+"</div>";
   if(c&&c.issues.length)h+='<div class="kv"><div class="k">Reviewer</div><span class="small">'+c.issues.map(esc).join("<br>")+"</span></div>";
   h+='<div class="kv"><div class="k">Actions</div><div class="acts"><button class="btn primary sm" id="actRerun">↻ Re-research</button><button class="btn secondary sm" id="actExpand">Split further</button><button class="btn secondary sm" data-suggest="'+esc(n.id)+'">Suggest sub-issues</button><button class="btn secondary sm" id="actAdd">+ Sub-issue</button><button class="btn secondary sm" id="actEdit">Edit</button><button class="btn danger sm" id="actDel">Remove</button></div></div>';
+  const files=n.attachments||[];
+  h+='<div class="kv"><div class="k">Files ('+files.length+')</div><div class="files">'+files.map(a=>'<div class="file"><span class="mono faint">'+esc(a.id)+'</span><span class="n" title="'+esc(a.name)+'">'+esc(a.name)+'</span><span class="small faint">'+(a.kind==="table"?"table":Math.round(a.size/1024)+" KB")+(a.truncated?" · cut":"")+'</span><button class="icon-btn" style="width:28px;height:28px" data-del-file="'+esc(a.id)+'" aria-label="Remove '+esc(a.name)+'">✕</button></div>').join("")+'<label class="drop" id="dropZone"><input type="file" id="fileIn" accept=".csv,.tsv,.txt,.md,.json,.html,.htm" multiple hidden>⬆ Add files to this piece — CSV, TXT, MD, JSON, HTML</label></div><div class="small faint" style="margin-top:4px">Files become cited sources (U1, U2…) for this piece only; it is re-researched with them.</div></div>';
   h+='<details class="more"'+(keep?" open":"")+'><summary>Instructions &amp; pages to read</summary><textarea id="nodeInstr" style="min-height:64px;margin-top:8px" placeholder="any rule, knowledge or method in plain words">'+esc(n.instructions||"")+'</textarea><textarea id="nodeUrls" style="min-height:44px;margin-top:6px" placeholder="one URL per line">'+esc((n.sourceUrls||[]).join("\n"))+'</textarea><button class="btn secondary sm" id="actSaveInstr" style="margin-top:6px">Save</button></details>';
   h+=suggestionsHtml(n.suggestions,n.id);
   const ch=kids(n.id);if(ch.length)h+='<div class="kv"><div class="k">Sub-issues ('+ch.length+')</div>'+ch.map(k=>'<div class="small" style="margin:4px 0"><a href="#" data-node="'+esc(k.id)+'">'+esc(k.id)+"</a> "+esc(k.title)+" "+grade(k.status)+"</div>").join("")+"</div>";
@@ -682,43 +692,71 @@ function renderInspector(){
   $("actSaveInstr").addEventListener("click",async()=>{try{STATE.project=await api(base,{method:"PATCH",body:{instructions:$("nodeInstr").value,sourceUrls:$("nodeUrls").value.split(/\s+/).filter(Boolean)}});renderAll();toast("saved; press Run");}catch(e){toast(e.message);}});
   $("actDel").addEventListener("click",async()=>{if(!confirm("Remove "+n.id+" and its sub-issues?"))return;try{STATE.project=await api(base,{method:"DELETE"});STATE.selected="Q";STATE.view=null;renderAll();}catch(e){toast(e.message);}});
   bindNodeActions(box,n.id);
+  const upload=async(list)=>{for(const f of list){if(f.size>2*1024*1024){toast(f.name+": too large (max 2 MB)");continue;}try{STATE.project=await api(base+"/attachments",{method:"POST",body:{name:f.name,text:await f.text()}});toast(f.name+" attached; press Run");}catch(e){toast(f.name+": "+e.message);}}renderAll();};
+  $("fileIn").addEventListener("change",e=>upload([...e.target.files]));
+  const dz=$("dropZone");
+  dz.addEventListener("dragover",e=>{e.preventDefault();dz.classList.add("over");});
+  dz.addEventListener("dragleave",()=>dz.classList.remove("over"));
+  dz.addEventListener("drop",e=>{e.preventDefault();dz.classList.remove("over");upload([...e.dataTransfer.files]);});
+  box.querySelectorAll("[data-del-file]").forEach(b=>b.addEventListener("click",async()=>{try{STATE.project=await api(base+"/attachments/"+b.dataset.delFile,{method:"DELETE"});renderAll();}catch(e){toast(e.message);}}));
 }
 async function addChild(parentId){
   const q=prompt("New sub-issue under "+parentId);if(!q)return;
   try{STATE.project=await api("/api/projects/"+STATE.project.id+"/nodes/"+encodeURIComponent(parentId)+"/children",{method:"POST",body:{question:q}});STATE.view=null;renderAll();toast("added; press Run to research it");}catch(e){toast(e.message);}
 }
 
-const CHAT={pending:null,sending:false,stick:true};
+const CHAT={pending:null,sending:false,stick:true,scope:"research",appThread:[],appLoaded:false};
 function chatKey(){return STATE.selected&&STATE.selected!=="Q"&&byId(STATE.selected)?STATE.selected:"Q";}
 function msgHtml(m){
   const cls=m.role==="user"?"user":m.role==="app"?"app":"assistant";
-  const meta=(m.role==="app"?"app report · ":"")+(m.at?esc(m.at.slice(11,16)):"")+(m.model?" · "+esc(m.model):"")+(m.actions&&m.actions.length?" · "+m.actions.map(a=>esc(a.type+" "+(a.nodeId||""))+(a.ok?" ✓":" ✗ "+esc(a.error||""))).join(", "):"");
-  return '<div class="msg '+cls+'">'+esc(m.content)+(meta?'<div class="meta">'+meta+"</div>":"")+"</div>";
+  const acts=(m.actions||[]).map(a=>esc(a.type+" "+(a.nodeId||a.projectId||""))+(a.ok?" ✓":" ✗ "+esc(a.error||""))).join(", ");
+  const meta=(m.role==="app"?"app report · ":"")+(m.at?esc(m.at.slice(11,16)):"")+(m.model?" · "+esc(m.model):"")+(acts?" · "+acts:"");
+  const open=(m.actions||[]).filter(a=>a.ok&&a.projectId&&(a.type==="open"||a.type==="create")).map(a=>'<button class="btn secondary sm" style="margin-top:6px" data-open-project="'+esc(a.projectId)+'">Open research</button>').join(" ");
+  return '<div class="msg '+cls+'">'+esc(m.content)+(meta?'<div class="meta">'+meta+"</div>":"")+open+"</div>";
 }
 function scrollChat(force){const b=$("chatMsgs");if(force||CHAT.stick)b.scrollTop=b.scrollHeight;}
 $("chatMsgs").addEventListener("scroll",()=>{const b=$("chatMsgs");CHAT.stick=b.scrollHeight-b.scrollTop-b.clientHeight<40;});
+$("chatMsgs").addEventListener("click",e=>{const b=e.target.closest("[data-open-project]");if(b)openProject(b.dataset.openProject);});
+function setScope(scope){CHAT.scope=scope;CHAT.stick=true;if(scope==="app"&&!CHAT.appLoaded)loadAppChat();renderChat();}
+document.querySelectorAll("#chatScopes button").forEach(b=>b.addEventListener("click",()=>{if(!b.disabled)setScope(b.dataset.scope);}));
+async function loadAppChat(){try{CHAT.appThread=await api("/api/chat");CHAT.appLoaded=true;renderChat();}catch(e){toast(e.message);}}
+function chatTarget(){
+  const p=STATE.project;const key=chatKey();
+  if(CHAT.scope==="app")return{kind:"app",key:"app",title:"Whole application · every research, models and search",thread:CHAT.appThread};
+  if(CHAT.scope==="node"&&key!=="Q")return{kind:"node",key,title:"This piece · "+key+" "+trunc((byId(key)||{}).title,40),thread:((p&&p.chats)||{})[key]||[]};
+  return{kind:"research",key:"Q",title:"Whole research · "+trunc(p?p.question:"",50),thread:((p&&p.chats)||{}).Q||[]};
+}
 function renderChat(){
-  const p=STATE.project;if(!p)return;const key=chatKey();
-  $("chatTitle").textContent="Chat · "+(key==="Q"?"whole research":key+" "+trunc((byId(key)||{}).title,32));
-  $("chatState").textContent=isLooping(p)?"loop running":RUNNING_PHASES.includes(p.phase)?"research running":"";
-  const th=((p.chats||{})[key]||[]).slice();
+  const p=STATE.project;const key=chatKey();
+  $("scopeNode").textContent=key==="Q"?"Piece":"Piece "+key;
+  $("scopeNode").disabled=key==="Q";
+  if(CHAT.scope==="node"&&key==="Q")CHAT.scope="research";
+  document.querySelectorAll("#chatScopes button").forEach(b=>b.classList.toggle("on",b.dataset.scope===CHAT.scope));
+  const t=chatTarget();
+  $("chatTitle").textContent=t.title;
+  $("chatState").textContent=p&&isLooping(p)?"loop running":p&&RUNNING_PHASES.includes(p.phase)?"research running":"";
+  const th=t.thread.slice();
   const pend=CHAT.pending;
-  if(pend&&pend.key===key&&pend.pid===p.id){
+  if(pend&&pend.key===t.key&&(t.kind==="app"||(p&&pend.pid===p.id))){
     const saved=th.some(m=>m.role==="user"&&m.content===pend.text&&String(m.at)>=pend.at.slice(0,19));
     if(!saved)th.push({role:"user",content:pend.text,at:pend.at});
     if(!th.length||th[th.length-1].role==="user")th.push({role:"assistant",content:"…",at:""});
   }
-  $("chatMsgs").innerHTML=th.length?th.map(msgHtml).join(""):'<div class="small faint" style="padding:6px 2px">Ask about '+(key==="Q"?"the research":"this piece")+' or tell it what to change: "read Golf listings in DE and CZ 2000–4000 EUR", "split by fuel type", "re-research". Run and loop reports appear here.</div>';
+  const hint=t.kind==="app"?'Ask across all researches: "which research is closest to its expected result?", "start a new research on glamping in Šumava", "run the loop on the cars research for 3 hours".':t.kind==="node"?'Talk to this piece: "read Golf listings in DE and CZ 2000–4000 EUR", "split by fuel type", "re-research with my uploaded file".':'Talk to the whole research: "add a piece about registration costs", "why is the verdict INSUFFICIENT DATA?". Run and loop reports appear here.';
+  $("chatMsgs").innerHTML=th.length?th.map(msgHtml).join(""):'<div class="small faint" style="padding:6px 2px">'+hint+"</div>";
   scrollChat(false);
 }
 async function sendChat(){
   const p=STATE.project;const text=$("chatIn").value.trim();
-  if(!p||!text||CHAT.sending)return;
-  const key=chatKey();CHAT.sending=true;$("chatSend").disabled=true;$("chatIn").value="";autosize();
-  CHAT.pending={pid:p.id,key,text,at:new Date().toISOString()};CHAT.stick=true;renderChat();
-  try{await api("/api/projects/"+p.id+"/chat",{method:"POST",body:{nodeId:key,message:text}});STATE.project=await api("/api/projects/"+p.id);}
-  catch(e){toast(e.message);$("chatIn").value=text;}
-  finally{CHAT.pending=null;CHAT.sending=false;$("chatSend").disabled=false;CHAT.stick=true;renderAll();}
+  if(!text||CHAT.sending)return;
+  const t=chatTarget();if(t.kind!=="app"&&!p)return;
+  CHAT.sending=true;$("chatSend").disabled=true;$("chatIn").value="";autosize();
+  CHAT.pending={pid:p?p.id:"",key:t.key,text,at:new Date().toISOString()};CHAT.stick=true;renderChat();
+  try{
+    if(t.kind==="app"){const r=await api("/api/chat",{method:"POST",body:{message:text}});CHAT.appThread=r.thread;if(r.actions.some(a=>a.type==="create"&&a.ok))loadProjects();}
+    else{await api("/api/projects/"+p.id+"/chat",{method:"POST",body:{nodeId:t.key,message:text}});STATE.project=await api("/api/projects/"+p.id);}
+  }catch(e){toast(e.message);$("chatIn").value=text;}
+  finally{CHAT.pending=null;CHAT.sending=false;$("chatSend").disabled=false;CHAT.stick=true;if(STATE.project)renderAll();else renderChat();}
 }
 function autosize(){const t=$("chatIn");t.style.height="40px";t.style.height=Math.min(140,t.scrollHeight)+"px";}
 $("chatForm").addEventListener("submit",e=>{e.preventDefault();sendChat();});

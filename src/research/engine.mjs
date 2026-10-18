@@ -1,4 +1,5 @@
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
+import { htmlToText } from '../search/search.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { listingsSource, scanSource } from '../search/marketplaces.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
@@ -13,6 +14,9 @@ const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0 };
 const LOG_LIMIT = 300;
 const MAX_ATTEMPTS = 3;
+const MAX_ATTACHMENTS = 6;
+const ATTACHMENT_TEXT_LIMIT = 20000;
+const ATTACHMENT_TYPES = /\.(csv|tsv|txt|md|json|html?)$/i;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -132,8 +136,42 @@ export class ResearchEngine {
     return this.store.save(project);
   }
 
-  dataSources(project) {
-    return project.data ? [project.data] : [];
+  dataSources(project, node = null) {
+    return [...(project.data ? [project.data] : []), ...(node?.attachments ?? []).map((a) => ({ id: a.id, kind: 'data', title: `your file: ${a.name}`, url: '', domain: 'user-file', snippet: a.text.slice(0, 300), text: a.text, provider: 'upload' }))];
+  }
+
+  async addAttachment(id, nodeId, { name = '', text = '' } = {}) {
+    if (this.running.has(id)) throw new ProjectBusyError('stop the run before adding files');
+    const project = await this.load(id);
+    const node = project.nodes.find((n) => n.id === nodeId);
+    if (!node) throw new NotFoundError(`node ${nodeId} not found`);
+    const fileName = String(name).trim().slice(0, 120) || 'file.txt';
+    if (!ATTACHMENT_TYPES.test(fileName)) throw new Error('attach a text file: CSV, TSV, TXT, MD, JSON or HTML (for a PDF, export or paste its text first)');
+    const raw = String(text);
+    if (!raw.trim()) throw new Error('the file is empty');
+    node.attachments = node.attachments ?? [];
+    if (node.attachments.length >= MAX_ATTACHMENTS) throw new Error(`a piece can hold ${MAX_ATTACHMENTS} files; remove one first`);
+    const isTable = /\.(csv|tsv)$/i.test(fileName);
+    const body = isTable ? describeProfile(profileTable(parseCsv(raw)), fileName) : /\.html?$/i.test(fileName) ? htmlToText(raw) : raw;
+    let n = 1;
+    while (node.attachments.some((a) => a.id === `U${n}`)) n++;
+    node.attachments.push({ id: `U${n}`, name: fileName, size: raw.length, kind: isTable ? 'table' : 'text', text: body.slice(0, ATTACHMENT_TEXT_LIMIT), truncated: body.length > ATTACHMENT_TEXT_LIMIT, addedAt: new Date().toISOString() });
+    this.resetWithAncestors(project, nodeId);
+    this.emit(project, 'edit', `${nodeId}: file "${fileName}" attached as source U${n}`, { nodeId });
+    return this.store.save(project);
+  }
+
+  async removeAttachment(id, nodeId, attachmentId) {
+    if (this.running.has(id)) throw new ProjectBusyError('stop the run before removing files');
+    const project = await this.load(id);
+    const node = project.nodes.find((n) => n.id === nodeId);
+    if (!node) throw new NotFoundError(`node ${nodeId} not found`);
+    const before = (node.attachments ?? []).length;
+    node.attachments = (node.attachments ?? []).filter((a) => a.id !== attachmentId);
+    if (node.attachments.length === before) throw new NotFoundError(`file ${attachmentId} not found`);
+    this.resetWithAncestors(project, nodeId);
+    this.emit(project, 'edit', `${nodeId}: file ${attachmentId} removed`, { nodeId });
+    return this.store.save(project);
   }
 
   async decompose(project) {
@@ -178,7 +216,7 @@ export class ResearchEngine {
       [...direct, ...web].forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
       if (!web.length && this.search.lastErrors.length) this.emit(project, 'warn', `${node.id}: search failed (${this.search.lastErrors.join('; ').slice(0, 200)})`, { nodeId: node.id });
     }
-    return [...sources, ...this.dataSources(project)];
+    return [...sources, ...this.dataSources(project, node)];
   }
 
   async searchGaps(project, node) {

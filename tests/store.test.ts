@@ -20,3 +20,19 @@ describe('ProjectStore', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
+
+describe('ProjectStore.list', () => {
+  it('ignores JSON files in the folder that are not projects', async () => {
+    const fsp = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { ProjectStore } = await import('../src/store.mjs');
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'frl-store-list-'));
+    await fsp.writeFile(path.join(dir, 'app-chat.json'), JSON.stringify([{ role: 'user', content: 'hi' }]));
+    const store = new ProjectStore({ dir });
+    await store.save({ id: 'real-question-abc123', question: 'real question?', nodes: [] });
+    expect((await store.list()).map((p: { id: string }) => p.id)).toEqual(['real-question-abc123']);
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+});
+

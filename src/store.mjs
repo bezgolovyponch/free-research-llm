@@ -55,7 +55,7 @@ export class ProjectStore {
     const files = (await fs.readdir(this.dir)).filter((f) => f.endsWith('.json'));
     const projects = await Promise.all(files.map((f) => this.get(f.slice(0, -5)).catch(() => null)));
     return projects
-      .filter(Boolean)
+      .filter((p) => p && typeof p.id === 'string' && typeof p.question === 'string')
       .map((p) => ({
         id: p.id,
         question: p.question,

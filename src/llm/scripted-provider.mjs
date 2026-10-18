@@ -78,6 +78,10 @@ const RESPONDERS = {
       { title: 'Cost check', question: 'What is the all-in cost per unit?', why: 'sets margin', method: 'calculation', searchQueries: ['unit cost'], sourceIds: [], quote: '' },
     ] };
   },
+  [TASK_MARKERS.appChat]: (prompt) => {
+    const wantsNew = /USER: .*(start|new research)/i.test(prompt);
+    return { reply: `DEMO app assistant: ${wantsNew ? 'starting a new research.' : 'here is what I see.'}`, actions: wantsNew ? [{ type: 'create', question: 'Which e-bike rental size breaks even in Prague?', expected: 'break-even fleet size' }] : [] };
+  },
   [TASK_MARKERS.variant]: () => ({ change: 'DEMO: sharper search queries', searchQueries: ['demo sharper query'] }),
   [TASK_MARKERS.synthesize]: () => ({
     verdict: 'GO-IF (DEMO) — margin stays above 0 after real costs are confirmed',

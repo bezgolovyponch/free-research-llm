@@ -44,6 +44,18 @@ test('builds a tree, opens a piece as a sheet, chats in it, runs, and finds it i
   await expect(page.locator('#chatMsgs .msg.user')).toContainText('what is missing here?');
   await expect(page.locator('#chatMsgs .msg.assistant').last()).toContainText('DEMO assistant', { timeout: 20000 });
   await expect(input).toHaveValue('');
+  await page.locator('#chatScopes button[data-scope="app"]').click();
+  await expect(page.locator('#chatTitle')).toContainText('Whole application');
+  await input.fill('which research is furthest along?');
+  await page.locator('#chatSend').click();
+  await expect(page.locator('#chatMsgs .msg.assistant').last()).toContainText('DEMO app assistant', { timeout: 20000 });
+  await page.locator('#chatScopes button[data-scope="node"]').click();
+  await expect(page.locator('#chatMsgs .msg.user')).toContainText('what is missing here?');
+
+  await page.locator('#inspTabs button[data-mode="details"]').click();
+  await page.locator('#fileIn').setInputFiles({ name: 'prices.csv', mimeType: 'text/csv', buffer: Buffer.from('model,price\nGolf,2500\nPolo,3100\n') });
+  await expect(page.locator('.file .n')).toHaveText('prices.csv', { timeout: 10000 });
+  await noSideScroll(page);
   await page.getByRole('button', { name: 'Close panel' }).click();
   await expect(page.locator('#inspector')).not.toHaveClass(/\bon\b/);
 

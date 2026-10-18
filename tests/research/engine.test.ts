@@ -139,6 +139,24 @@ describe('ResearchEngine', () => {
     expect(built.acceptance).toMatchObject({ expected: '5 links', itemCount: 5, urlsLive: true, locked: true });
   });
 
+  it('attaches files to one piece as cited data sources and removes them again', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    await engine.buildTree(project.id);
+    const withCsv = await engine.addAttachment(project.id, 'D1.1', { name: 'prices.csv', text: 'model,price\nGolf,2500\nPolo,3100\n' });
+    const withNote = await engine.addAttachment(project.id, 'D1.1', { name: 'notes.md', text: '# Notes\nTransport DE-CZ costs about 450 EUR.' });
+    const node = withNote.nodes.find((n: { id: string }) => n.id === 'D1.1');
+    expect(node.attachments.map((a: { id: string; kind: string }) => [a.id, a.kind])).toEqual([['U1', 'table'], ['U2', 'text']]);
+    expect(withCsv.nodes.find((n: { id: string }) => n.id === 'D1.1').attachments[0].text).toMatch(/price/);
+    const sources = await engine.gatherSources(withNote, node);
+    expect(sources.filter((s: { provider: string }) => s.provider === 'upload').map((s: { id: string }) => s.id)).toEqual(['U1', 'U2']);
+    await expect(engine.addAttachment(project.id, 'D1.1', { name: 'scan.pdf', text: 'x' })).rejects.toThrow(/text file/);
+    await expect(engine.addAttachment(project.id, 'D1.1', { name: 'empty.txt', text: '   ' })).rejects.toThrow(/empty/);
+    const removed = await engine.removeAttachment(project.id, 'D1.1', 'U1');
+    expect(removed.nodes.find((n: { id: string }) => n.id === 'D1.1').attachments.map((a: { id: string }) => a.id)).toEqual(['U2']);
+    await expect(engine.removeAttachment(project.id, 'D1.1', 'U9')).rejects.toThrow(/not found/);
+  });
+
   it('marks a node failed but finishes the run when one call breaks', async () => {
     const provider = new ScriptedProvider({ failures: { [TASK_MARKERS.rollup]: [new ProviderError('bad request', { status: 400 })] } });
     const { engine } = engineWith(provider);

@@ -97,11 +97,15 @@ export function createServer(app, gate = new AccessGate()) {
     ['GET', /^\/api\/projects\/([\w-]+)\/logs$/, async (req, [id]) => app.logs.read(`project-${id}`)],
     ['GET', /^\/api\/logs\/model-calls$/, async () => app.logs.read('model-calls')],
     ['GET', /^\/api\/history$/, async () => app.history()],
+    ['GET', /^\/api\/chat$/, async () => app.appChat.thread()],
+    ['POST', /^\/api\/chat$/, async (req) => app.appChat.send((await readJson(req)).message)],
     ['GET', /^\/api\/projects\/([\w-]+)\/knowledge$/, async (req, [id]) => knowledgeRecord(await app.engine.load(id))],
     ['POST', /^\/api\/projects\/([\w-]+)\/chat$/, async (req, [id]) => {
       const body = await readJson(req);
       return app.chat.send(id, body.nodeId || 'Q', body.message);
     }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/attachments$/, async (req, [id, nodeId]) => app.engine.addAttachment(id, nodeId, await readJson(req))],
+    ['DELETE', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/attachments\/(U\d+)$/, async (req, [id, nodeId, attachmentId]) => app.engine.removeAttachment(id, nodeId, attachmentId)],
     ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/suggest$/, async (req, [id, nodeId]) => app.suggester.suggest(id, nodeId)],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve$/, async (req, [id]) => {
       await app.engine.load(id);
