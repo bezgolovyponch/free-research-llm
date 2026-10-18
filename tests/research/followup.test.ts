@@ -26,3 +26,11 @@ describe('mergeSources', () => {
     expect(added).toHaveLength(1);
   });
 });
+
+describe('mergeSources ids', () => {
+  it('never reuses an id already taken by a data source', () => {
+    const existing = [{ id: 'S1', kind: 'data' }, { id: 'S2', kind: 'web' }, { id: 'S3', kind: 'web' }];
+    expect(mergeSources(existing, [{ kind: 'web' }]).added[0].id).toBe('S4');
+  });
+});
+

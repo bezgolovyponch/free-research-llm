@@ -20,6 +20,7 @@ export function followUpQueries(node, finding, alreadyAsked = []) {
 export function mergeSources(existing, found) {
   const web = existing.filter((s) => s.kind !== 'data');
   const data = existing.filter((s) => s.kind === 'data');
-  const added = found.map((s, i) => ({ ...s, id: `S${web.length + i + 1}` }));
+  const highest = Math.max(0, ...existing.map((s) => Number(String(s.id).match(/^S(\d+)$/)?.[1] ?? 0)));
+  const added = found.map((s, i) => ({ ...s, id: `S${highest + i + 1}` }));
   return { sources: [...web, ...added, ...data], added };
 }

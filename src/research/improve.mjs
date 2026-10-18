@@ -1,7 +1,7 @@
 import { scoreProject } from '../loop/score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt } from './prompts.mjs';
-import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
+import { METHODS, ROOT_ID, blankNode, isLeaf, listingSpec, nextNodeId, urlList } from './tree.mjs';
 
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, researching: 0 };
 const MAX_HOURS = 72;
@@ -53,6 +53,7 @@ function nodeFields(raw, id, parentId) {
     method: METHODS.includes(raw?.method) ? raw.method : 'lookup',
     searchQueries: strings(raw?.searchQueries, 3),
     sourceUrls: urlList(raw?.sourceUrls),
+    listings: listingSpec(raw?.listings),
   });
 }
 
@@ -86,6 +87,7 @@ export function applyVariant(project, nodeId, variant) {
   if (Array.isArray(variant?.searchQueries) && strings(variant.searchQueries, 3).length) node.searchQueries = strings(variant.searchQueries, 3);
   if (Array.isArray(variant?.sourceUrls) && urlList(variant.sourceUrls).length) node.sourceUrls = urlList(variant.sourceUrls);
   if (METHODS.includes(variant?.method)) node.method = variant.method;
+  if (listingSpec(variant?.listings)) node.listings = listingSpec(variant.listings);
   if (typeof variant?.instructions === 'string' && variant.instructions.trim()) node.instructions = variant.instructions.trim().slice(0, 2000);
   touched.push(node.id);
   for (const raw of (Array.isArray(variant?.split) ? variant.split : []).slice(0, 3)) {
@@ -108,6 +110,20 @@ export class ProjectImprover {
 
   isActive(id) {
     return this.active.has(id);
+  }
+
+  remainingHours(id) {
+    const state = this.active.get(id);
+    return state ? Math.max(0, (state.deadline - this.now()) / 3600000) : 0;
+  }
+
+  async restore(id, before) {
+    const current = await this.engine.load(id);
+    await this.engine.store.save({ ...before, chats: current.chats, log: current.log, improve: current.improve });
+  }
+
+  stopped(state) {
+    return state.stopped || this.all?.stopped;
   }
 
   start(id, { hours = 1 } = {}) {
@@ -239,6 +255,7 @@ export class ProjectImprover {
       const variant = await this.propose(before, nodeId, best);
       const change = String(variant.change ?? 'variant').slice(0, 240);
       const project = structuredClone(before);
+      if (this.stopped(state)) return { kept: false };
       const touched = applyVariant(project, nodeId, variant);
       if (!touched.length) {
         await this.record(id, {}, { ...base, change, outcome: 'no-change', score: best.score });
@@ -249,16 +266,27 @@ export class ProjectImprover {
       if (nodeId !== ROOT_ID && oldNode && isLeaf(project.nodes, project.nodes.find((n) => n.id === nodeId))) {
         const node = project.nodes.find((n) => n.id === nodeId);
         await this.engine.researchLeaf(project, node);
+        if (this.stopped(state)) {
+          await this.restore(id, before);
+          await this.record(id, {}, { ...base, change, outcome: 'reverted-stopped', score: best.score });
+          return { kept: false };
+        }
         if ((GRADE_RANK[node.status] ?? 0) < (GRADE_RANK[oldNode.status] ?? 0)) {
-          await this.engine.store.save(before);
+          await this.restore(id, before);
           await this.record(id, {}, { ...base, change, outcome: 'reverted-piece', score: best.score, detail: `${nodeId} fell from ${oldNode.status} to ${node.status}` });
           return { kept: false };
         }
       }
-      await this.engine.store.save(project);
+      if (this.stopped(state)) {
+        await this.restore(id, before);
+        await this.record(id, {}, { ...base, change, outcome: 'reverted-stopped', score: best.score });
+        return { kept: false };
+      }
+      const current = await this.engine.load(id);
+      await this.engine.store.save({ ...project, chats: current.chats });
       const after = await this.engine.run(id);
-      if (!this.live(state) && state.stopped) {
-        await this.engine.store.save(before);
+      if (this.stopped(state) || after.phase === 'cancelled') {
+        await this.restore(id, before);
         await this.record(id, {}, { ...base, change, outcome: 'reverted-stopped', score: best.score });
         return { kept: false };
       }
@@ -267,11 +295,11 @@ export class ProjectImprover {
         await this.record(id, { best: score.score }, { ...base, change, outcome: 'kept', score: score.score });
         return { kept: true, score };
       }
-      await this.engine.store.save(before);
+      await this.restore(id, before);
       await this.record(id, {}, { ...base, change, outcome: 'reverted-whole', score: score.score });
       return { kept: false };
     } catch (error) {
-      await this.engine.store.save(before);
+      await this.restore(id, before);
       await this.record(id, {}, { ...base, change: 'trial failed', outcome: 'error', score: best.score, detail: error.message.slice(0, 200) });
       if (QUOTA_ERROR.test(error.message) && this.live(state)) await this.sleep(Math.min(QUOTA_PAUSE_MS, Math.max(0, state.deadline - this.now())));
       return { kept: false };

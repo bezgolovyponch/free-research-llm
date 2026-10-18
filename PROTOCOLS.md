@@ -17,6 +17,13 @@ Each row names the code that enforces it and the test that proves it.
 | 8 Roll up | A parent takes its weakest child's grade | `ResearchEngine.rollup` |
 | 9 Deliver | Only items from verified/supported nodes are collected; the expected-result checks run on them | `collectDeliverables`, `AcceptanceChecker` |
 
+## 1b. Marketplace data protocol
+
+- Listing data comes from built-in connectors, not from the model: DE kleinanzeigen.de, CZ bazos.cz and aaaauto.cz (`src/search/marketplaces.mjs`). A node asks for it with `listings: {countries, make, model, minEur, maxEur}`.
+- Every page is checked against the site's robots.txt first (`RobotsPolicy`, RFC 9309 longest match); disallowed pages are never fetched. Price filters that robots.txt forbids (kleinanzeigen `/*/preis:*`, bazos `cenaod=`) are applied in code instead; sauto.cz forbids bots entirely and is not used.
+- Listings are read from schema.org structured data when the page has it, otherwise from the listing card; prices are converted at ECB rates; median, range and count are computed by code; each fetch is stored in `data/market/` so the price trend builds up over time.
+- The result is a `data` source whose rows and links the gates trust; items must still be copied from those rows.
+
 ## 2. Gate protocol (the model cannot override these)
 
 | Gate | Fails when | Effect |
@@ -39,7 +46,7 @@ Tests: `tests/research/verify.test.ts`, `tests/research/acceptance.test.ts`.
 - The chat can only **edit, add, remove, expand, suggest, re-research** existing nodes. It cannot write answers, grades or sources. Unknown action types and unknown node ids are dropped by `validActions`.
 - Any change resets that node, its ancestors and every node that depends on it to *pending*, so nothing stale survives (`resetWithAncestors`).
 - Sub-issue suggestions are researched first: a search runs, the model proposes, and code marks each suggestion **quoted** (its quote is found in a cited page), **cited**, or **not grounded** (`gradeSuggestion`).
-- Edits are refused while a run or the self-improving loop is active (HTTP 409).
+- **Your chat message has priority**: if it changes the tree while a run or the loop is active, the app pauses it (the loop reverts its unfinished trial), applies your change, then resumes for the remaining time. Reverts never overwrite the chat.
 
 ## 4. Self-improving loop protocol
 
@@ -47,7 +54,7 @@ Tests: `tests/research/verify.test.ts`, `tests/research/acceptance.test.ts`.
 2. For each target (structure first, then the weakest leaves): the model proposes one change; code applies it.
 3. **Piece test**: the changed leaf is re-researched; if its grade drops, revert immediately.
 4. **Whole test**: the full model re-runs; keep only if the score rises by more than 0.001, otherwise revert to the exact previous project.
-5. Stop at the time limit or on Stop. On a quota error: revert, pause up to 5 min, continue.
+5. Stop at the time limit or on Stop (checked before and after every step, so Stop takes effect within one model call). On a quota error: revert, pause up to 5 min, continue.
 Every trial is recorded with before/after score (`project.improve.trials`). Test: `tests/research/improve.test.ts`.
 
 ## 5. Logging and audit protocol

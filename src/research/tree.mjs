@@ -15,6 +15,15 @@ function list(value, max = 6) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => text(v, 200)).filter(Boolean).slice(0, max);
 }
 
+export function listingSpec(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const countries = list(raw.countries, 4).map((c) => c.toUpperCase().slice(0, 2)).filter((c) => /^[A-Z]{2}$/.test(c));
+  const minEur = Number(raw.minEur);
+  const maxEur = Number(raw.maxEur);
+  const spec = { countries, make: text(raw.make, 40), model: text(raw.model, 40), minEur: Number.isFinite(minEur) ? minEur : 0, maxEur: Number.isFinite(maxEur) && maxEur > 0 ? maxEur : 1000000 };
+  return spec.make || spec.model || countries.length ? spec : null;
+}
+
 export function urlList(value, max = 4) {
   return list(value, max * 2).filter((u) => /^https?:\/\/[^\s]+\.[^\s]+/.test(u)).slice(0, max);
 }
@@ -37,6 +46,7 @@ export function blankNode(fields) {
     method: 'lookup',
     searchQueries: [],
     sourceUrls: [],
+    listings: null,
     instructions: '',
     dependsOn: [],
     impact: 3,
@@ -105,6 +115,7 @@ export function normalizeTree(raw, question) {
       method: METHODS.includes(item?.method) ? item.method : 'lookup',
       searchQueries: list(item?.searchQueries, 3),
       sourceUrls: urlList(item?.sourceUrls),
+      listings: listingSpec(item?.listings),
       dependsOn: list(item?.dependsOn, 6),
       impact: clampScore(item?.impact),
       uncertainty: clampScore(item?.uncertainty),

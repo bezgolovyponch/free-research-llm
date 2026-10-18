@@ -46,3 +46,31 @@ describe('NodeChat', () => {
     await expect(chat.send(project.id, 'nope', 'hi')).rejects.toThrow(/not found/);
   });
 });
+
+describe('NodeChat priority', () => {
+  it('pauses a running loop, applies the user change, resumes it with the remaining time', async () => {
+    const calls: string[] = [];
+    let active = true;
+    const improver = {
+      isActive: () => active,
+      remainingHours: () => 3,
+      stop: () => { calls.push('stop'); setTimeout(() => { active = false; }, 5); },
+      start: (_id: string, opts: { hours: number }) => { calls.push(`start ${opts.hours}`); },
+    };
+    const project = { id: 'p', question: 'q', acceptance: {}, nodes: [{ id: 'D1', parentId: 'Q', question: 'q1', searchQueries: [], status: 'weak', sources: [] }], chats: {} };
+    const engine = {
+      running: new Set(),
+      load: async () => structuredClone(project),
+      store: { save: async (p: typeof project) => { Object.assign(project, p); return p; } },
+      emit: () => {},
+      editNode: async (_id: string, nodeId: string) => { calls.push(`edit ${nodeId} while ${active ? 'looping' : 'paused'}`); },
+      router: { complete: async () => ({ data: { reply: 'ok', actions: [{ type: 'edit', nodeId: 'D1', fields: { question: 'sharper' } }] }, provider: 'x', model: 'y' }) },
+    };
+    const chat = new NodeChat({ engine, suggester: {}, improver, sleep: (ms: number) => new Promise((r) => setTimeout(r, ms)) });
+    const result = await chat.send('p', 'D1', 'make it sharper');
+    expect(calls).toEqual(['stop', 'edit D1 while paused', 'start 3']);
+    expect(result.actions.map((a: { type: string }) => a.type)).toEqual(['edit', 'loop paused and resumed']);
+    expect(project.chats.D1.map((m: { role: string }) => m.role)).toEqual(['user', 'assistant']);
+  });
+});
+

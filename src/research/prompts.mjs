@@ -53,11 +53,12 @@ Build an issue tree that answers the QUESTION:
 4. Every node: id (drivers "D1".."D6", leaves "D1.1" etc.), title (<=8 words), question (specific, with geography/time/units), why (how the answer moves the decision), hypothesis (your best guess to test), metric, unit, method (one of ${METHODS.join('|')}), searchQueries (2-3 precise web queries, include country language terms when useful), dependsOn (ids of OTHER nodes whose answer this needs, e.g. a margin calculation depends on price leaves), impact 1-5 (effect on the decision), uncertainty 1-5 (how unknown it is today).
 5. "assumptionsToConfirm": things the user must confirm.
 5b. "acceptance": machine-checkable criteria taken ONLY from the EXPECTED RESULT: itemCount (number of items/links wanted, else null), urlsLive (true if links are wanted), valueRange ([min,max] if items must have a value such as a price in a range, else null), unit (e.g. EUR), mustMention (words every delivered page must contain, else []).
+5d. TOOL "listings" per node (use it for every node about car prices, listings, models or price gaps): {"countries":["DE"|"CZ"],"make":"","model":"","minEur":0,"maxEur":0}. Code then reads real marketplace listings (DE: kleinanzeigen.de; CZ: bazos.cz, aaaauto.cz), converts prices to EUR and computes median, range and the price trend. One make/model per node; split comparisons into one node per model and country.
 5c. "sourceUrls" per node (optional, max 2): exact public pages that answer it directly, e.g. a marketplace search page with the filters in the URL or an official statistics table. Only well-known real sites; never guess deep IDs.
 6. Be brief: every text field at most 15 words, 1-2 searchQueries per node, compact JSON without indentation. List drivers first, then their leaves.
 
 JSON shape:
-{"decision":"","successCriteria":"","assumptionsToConfirm":[""],"acceptance":{"itemCount":null,"urlsLive":false,"valueRange":null,"unit":"","mustMention":[]},"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"sourceUrls":[],"dependsOn":[],"impact":3,"uncertainty":3}]}`,
+{"decision":"","successCriteria":"","assumptionsToConfirm":[""],"acceptance":{"itemCount":null,"urlsLive":false,"valueRange":null,"unit":"","mustMention":[]},"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"sourceUrls":[],"listings":null,"dependsOn":[],"impact":3,"uncertainty":3}]}`,
     },
   ];
 }
@@ -116,6 +117,7 @@ RULES:
 - "sourceIds" may only contain ids shown above (${sources.map((s) => s.id).join(', ') || 'none'}). Never invent ids or URLs.
 - If the method is calculation/comparison, provide "calculation": a formula using variable names (letters, digits, _), + - * / ^ ( ) and min/max/abs/round, the numeric value of each input, and the result. The result will be recomputed by machine.
 - confidence "high" only with 2+ independent sources agreeing.
+- Marketplace sources list real listings as rows "title | price | year | km | url"; their median, range and trend were computed by code: cite them instead of guessing.
 - If the sub-question asks for concrete items (listings, offers, products, pages, links), return them in "items". An item "url" must be copied exactly from a LINKS list or a source URL above; any other URL is rejected by machine.
 
 JSON shape:
@@ -224,13 +226,13 @@ reviewer: ${(node.critique?.issues ?? []).join(' | ') || 'none'}
 sources it found:
 ${sources}
 
-Propose ONE change to this piece: a sharper question, better search queries (local language helps), exact public pages to read directly (sourceUrls, e.g. a marketplace search URL with filters), a different method, extra instructions, or a split into 2-3 smaller pieces ("split").`}
+Propose ONE change to this piece: a sharper question, better search queries (local language helps), the marketplace "listings" tool ({"countries":["DE"|"CZ"],"make":"","model":"","minEur":0,"maxEur":0}; code reads real listings), exact public pages to read directly (sourceUrls), a different method, extra instructions, or a split into 2-3 smaller pieces ("split", each may carry "listings").`}
 
 ALREADY TRIED (do not repeat):
 ${tried}
 
 Reply with only the fields you change. JSON shape:
-{"change":"one sentence: what and why","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup","instructions":"","split":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"add":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"remove":[""]}`,
+{"change":"one sentence: what and why","question":"","searchQueries":[""],"sourceUrls":[""],"listings":null,"method":"lookup","instructions":"","split":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""],"listings":null}],"add":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"remove":[""]}`,
     },
   ];
 }
@@ -270,8 +272,9 @@ ${history || 'none'}
 USER: ${message}
 
 Allowed actions (use only when the user asks for a change or a re-check):
-- {"type":"edit","nodeId":"${id === 'Q' ? 'D1' : id}","fields":{"question":"","searchQueries":[""],"sourceUrls":[""],"instructions":"","method":"lookup|calculation|comparison|estimate|data"}}
-- {"type":"add","parentId":"${id}","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup"}
+- {"type":"edit","nodeId":"${id === 'Q' ? 'D1' : id}","fields":{"question":"","searchQueries":[""],"sourceUrls":[""],"listings":{"countries":["DE"],"make":"","model":"","minEur":0,"maxEur":0},"instructions":"","method":"lookup|calculation|comparison|estimate|data"}}
+- {"type":"add","parentId":"${id}","question":"","searchQueries":[""],"sourceUrls":[""],"listings":null,"method":"lookup"}
+("listings" makes code read real car listings: DE kleinanzeigen.de, CZ bazos.cz + aaaauto.cz)
 - {"type":"remove","nodeId":""}
 - {"type":"expand","nodeId":"","hint":""}  (break into sub-issues)
 - {"type":"suggest","nodeId":"${id}"}  (research a suggestion list of sub-issues)

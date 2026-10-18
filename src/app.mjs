@@ -11,6 +11,8 @@ import { NodeChat } from './research/chat.mjs';
 import { SubIssueSuggester } from './research/suggest.mjs';
 import { ExchangeRates } from './research/rates.mjs';
 import { EventLog } from './logs.mjs';
+import { MarketplaceService } from './search/marketplaces.mjs';
+import { RobotsPolicy } from './search/robots.mjs';
 import { ProjectStore } from './store.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -94,10 +96,12 @@ export class App {
     this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), paidCallLimit: Number(env.FRL_PAID_CALL_LIMIT ?? 0) || 0, onLedger: (row) => this.logs.append('model-calls', row) });
     this.search = search ?? buildSearch({ env, fetchImpl });
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects') });
-    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates: new ExchangeRates({ fetchImpl }), onEvent: (projectId, event) => this.recordEvent(projectId, event) });
-    this.suggester = new SubIssueSuggester({ engine: this.engine });
-    this.chat = new NodeChat({ engine: this.engine, suggester: this.suggester });
+    const rates = new ExchangeRates({ fetchImpl });
+    this.markets = env.FRL_MARKETPLACES === '0' ? null : new MarketplaceService({ fetchImpl, rates, robots: new RobotsPolicy({ fetchImpl }) });
+    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, markets: this.markets, marketHistory: new EventLog({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'market') }), onEvent: (projectId, event) => this.recordEvent(projectId, event) });
     this.improver = new ProjectImprover({ engine: this.engine });
+    this.suggester = new SubIssueSuggester({ engine: this.engine });
+    this.chat = new NodeChat({ engine: this.engine, suggester: this.suggester, improver: this.improver });
     this.fixedProviders = Boolean(providers);
   }
 

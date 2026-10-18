@@ -3,6 +3,16 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-18 · session 4 — why there were no results, and the fix
+
+**Diagnosis (cars DE→CZ research):** 6/21 nodes passed, 0 listing links. Causes, in order:
+1. The data was unreachable: web search (LangSearch) returns reviews and catalogues, not live listings; the model's direct pages were bare homepages (mobile.de blocks readers).
+2. Stop was ignored: the research run cleared the stop flag when it started.
+3. Chat changes failed while the loop ran (edits refused) and the loop's revert then overwrote the chat thread.
+4. The LangSearch key had been saved without its first character (fixed earlier the same day).
+
+**Fixes:** marketplace connectors with robots.txt enforcement, schema.org extraction, ECB conversion, code-computed stats and trend snapshots; Stop checked between every step; user chat has priority (pause → apply → resume) and survives reverts; classic chat dock (messages scroll, separate input that live updates never clear); app reports posted into the chat.
+
 ## 2026-10-18 · session 3 — chat, suggestions, history, gates
 
 **Asked:** save sessions and logs; an AI chat per node that can change the tree; researched sub-issue suggestions; re-research any piece; keep the mechanical gates; apply the newest mikoshi-construct mechanics; ship through the gates; report productivity vs paid models.

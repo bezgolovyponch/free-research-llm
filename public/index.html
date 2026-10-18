@@ -70,11 +70,18 @@
   #cloud{flex:1 1 auto; width:100%; display:block; background:var(--bg); touch-action:none}
   #legend{position:absolute; bottom:10px; left:10px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:6px 10px; font-size:12px; color:var(--dim); max-width:calc(100% - 20px)}
   .dot{display:inline-block; width:10px; height:10px; border-radius:50%; margin:0 4px 0 8px; vertical-align:-1px}
-  #side{flex:0 0 420px; max-width:46%; border-left:1px solid var(--line); background:var(--panel); overflow:auto; padding:14px}
+  #side{flex:0 0 440px; max-width:48%; border-left:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; min-height:0}
+  #sideBody{flex:1 1 auto; overflow:auto; padding:14px; min-height:0}
+  #chatDock{flex:0 0 46%; display:flex; flex-direction:column; border-top:2px solid var(--acc); background:var(--panel2); min-height:200px}
+  #chatHead{padding:6px 12px; font-size:12px; font-weight:700; color:var(--acc); border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:8px}
+  #chatMsgs{flex:1 1 auto; overflow:auto; padding:8px 10px}
+  #chatForm{display:flex; gap:6px; padding:8px; border-top:1px solid var(--line); background:var(--panel)}
+  #chatForm textarea{min-height:40px; height:40px; resize:none; flex:1}
   @media (max-width:820px){
     #tab-tree.on{flex-direction:column; overflow:auto}
     #cloudWrap{flex:0 0 60vh}
     #side{flex:1 0 auto; max-width:none; border-left:0; border-top:1px solid var(--line)}
+    #chatDock{flex:0 0 auto; height:60vh}
     header{padding:8px 16px; gap:8px}
     .logo small{display:none}
     nav{flex-wrap:nowrap; overflow-x:auto; max-width:100%; width:100%}
@@ -190,7 +197,14 @@
         <span class="dot" style="background:var(--gray)"></span>pending · size = impact × uncertainty · dashed = "needs"
       </div>
     </div>
-    <div id="side"></div>
+    <div id="side">
+      <div id="sideBody"></div>
+      <div id="chatDock">
+        <div id="chatHead"><span id="chatTitle">Chat</span><span class="muted" id="chatState"></span></div>
+        <div id="chatMsgs"></div>
+        <form id="chatForm" autocomplete="off"><textarea id="chatIn" placeholder="Message… Enter sends · Shift+Enter new line" title="Your message takes priority: a running loop or run pauses, your change is applied, then it resumes."></textarea><button class="btn sm" id="chatSend" type="submit">Send</button></form>
+      </div>
+    </div>
   </section>
 
   <section id="tab-findings" class="tab">
@@ -439,7 +453,7 @@ async function openProject(id){
 }
 
 function queueRender(){if(STATE.drawQueued)return;STATE.drawQueued=true;requestAnimationFrame(()=>{STATE.drawQueued=false;renderAll();});}
-function renderAll(){renderRunbar();drawTree(false);renderSide();renderFindings();renderReport();renderSources();}
+function renderAll(){renderRunbar();drawTree(false);renderSide();renderChat();renderFindings();renderReport();renderSources();}
 
 function nodesOf(){return STATE.project?STATE.project.nodes:[];}
 function byId(id){return nodesOf().find(n=>n.id===id);}
@@ -503,7 +517,7 @@ function drawTree(force){
   el("circle",{r:26,fill:p.report?"var(--gr)":"var(--acc)",opacity:.9},root);
   const rt=el("text",{class:"nid","text-anchor":"middle",y:4,fill:"var(--acc-ink)"},root);rt.textContent="Q";rt.style.fill="var(--acc-ink)";
   const rl=el("text",{class:"lbl","text-anchor":"middle",y:44},root);rl.textContent=trunc(p.report?p.report.verdict:p.question,48);
-  root.addEventListener("click",(e)=>{e.stopPropagation();STATE.selected="Q";renderSide();drawTree(true);});
+  root.addEventListener("click",(e)=>{e.stopPropagation();STATE.selected="Q";renderSide();renderChat();drawTree(true);});
   p.nodes.forEach(n=>{
     const c=center(n.id);if(!c)return;
     const g=el("g",{class:"node"+(n.status==="researching"?" pulse":""),transform:"translate("+c.x+","+c.y+")"},gN);
@@ -512,7 +526,7 @@ function drawTree(force){
     el("circle",{r,fill:STATUS_COLOR[n.status]||"var(--gray)",opacity:n.status==="pending"?.55:.92},g);
     const t1=el("text",{class:"nid",x:r+6,y:-2},g);t1.textContent=n.id;
     const t2=el("text",{class:"lbl",x:r+6,y:11},g);t2.textContent=trunc(n.title,30);
-    g.addEventListener("click",(e)=>{e.stopPropagation();STATE.selected=n.id;renderSide();drawTree(true);});
+    g.addEventListener("click",(e)=>{e.stopPropagation();STATE.selected=n.id;renderSide();renderChat();drawTree(true);});
   });
   applyView();
 }
@@ -533,16 +547,16 @@ function claimsHtml(f,sources){
   return '<div class="kv"><b class="k">Claims</b>'+f.claims.map(c=>'<div class="small" style="margin:3px 0">• '+esc(c.text)+" "+c.sourceIds.map(id=>{const s=srcMap[id];const u=s&&safeUrl(s.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener" title="'+esc(s.title)+'">['+esc(id)+"]</a>":'<span class="mono">['+esc(id)+"]</span>";}).join(" ")+(c.assumption?' <span style="color:var(--am)">(assumption)</span>':"")+"</div>").join("")+"</div>";
 }
 function renderSide(){
-  const side=$("side");const p=STATE.project;
+  const side=$("sideBody");const p=STATE.project;
   if(!p){side.innerHTML='<h2>No project</h2><p class="muted">Start with <b>Ask</b>.</p>';return;}
   const n=STATE.selected&&STATE.selected!=="Q"?byId(STATE.selected):null;
   if(!n){
-    side.innerHTML='<h2>'+esc(p.question)+'</h2>'+(p.decision?'<div class="kv"><b class="k">Decision</b>'+esc(p.decision)+"</div>":"")+(p.successCriteria?'<div class="kv"><b class="k">Success criteria</b>'+esc(p.successCriteria)+"</div>":"")+(p.report?'<div class="kv"><b class="k">Verdict</b><b>'+esc(p.report.verdict)+'</b> <span class="small muted">('+esc(p.report.confidence)+' confidence)</span><div><a href="#" id="toReport">open full report →</a></div></div>':"")+(p.error?'<div class="notice err">'+esc(p.error)+"</div>":"")+(p.assumptionsToConfirm&&p.assumptionsToConfirm.length?'<div class="kv"><b class="k">Please confirm</b>'+p.assumptionsToConfirm.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>":"")+expectedHtml(p)+improveHtml(p)+'<h3>Drivers</h3>'+kids("Q").map(subBtn).join("")+'<div class="row" style="margin-top:8px"><button class="btn dim sm" id="addDriver">+ add driver question</button><button class="btn danger sm" id="resetAll">⟲ Re-research everything</button><button class="btn ghost sm" data-suggest="Q">🔎 Suggest researched top-level pieces</button></div>'+suggestionsHtml(p.rootSuggestions,"Q")+chatHtml("Q")+'<h3>Live log</h3><div id="log">'+(p.log||[]).slice(-60).reverse().map(l=>'<div title="'+esc(l.message)+'"><span class="muted mono">'+esc(l.ts.slice(11,19))+"</span> "+esc(l.message)+"</div>").join("")+"</div>";
+    side.innerHTML='<h2>'+esc(p.question)+'</h2>'+(p.decision?'<div class="kv"><b class="k">Decision</b>'+esc(p.decision)+"</div>":"")+(p.successCriteria?'<div class="kv"><b class="k">Success criteria</b>'+esc(p.successCriteria)+"</div>":"")+(p.report?'<div class="kv"><b class="k">Verdict</b><b>'+esc(p.report.verdict)+'</b> <span class="small muted">('+esc(p.report.confidence)+' confidence)</span><div><a href="#" id="toReport">open full report →</a></div></div>':"")+(p.error?'<div class="notice err">'+esc(p.error)+"</div>":"")+(p.assumptionsToConfirm&&p.assumptionsToConfirm.length?'<div class="kv"><b class="k">Please confirm</b>'+p.assumptionsToConfirm.map(a=>'<div class="small">• '+esc(a)+"</div>").join("")+"</div>":"")+expectedHtml(p)+improveHtml(p)+'<h3>Drivers</h3>'+kids("Q").map(subBtn).join("")+'<div class="row" style="margin-top:8px"><button class="btn dim sm" id="addDriver">+ add driver question</button><button class="btn danger sm" id="resetAll">⟲ Re-research everything</button><button class="btn ghost sm" data-suggest="Q">🔎 Suggest researched top-level pieces</button></div>'+suggestionsHtml(p.rootSuggestions,"Q")+'<h3>Live log</h3><div id="log">'+(p.log||[]).slice(-60).reverse().map(l=>'<div title="'+esc(l.message)+'"><span class="muted mono">'+esc(l.ts.slice(11,19))+"</span> "+esc(l.message)+"</div>").join("")+"</div>";
     const tr=$("toReport");if(tr)tr.addEventListener("click",e=>{e.preventDefault();gotoTab("report");});
     $("addDriver").addEventListener("click",()=>addChild("Q"));
     $("resetAll").addEventListener("click",async()=>{if(!confirm("Clear all findings and research the whole tree again? The tree itself is kept."))return;try{STATE.project=await api("/api/projects/"+p.id+"/reset",{method:"POST"});renderAll();toast("cleared; press Run");}catch(e){toast(e.message);}});
-    bindExpected(p);bindImprove(p);bindSuggestions(side,"Q");bindChat("Q");
-    side.querySelectorAll("[data-node]").forEach(b=>b.addEventListener("click",()=>{STATE.selected=b.dataset.node;renderSide();drawTree(true);}));
+    bindExpected(p);bindImprove(p);bindSuggestions(side,"Q");
+    side.querySelectorAll("[data-node]").forEach(b=>b.addEventListener("click",()=>{STATE.selected=b.dataset.node;renderSide();renderChat();drawTree(true);}));
     return;
   }
   const f=n.finding,v=n.verification,c=n.critique;
@@ -563,19 +577,19 @@ function renderSide(){
   if(v&&v.checks)h+='<div class="kv"><b class="k">Checks</b>'+v.checks.map(ch=>'<div class="check"><span class="'+(ch.passed?"y":"n")+'">'+(ch.passed?"✓":"✗")+"</span> "+esc(ch.label)+' <span class="small muted">— '+esc(ch.detail)+"</span></div>").join("")+"</div>";
   if(c)h+='<div class="kv"><b class="k">Independent reviewer</b><span class="small">'+(c.agree?"agrees":"disagrees")+" · severity "+esc(c.severity)+(c.issues.length?"<br>"+c.issues.map(esc).join("<br>"):"")+"</span></div>";
   h+='<h3>Instructions for this node</h3><textarea id="nodeInstr" style="min-height:60px" placeholder="any instruction, knowledge or method: e.g. use only listings from the last 30 days; prices on otomoto are in PLN; compute margin as sell - buy - 900">'+esc(n.instructions||"")+'</textarea><label class="f" style="margin-top:6px">Pages to read directly (one URL per line)</label><textarea id="nodeUrls" style="min-height:44px" placeholder="https://www.autoscout24.de/lst?priceto=4000&pricefrom=2000">'+esc((n.sourceUrls||[]).join("\n"))+'</textarea><div class="row" style="margin-top:6px"><button class="btn dim sm" id="actSaveInstr">Save (node will be re-researched)</button></div>';
-  h+='<h3>Act on this node</h3><input type="text" id="hint" placeholder="hint for re-research, e.g. use otomoto.pl prices from 2026"><div class="row" style="margin-top:8px"><button class="btn sm" id="actRerun">↻ Re-research</button><button class="btn ghost sm" id="actExpand">⤵ Break down further</button><button class="btn dim sm" id="actEdit">✎ Edit question</button><button class="btn dim sm" id="actAdd">+ Sub-question</button><button class="btn danger sm" id="actDel">Remove</button><button class="btn ghost sm" data-suggest="'+esc(n.id)+'">🔎 Suggest researched sub-issues</button></div>'+suggestionsHtml(n.suggestions,n.id)+chatHtml(n.id);
+  h+='<h3>Act on this node</h3><input type="text" id="hint" placeholder="hint for re-research, e.g. use otomoto.pl prices from 2026"><div class="row" style="margin-top:8px"><button class="btn sm" id="actRerun">↻ Re-research</button><button class="btn ghost sm" id="actExpand">⤵ Break down further</button><button class="btn dim sm" id="actEdit">✎ Edit question</button><button class="btn dim sm" id="actAdd">+ Sub-question</button><button class="btn danger sm" id="actDel">Remove</button><button class="btn ghost sm" data-suggest="'+esc(n.id)+'">🔎 Suggest researched sub-issues</button></div>'+suggestionsHtml(n.suggestions,n.id);
   const ch=kids(n.id);
   if(ch.length)h+="<h3>Sub-questions ("+ch.length+")</h3>"+ch.sort((a,b)=>prio(b)-prio(a)).map(subBtn).join("");
   side.innerHTML=h;
-  $("toRoot").addEventListener("click",e=>{e.preventDefault();STATE.selected=null;renderSide();drawTree(true);});
-  side.querySelectorAll("[data-node]").forEach(b=>b.addEventListener("click",(e)=>{e.preventDefault();STATE.selected=b.dataset.node;renderSide();drawTree(true);}));
+  $("toRoot").addEventListener("click",e=>{e.preventDefault();STATE.selected=null;renderSide();renderChat();drawTree(true);});
+  side.querySelectorAll("[data-node]").forEach(b=>b.addEventListener("click",(e)=>{e.preventDefault();STATE.selected=b.dataset.node;renderSide();renderChat();drawTree(true);}));
   const base="/api/projects/"+p.id+"/nodes/"+encodeURIComponent(n.id);
   $("actRerun").addEventListener("click",async()=>{try{await api(base+"/rerun",{method:"POST",body:{hint:$("hint").value}});toast(n.id+" re-researching");}catch(e){toast(e.message);}});
   $("actExpand").addEventListener("click",async(e)=>{e.target.disabled=true;toast("breaking "+n.id+" down…");try{const pr=await api(base+"/expand",{method:"POST",body:{hint:$("hint").value}});STATE.project=pr;STATE.view=null;renderAll();toast("added sub-questions; press Run to research them");}catch(err){toast(err.message);}finally{e.target.disabled=false;}});
   $("actEdit").addEventListener("click",async()=>{const q=prompt("Edit the question for "+n.id,n.question);if(!q)return;try{STATE.project=await api(base,{method:"PATCH",body:{question:q,title:trunc(q,60)}});renderAll();toast("edited; press Run to re-research");}catch(e){toast(e.message);}});
   $("actAdd").addEventListener("click",()=>addChild(n.id));
   $("actSaveInstr").addEventListener("click",async()=>{try{STATE.project=await api(base,{method:"PATCH",body:{instructions:$("nodeInstr").value,sourceUrls:$("nodeUrls").value.split(/\s+/).filter(Boolean)}});renderAll();toast("saved; press Run to re-research");}catch(e){toast(e.message);}});
-  bindSuggestions(side,n.id);bindChat(n.id);
+  bindSuggestions(side,n.id);
   $("actDel").addEventListener("click",async()=>{if(!confirm("Remove "+n.id+" and its sub-questions?"))return;try{STATE.project=await api(base,{method:"DELETE"});STATE.selected=null;STATE.view=null;renderAll();}catch(e){toast(e.message);}});
 }
 function expectedHtml(p){
@@ -612,16 +626,38 @@ function bindSuggestions(root,id){
     try{STATE.project=await api("/api/projects/"+STATE.project.id+"/nodes/"+encodeURIComponent(id)+"/children",{method:"POST",body:{question:it.question,title:it.title,why:it.why,method:it.method,searchQueries:it.searchQueries}});STATE.view=null;renderAll();toast("added; press Run to research it");}catch(e){toast(e.message);}
   }));
 }
-function chatHtml(key){
-  const th=((STATE.project.chats||{})[key])||[];
-  return '<h3>Chat with '+(key==="Q"?"the whole project":"this node")+'</h3><div class="chat" id="chatBox">'+(th.length?th.map(m=>'<div class="msg '+(m.role==="user"?"user":m.role==="app"?"app":"assistant")+'">'+(m.role==="app"?'<div class="meta">app report · '+esc((m.at||"").slice(0,16).replace("T"," "))+"</div>":"")+esc(m.content)+((m.actions&&m.actions.length)||m.model?'<div class="meta">'+(m.model?esc(m.model):"")+(m.actions&&m.actions.length?" · actions: "+m.actions.map(a=>esc(a.type+" "+(a.nodeId||""))+(a.ok?" ✓":" ✗ "+esc(a.error||""))).join(", "):"")+"</div>":"")+"</div>").join(""):'<div class="small muted">Ask about this piece, tell it what to change ("search otomoto in Polish", "split by fuel type", "re-research with 2026 prices"). It can edit, add, split, suggest and re-research nodes; findings still pass the machine checks.</div>')+'</div><div class="row"><input type="text" id="chatIn" placeholder="message…" style="flex:1"><button class="btn sm" id="chatSend">Send</button></div>';
+const CHAT={pending:null,sending:false};
+function chatKey(){return STATE.selected&&STATE.selected!=="Q"&&byId(STATE.selected)?STATE.selected:"Q";}
+function msgHtml(m){
+  const cls=m.role==="user"?"user":m.role==="app"?"app":"assistant";
+  const meta=(m.role==="app"?"app report · ":"")+(m.at?esc(m.at.slice(11,16)):"")+(m.model?" · "+esc(m.model):"")+(m.actions&&m.actions.length?" · actions: "+m.actions.map(a=>esc(a.type+" "+(a.nodeId||""))+(a.ok?" ✓":" ✗ "+esc(a.error||""))).join(", "):"");
+  return '<div class="msg '+cls+'">'+esc(m.content)+'<div class="meta">'+meta+"</div></div>";
 }
-function bindChat(key){
-  const box=$("chatBox");if(box)box.scrollTop=box.scrollHeight;
-  const send=async()=>{const m=$("chatIn").value.trim();if(!m)return;$("chatSend").disabled=true;$("chatIn").value="";toast("thinking…");try{await api("/api/projects/"+STATE.project.id+"/chat",{method:"POST",body:{nodeId:key,message:m}});STATE.project=await api("/api/projects/"+STATE.project.id);renderAll();}catch(e){toast(e.message);}finally{const b=$("chatSend");if(b)b.disabled=false;}};
-  $("chatSend").addEventListener("click",send);
-  $("chatIn").addEventListener("keydown",e=>{if(e.key==="Enter")send();});
+function renderChat(){
+  const p=STATE.project;const box=$("chatMsgs");
+  if(!p){$("chatTitle").textContent="Chat";box.innerHTML='<div class="small muted">Open a project to chat.</div>';return;}
+  const key=chatKey();
+  $("chatTitle").textContent="Chat · "+(key==="Q"?"whole project (Q)":key+" "+trunc((byId(key)||{}).title,40));
+  const looping=(STATE.status&&(STATE.status.improving||[]).includes(p.id))||(p.improve&&p.improve.active);
+  $("chatState").textContent=looping?"loop running":["decomposing","researching","synthesizing"].includes(p.phase)?"research running":"";
+  const th=((p.chats||{})[key]||[]).slice();
+  if(CHAT.pending&&CHAT.pending.key===key&&CHAT.pending.pid===p.id)th.push({role:"user",content:CHAT.pending.text,at:CHAT.pending.at},{role:"assistant",content:"…",at:""});
+  const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;
+  box.innerHTML=th.length?th.map(msgHtml).join(""):'<div class="small muted">Ask about this piece or tell it what to change ("read Golf listings in DE and CZ 2000-4000 EUR", "split by fuel type", "re-research"). Results of runs and of the loop are posted here as app reports.</div>';
+  if(atBottom||CHAT.justSent){box.scrollTop=box.scrollHeight;CHAT.justSent=false;}
 }
+async function sendChat(){
+  const p=STATE.project;const text=$("chatIn").value.trim();
+  if(!p||!text||CHAT.sending)return;
+  const key=chatKey();
+  CHAT.sending=true;$("chatSend").disabled=true;$("chatIn").value="";
+  CHAT.pending={pid:p.id,key,text,at:new Date().toISOString()};CHAT.justSent=true;renderChat();
+  try{await api("/api/projects/"+p.id+"/chat",{method:"POST",body:{nodeId:key,message:text}});STATE.project=await api("/api/projects/"+p.id);}
+  catch(e){toast(e.message);$("chatIn").value=text;}
+  finally{CHAT.pending=null;CHAT.sending=false;$("chatSend").disabled=false;CHAT.justSent=true;renderAll();}
+}
+$("chatForm").addEventListener("submit",e=>{e.preventDefault();sendChat();});
+$("chatIn").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendChat();}});
 async function addChild(parentId){
   const q=prompt("New sub-question under "+parentId);if(!q)return;
   try{STATE.project=await api("/api/projects/"+STATE.project.id+"/nodes/"+encodeURIComponent(parentId)+"/children",{method:"POST",body:{question:q}});STATE.view=null;renderAll();toast("added; press Run to research it");}catch(e){toast(e.message);}
