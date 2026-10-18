@@ -130,6 +130,15 @@ describe('ResearchEngine', () => {
     expect((await engine.run(project.id)).nodes.length).toBeGreaterThan(0);
   });
 
+  it('keeps checks the user set when the tree is rebuilt', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Which used cars resell best from Germany to Czechia?', expected: 'x' });
+    await engine.updateProject(project.id, { expected: '5 links', acceptance: { itemCount: 5, urlsLive: true } });
+    await engine.resetResearch(project.id, { tree: true });
+    const built = await engine.buildTree(project.id);
+    expect(built.acceptance).toMatchObject({ expected: '5 links', itemCount: 5, urlsLive: true, locked: true });
+  });
+
   it('marks a node failed but finishes the run when one call breaks', async () => {
     const provider = new ScriptedProvider({ failures: { [TASK_MARKERS.rollup]: [new ProviderError('bad request', { status: 400 })] } });
     const { engine } = engineWith(provider);

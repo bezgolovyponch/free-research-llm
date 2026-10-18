@@ -17,10 +17,14 @@ function list(value, max = 6) {
 
 export function listingSpec(raw) {
   if (!raw || typeof raw !== 'object') return null;
-  const countries = list(raw.countries, 4).map((c) => c.toUpperCase().slice(0, 2)).filter((c) => /^[A-Z]{2}$/.test(c));
+  const countries = list(raw.countries, 4).filter((c) => /^[A-Za-z]{2}$/.test(c)).map((c) => c.toUpperCase());
   const minEur = Number(raw.minEur);
   const maxEur = Number(raw.maxEur);
   const spec = { countries, make: text(raw.make, 40), model: text(raw.model, 40), minEur: Number.isFinite(minEur) ? minEur : 0, maxEur: Number.isFinite(maxEur) && maxEur > 0 ? maxEur : 1000000 };
+  if (raw.scan) {
+    const country = (value, fallback) => (/^[A-Za-z]{2}$/.test(String(value ?? '')) ? String(value).toUpperCase() : fallback);
+    return { ...spec, scan: true, from: country(raw.from, countries[0] ?? 'DE'), to: country(raw.to, countries[1] ?? 'CZ') };
+  }
   return spec.make || spec.model || countries.length ? spec : null;
 }
 

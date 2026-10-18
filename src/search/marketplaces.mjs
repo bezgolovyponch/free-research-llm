@@ -9,6 +9,11 @@ function slug(text) {
 }
 
 const PAGES = 3;
+const MIN_SAMPLE = 3;
+export const DEFAULT_SCAN_MODELS = [
+  ['Skoda', 'Octavia'], ['Skoda', 'Fabia'], ['Volkswagen', 'Golf'], ['Volkswagen', 'Passat'], ['Volkswagen', 'Polo'],
+  ['Ford', 'Focus'], ['Opel', 'Astra'], ['Opel', 'Corsa'], ['Toyota', 'Yaris'], ['Hyundai', 'i30'], ['Renault', 'Megane'], ['Peugeot', '308'],
+];
 const DEEP_PAGES = 8;
 
 function query(make, model) {
@@ -150,20 +155,46 @@ export class MarketplaceService {
     this.lastErrors = [];
   }
 
-  async page(url) {
+  async page(url, cache) {
+    if (cache?.has(url)) return cache.get(url);
     if (this.robots && !(await this.robots.allowed(url))) throw new Error(`robots.txt disallows ${url}`);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20000);
     try {
       const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept: 'text/html' }, signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-      return await res.text();
+      const html = await res.text();
+      cache?.set(url, html);
+      return html;
     } finally {
       clearTimeout(timer);
     }
   }
 
-  async search({ countries = [], minEur = 0, maxEur = 1000000, make = '', model = '' } = {}) {
+  async scanModels({ from = 'DE', to = 'CZ', minEur = 0, maxEur = 1000000, models = DEFAULT_SCAN_MODELS } = {}) {
+    const cache = new Map();
+    const rows = [];
+    for (const [make, model] of models) {
+      const results = await this.search({ countries: [from, to], minEur, maxEur, make, model }, cache);
+      const side = (country) => results.filter((r) => r.country === country).flatMap((r) => r.listings);
+      const fromListings = side(from);
+      const toListings = side(to);
+      const a = listingStats(fromListings);
+      const b = listingStats(toListings);
+      const comparable = a.count >= MIN_SAMPLE && b.count >= MIN_SAMPLE;
+      rows.push({
+        make,
+        model,
+        from: { country: from, ...a },
+        to: { country: to, ...b },
+        gapPct: comparable ? Math.round(((b.medianEur - a.medianEur) / a.medianEur) * 1000) / 10 : null,
+        cheapest: fromListings.filter((l) => l.priceEur !== null).sort((x, y) => x.priceEur - y.priceEur).slice(0, 3),
+      });
+    }
+    return rows.sort((x, y) => (y.gapPct ?? -Infinity) - (x.gapPct ?? -Infinity));
+  }
+
+  async search({ countries = [], minEur = 0, maxEur = 1000000, make = '', model = '' } = {}, cache = null) {
     const convert = this.rates ? await this.rates.converter() : (v) => v;
     const markets = this.markets.filter((m) => !countries.length || countries.includes(m.country));
     this.lastErrors = [];
@@ -173,7 +204,7 @@ export class MarketplaceService {
       const fetched = [];
       for (const url of market.urls({ make, model })) {
         try {
-          listings.push(...extractListings(await this.page(url), url, market));
+          listings.push(...extractListings(await this.page(url, cache), url, market));
           fetched.push(url);
         } catch (error) {
           this.lastErrors.push(`${market.id}: ${error.message}`);
@@ -194,6 +225,25 @@ export function trendLine(history, stats) {
   const first = previous[0];
   const change = ((stats.medianEur - first.medianEur) / first.medianEur) * 100;
   return `trend: median ${first.medianEur} EUR on ${String(first.ts).slice(0, 10)} → ${stats.medianEur} EUR now (${change >= 0 ? '+' : ''}${change.toFixed(1)}%, ${previous.length + 1} snapshots); listings ${first.count} → ${stats.count}`;
+}
+
+export function scanSource(rows, spec, id, histories = {}) {
+  const lines = rows.map((r, i) => `${i + 1}. ${r.make} ${r.model} | ${r.from.country} n=${r.from.count} median ${r.from.medianEur ?? 'n/a'} EUR | ${r.to.country} n=${r.to.count} median ${r.to.medianEur ?? 'n/a'} EUR | gap ${r.gapPct === null ? `not comparable (needs ${MIN_SAMPLE}+ listings each side)` : `${r.gapPct >= 0 ? '+' : ''}${r.gapPct}%`} | ${trendLine(histories[`${r.make} ${r.model}`] ?? [], r.from)}`);
+  const picks = rows.filter((r) => r.gapPct !== null && r.gapPct > 0).flatMap((r) => r.cheapest.map((l) => ({ ...l, model: `${r.make} ${r.model}` })));
+  const header = `Model price-gap scan read by code (robots.txt-allowed pages only), ${spec.from}→${spec.to}, ${spec.minEur}-${spec.maxEur} EUR, prices converted at ECB rates. Gap = (${spec.to} median − ${spec.from} median) / ${spec.from} median, before transport, registration and taxes.`;
+  return {
+    id,
+    kind: 'data',
+    title: `Model price-gap scan ${spec.from}→${spec.to}`,
+    url: '',
+    domain: 'marketplace-scan',
+    snippet: header,
+    text: `${header}\n${lines.join('\n')}\nCheapest ${spec.from} listings of models with a positive gap:\n${picks.map((l) => `- ${l.model} | ${l.title} | ${l.price} ${l.currency} | ${l.year ?? '?'} | ${l.km ?? '?'} km | ${l.url}`).join('\n') || 'none'}`,
+    links: picks.map((l) => ({ url: l.url, text: `${l.model} ${l.title} ${l.price} ${l.currency}` })),
+    provider: 'marketplace',
+    listings: picks,
+    scan: rows,
+  };
 }
 
 export function listingsSource(result, id, history = []) {

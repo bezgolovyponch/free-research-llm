@@ -50,3 +50,14 @@ describe('normalizeTree', () => {
     expect(researchOrder(cyclic.nodes)).toHaveLength(2);
   });
 });
+
+describe('listingSpec', () => {
+  it('normalizes single-model and scan listing requests', async () => {
+    const { listingSpec } = await import('../../src/research/tree.mjs');
+    expect(listingSpec({ countries: ['de', 'xx1'], make: 'Skoda', model: 'Octavia', minEur: '2000', maxEur: 4000 })).toEqual({ countries: ['DE'], make: 'Skoda', model: 'Octavia', minEur: 2000, maxEur: 4000 });
+    expect(listingSpec({ scan: true, minEur: 2000, maxEur: 4000 })).toMatchObject({ scan: true, from: 'DE', to: 'CZ' });
+    expect(listingSpec({})).toBeNull();
+    expect(listingSpec(null)).toBeNull();
+  });
+});
+

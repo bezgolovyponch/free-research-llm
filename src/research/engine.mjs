@@ -1,6 +1,6 @@
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
-import { listingsSource } from '../search/marketplaces.mjs';
+import { listingsSource, scanSource } from '../search/marketplaces.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt } from './prompts.mjs';
@@ -148,7 +148,7 @@ export class ResearchEngine {
     });
     const tree = normalizeTree(reply.data, project.question);
     if (tree.nodes.length < 2) throw new Error('the model returned an empty issue tree; try again or use a stronger model');
-    const acceptance = normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected);
+    const acceptance = project.acceptance?.locked ? project.acceptance : normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
     this.emit(project, 'tree', `issue tree ready: ${tree.nodes.length} nodes (${reply.provider}/${reply.model})`);
     await this.store.save(project);
@@ -193,7 +193,22 @@ export class ResearchEngine {
     this.emit(project, 'node', `${node.id}: ${added.length} new source(s) from gap search`, { nodeId: node.id });
   }
 
+  async scanSources(project, node) {
+    const spec = node.listings;
+    this.emit(project, 'node', `${node.id}: scanning model prices ${spec.from}→${spec.to} on marketplaces (code, robots.txt-checked)`, { nodeId: node.id });
+    const rows = await this.markets.scanModels(spec);
+    const histories = {};
+    for (const row of rows) {
+      const key = `scan-${spec.from}-${row.make}-${row.model}-${spec.minEur}-${spec.maxEur}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+      histories[`${row.make} ${row.model}`] = this.marketHistory ? await this.marketHistory.read(key, 200) : [];
+      if (this.marketHistory) void this.marketHistory.append(key, { ...row.from, gapPct: row.gapPct });
+    }
+    this.emit(project, 'node', `${node.id}: scan done — ${rows.filter((r) => r.gapPct !== null).length}/${rows.length} models comparable; top: ${rows.slice(0, 3).map((r) => `${r.make} ${r.model} ${r.gapPct ?? 'n/a'}%`).join(', ')}`, { nodeId: node.id });
+    return [scanSource(rows, spec, '', histories)];
+  }
+
   async listingSources(project, node) {
+    if (node.listings.scan) return this.scanSources(project, node);
     const results = await this.markets.search(node.listings);
     if (this.markets.lastErrors.length) this.emit(project, 'warn', `${node.id}: marketplaces — ${this.markets.lastErrors.join('; ').slice(0, 200)}`, { nodeId: node.id });
     const sources = [];
@@ -396,7 +411,7 @@ export class ResearchEngine {
     if (this.running.has(id)) throw new ProjectBusyError('stop the run before editing');
     const project = await this.load(id);
     const nextExpected = typeof expected === 'string' ? expected : project.acceptance?.expected;
-    project.acceptance = normalizeAcceptance(acceptance ?? project.acceptance ?? {}, nextExpected);
+    project.acceptance = { ...normalizeAcceptance(acceptance ?? project.acceptance ?? {}, nextExpected), locked: Boolean(acceptance) || Boolean(project.acceptance?.locked) };
     project.acceptanceResult = null;
     this.emit(project, 'edit', `expected result updated: ${project.acceptance.expected || 'none'}`);
     return this.store.save(project);

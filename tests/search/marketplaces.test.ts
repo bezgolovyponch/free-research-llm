@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MARKETPLACES, MarketplaceService, extractListings, listingStats, listingsSource, trendLine, yearOf } from '../../src/search/marketplaces.mjs';
+import { MARKETPLACES, MarketplaceService, extractListings, listingStats, listingsSource, scanSource, trendLine, yearOf } from '../../src/search/marketplaces.mjs';
 import { fakeFetch } from '../helpers/fake-fetch';
 
 const market = (id: string) => MARKETPLACES.find((m) => m.id === id)!;
@@ -55,3 +55,31 @@ describe('marketplace extraction', () => {
     expect(source.text).toContain('a | 3000 EUR | 2008 | 1 km | https://k.example/1');
   });
 });
+
+describe('model price-gap scan', () => {
+  it('ranks models by the gap between country medians, needs 3+ listings each side, reuses fetched pages', async () => {
+    const deFor = (model: string, prices: number[]) => prices.map((p, i) => `<a href="/s-anzeige/${model}-x/${i}${model.length}00-216-1">x</a> ${p} €`).join('');
+    const fetched: string[] = [];
+    const service = new MarketplaceService({
+      robots: { allowed: async () => true },
+      rates: { converter: async () => (v: number, from: string) => (from === 'CZK' ? v / 25 : v) },
+      markets: [
+        { id: 'de', country: 'DE', currency: 'EUR', listing: /\/s-anzeige\/[^"]+/, urls: ({ model }: { model: string }) => [`https://de.example/${model}`] },
+        { id: 'cz', country: 'CZ', currency: 'CZK', listing: /\/inzerat\/\d+\/[^"]+/, urls: () => ['https://cz.example/all'] },
+      ],
+      fetchImpl: async (url: string) => {
+        fetched.push(url);
+        const body = url.endsWith('Golf') ? deFor('golf', [2000, 2200, 2400]) : url.endsWith('Polo') ? deFor('polo', [3000]) : '<a href="/inzerat/1/golf-a">x</a> 75 000 Kč <a href="/inzerat/2/golf-b">x</a> 60 000 Kč <a href="/inzerat/3/golf-c">x</a> 62 500 Kč <a href="/inzerat/4/polo-a">x</a> 80 000 Kč';
+        return new Response(body);
+      },
+    });
+    const rows = await service.scanModels({ minEur: 2000, maxEur: 4000, models: [['VW', 'Polo'], ['VW', 'Golf']] });
+    expect(rows.map((r: { model: string; gapPct: number | null }) => [r.model, r.gapPct])).toEqual([['Golf', 13.6], ['Polo', null]]);
+    expect(fetched.filter((u) => u === 'https://cz.example/all')).toHaveLength(1);
+    const source = scanSource(rows, { from: 'DE', to: 'CZ', minEur: 2000, maxEur: 4000 }, 'S1');
+    expect(source.text).toContain('1. VW Golf | DE n=3 median 2200 EUR | CZ n=3 median 2500 EUR | gap +13.6%');
+    expect(source.text).toContain('gap not comparable (needs 3+ listings each side)');
+    expect(source.links).toHaveLength(3);
+  });
+});
+
