@@ -82,6 +82,10 @@ export function createServer(app) {
       app.engine.start(id);
       return { ok: true };
     }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/reset$/, async (req, [id]) => {
+      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      return app.engine.resetResearch(id);
+    }],
     ['POST', /^\/api\/projects\/([\w-]+)\/tree$/, async (req, [id]) => app.engine.buildTree(id)],
     ['PATCH', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => app.engine.updateProject(id, await readJson(req))],
     ['GET', /^\/api\/projects\/([\w-]+)\/logs$/, async (req, [id]) => app.logs.read(`project-${id}`)],

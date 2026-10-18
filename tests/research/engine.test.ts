@@ -116,6 +116,17 @@ describe('ResearchEngine', () => {
     expect(retried.sources.map((s: { id: string }) => s.id)).toEqual(['S1', 'S2', 'S3']);
   });
 
+  it('resets all findings but keeps the tree for a fresh research run', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    const done = await engine.run(project.id);
+    const reset = await engine.resetResearch(project.id);
+    expect(reset.nodes.map((n: { id: string }) => n.id)).toEqual(done.nodes.map((n: { id: string }) => n.id));
+    expect(new Set(reset.nodes.map((n: { status: string }) => n.status))).toEqual(new Set(['pending']));
+    expect([reset.report, reset.phase]).toEqual([null, 'tree-ready']);
+    expect((await engine.run(project.id)).phase).toBe('done');
+  });
+
   it('marks a node failed but finishes the run when one call breaks', async () => {
     const provider = new ScriptedProvider({ failures: { [TASK_MARKERS.rollup]: [new ProviderError('bad request', { status: 400 })] } });
     const { engine } = engineWith(provider);
