@@ -11,6 +11,7 @@ import { needsEscalation, verifyFinding } from './verify.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { basisOf, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
+import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
@@ -218,13 +219,26 @@ export class ResearchEngine {
     }
   }
 
+  entitiesOf(project) {
+    const domains = entityDomains(project.question);
+    return { domains, names: entityNames(domains), subject: entityNames(domains)[0] ?? null };
+  }
+
+  usedDomains(project, node) {
+    const used = {};
+    for (const n of project.nodes) if (n.id !== node.id) for (const s of n.sources ?? []) if (s.url) used[hostOf(s.url)] = (used[hostOf(s.url)] ?? 0) + 1;
+    return used;
+  }
+
   async gatherSources(project, node) {
     const sources = [];
-    if (this.search?.enabled) {
+    const entities = this.entitiesOf(project);
+    node.ownerOnly = ownerOnly(node, entities.subject ? [entities.subject] : []);
+    if (this.search?.enabled && !node.ownerOnly) {
       const listed = node.listings && this.markets ? await this.listingSources(project, node) : [];
       const direct = [...listed, ...(node.sourceUrls?.length && this.search.readPages ? await this.search.readPages(node.sourceUrls) : [])];
-      const queries = [...node.searchQueries, node.title, node.question].filter(Boolean);
-      const web = await this.search.search(queries, { maxSources: 8 - direct.length, exclude: direct.map((d) => d.url) });
+      const queries = [...new Set([...entityQueries(node, entities.domains), ...scopedQueries(node, entities.names)])];
+      const web = await this.search.search(queries, { maxSources: 8 - direct.length, exclude: direct.map((d) => d.url), wanted: terms(`${node.title} ${node.question}`), entities: entities.domains, usedDomains: this.usedDomains(project, node), names: mentionedNames(node, entities.names) });
       [...direct, ...web].forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
       if (!web.length && this.search.lastErrors.length) this.emit(project, 'warn', `${node.id}: search failed (${this.search.lastErrors.join('; ').slice(0, 200)})`, { nodeId: node.id });
     }
@@ -290,7 +304,15 @@ export class ResearchEngine {
     node.status = 'researching';
     this.emit(project, 'node', `${node.id}: searching sources`, { nodeId: node.id });
     node.sources = await this.gatherSources(project, node);
-    this.emit(project, 'node', `${node.id}: ${node.sources.length} source(s), analysing`, { nodeId: node.id });
+    if (node.ownerOnly && !node.sources.length) {
+      const who = node.ownerOnly;
+      node.finding = { answer: `Only ${who} has this figure; it is not public. Give it in this piece's chat (request + desired output) or attach your data, and the research uses it.`, claims: [], gaps: [`${who}'s own figure: owner input needed`], assumptions: [], confidence: 'low' };
+      node.verification = { grade: 'weak', score: 0, checks: [{ id: 'concrete', label: 'Gives a concrete answer, not "unknown"', passed: false, detail: `needs ${who}'s own data (owner input)` }], failures: [`needs ${who}'s own data (owner input)`] };
+      node.status = 'weak';
+      this.emit(project, 'node', `${node.id}: not searched — only ${who} has this figure; marked Clarify`, { nodeId: node.id });
+      return;
+    }
+    this.emit(project, 'node', `${node.id}: ${node.sources.length} source(s) from ${new Set(node.sources.filter((x) => x.url).map((x) => hostOf(x.url))).size} site(s), analysing`, { nodeId: node.id });
     let failures = [];
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const tier = attempt === 1 ? 'fast' : 'deep';

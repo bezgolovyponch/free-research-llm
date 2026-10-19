@@ -15,6 +15,21 @@ export const TEMPLATES = [
     decisionRule: 'State the decision as GO / NO-GO / GO-IF with the threshold that flips it.',
   },
   {
+    id: 'competitive-strategy',
+    label: 'Competitive strategy / action plan',
+    example: 'Create an action plan to grow https://example-startup.com against its main competitors in the EU and US within 6 months',
+    fields: [
+      { key: 'market', label: 'Market / field', placeholder: 'e.g. AI drug discovery' },
+      { key: 'geo', label: 'Where', placeholder: 'e.g. EU, US, UK' },
+      { key: 'horizon', label: 'Time horizon', placeholder: 'e.g. 6 months' },
+      { key: 'success', label: 'What counts as success', placeholder: 'e.g. 3 new pharma pilots' },
+    ],
+    drivers: 'Each competitor\'s capabilities and recent moves (products, models, papers, code, launches); customer segments and what triggers a purchase (case studies, job posts, conference talks); pricing and business models (pricing pages, licences); partnerships and channels (press releases, alliances); differentiation gaps and opportunities; execution constraints (regulation, talent, data access).',
+    metrics: 'features present/absent per competitor, public customers and partners, announced deals, prices per plan, publications and repository activity, hiring signals',
+    sources: 'the companies\' own websites and pricing pages, GitHub repositories, papers (arXiv, bioRxiv, PubMed), press releases, official registers, conference talks, job boards, reputable trade press; avoid market-report teaser pages',
+    decisionRule: 'Rank concrete actions by the evidence behind them and their impact; name the piece ids each action rests on.',
+  },
+  {
     id: 'car-arbitrage',
     label: 'Car arbitrage (buy here, sell there)',
     example: 'Is it profitable to buy used 2015-2019 Toyota RAV4 hybrids in Germany and resell them in Poland? Which trims and mileage give the best net margin per car?',
@@ -84,6 +99,7 @@ export function suggestTemplate(question) {
   if (/\bcars?\b|vehicle|\bauto|arbitrage|resell|\bflip|mileage|toyota|bmw|audi|volkswagen|\bvw\b|mercedes|skoda|škoda|porsche|honda|ford|rav4|mobile\.de|otomoto|autoscout/.test(q)) return 'car-arbitrage';
   if (/glamp|camp|cabin|hotel|guesthouse|airbnb|occupancy|hospitality|holiday (home|rental)/.test(q)) return 'glamping-location';
   if (/\btax|vat|dph|deduct|s\.r\.o|llc|self-employ|freelanc|social (insurance|security)|payroll/.test(q)) return 'taxes';
+  if (/compet|rival|\bvs\.?\b|versus|strateg|action plan|go[- ]to[- ]market|positioning|differentiat|outperform|beat\b/.test(q)) return 'competitive-strategy';
   if (/market size|how big|tam|sam|som|break even|break-even/.test(q)) return 'market-sizing';
   return 'generic';
 }

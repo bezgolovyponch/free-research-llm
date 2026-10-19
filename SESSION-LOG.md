@@ -3,6 +3,27 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-20 · session 14 — diverse, entity-specific research instead of generic content
+
+- **Asked:** review the latest run, whose content is generic, and patch the app for more diverse results.
+- **Review of the DeepMedChem run** (25 pieces: 3 verified, 1 supported, 17 weak, 1 unsupported, 3 pending):
+  - the tree asked for figures only the company has (cash burn, EU market share, break-even);
+  - queries were generic ("SaaS subscription break even formula");
+  - off-topic pages were accepted (grafana docs, a netlify spam page, change.org, "ai-in-blockchain");
+  - 9 of the top 15 domains were market-report teaser sites, and only 5 of 178 sources came from the three named companies;
+  - the prompt's "hypothesis to test" anchored the answers.
+  - **Code causes:** search kept the first results until the budget filled (the first query dominated); there was no per-site cap and no source-quality tier; no company-scoped queries.
+- **Patched:**
+  - **Source selection** (`src/search/selection.mjs`, used by `SearchService.search`). It is MMR-style (Carbonell & Goldstein 1998): candidates come from every query, then relevant and different sources are picked.
+    - Tiers: the companies' own sites, code, papers, registers and press releases are primary; market-report teasers and spam hosts are low, at most 2 per piece.
+    - Limits: at most 2 sources per site; pages sharing no word with the piece are dropped; pages that never name the piece's companies rank lower; sites other pieces already use are penalised.
+  - **Queries:** `site:` queries for the named company domains, and company names added to queries that leave them out.
+  - **Owner-only figures:** a private company's own figures are not searched; the piece goes to **Clarify** with "owner input".
+  - **Prompts:** perspectives as in STORM (Shao et al. 2024); leaves must name entities and public evidence; internal figures go to "assumptions to confirm". Research no longer sees the hypothesis, must not give generic advice, opens with the finding and prefers primary evidence.
+  - **New `competitive-strategy` template** (competitors' capabilities, customers, pricing, partnerships, gaps, constraints). It is chosen for competition, strategy and action-plan questions.
+- **Live check** (real search keys) on the pricing-gap piece: before, the sources were saastr.com and twbrian.wordpress.com. After: boltz.com pricing, cheese.deepmedchem.com pricing, docs.boltz.com, arxiv.org, genengnews.com, a talk comparing Boltz with Isomorphic Labs — 8 relevant sources from 6 sites.
+- **Open:** existing pieces keep their old sources until re-researched. The running research keeps its market-sizing tree until it is rebuilt.
+
 ## 2026-10-19 · session 13 — Node 24, dependency PRs
 
 - **Merged** Dependabot PR #1: GitHub Actions `checkout`, `setup-node` and `upload-artifact` updated to v7. Green on Node 22 and 24 after a rebase; the earlier red run was one flaky e2e test.

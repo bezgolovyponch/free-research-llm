@@ -1,3 +1,4 @@
+import { selectDiverse } from './selection.mjs';
 const USER_AGENT = 'free-research-llm/1.0 (+https://github.com/bezgolovyponch/free-research-llm)';
 const PAGE_TEXT_LIMIT = 6000;
 const MAX_LINKS = 60;
@@ -392,7 +393,7 @@ export class SearchService {
     return [...primary.slice(start), ...primary.slice(0, start), ...live.filter((b) => b.fallback)];
   }
 
-  async search(queries, { maxSources = 6, exclude = [] } = {}) {
+  async search(queries, { maxSources = 6, exclude = [], wanted = [], entities = [], usedDomains = {}, names = [] } = {}) {
     const seen = new Set(exclude);
     const collected = [];
     this.lastErrors = [];
@@ -417,9 +418,9 @@ export class SearchService {
           this.health.set(backend.id, { ok: false, at: new Date(this.now()).toISOString(), error: error.invalidKey ? `invalid key (${error.message}) — fix it with ./keys.command check` : error.message });
         }
       }
-      if (collected.length >= maxSources) break;
+      if (collected.length >= maxSources * 3) break;
     }
-    const sources = collected.slice(0, maxSources);
+    const sources = selectDiverse(collected, { max: maxSources, wanted, entities, usedDomains, names });
     if (this.fetchPages) {
       await Promise.all(sources.slice(0, 5).map(async (s) => {
         const page = await this.readPage(s.url);
@@ -437,6 +438,7 @@ export class SearchService {
       links: s.links ?? [],
       provider: s.provider,
       query: s.query,
+      tier: s.tier,
     }));
   }
 

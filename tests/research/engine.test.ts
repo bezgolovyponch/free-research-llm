@@ -237,4 +237,22 @@ describe('ResearchEngine', () => {
     expect(rewritten.report.actionItems.length).toBeGreaterThan(0);
     expect(rewritten.report.kind).toBe('decision');
   });
+
+  it('does not search the web for a private company\'s own figures and sends the piece to Clarify; other pieces get company-scoped queries', async () => {
+    const asked: string[][] = [];
+    const search = { enabled: true, lastErrors: [], search: async (queries: string[]) => { asked.push(queries); return [{ kind: 'web', title: 'Boltz pricing', url: 'https://boltz.com/pricing', domain: 'boltz.com', text: 'Boltz pricing per seat 100 EUR', query: queries[0] }]; } };
+    const { engine } = engineWith(new ScriptedProvider(), search);
+    const project = await engine.createProject({ question: 'Create an action plan for https://www.deepmedchem.com against https://boltz.com/' });
+    const p = await engine.load(project.id);
+    const own = { id: 'D9', parentId: 'Q', title: 'Cash burn', question: 'Monthly cash burn of DeepMedChem in 2026 (EUR)', searchQueries: ['DeepMedChem burn'], sourceUrls: [], dependsOn: [], status: 'pending' };
+    const rival = { id: 'D8', parentId: 'Q', title: 'Boltz pricing', question: 'What does Boltz charge per seat?', searchQueries: ['Boltz price'], sourceUrls: [], dependsOn: [], status: 'pending' };
+    await engine.researchLeaf(p, own);
+    expect(own).toMatchObject({ status: 'weak', ownerOnly: 'deepmedchem' });
+    expect(own.finding.answer).toContain('Only deepmedchem has this figure');
+    expect(asked).toHaveLength(0);
+    const { nodeAction } = await import('../../src/research/gaps.mjs');
+    expect(nodeAction(own)).toMatchObject({ action: 'clarify' });
+    await engine.researchLeaf(p, rival);
+    expect(asked[0][0]).toBe('site:boltz.com boltz pricing');
+  });
 });

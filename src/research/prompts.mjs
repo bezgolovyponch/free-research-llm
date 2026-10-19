@@ -52,9 +52,11 @@ DOMAIN PLAYBOOK (${template.label}) — use as a checklist, adapt to the questio
 ${dataSummary ? `\nUSER DATA AVAILABLE (source id D1):\n${dataSummary}\n` : ''}
 Build an issue tree that answers the QUESTION:
 1. "decision": restate the decision in one sentence; "successCriteria": the measurable threshold that answers it.
+1b. First think of 4-5 different PERSPECTIVES on the question (e.g. a customer who buys it, a competitor's product lead, an investor, a regulator, a domain scientist), as in Stanford's STORM. The drivers must cover different perspectives, not one checklist.
 2. 3-6 top-level DRIVERS (parentId null): mutually exclusive, together exhaustive for the decision.
+2b. Every leaf names concrete entities from the question (companies, products, places, models) and asks what public evidence can show: their own pages, papers, code, pricing pages, press releases, partnerships, job posts, customer case studies. Never make a leaf that asks for a private company's internal figures (revenue, cash burn, customer count, market share, break-even): put those in "assumptionsToConfirm" for the user.
 3. Under each driver 2-4 LEAF sub-questions (parentId = driver id), each answerable by one lookup, calculation, comparison, estimate or data analysis. Max ${MAX_NODES} nodes total.
-4. Every node: id (drivers "D1".."D6", leaves "D1.1" etc.), title (<=8 words), question (specific, with geography/time/units), why (how the answer moves the decision), hypothesis (your best guess to test), metric, unit, method (one of ${METHODS.join('|')}), searchQueries (2-3 precise web queries, include country language terms when useful), dependsOn (ids of OTHER nodes whose answer this needs, e.g. a margin calculation depends on price leaves), impact 1-5 (effect on the decision), uncertainty 1-5 (how unknown it is today).
+4. Every node: id (drivers "D1".."D6", leaves "D1.1" etc.), title (<=8 words), question (specific, with geography/time/units), why (how the answer moves the decision), hypothesis (your prior guess; research will not see it), metric, unit, method (one of ${METHODS.join('|')}), searchQueries (2-3 precise web queries that name the entities, never generic how-to queries; include country language terms when useful), dependsOn (ids of OTHER nodes whose answer this needs, e.g. a margin calculation depends on price leaves), impact 1-5 (effect on the decision), uncertainty 1-5 (how unknown it is today).
 5. "assumptionsToConfirm": things the user must confirm.
 5b. "acceptance": machine-checkable criteria taken ONLY from the EXPECTED RESULT: itemCount (number of items/links wanted, else null), urlsLive (true if links are wanted), valueRange ([min,max] if items must have a value such as a price in a range, else null), unit (e.g. EUR), mustMention (words every delivered page must contain, else []).
 5d. TOOL "listings" per node (use it for every node about car prices, listings, models or price gaps): {"countries":["DE"|"CZ"],"make":"","model":"","minEur":0,"maxEur":0}. Code then reads real marketplace listings (DE: kleinanzeigen.de; CZ: bazos.cz, aaaauto.cz), converts prices to EUR and computes median, range and the price trend. One make/model per node. For "which models" questions add ONE scan node instead: {"scan":true,"from":"DE","to":"CZ","minEur":0,"maxEur":0} — code then compares the median price of 12 common models in both countries and ranks the price gaps.
@@ -107,7 +109,7 @@ export function researchPrompt({ question, node, sources, upstream, previousFail
 Today is ${today()}. Overall question: ${question}
 
 SUB-QUESTION ${node.id}: ${node.question}
-Metric: ${node.metric || 'n/a'} (${node.unit || 'unit n/a'}) · method: ${node.method} · hypothesis to test: ${node.hypothesis || 'n/a'}
+Metric: ${node.metric || 'n/a'} (${node.unit || 'unit n/a'}) · method: ${node.method}
 ${node.instructions ? `INSTRUCTIONS FOR THIS NODE (follow them): ${node.instructions}\n` : ''}${hint ? `User guidance: ${hint}\n` : ''}${expected ? `The user's expected final result: ${expected}\n` : ''}
 ANSWERS ALREADY ESTABLISHED (use them, cite as their node id in text):
 ${upstreamBlock(upstream)}
@@ -121,6 +123,8 @@ RULES:
 - "sourceIds" may only contain ids shown above (${sources.map((s) => s.id).join(', ') || 'none'}). Never invent ids or URLs.
 - If the method is calculation/comparison, provide "calculation": a formula using variable names (letters, digits, _), + - * / ^ ( ) and min/max/abs/round, the numeric value of each input, and the result. The result will be recomputed by machine.
 - confidence "high" only with 2+ independent sources agreeing.
+- Answer about the entities, places and products named in the question, using what the EVIDENCE says about them. Never answer with generic advice, definitions or how-to content ("typical cycles", "generic levers"). Open with the finding, not with what is missing; put what is missing in "gaps".
+- Prefer primary evidence (the companies' own pages, papers, code repositories, official registers, press releases) over market-report summaries; when only market-report pages give a number, say so in the claim text.
 - Marketplace sources list real listings as rows "title | price | year | km | url"; their median, range and trend were computed by code: cite them instead of guessing.
 - If the sub-question asks for concrete items (listings, offers, products, pages, links), return them in "items". An item "url" must be copied exactly from a LINKS list or a source URL above; any other URL is rejected by machine.
 

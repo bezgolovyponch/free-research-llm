@@ -5,7 +5,7 @@ const OPEN = new Set(['pending', 'researching']);
 const GRADE_GAP = { verified: 0, supported: 0.25, weak: 0.6, unsupported: 0.85, failed: 1, pending: 1, researching: 1 };
 const FIX_CHECKS = new Set(['answer', 'citations', 'calculation']);
 const RESEARCH_CHECKS = new Set(['concrete', 'numbers-sourced', 'critique']);
-const NEEDS_USER = /\b(your|you|user'?s?|budget|preference|which (?:one|model|option)|depends on (?:the|your)|not specified|unspecified|define|definition|ambiguous|clarify|assum(?:e|ption)s? (?:about|on) (?:the )?(?:buyer|seller|owner|company|business))\b/i;
+const NEEDS_USER = /\b(owner input|your|you|user'?s?|budget|preference|which (?:one|model|option)|depends on (?:the|your)|not specified|unspecified|define|definition|ambiguous|clarify|assum(?:e|ption)s? (?:about|on) (?:the )?(?:buyer|seller|owner|company|business))\b/i;
 
 function failures(node) {
   return (node.verification?.checks ?? []).filter((c) => !c.passed);
