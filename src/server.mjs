@@ -104,6 +104,21 @@ export function createServer(app, gate = new AccessGate()) {
         throw new HttpError(400, error.message);
       }
     }],
+    ['POST', /^\/api\/router\/strategy$/, async (req) => {
+      try {
+        return await app.routerAdmin.setStrategy(String((await readJson(req)).strategy ?? ''));
+      } catch (error) {
+        throw new HttpError(400, error.message);
+      }
+    }],
+    ['POST', /^\/api\/router\/use$/, async (req) => {
+      const body = await readJson(req);
+      try {
+        return await app.routerAdmin.use(String(body.id ?? ''), body.on !== false);
+      } catch (error) {
+        throw new HttpError(400, error.message);
+      }
+    }],
     ['POST', /^\/api\/router\/order$/, async (req) => {
       try {
         return await app.routerAdmin.order((await readJson(req)).order);
@@ -342,6 +357,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.exit(0);
   };
   app.onRestart = () => void stop('restart requested');
+  await app.seedLedger();
+  setInterval(() => app.routerAdmin.apply(), 60000).unref();
   process.on('SIGTERM', () => void stop('SIGTERM'));
   process.on('SIGINT', () => void stop('SIGINT'));
   if (process.env.FRL_AUTO_RESUME !== '0') {

@@ -74,18 +74,30 @@
   .btn.ghost:hover{background:var(--hover); color:var(--txt)}
   .btn.danger{background:none; border-color:var(--line); color:var(--rd)}
   .btn.sm{padding:5px 10px; font-size:13px; min-height:32px}
-  #routerDlg{border:1px solid var(--line); border-radius:14px; background:var(--panel); color:var(--txt); padding:0; width:min(980px,calc(100vw - 24px)); max-height:calc(100vh - 32px)}
-  #routerDlg::backdrop{background:rgba(0,0,0,.45)}
-  #routerDlg .rhead{display:flex; align-items:center; gap:8px; padding:14px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--panel); z-index:1}
-  #routerDlg .rbody{padding:12px 16px 18px; overflow:auto}
-  .rrow{display:grid; grid-template-columns:minmax(160px,1.2fr) minmax(180px,1.6fr) minmax(200px,1.4fr); gap:10px; align-items:start; padding:10px 0; border-bottom:1px solid var(--line)}
-  .rrow .rin{display:flex; gap:6px; flex-wrap:wrap}
-  .rrow .rin input{flex:1 1 140px; min-width:0}
-  .rstate{display:inline-flex; align-items:center; gap:6px; font-size:12px}
-  .rstate i{width:9px; height:9px; border-radius:50%; display:inline-block}
-  .rorder{display:flex; flex-direction:column; gap:4px; margin-top:6px}
-  .rorder .ro{display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--panel2)}
-  @media (max-width:820px){ .rrow{grid-template-columns:1fr} }
+  .rt-seg{display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; flex-wrap:wrap}
+  .rt-seg button{border:0; background:var(--panel); padding:8px 14px; font-weight:600; cursor:pointer; color:var(--dim)}
+  .rt-seg button.on{background:var(--acc); color:var(--acc-ink)}
+  .rt-tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin:14px 0}
+  .rt-tile{border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:var(--panel)}
+  .rt-tile b{display:block; font-size:20px}
+  .rt-roles{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .rt-row{display:grid; grid-template-columns:28px minmax(0,1fr) 92px 58px 54px; gap:8px; align-items:center; padding:9px 0; border-top:1px solid var(--line)}
+  .rt-row .rk{font-weight:800; color:var(--faint); text-align:center}
+  .rt-row .nm b{display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .rt-row .nm span{display:block; font-size:12px; color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .rt-row .why{grid-column:2 / -1; font-size:12px; color:var(--dim); margin-top:-4px}
+  .rt-row.off{opacity:.55}
+  .rt-bar{height:6px; border-radius:3px; background:var(--panel2); overflow:hidden}
+  .rt-bar i{display:block; height:100%; background:var(--gr)}
+  .rt-head{display:grid; grid-template-columns:28px minmax(0,1fr) 92px 58px 54px; gap:8px; font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.4px; padding-bottom:6px}
+  .rt-cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:12px; margin-top:10px}
+  .rt-card{border:1px solid var(--line); border-radius:12px; padding:12px; background:var(--panel); display:flex; flex-direction:column; gap:6px}
+  .rt-card .top{display:flex; align-items:center; gap:8px}
+  .rt-card input{width:100%}
+  .rt-dot{width:10px; height:10px; border-radius:50%; display:inline-block; flex:0 0 auto}
+  .switch{display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--dim)}
+  @media (max-width:900px){ .rt-roles{grid-template-columns:1fr} }
+  @media (max-width:480px){ .rt-row,.rt-head{grid-template-columns:24px minmax(0,1fr) 64px 46px} .rt-row .cap,.rt-head .cap{display:none} }
   .btn:disabled{opacity:.45; cursor:not-allowed}
   .icon-btn{display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px; border:0; background:none; cursor:pointer; color:var(--dim)}
   .icon-btn:hover{background:var(--hover); color:var(--txt)}
@@ -303,6 +315,7 @@
       <button class="navlink" data-view="assistant">App assistant</button>
       <button class="navlink" data-view="terminal">Terminal</button>
       <button class="navlink" data-view="history">History</button>
+      <button class="navlink" data-view="router">Models &amp; router</button>
       <button class="navlink" data-view="setup">Setup &amp; keys</button>
       <button class="navlink" data-view="guide">Guide</button>
       <div class="health"><span class="pill" id="chipModel"><i></i>models …</span><button class="btn secondary sm" id="btnRouter" aria-label="Add models and manage the router" title="Add free model keys and set the router order">+</button><span class="pill" id="chipSearch"><i></i>search …</span></div>
@@ -438,13 +451,20 @@
       </div>
     </section>
 
+    <section class="view" id="view-router">
+      <div class="page">
+        <div class="row"><h1 style="margin:0">Models &amp; router</h1><span class="spacer"></span><button class="btn ghost sm" id="rtVerify">Re-check links</button></div>
+        <p class="lead">Every model call goes down the list for its role, top first. A provider that hits a rate limit cools down and the next one answers. The order is recomputed every minute from the last 24 h of calls.</p>
+        <div id="rtBody"><p class="small faint">Loading…</p></div>
+      </div>
+    </section>
     <section class="view" id="view-setup">
       <div class="page">
         <h1>Setup &amp; keys</h1>
         <p class="lead">Free model and search keys live in your system key store (macOS Keychain, Windows user environment: <b>Terminal → Add keys</b>). Keys pasted here last until the app stops.</p>
         <div class="card"><h2>Connect a key</h2>
           <div class="row" style="margin-top:10px"><select id="keyProvider" style="flex:1 1 220px"></select><input type="password" id="keyValue" placeholder="API key" style="flex:2 1 220px"><input type="text" id="keyUrl" placeholder="base URL (custom only)" style="flex:1 1 180px; display:none"><button class="btn primary" id="btnKey">Connect</button></div>
-          <div class="row" style="margin-top:8px"><button class="btn primary sm" id="btnRouter2">Models &amp; router…</button><button class="btn secondary sm" id="btnReload">Reload keys from Keychain</button><button class="btn secondary sm" id="btnRefresh">Re-check providers</button></div>
+          <div class="row" style="margin-top:8px"><button class="btn primary sm" id="btnRouter2">Models &amp; router</button><button class="btn secondary sm" id="btnReload">Reload keys from Keychain</button><button class="btn secondary sm" id="btnRefresh">Re-check providers</button></div>
           <p class="small muted" id="keyHelp" style="margin-top:8px"></p>
         </div>
         <div class="card tablewrap" style="padding:4px"><table id="provTable"></table></div>
@@ -469,7 +489,6 @@
 </div>
 <div id="toast" role="status"></div>
 
-<dialog id="routerDlg" aria-labelledby="routerTitle"><div class="rhead"><h2 id="routerTitle" style="font-size:16px;margin:0">Models &amp; router</h2><span class="small muted" id="routerStore"></span><span class="spacer"></span><button class="btn ghost sm" id="routerVerify">Re-check links</button><button class="icon-btn" id="routerClose" aria-label="Close">✕</button></div><div class="rbody" id="routerBody"><p class="small faint">Loading…</p></div></dialog>
 <script>
 "use strict";
 const STATUS_COLOR={verified:"var(--gr)",supported:"var(--tl)",weak:"var(--am)",unsupported:"var(--rd)",failed:"var(--rd)",researching:"var(--bl)",pending:"var(--gray)"};
@@ -497,10 +516,11 @@ function showPage(name){
   document.querySelectorAll(".view").forEach(v=>v.classList.toggle("on",v.id==="view-"+name));
   document.querySelectorAll(".navlink").forEach(b=>b.classList.toggle("on",b.dataset.view===name));
   if(name==="setup")loadStatus();
+  if(name==="router")loadRouter();
   if(name==="history")loadHistory();
   if(name==="assistant"){if(!CHAT.appLoaded)loadAppChat();else renderAppPage();}
   if(name==="terminal")ensureTerminal();
-  $("mobileTitle").textContent=name==="project"?"Research":name==="home"?"New research":name==="setup"?"Setup & keys":name==="assistant"?"App assistant":name[0].toUpperCase()+name.slice(1);
+  $("mobileTitle").textContent=name==="project"?"Research":name==="home"?"New research":name==="setup"?"Setup & keys":name==="router"?"Models & router":name==="assistant"?"App assistant":name[0].toUpperCase()+name.slice(1);
   if(name!=="project")closeInspector();
   closeSidebar();renderProjectList();syncHash();
 }
@@ -566,53 +586,58 @@ function updateKeyHelp(){
 }
 $("keyProvider").addEventListener("change",updateKeyHelp);
 $("btnKey").addEventListener("click",async()=>{const key=$("keyValue").value.trim();if(!key){toast("paste a key first");return;}$("btnKey").disabled=true;try{await api("/api/keys",{method:"POST",body:{provider:$("keyProvider").value,key,baseURL:$("keyUrl").value.trim()}});$("keyValue").value="";await loadStatus();toast("connected");}catch(e){toast(e.message);}finally{$("btnKey").disabled=false;}});
-const ROUTER={view:null,order:null};
-const R_STATE={ready:["var(--gr)","works"],cooling:["var(--am)","cooling down"],failed:["var(--rd)","not working"],empty:["var(--gray)","no key"],saved:["var(--bl)","saved"]};
-function linkBadge(r){if(!r.signup)return "";const l=r.link;const b=!l?'<span class="faint">link not checked yet</span>':l.ok?'<span style="color:var(--gr)" title="'+esc(l.detail)+'">✓ link works</span>':'<span style="color:var(--rd)" title="'+esc(l.detail)+'">✗ link broken: '+esc(l.detail)+"</span>";return '<a href="'+esc(safeUrl(r.signup)||"#")+'" target="_blank" rel="noopener">Get a free key ↗</a> <span class="small">'+b+"</span>";}
-function routerRow(r){
-  const st=R_STATE[r.state]||R_STATE.empty;
+const RT={view:null,msg:{}};
+const RT_STATE={ready:["var(--gr)","Works"],cooling:["var(--am)","Cooling down"],failed:["var(--rd)","Not working"],empty:["var(--gray)","Not connected"],saved:["var(--bl)","Saved"]};
+function rtLink(r){if(!r.signup)return"";const l=r.link;const badge=!l?'<span class="faint">checking link…</span>':l.ok?'<span style="color:var(--gr)" title="'+esc(l.detail)+'">✓ link checked</span>':'<span style="color:var(--rd)" title="'+esc(l.detail)+'">✗ link broken ('+esc(l.detail)+")</span>";return '<span class="small"><a href="'+esc(safeUrl(r.signup)||"#")+'" target="_blank" rel="noopener">Get a free key ↗</a> · '+badge+"</span>";}
+function rtRouteRows(rows,custom){
+  const on=rows.filter(r=>r.ready),off=rows.filter(r=>!r.ready);
+  const row=(r,i)=>{const pct=Math.round(r.reliability*100);return '<div class="rt-row'+(r.ready?"":" off")+'" data-rt="'+esc(r.id)+'"><span class="rk">'+(r.ready?r.rank:"–")+'</span><span class="nm"><b><i class="rt-dot" style="background:'+(r.cooling?"var(--am)":r.ready?"var(--gr)":"var(--gray)")+';margin-right:6px"></i>'+esc(r.label)+"</b><span>"+esc(r.model||"no model")+'</span></span><span title="'+r.ok+" of "+r.calls+' calls worked in 24 h"><div class="rt-bar"><i style="width:'+(r.calls?pct:0)+'%;background:'+(pct>=80?"var(--gr)":pct>=50?"var(--am)":"var(--rd)")+'"></i></div><span class="small faint">'+(r.calls?pct+"% of "+r.calls:"no calls yet")+'</span></span><span class="small mono">'+(r.medianMs?(r.medianMs/1000).toFixed(1)+" s":"–")+'</span><span class="small cap" title="'+esc(r.capabilityBasis)+'">'+"★".repeat(r.capability)+'<span class="faint">'+"★".repeat(5-r.capability)+"</span></span>"+'<span class="why">'+esc(r.why)+(custom&&r.ready?' <button class="btn ghost sm" data-rtup="'+esc(r.id)+'"'+(i?"":" disabled")+' aria-label="move '+esc(r.label)+' up">↑</button><button class="btn ghost sm" data-rtdown="'+esc(r.id)+'"'+(i<on.length-1?"":" disabled")+' aria-label="move '+esc(r.label)+' down">↓</button>':"")+"</span></div>";};
+  return '<div class="rt-head"><span>#</span><span>Provider · model</span><span>Reliability</span><span>Speed</span><span class="cap">Capability</span></div>'+on.map(row).join("")+(off.length?'<details style="margin-top:6px"><summary class="small muted">Not available now ('+off.length+")</summary>"+off.map(row).join("")+"</details>":"")+(on.length?"":'<p class="small" style="color:var(--rd)">No provider is ready for this role. Connect one below.</p>');
+}
+function rtCard(r){
+  const st=RT_STATE[r.state]||RT_STATE.empty;
   const field=(name,label,secret)=>name?'<input data-rname="'+esc(name)+'" type="'+(secret?"password":"text")+'" placeholder="'+esc(label)+'" aria-label="'+esc(r.label+": "+label)+'" autocomplete="off">':"";
-  const inputs=field(r.baseEnv,"base URL",false)+field(r.modelEnv,"model",false)+field(r.accountEnv,"account ID",false)+field(r.env,r.saved?"key saved · paste to replace":"paste API key",true);
-  const main=r.env||r.baseEnv;
-  return '<div class="rrow" data-rrow="'+esc(r.id)+'"><div><b>'+esc(r.label)+'</b> <span class="mono small faint">'+esc(r.id)+"</span>"+(r.free?'<div class="small muted">'+esc(r.free)+"</div>":"")+'<div class="small" style="margin-top:3px">'+linkBadge(r)+"</div></div>"
-    +'<div>'+(inputs?'<div class="rin">'+inputs+"</div>":'<span class="small faint">no key needed</span>')+'<div class="rin" style="margin-top:6px">'+(inputs?'<button class="btn primary sm" data-rsave="'+esc(r.id)+'">Save &amp; test</button>':"")+(r.saved&&r.env?'<button class="btn ghost sm" data-rtest="'+esc(r.env)+'">Test</button><button class="btn ghost sm" data-rdel="'+esc(main)+'">Remove</button>':"")+'</div><div class="small" data-rmsg="'+esc(r.id)+'"></div></div>'
-    +'<div><span class="rstate"><i style="background:'+st[0]+'"></i><b>'+st[1]+'</b></span><div class="small muted">'+esc(r.detail||"")+"</div>"+(r.calls&&(r.calls.ok||r.calls.failed)?'<div class="small faint">this session: '+r.calls.ok+" ok · "+r.calls.failed+" failed</div>":"")+"</div></div>";
+  const inputs=field(r.baseEnv,"base URL",false)+field(r.modelEnv,"model",false)+field(r.accountEnv,"account ID",false)+field(r.env,r.saved?"key saved · paste a new one to replace":"paste your API key",true);
+  return '<div class="rt-card" data-rrow="'+esc(r.id)+'"><div class="top"><i class="rt-dot" style="background:'+st[0]+'"></i><b style="flex:1">'+esc(r.label)+"</b>"+(r.kind==="model"?'<label class="switch"><input type="checkbox" data-ruse="'+esc(r.id)+'"'+(r.enabled?" checked":"")+"> use</label>":"")+'</div><div class="small"><b>'+st[1]+'</b> <span class="muted">'+esc(r.detail||"")+"</span></div>"+(r.free?'<div class="small muted">Free: '+esc(r.free)+"</div>":"")+rtLink(r)+(inputs?inputs+'<div class="row"><button class="btn '+(r.saved?"secondary":"primary")+' sm" data-rsave="'+esc(r.id)+'">'+(r.saved?"Replace &amp; test":"Connect &amp; test")+"</button>"+(r.saved&&r.env?'<button class="btn ghost sm" data-rtest="'+esc(r.env)+'">Test</button><button class="btn ghost sm" data-rdel="'+esc(r.env||r.baseEnv)+'">Remove</button>':"")+"</div>":'<div class="small faint">No key needed.</div>')+'<div class="small" data-rmsg="'+esc(r.id)+'">'+(RT.msg[r.id]||"")+"</div></div>";
 }
-function renderRouter(){
-  const v=ROUTER.view;if(!v)return;const byIdR=Object.fromEntries(v.models.map(m=>[m.id,m]));
-  if(!ROUTER.order)ROUTER.order=[...v.order];
-  const off=v.models.map(m=>m.id).filter(id=>!ROUTER.order.includes(id));
-  $("routerStore").textContent="keys are saved in: "+v.store;
-  const orderHtml='<div class="card" style="margin:0 0 12px"><h2>Router order</h2><p class="small muted">Each call goes down this list. A provider that hits a rate limit cools down and the next one answers; unticked providers are never used.'+(v.overrides.length?" "+esc(v.overrides.join(", "))+" is set in the environment and overrides this order for its role.":"")+'</p><div class="rorder">'+ROUTER.order.map((id,i)=>'<div class="ro"><input type="checkbox" checked data-ron="'+esc(id)+'" aria-label="use '+esc(id)+'"><b class="mono">'+(i+1)+"</b> "+esc((byIdR[id]||{}).label||id)+'<span class="spacer"></span><span class="rstate"><i style="background:'+(R_STATE[(byIdR[id]||{}).state]||R_STATE.empty)[0]+'"></i></span><button class="btn ghost sm" data-rup="'+i+'" aria-label="move up"'+(i?"":" disabled")+'>↑</button><button class="btn ghost sm" data-rdown="'+i+'" aria-label="move down"'+(i<ROUTER.order.length-1?"":" disabled")+">↓</button></div>").join("")+off.map(id=>'<div class="ro" style="opacity:.6"><input type="checkbox" data-ron="'+esc(id)+'" aria-label="use '+esc(id)+'"> '+esc((byIdR[id]||{}).label||id)+"</div>").join("")+'</div><div class="row" style="margin-top:8px"><button class="btn primary sm" id="rOrderSave">Save order</button><span class="small faint" id="rOrderMsg"></span></div></div>';
-  $("routerBody").innerHTML=orderHtml+'<h2>Model providers</h2><p class="small faint">Free limits were checked on '+esc(v.freeTiersChecked)+"; the provider's page wins. Links are checked live by the app.</p>"+v.models.map(routerRow).join("")+'<h2 style="margin-top:16px">Search engines</h2>'+v.search.map(routerRow).join("");
-  const body=$("routerBody");
-  body.querySelectorAll("[data-ron]").forEach(c=>c.addEventListener("change",()=>{const id=c.dataset.ron;if(c.checked){if(!ROUTER.order.includes(id))ROUTER.order.push(id);}else ROUTER.order=ROUTER.order.filter(x=>x!==id);renderRouter();}));
-  body.querySelectorAll("[data-rup],[data-rdown]").forEach(b=>b.addEventListener("click",()=>{const i=Number(b.dataset.rup??b.dataset.rdown);const j=b.dataset.rup!=null?i-1:i+1;const o=ROUTER.order;[o[i],o[j]]=[o[j],o[i]];renderRouter();}));
-  $("rOrderSave").addEventListener("click",async()=>{try{const r=await api("/api/router/order",{method:"POST",body:{order:ROUTER.order}});ROUTER.order=null;ROUTER.orderMsg="saved: "+r.order.join(" → ");await refreshRouter();await loadStatus();}catch(e){$("rOrderMsg").textContent=e.message;}});
-  if(ROUTER.orderMsg){$("rOrderMsg").textContent=ROUTER.orderMsg;ROUTER.orderMsg="";}
-  body.querySelectorAll("[data-rsave]").forEach(b=>b.addEventListener("click",()=>saveRouterRow(b.dataset.rsave,false)));
-  body.querySelectorAll("[data-rtest]").forEach(b=>b.addEventListener("click",async()=>{const row=b.closest(".rrow");const msg=row.querySelector("[data-rmsg]");msg.textContent="testing…";try{const r=await api("/api/router/keys/"+b.dataset.rtest+"/test",{method:"POST"});msg.innerHTML=r.ok?'<span style="color:var(--gr)">✓ works: '+esc(r.detail)+"</span>":r.ok===null?esc(r.detail):'<span style="color:var(--rd)">✗ '+esc(r.detail)+"</span>";}catch(e){msg.textContent=e.message;}}));
-  body.querySelectorAll("[data-rdel]").forEach(b=>b.addEventListener("click",async()=>{if(!confirm("Remove "+b.dataset.rdel+" from the key store?"))return;try{await api("/api/router/keys/"+b.dataset.rdel,{method:"DELETE"});await refreshRouter();await loadStatus();}catch(e){toast(e.message);}}));
+function renderRouterPage(){
+  const v=RT.view;if(!v)return;const sm=v.summary;const strat=v.strategies.find(x=>x.id===v.strategy);
+  const models=[...v.models].sort((a,b)=>(b.saved||b.state==="ready")-(a.saved||a.state==="ready"));
+  let h='<div class="card"><div class="row"><b>Routing strategy</b><span class="spacer"></span><div class="rt-seg" role="radiogroup" aria-label="Routing strategy">'+v.strategies.map(x=>'<button role="radio" aria-checked="'+(x.id===v.strategy)+'" data-rstrat="'+esc(x.id)+'" class="'+(x.id===v.strategy?"on":"")+'">'+esc(x.label)+"</button>").join("")+'</div></div><p class="small muted" style="margin-top:8px">'+esc(strat.what)+(v.overrides.length?" "+esc(v.overrides.join(", "))+" is set in the environment and fixes that role's order.":"")+"</p></div>";
+  h+='<div class="rt-tiles"><div class="rt-tile"><span class="small faint">Connected</span><b>'+sm.connected+"/"+sm.total+'</b></div><div class="rt-tile"><span class="small faint">Ready now</span><b>'+sm.ready+'</b></div><div class="rt-tile"><span class="small faint">Cooling down</span><b style="color:'+(sm.cooling?"var(--am)":"inherit")+'">'+sm.cooling+'</b></div><div class="rt-tile"><span class="small faint">Calls, 24 h</span><b>'+sm.calls+'</b></div><div class="rt-tile"><span class="small faint">Worked</span><b>'+(sm.success==null?"–":Math.round(sm.success*100)+"%")+'</b></div><div class="rt-tile"><span class="small faint">Rate-limited</span><b>'+sm.rateLimited+"</b></div></div>";
+  h+='<div class="rt-roles"><div class="card"><h2>Deep role</h2><p class="small muted">Builds the tree, retries failed checks, reviews, writes the memo. Few calls; capability matters most.</p>'+rtRouteRows(v.route.deep,v.strategy==="custom")+'</div><div class="card"><h2>Fast role</h2><p class="small muted">Researches every piece. Many calls; speed and reliability matter most.</p>'+rtRouteRows(v.route.fast,v.strategy==="custom")+"</div></div>";
+  h+='<h2 style="margin-top:18px">Providers</h2><p class="small muted">Keys are tested with the provider before they are saved in '+esc(v.store)+'. Free limits checked on '+esc(v.freeTiersChecked)+"; the provider's own page wins.</p>"+'<div class="rt-cards">'+models.map(rtCard).join("")+"</div>";
+  h+='<details style="margin-top:18px"><summary><b>Search engines</b> <span class="small muted">('+v.search.filter(x=>x.saved).length+" of "+v.search.length+' connected)</span></summary><div class="rt-cards">'+v.search.map(rtCard).join("")+"</div></details>";
+  const body=$("rtBody");body.innerHTML=h;
+  body.querySelectorAll("[data-rstrat]").forEach(b=>b.addEventListener("click",async()=>{try{await api("/api/router/strategy",{method:"POST",body:{strategy:b.dataset.rstrat}});await loadRouter();}catch(e){toast(e.message);}}));
+  body.querySelectorAll("[data-ruse]").forEach(c=>c.addEventListener("change",async()=>{try{await api("/api/router/use",{method:"POST",body:{id:c.dataset.ruse,on:c.checked}});await loadRouter();await loadStatus();}catch(e){toast(e.message);c.checked=!c.checked;}}));
+  const move=(id,d)=>{const o=v.route.deep.filter(r=>r.ready).map(r=>r.id);const rest=v.order.filter(x=>!o.includes(x));const i=o.indexOf(id),j=i+d;if(i<0||j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];api("/api/router/order",{method:"POST",body:{order:[...o,...rest]}}).then(loadRouter,e=>toast(e.message));};
+  body.querySelectorAll("[data-rtup]").forEach(b=>b.addEventListener("click",()=>move(b.dataset.rtup,-1)));
+  body.querySelectorAll("[data-rtdown]").forEach(b=>b.addEventListener("click",()=>move(b.dataset.rtdown,1)));
+  body.querySelectorAll("[data-rsave]").forEach(b=>b.addEventListener("click",()=>saveRouterCard(b.dataset.rsave,false)));
+  body.querySelectorAll("[data-rtest]").forEach(b=>b.addEventListener("click",async()=>{const id=b.closest("[data-rrow]").dataset.rrow;RT.msg[id]="testing…";renderRouterPage();try{const r=await api("/api/router/keys/"+b.dataset.rtest+"/test",{method:"POST"});RT.msg[id]=r.ok?'<span style="color:var(--gr)">✓ works: '+esc(r.detail)+"</span>":r.ok===null?esc(r.detail):'<span style="color:var(--rd)">✗ '+esc(r.detail)+"</span>";}catch(e){RT.msg[id]=esc(e.message);}renderRouterPage();}));
+  body.querySelectorAll("[data-rdel]").forEach(b=>b.addEventListener("click",async()=>{if(!confirm("Remove "+b.dataset.rdel+" from the key store?"))return;try{await api("/api/router/keys/"+b.dataset.rdel,{method:"DELETE"});await loadRouter();await loadStatus();}catch(e){toast(e.message);}}));
+  body.querySelectorAll("[data-rforce]").forEach(b=>b.addEventListener("click",()=>saveRouterCard(b.dataset.rforce,true)));
 }
-async function saveRouterRow(id,force){
-  const row=$("routerBody").querySelector('[data-rrow="'+CSS.escape(id)+'"]');const msg=row.querySelector("[data-rmsg]");
-  const fields=[...row.querySelectorAll("[data-rname]")].filter(i=>i.value.trim());
-  if(!fields.length){msg.textContent="type or paste a value first";return;}
-  msg.textContent="checking with the provider…";
+async function saveRouterCard(id,force){
+  const card=$("rtBody").querySelector('[data-rrow="'+CSS.escape(id)+'"]');
+  const fields=[...card.querySelectorAll("[data-rname]")].filter(i=>i.value.trim());
+  if(!fields.length){RT.msg[id]="type or paste a value first";renderRouterPage();return;}
+  card.querySelector("[data-rmsg]").textContent="checking with the provider…";
   try{for(const f of fields){const r=await api("/api/router/keys",{method:"POST",body:{name:f.dataset.rname,value:f.value,force}});
-      if(!r.saved){msg.innerHTML='<span style="color:var(--rd)">✗ '+esc(f.dataset.rname)+": "+esc(r.detail)+'</span> <button class="btn ghost sm" data-rforce="1">Save anyway</button>';msg.querySelector("[data-rforce]").addEventListener("click",()=>saveRouterRow(id,true));return;}
-      f.value="";}
-    await refreshRouter();await loadStatus();
-    const m=$("routerBody").querySelector('[data-rmsg="'+CSS.escape(id)+'"]');const st=(ROUTER.view.models.concat(ROUTER.view.search)).find(x=>x.id===id);
-    if(m)m.innerHTML=st&&st.state==="ready"?'<span style="color:var(--gr)">✓ saved and working</span>':'<span>saved'+(st?" · "+esc(st.detail):"")+"</span>";
-  }catch(e){msg.textContent=e.message;}
+      if(!r.saved){RT.msg[id]='<span style="color:var(--rd)">✗ '+esc(f.dataset.rname)+": "+esc(r.detail)+'</span> <button class="btn ghost sm" data-rforce="'+esc(id)+'">Save anyway</button>';renderRouterPage();return;}}
+    await loadRouter();await loadStatus();
+    const st=RT.view.models.concat(RT.view.search).find(x=>x.id===id);
+    RT.msg[id]=st&&st.state==="ready"?'<span style="color:var(--gr)">✓ connected and working</span>':"saved"+(st?" · "+esc(st.detail):"");
+  }catch(e){RT.msg[id]=esc(e.message);}
+  renderRouterPage();
 }
-async function refreshRouter(verify){try{ROUTER.view=await api("/api/router"+(verify?"?verify=1":""));renderRouter();}catch(e){$("routerBody").innerHTML='<div class="notice err small">'+esc(e.message)+"</div>";}}
-async function openRouter(){ROUTER.order=null;const d=$("routerDlg");if(!d.open)d.showModal();await refreshRouter();setTimeout(()=>{if(d.open)refreshRouter();},8000);}
+async function loadRouter(verify){try{RT.view=await api("/api/router"+(verify?"?verify=1":""));renderRouterPage();}catch(e){$("rtBody").innerHTML='<div class="notice err small">'+esc(e.message)+"</div>";}}
+function openRouter(){showPage("router");setTimeout(()=>{if(STATE.page==="router")loadRouter();},8000);}
 $("btnRouter").addEventListener("click",openRouter);
 $("btnRouter2").addEventListener("click",openRouter);
-$("routerClose").addEventListener("click",()=>$("routerDlg").close());
-$("routerVerify").addEventListener("click",async()=>{$("routerVerify").disabled=true;await refreshRouter(true);$("routerVerify").disabled=false;});
+$("rtVerify").addEventListener("click",async()=>{$("rtVerify").disabled=true;await loadRouter(true);$("rtVerify").disabled=false;});
+
 $("btnReload").addEventListener("click",async()=>{try{const r=await api("/api/keys/reload",{method:"POST"});await loadStatus();toast(r.changed.length?"reloaded: "+r.changed.join(", "):"keys reloaded (no change)");}catch(e){toast(e.message);}});
 $("btnRefresh").addEventListener("click",async()=>{try{await api("/api/providers/refresh",{method:"POST"});await loadStatus();toast("providers re-checked");}catch(e){toast(e.message);}});
 

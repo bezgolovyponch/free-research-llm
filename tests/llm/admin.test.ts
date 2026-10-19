@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LinkVerifier, RouterAdmin, catalogRows, editableNames, linkVerdict, modelOrder } from '../../src/llm/admin.mjs';
+import { LinkVerifier, RouterAdmin, catalogRows, editableNames, linkVerdict, modelOrder, strategyOf, summaryOf } from '../../src/llm/admin.mjs';
 
 function store() {
   const saved = new Map<string, string>();
@@ -77,5 +77,24 @@ describe('router admin', () => {
     await v.checkAll(['https://x.test/broken'], { force: true });
     expect(calls).toBe(2);
     expect(editableNames().has('CLOUDFLARE_ACCOUNT_ID')).toBe(true);
+  });
+
+  it('switches the routing strategy and providers on or off, and the view shows the ranked route and a summary', async () => {
+    const env: Record<string, string> = { GROQ_API_KEY: 'gsk_x' };
+    const t = admin(env, async () => ({ ok: true }));
+    expect(strategyOf(env)).toBe('balanced');
+    expect(await t.a.setStrategy('fastest')).toMatchObject({ strategy: 'fastest' });
+    expect([env.FRL_ROUTER_STRATEGY, t.secrets.saved.get('FRL_ROUTER_STRATEGY')]).toEqual(['fastest', 'fastest']);
+    await expect(t.a.setStrategy('random')).rejects.toThrow(/strategy must be/);
+    await t.a.use('gemini', false);
+    expect(env.FRL_PROVIDER_ORDER.split(',')).not.toContain('gemini');
+    await t.a.use('gemini', true);
+    expect(env.FRL_PROVIDER_ORDER.split(',').at(-1)).toBe('gemini');
+    await expect(t.a.use('nope', true)).rejects.toThrow(/unknown provider/);
+    const view = await t.a.view();
+    expect(view.strategy).toBe('fastest');
+    expect(view.route.deep.filter((r: { ready: boolean }) => r.ready).map((r: { id: string }) => r.id)).toEqual(['gemini', 'groq']);
+    expect(view.summary).toMatchObject({ ready: 1, cooling: 1, calls: 2, success: 0.5 });
+    expect(summaryOf([], {})).toMatchObject({ calls: 0, success: null });
   });
 });

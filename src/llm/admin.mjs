@@ -1,5 +1,6 @@
 import { PROVIDER_PRESETS, ROUTE_ORDER, SEARCH_KEYS } from './presets.mjs';
 import { KeyChecker } from '../keycheck.mjs';
+import { STRATEGIES, routeFor } from './ranking.mjs';
 
 export const FREE_TIERS_CHECKED = '2026-10-18';
 export const FREE_TIERS = {
@@ -129,8 +130,28 @@ export function editableNames() {
   return names;
 }
 
+export function strategyOf(env) {
+  return STRATEGIES[env.FRL_ROUTER_STRATEGY] ? env.FRL_ROUTER_STRATEGY : 'balanced';
+}
+
+export function summaryOf(models, stats) {
+  const all = Object.values(stats);
+  const calls = all.reduce((n, s) => n + s.calls, 0);
+  const ok = all.reduce((n, s) => n + s.ok, 0);
+  return {
+    connected: models.filter((m) => m.saved || (m.keyless && m.state === 'ready')).length,
+    total: models.length,
+    ready: models.filter((m) => m.state === 'ready').length,
+    cooling: models.filter((m) => m.state === 'cooling').length,
+    calls,
+    success: calls ? Math.round((ok / calls) * 100) / 100 : null,
+    rateLimited: all.reduce((n, s) => n + s.rateLimited, 0),
+  };
+}
+
 export class RouterAdmin {
-  constructor({ env, secrets, reload, statuses, ledger, applyOrder, checker = new KeyChecker(), links = new LinkVerifier() }) {
+  constructor({ env, secrets, reload, statuses, ledger, applyOrder, checker = new KeyChecker(), links = new LinkVerifier(), now = () => Date.now() }) {
+    this.now = now;
     this.env = env;
     this.secrets = secrets;
     this.reload = reload;
@@ -145,11 +166,51 @@ export class RouterAdmin {
     return [...PROVIDER_PRESETS.map((p) => p.signup), ...SEARCH_KEYS.map((k) => k.signup)].filter((u) => /^https:\/\//.test(u ?? ''));
   }
 
+  route() {
+    const strategy = strategyOf(this.env);
+    const enabled = modelOrder(this.env).enabled;
+    return { strategy, ...routeFor({ strategy, providers: this.statuses(), ledger: this.ledger(), enabled, customOrder: enabled, now: this.now() }) };
+  }
+
+  apply() {
+    const route = this.route();
+    this.applyOrder(route.order);
+    return route;
+  }
+
   async view({ verify = false } = {}) {
     if (verify) await this.links.checkAll(this.urls(), { force: true });
     else void this.links.checkAll(this.urls()).catch(() => {});
     const links = Object.fromEntries(this.urls().map((u) => [u, this.links.known(u)]));
-    return { ...catalogRows({ env: this.env, statuses: this.statuses(), ledger: this.ledger(), links }), store: this.secrets?.label ?? 'this session only (no key store)' };
+    const route = this.apply();
+    const catalog = catalogRows({ env: this.env, statuses: this.statuses(), ledger: this.ledger(), links });
+    return {
+      ...catalog,
+      strategy: route.strategy,
+      strategies: Object.entries(STRATEGIES).map(([id, s]) => ({ id, ...s })),
+      route: { deep: route.deep, fast: route.fast },
+      summary: summaryOf(catalog.models, route.stats),
+      store: this.secrets?.label ?? 'this session only (no key store)',
+    };
+  }
+
+  async setting(name, value) {
+    if (this.secrets) await this.secrets.write(name, value);
+    this.env[name] = value;
+  }
+
+  async setStrategy(id) {
+    if (!STRATEGIES[id]) throw new RangeError(`strategy must be one of ${Object.keys(STRATEGIES).join(', ')}`);
+    await this.setting('FRL_ROUTER_STRATEGY', id);
+    return { strategy: id, order: this.apply().order };
+  }
+
+  async use(id, on) {
+    const known = PROVIDER_PRESETS.some((p) => p.id === id);
+    if (!known) throw new RangeError(`unknown provider ${id}`);
+    const enabled = modelOrder(this.env).enabled.filter((x) => x !== id);
+    if (on) enabled.push(id);
+    return this.order(enabled);
   }
 
   guard(name) {
@@ -165,6 +226,7 @@ export class RouterAdmin {
     const stored = this.secrets ? await this.secrets.write(name, verdict.value) : false;
     this.env[name] = verdict.value;
     await this.reload();
+    this.apply();
     return { saved: true, stored, ok: verdict.ok, detail: verdict.repaired ? `repaired: ${verdict.repaired}` : verdict.detail };
   }
 
@@ -189,11 +251,9 @@ export class RouterAdmin {
     const known = new Set(PROVIDER_PRESETS.map((p) => p.id));
     const list = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter((id) => known.has(id)))];
     if (!list.length) throw new RangeError('keep at least one provider on');
-    const value = list.join(',');
-    if (this.secrets) await this.secrets.write('FRL_PROVIDER_ORDER', value);
-    this.env.FRL_PROVIDER_ORDER = value;
-    this.applyOrder();
+    await this.setting('FRL_PROVIDER_ORDER', list.join(','));
     await this.reload();
+    this.apply();
     return { order: list };
   }
 }

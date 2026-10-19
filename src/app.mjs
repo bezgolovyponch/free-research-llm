@@ -137,8 +137,9 @@ export class App {
       reload: () => this.reloadKeys(),
       statuses: () => this.router.status(),
       ledger: () => this.router.ledger,
-      applyOrder: () => {
-        this.router.routeOrder = routeOrderFrom(this.env);
+      applyOrder: (order) => {
+        const forced = routeOrderFrom(this.env);
+        this.router.routeOrder = { fast: this.env.FRL_FAST_ORDER ? forced.fast : order.fast, deep: this.env.FRL_DEEP_ORDER ? forced.deep : order.deep };
       },
       checker: new KeyChecker({ fetchImpl }),
       links: new LinkVerifier({ fetchImpl }),
@@ -265,7 +266,14 @@ export class App {
     if (this.demo && !live.length) providers.push(new ScriptedProvider());
     this.engine.demo = this.demo && !live.length;
     this.router.setProviders(providers);
+    this.routerAdmin?.apply();
     return this.router.status();
+  }
+
+  async seedLedger() {
+    const rows = await this.logs.read('model-calls', 500).catch(() => []);
+    if (!this.router.ledger.length) this.router.ledger.push(...rows.slice(-500));
+    return this.routerAdmin.apply();
   }
 
   async reloadKeys() {

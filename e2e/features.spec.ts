@@ -136,23 +136,25 @@ test('researches list shows only name, start time, active dot and node count; ma
   await page.request.post(`/api/projects/${id}/improve/stop`);
 });
 
-test('the + next to the models indicator opens the router menu: free keys, source links, state and order', async ({ page }) => {
+test('the + next to the models indicator opens the router page: strategy, ranked route per role with reasons, providers', async ({ page }) => {
   await page.goto('/');
   if (await page.locator('#menuBtn').isVisible()) await page.locator('#menuBtn').click();
   await page.locator('#btnRouter').click();
-  const dlg = page.locator('#routerDlg');
-  await expect(dlg).toBeVisible();
-  await expect(dlg.locator('[data-rrow="groq"]')).toContainText('1,000 req/day');
-  await expect(dlg.locator('[data-rrow="groq"] a')).toHaveAttribute('href', 'https://console.groq.com/keys');
-  await expect(dlg.locator('[data-rrow="groq"] input[type="password"]')).toBeVisible();
-  await expect(dlg.locator('[data-rrow="TAVILY_API_KEY"]')).toBeVisible();
-  await expect(dlg.locator('[data-rrow="pollinations"]')).toContainText('no key needed');
+  const body = page.locator('#rtBody');
+  await expect(page.getByRole('heading', { name: 'Models & router' })).toBeVisible();
+  await expect(body.getByRole('radio', { name: 'Balanced' })).toHaveAttribute('aria-checked', 'true');
+  await expect(body.locator('.rt-roles .card').first()).toContainText('Deep role');
+  await expect(body.locator('.rt-row[data-rt="pollinations"] .why').first()).toContainText('disabled by FRL_POLLINATIONS=0');
+  await expect(body.locator('[data-rrow="groq"]')).toContainText('1,000 req/day');
+  await expect(body.locator('[data-rrow="groq"] a')).toHaveAttribute('href', 'https://console.groq.com/keys');
+  await expect(body.locator('[data-rrow="groq"] input[type="password"]')).toBeVisible();
   await noSideScroll(page);
-  await dlg.locator('[data-rsave="groq"]').click();
-  await expect(dlg.locator('[data-rmsg="groq"]')).toContainText('type or paste a value first');
-  await expect(dlg.locator('.ro').first()).toContainText('Pollinations');
-  await dlg.locator('#rOrderSave').click();
-  await expect(dlg.locator('#rOrderMsg')).toContainText('saved: pollinations');
-  await dlg.locator('#routerClose').click();
-  await expect(dlg).toBeHidden();
+  await body.getByRole('radio', { name: 'Fastest' }).click();
+  await expect(body.getByRole('radio', { name: 'Fastest' })).toHaveAttribute('aria-checked', 'true');
+  await expect(body).toContainText('Lowest median reply time first');
+  await body.getByRole('radio', { name: 'Custom' }).click();
+  await expect(body).toContainText('Your own order, the same for both roles');
+  await body.getByRole('radio', { name: 'Balanced' }).click();
+  await body.locator('[data-rsave="groq"]').click();
+  await expect(body.locator('[data-rmsg="groq"]')).toContainText('type or paste a value first');
 });

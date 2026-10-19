@@ -101,6 +101,7 @@ From other devices the terminal is protected by the access token, like the rest 
 | Always on in a free cloud server | [CLOUD.md](CLOUD.md) |
 | Free keys | [KEYS.md](KEYS.md) |
 | Models in a circle when quotas run out (FreeLLMAPI) | [FREE-ROUTING.md](FREE-ROUTING.md) |
+| How the router orders models | **Models & router** page (the **+** next to the models indicator): a strategy (Balanced, Fastest, Smartest, Custom) ranks the ready providers per role from the last 24 h of calls (reliability, median speed) and a capability rating; each place shows its reason |
 | Rules the code enforces | [PROTOCOLS.md](PROTOCOLS.md) |
 | Mandatory audit for anyone changing the app | [AUDIT-PROTOCOL.md](AUDIT-PROTOCOL.md) |
 | Build history | [SESSION-LOG.md](SESSION-LOG.md) |
