@@ -5,6 +5,7 @@ import { MAX_THREAD } from './research/notify.mjs';
 import { ReplyAudit, auditFeedback } from './chat/reply-audit.mjs';
 import { CONSOLE_COMMANDS, commandById } from './terminal/catalog.mjs';
 import { ENGINES, engineOf, normalizeTicket } from './changes.mjs';
+import { guideCommands, guideUrls } from './llm/guides.mjs';
 
 const DIRECT = new Set(['open', 'stop', 'links']);
 const PROPOSALS = new Set(['create', 'delete', 'improve', 'command', 'change']);
@@ -92,7 +93,7 @@ export class AppChat {
   auditor(facts) {
     const links = facts.links ?? [];
     return new ReplyAudit({
-      allowedUrls: [...(this.docs?.urls() ?? []), ...links.map((l) => l.url)],
+      allowedUrls: [...(this.docs?.urls() ?? []), ...guideUrls(), ...links.map((l) => l.url)],
       allowedHosts: links.map((l) => {
         try {
           return new URL(l.url).host;
@@ -100,7 +101,7 @@ export class AppChat {
           return '';
         }
       }).filter(Boolean),
-      commands: [...(this.docs?.commands() ?? []), ...CONSOLE_COMMANDS.map((c) => c.run)],
+      commands: [...(this.docs?.commands() ?? []), ...guideCommands(), ...CONSOLE_COMMANDS.map((c) => c.run)],
     });
   }
 

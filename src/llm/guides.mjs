@@ -163,3 +163,19 @@ export function guideFor(env) {
 export function guidesFor(names) {
   return names.filter(Boolean).map((env) => ({ env, ...KEY_GUIDES[env] })).filter((g) => g.steps);
 }
+
+const URL_IN_TEXT = /https?:\/\/[^\s"'<>)]+/g;
+const COMMAND_IN_TEXT = /(?:node src\/frl\.mjs|ollama|curl|docker) [^;]*?(?=\s+\(|\s+or\s|\s+and\s|\s+on\s|\s+—|\.\s|\.$|\)|$)/g;
+
+export function guideUrls() {
+  const all = Object.values(KEY_GUIDES).flatMap((g) => [g.url, g.source, ...g.steps.flatMap((t) => t.match(URL_IN_TEXT) ?? [])]);
+  return [...new Set(all.filter(Boolean).map((u) => u.replace(/[.,;]+$/, '')))];
+}
+
+export function guideCommands() {
+  return [...new Set(Object.values(KEY_GUIDES).flatMap((g) => g.steps.flatMap((t) => t.match(COMMAND_IN_TEXT) ?? [])).map((c) => c.trim()))];
+}
+
+export function guidesText(missing) {
+  return missing.map((env) => KEY_GUIDES[env] && `${env}: ${KEY_GUIDES[env].steps.map((t, i) => `${i + 1}) ${t}`).join(' ')}`).filter(Boolean).join('\n');
+}

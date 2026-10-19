@@ -27,7 +27,7 @@ import { ClaudeCodeCoder } from './coder/claude-code.mjs';
 import { ChangeRunner } from './coder/runner.mjs';
 import { KeyChecker } from './keycheck.mjs';
 import { LinkVerifier, RouterAdmin } from './llm/admin.mjs';
-import { KEY_GUIDES } from './llm/guides.mjs';
+import { KEY_GUIDES, guidesText } from './llm/guides.mjs';
 import { accessLinks, lanAddresses } from './service.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -220,6 +220,7 @@ export class App {
       remote: this.remote,
       links: this.remote ? accessLinks({ port: this.port, lan: lanAddresses(os.networkInterfaces()) }).slice(1) : [],
       terminal: { full: 'on (real shell)', basic: 'on (basic shell: node-pty missing)', off: 'off (FRL_TERMINAL=0)' }[await this.terminal.mode()],
+      keyGuides: guidesText(Object.keys(KEY_GUIDES).filter((name) => !this.env[name])),
       claude: claude.installed ? `installed (${claude.version})` : 'not installed',
       coders: this.coder?.engines?.() ?? [],
     };

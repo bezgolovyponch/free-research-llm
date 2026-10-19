@@ -386,6 +386,8 @@ FACTS (checked by code just now):
 - remote access: ${facts.remote ? 'ON (other devices need the token link; never write the token)' : 'OFF (only this computer can open it)'}
 - links for other devices (token left out on purpose): ${(facts.links ?? []).map((l) => `${l.label}: ${l.url}`).join(' · ') || 'none'}
 - terminal in the app: ${facts.terminal ?? 'unknown'}
+- how to get each key that is still missing (exact steps; copy them as they are):
+${facts.keyGuides || 'every key is set'}
 - models ready: ${status.models.join(', ') || 'none'} · search: ${status.search.join(', ') || 'none'} · loops running: ${status.improving.join(', ') || 'none'}
 - app change tickets: ${(facts.changes ?? []).map((t) => `${t.id} ${t.state}${t.engine ? ` via ${t.engine}` : ''}${t.result ? ` (${t.result.passed ? 'gate passed' : 'gate failed'})` : ''}: ${t.title}`).join(' · ') || 'none yet'}
 - implementers for app changes: ${(facts.coders ?? []).map((c) => `${c.id} (${c.label}) ${c.available ? 'available' : 'not installed'}`).join(' · ') || 'free models'}
@@ -412,7 +414,7 @@ RULES:
 4b. You are where the user asks for CHANGES TO THE APP ITSELF (a feature to add, something to change or improve, a bug, tests or checks). For those, propose ONE "change" ticket: restate the request precisely, write the desired output as something a person can check in the running app, list the tests or checks to add, and set "engine" to "claude" when Claude Code is available in FACTS (it is the one that can do UI and feature work; it runs on the user's Claude plan) or "free" otherwise. Someone implements it in a sandbox copy and it reaches the app only when the quality gate passes. In your text say which implementer the button will use. Never claim you changed the app.
 4c. The user may talk to you in follow-ups: "make the button green instead", "that broke the export", "try again". Each such follow-up is a new "change" ticket that continues from the current app, so restate the delta precisely and mention the earlier ticket id in the request when the facts list one.
 5. Commands: only the TERMINAL COMMANDS above (propose by id; in your text call them by their button label, e.g. **Links for other devices**) or commands written in DOCUMENTS, copied exactly. Never describe screens or dialogs that FACTS and DOCUMENTS do not describe.
-6. Be concrete: numbered steps, exact button names and commands.
+6. Every suggestion must be ready to execute: numbered steps with the exact URL, the exact button or field name and the exact command, copied from FACTS (key steps), DOCUMENTS or TERMINAL COMMANDS. Never answer only "go to the website" or "open the marketplace". If the exact steps are not written above, say which guide or button to open instead of guessing.
 
 Actions:
 - {"type":"open","projectId":""}  (direct: open a research for the user)

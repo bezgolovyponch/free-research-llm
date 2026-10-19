@@ -6,6 +6,8 @@ import { CodeSandbox, restoreBackup } from './sandbox.mjs';
 export const CLAUDE_TIMEOUT_MS = 45 * 60 * 1000;
 export const MAX_CLAUDE_RUNS = 2;
 export const CLAUDE_MAX_TURNS = 80;
+export const CLAUDE_ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash(npm run quality)', 'Bash(npx vitest *)', 'Bash(npx playwright test *)', 'Bash(node --check *)', 'Bash(ls *)'];
+export const CLAUDE_DENIED_TOOLS = ['Bash(git push *)', 'Bash(git commit *)', 'Bash(git reset *)', 'Bash(rm *)', 'Bash(curl *)', 'Bash(wget *)', 'WebFetch', 'WebSearch'];
 const MAX_OUTPUT = 6000;
 const NOTE_EVERY_MS = 5 * 60 * 1000;
 
@@ -95,7 +97,7 @@ export class ClaudeCodeCoder {
   }
 
   spawnClaude(prompt, cwd) {
-    const args = ['-p', prompt, '--output-format', 'json', '--permission-mode', 'acceptEdits', '--max-turns', String(CLAUDE_MAX_TURNS), '--allowedTools', 'Read,Glob,Grep,Edit,Write,Bash'];
+    const args = ['-p', prompt, '--output-format', 'json', '--permission-mode', 'acceptEdits', '--max-turns', String(CLAUDE_MAX_TURNS), '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(','), '--disallowedTools', CLAUDE_DENIED_TOOLS.join(',')];
     const child = (this.spawnImpl ?? spawn)('claude', args, { cwd, env: { ...this.env, PATH: claudePath(this.env) }, shell: process.platform === 'win32' });
     return new Promise((resolve) => {
       let output = '';

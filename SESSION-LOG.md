@@ -3,6 +3,14 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-19 · session 11 — exact steps everywhere, Claude Code shell limits, clean-up
+
+- **Asked:** guidance like "NVIDIA: open the marketplace" is not enough; every suggestion in the app must be an exact, ready-to-execute instruction. Then: clear temp and cache files; the App assistant should change the app the way this chat does; review open-source solutions and bring the app up to standard.
+- **Found:** a second agent (DeepSeek Harness) was editing and committing this repo at the same time (21:08–21:42, including the chat-to-code work and `OSS-REVIEW.md`), and it overwrote a change in progress. The user chose one editor from now on.
+- **Exact steps:** the App chat now receives the dated key steps for every missing key. Its rule 6 requires ready-to-run steps, never "go to the website". The reply audit accepts the guide links and commands (`guideUrls`, `guideCommands`, `guidesText` in `src/llm/guides.mjs`). The Results action plan names the exact control (Re-research on this row, ▶ Run, Clarify in chat, Instructions & pages to read → Save, Split further). Audit check O12 was added.
+- **Security fix:** the Claude Code runner passed `--allowedTools ...,Bash`. The Claude Code docs say a bare `Bash` rule "matches all Bash commands", so a chat-started run could run any shell command unattended. It is now limited to `npm run quality`, `npx vitest *`, `npx playwright test *`, `node --check *` and `ls *`. `git push/commit/reset`, `rm`, `curl`, `wget`, WebFetch and WebSearch are denied (`CLAUDE_ALLOWED_TOOLS`, `CLAUDE_DENIED_TOOLS`).
+- **Clean-up (approved by the user):** deleted this session's scratch files, test results, the Hugging Face, Gradle (caches and daemons), Codex, npm and Homebrew caches. 1.5 GB freed; 52 GB free. `~/.cache/chroma` was kept (the running memory plugin uses it). Docker was not running, so `docker system prune` was not run.
+
 ## 2026-10-19 · session 10 — change the app by talking to it (Claude Code or free models), and repository standards
 
 **Asked:** (1) revise how the AI chats work so a change can be made from the App assistant the way one works with a coding agent — describe it in the chat and have UI and features changed, with follow-ups. (2) Review ready-made open-source solutions, then optimise and bring the project up to standards.

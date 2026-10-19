@@ -87,6 +87,10 @@ describe('ClaudeCodeCoder', () => {
     expect(call.args).toContain('--permission-mode');
     expect(call.args.join(' ')).not.toContain('dangerously');
     expect(call.args).toContain('acceptEdits');
+    const allowed = call.args[call.args.indexOf('--allowedTools') + 1].split(',');
+    expect(allowed).not.toContain('Bash');
+    expect(allowed.filter((t: string) => t.startsWith('Bash'))).toEqual(['Bash(npm run quality)', 'Bash(npx vitest *)', 'Bash(npx playwright test *)', 'Bash(node --check *)', 'Bash(ls *)']);
+    expect(call.args[call.args.indexOf('--disallowedTools') + 1]).toContain('Bash(git push *)');
     expect(call.args.join(' ')).toContain('/tmp/sandbox/C1');
     await fs.rm(t.dir, { recursive: true, force: true });
   });

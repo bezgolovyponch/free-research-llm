@@ -134,6 +134,21 @@ describe('AppChat', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('answers key questions with the exact key steps, and those links and commands pass the reply audit', async () => {
+    const reply = 'NVIDIA: 1) open https://build.nvidia.com/settings/api-keys and press "Generate Key". 2) Run `node src/frl.mjs keys set NVIDIA_API_KEY`.';
+    const { dir, chat } = await setup([{ reply, actions: [] }]);
+    const prompts: string[] = [];
+    const complete = (chat as unknown as { router: { complete: (a: unknown) => Promise<unknown> } }).router.complete;
+    (chat as unknown as { router: { complete: unknown } }).router.complete = async (args: { messages: Array<{ content: string }> }) => { prompts.push(args.messages[1].content); return complete(args); };
+    (chat as unknown as { facts: () => Promise<unknown> }).facts = async () => ({ keyGuides: 'NVIDIA_API_KEY: 1) Open https://build.nvidia.com and press "Get API Key".' });
+    const r = await chat.send('how do I get an NVIDIA key?');
+    expect(prompts[0]).toContain('NVIDIA_API_KEY: 1) Open https://build.nvidia.com');
+    expect(prompts[0]).toContain('Never answer only "go to the website"');
+    expect(r.thread.at(-1)).toMatchObject({ audit: { passed: true } });
+    expect(r.thread.at(-1).content).toContain('https://build.nvidia.com/settings/api-keys');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('never feeds replies written before the audit existed back to the model', async () => {
     const { dir, chat } = await setup();
     const prompts: string[] = [];

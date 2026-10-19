@@ -33,6 +33,7 @@ It adapts three existing protocols instead of inventing a new one:
 | O8 | **No secrets.** | No key, token or passphrase in code, docs, logs, chat threads or the report. Placeholders such as `${VAR}` only |
 | O9 | **No false claims of action.** | Every "created / deleted / pushed / installed" in the report matches a command whose output was seen |
 | O10 | **Concept still holds.** Re-check S1 against the final change | Chats stay in their scope; nothing runs without a gate or a button |
+| O12 | **Every suggestion is ready to execute.** Anything the app or the report tells the user to do | It names the exact URL, the exact button or field, and the exact command, taken from a provider's docs or this repo (key steps live in `src/llm/guides.mjs`). "Go to the website" alone fails |
 | O11 | **Record.** | [SESSION-LOG.md](SESSION-LOG.md) has the session: what was asked, what changed, what is still open |
 
 A failed check is fixed, then the whole of Part 2 runs again. If a check cannot pass (for example, a permission was refused), the report says so in the first lines.

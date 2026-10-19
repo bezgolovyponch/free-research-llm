@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GUIDES_CHECKED, KEY_GUIDES, guideFor, guidesFor } from '../../src/llm/guides.mjs';
+import { GUIDES_CHECKED, KEY_GUIDES, guideCommands, guideFor, guideUrls, guidesFor, guidesText } from '../../src/llm/guides.mjs';
 import { PROVIDER_PRESETS, SEARCH_KEYS } from '../../src/llm/presets.mjs';
 import { catalogRows } from '../../src/llm/admin.mjs';
 
@@ -52,5 +52,15 @@ describe('key guides', () => {
     expect(model('pollinations').guide).toEqual([]);
     expect(search('BRAVE_API_KEY').guide[0]).toMatchObject({ env: 'BRAVE_API_KEY', card: true });
     expect(rows.guidesChecked).toBe(GUIDES_CHECKED);
+  });
+
+  it('gives the App chat the exact steps for missing keys and lets their links and commands pass the reply audit', () => {
+    const text = guidesText(['NVIDIA_API_KEY', 'NOT_A_KEY']);
+    expect(text.split('\n')).toHaveLength(1);
+    expect(text).toContain('NVIDIA_API_KEY: 1) Open https://build.nvidia.com');
+    expect(text).toContain('https://build.nvidia.com/settings/api-keys and press "Generate Key"');
+    expect(guideUrls()).toEqual(expect.arrayContaining(['https://build.nvidia.com/settings/api-keys', 'https://aistudio.google.com/apikey', 'https://console.groq.com/keys']));
+    expect(guideUrls().every((u: string) => /^https?:\/\/[^\s]+[^.,;]$/.test(u))).toBe(true);
+    expect(guideCommands()).toEqual(expect.arrayContaining(['node src/frl.mjs keys set NVIDIA_API_KEY', 'node src/frl.mjs keys set CLOUDFLARE_ACCOUNT_ID', 'node src/frl.mjs keys set CLOUDFLARE_API_TOKEN', 'node src/frl.mjs searxng', 'ollama pull qwen2.5:7b']));
   });
 });

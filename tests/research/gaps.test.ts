@@ -23,7 +23,7 @@ describe('action plan for an insufficient result', () => {
     const p = project();
     const byId = Object.fromEntries(actionPlan(p).map((a: { nodeId: string }) => [a.nodeId, a]));
     expect(Object.keys(byId).sort()).toEqual(['D2', 'D2.1', 'D2.2', 'D2.3', 'D3', 'D4']);
-    expect(byId['D2.1']).toMatchObject({ action: 'research', decisive: true, next: 'Search for: quotes from 3 carriers' });
+    expect(byId['D2.1']).toMatchObject({ action: 'research', decisive: true, next: 'Search for: quotes from 3 carriers. Press Re-research on this row; it uses these searches' });
     expect(byId['D2.2']).toMatchObject({ action: 'fix', why: 'run failed: every provider failed' });
     expect(byId['D3']).toMatchObject({ action: 'fix', next: expect.stringContaining('formula did not recompute') });
     expect(byId['D2.3']).toMatchObject({ action: 'clarify', assumptions: ['15% target'] });

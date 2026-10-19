@@ -28,21 +28,21 @@ export function nodeAction(node) {
   if (OPEN.has(node.status)) {
     action = 'research';
     why = 'not researched yet';
-    next = 'Run the research (▶ Run) so this piece gets an answer';
+    next = 'Press ▶ Run at the top of the research. Pending pieces are researched first';
   } else if (node.status === 'failed' || node.error || [...ids].some((id) => FIX_CHECKS.has(id))) {
     action = 'fix';
     const broken = failed.filter((c) => FIX_CHECKS.has(c.id));
     why = node.error ? `run failed: ${node.error}` : broken.map((c) => `${c.label}: ${c.detail}`).join('; ') || 'a critical check failed';
-    next = ids.has('calculation') ? 'Re-research: the formula did not recompute; ask for the inputs and the formula step by step' : ids.has('citations') ? 'Re-research: the answer cited sources that were never retrieved' : 'Re-research this piece; if it fails again, split it into smaller questions';
+    next = ids.has('calculation') ? `Press Re-research on this row (or open ${node.id} → ↻ Re-research): the formula did not recompute, so it is re-asked with the inputs and the formula step by step` : ids.has('citations') ? `Press Re-research on this row (or open ${node.id} → ↻ Re-research): the answer cited sources that were never retrieved` : `Press Re-research on this row. If it fails again, open ${node.id} → Split further`;
   } else if (NEEDS_USER.test(userText) || (assumptions.length && !ids.has('numbers-sourced'))) {
     action = 'clarify';
     why = assumptions.length ? `rests on assumptions: ${assumptions.slice(0, 3).join(' | ')}` : `needs an input only you can give: ${gaps[0] ?? node.question}`;
-    next = 'Answer in this piece’s chat (request + desired output), or attach your own data as a file';
+    next = `Press Clarify in chat: type the missing input as the request (e.g. your target margin) and the result you expect as the desired output, or attach your data with 📎`;
   } else {
     action = 'research';
     const soft = failed.filter((c) => RESEARCH_CHECKS.has(c.id));
     why = soft.map((c) => `${c.label}: ${c.detail}`).join('; ') || gaps.join('; ') || `graded ${node.status}`;
-    next = gaps.length ? `Search for: ${gaps.slice(0, 3).join('; ')}` : (node.sources ?? []).length < 2 ? 'Find more sources: add exact pages to read, or local-language queries' : 'Re-research with sharper queries, or split into smaller questions';
+    next = gaps.length ? `Search for: ${gaps.slice(0, 3).join('; ')}. Press Re-research on this row; it uses these searches` : (node.sources ?? []).length < 2 ? `Open ${node.id} → Instructions & pages to read, paste the exact pages to read in the URL box (one per line), press Save, then ↻ Re-research` : `Press Re-research on this row. If it stays weak, open ${node.id} → Split further`;
   }
   const priority = Math.round(((node.impact ?? 3) * (node.uncertainty ?? 3) * (GRADE_GAP[node.status] ?? 1)) / 25 * 100) / 100;
   return { nodeId: node.id, title: node.title, status: node.status, action, why: why.slice(0, 400), next: next.slice(0, 300), priority, gaps: gaps.slice(0, 5), assumptions: assumptions.slice(0, 5) };
