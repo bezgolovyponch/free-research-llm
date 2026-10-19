@@ -160,8 +160,10 @@ test('the + next to the models indicator opens the router page: strategy, ranked
   await page.locator('#btnRouter').click();
   const body = page.locator('#rtBody');
   await expect(page.getByRole('heading', { name: 'Models & router' })).toBeVisible();
-  await expect(body.getByRole('radio', { name: 'Balanced' })).toHaveAttribute('aria-checked', 'true');
-  await expect(body.locator('.rt-roles .card').first()).toContainText('Deep role');
+  await expect(body.getByRole('radio', { name: 'Maximum capability' })).toHaveAttribute('aria-checked', 'true');
+  await expect(body).toContainText('How each kind of call is routed');
+  await expect(body).toContainText('Reviews and roll-ups');
+  await expect(body.locator('.rt-roles .card', { hasText: 'Deep role' })).toBeVisible();
   await expect(body.locator('.rt-row[data-rt="pollinations"] .why').first()).toContainText('disabled by FRL_POLLINATIONS=0');
   await expect(body.locator('h2', { hasText: 'In use' })).toBeVisible();
   await expect(body.locator('h2', { hasText: 'Can be added' })).toBeVisible();

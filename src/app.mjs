@@ -143,7 +143,7 @@ export class App {
       history: () => this.logs.read('model-calls', 20000),
       applyOrder: (order) => {
         const forced = routeOrderFrom(this.env);
-        this.router.routeOrder = { fast: this.env.FRL_FAST_ORDER ? forced.fast : order.fast, deep: this.env.FRL_DEEP_ORDER ? forced.deep : order.deep };
+        this.router.routeOrder = { fast: this.env.FRL_FAST_ORDER ? forced.fast : order.fast, deep: this.env.FRL_DEEP_ORDER ? forced.deep : order.deep, ...(order.byPurpose && !this.env.FRL_FAST_ORDER && !this.env.FRL_DEEP_ORDER ? { byPurpose: order.byPurpose } : {}) };
       },
       checker: new KeyChecker({ fetchImpl }),
       links: new LinkVerifier({ fetchImpl }),
