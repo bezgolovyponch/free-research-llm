@@ -4,15 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ChangeBook } from '../../src/changes.mjs';
-import { ClaudeCodeCoder, ProgressLog, describeEvent, claudePromptFor, detectClaude, parseClaudeOutput } from '../../src/coder/claude-code.mjs';
+import { ClaudeCodeCoder, ProgressLog, describeEvent, winQuote, claudePromptFor, detectClaude, parseClaudeOutput } from '../../src/coder/claude-code.mjs';
 
-type FakeChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => void };
+type FakeChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => void; stdin?: { end: (data: string) => void }; input?: string };
 
 function fakeChild(output: string, code = 0): FakeChild {
   const child = new EventEmitter() as FakeChild;
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.kill = () => {};
+  child.stdin = { end: (data: string) => { child.input = data; } };
   setImmediate(() => {
     if (output) child.stdout.emit('data', output);
     child.emit('close', code);
@@ -52,7 +53,7 @@ async function setup({ gates = [true], output = JSON.stringify({ result: 'done',
   const changes = new ChangeBook({ dir: path.join(dir, 'changes') });
   const ticket = await changes.create({ title: 'Green button', request: 'Make the Run button green in the header', desired: 'The Run button is green', engine: 'claude' });
   const notes: string[] = [];
-  const runs: Array<{ command: string; args: string[]; options: { cwd: string } }> = [];
+  const runs: Array<{ command: string; args: string[]; options: { cwd: string }; child: FakeChild }> = [];
   const sandbox = fakeSandbox({ gates, changed });
   const coder = new ClaudeCodeCoder({
     root: dir,
@@ -63,8 +64,9 @@ async function setup({ gates = [true], output = JSON.stringify({ result: 'done',
     sandboxFactory: () => sandbox,
     detect: () => detect,
     spawnImpl: ((command: string, args: string[], options: { cwd: string }) => {
-      runs.push({ command, args, options });
-      return fakeChild(output);
+      const child = fakeChild(output);
+      runs.push({ command, args, options, child });
+      return child;
     }) as never,
   });
   return { dir, changes, ticket, coder, sandbox, notes, runs };
@@ -91,7 +93,8 @@ describe('ClaudeCodeCoder', () => {
     expect(allowed).not.toContain('Bash');
     expect(allowed.filter((t: string) => t.startsWith('Bash'))).toEqual(['Bash(npm run quality)', 'Bash(npx vitest *)', 'Bash(npx playwright test *)', 'Bash(node --check *)', 'Bash(ls *)']);
     expect(call.args[call.args.indexOf('--disallowedTools') + 1]).toContain('Bash(git push *)');
-    expect(call.args.join(' ')).toContain('/tmp/sandbox/C1');
+    expect(call.child.input).toContain('/tmp/sandbox/C1');
+    expect(call.args.join(' ')).not.toContain('/tmp/sandbox/C1');
     await fs.rm(t.dir, { recursive: true, force: true });
   });
 
@@ -101,7 +104,7 @@ describe('ClaudeCodeCoder', () => {
     expect(result).toMatchObject({ state: 'failed', result: { passed: false } });
     expect(t.sandbox.promoted).toBe(false);
     expect(t.runs).toHaveLength(2);
-    expect(t.runs[1].args.join(' ')).toContain('The quality gate failed');
+    expect(t.runs[1].child.input).toContain('The quality gate failed');
     expect(t.notes.join('\n')).toContain('gate failed');
     await fs.rm(t.dir, { recursive: true, force: true });
   });
@@ -163,5 +166,9 @@ describe('ClaudeCodeCoder', () => {
     for (const f of ['a', 'b', 'c', 'd', 'e']) log.add(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: `/s/${f}.mjs` } }] } }));
     expect(log.flush()).toBe('edited a.mjs, b.mjs, c.mjs, d.mjs +1 more');
     expect(log.flush()).toBe('');
+  });
+
+  it('quotes arguments for cmd.exe on Windows, and the prompt never travels on the command line', () => {
+    expect([winQuote('-p'), winQuote('acceptEdits'), winQuote('Read,Bash(npx vitest *)'), winQuote('say "hi"')]).toEqual(['-p', 'acceptEdits', '"Read,Bash(npx vitest *)"', '"say \\"hi\\""']);
   });
 });

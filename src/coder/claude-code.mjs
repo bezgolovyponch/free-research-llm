@@ -14,6 +14,11 @@ const NOTE_EVERY_MS = 5 * 60 * 1000;
 
 const SEARCH_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'].join(path.delimiter);
 
+export function winQuote(arg) {
+  const text = String(arg);
+  return /^[\w./:=-]+$/.test(text) ? text : `"${text.replace(/"/g, '\\"')}"`;
+}
+
 export function claudePath(env = process.env) {
   const parts = [...String(env.PATH ?? '').split(path.delimiter), ...SEARCH_PATH.split(path.delimiter)].filter(Boolean);
   return [...new Set(parts)].join(path.delimiter);
@@ -58,7 +63,8 @@ HOW TO WORK
 }
 
 export class ClaudeCodeCoder {
-  constructor({ root, workDir, changes, note = () => {}, restart = null, sandboxFactory = null, spawnImpl = null, detect = detectClaude, env = process.env, timeoutMs = CLAUDE_TIMEOUT_MS, progressEveryMs = PROGRESS_EVERY_MS }) {
+  constructor({ root, workDir, changes, note = () => {}, restart = null, sandboxFactory = null, spawnImpl = null, detect = detectClaude, env = process.env, timeoutMs = CLAUDE_TIMEOUT_MS, progressEveryMs = PROGRESS_EVERY_MS, platform = process.platform }) {
+    this.platform = platform;
     this.progressEveryMs = progressEveryMs;
     this.root = root;
     this.workDir = workDir;
@@ -99,16 +105,21 @@ export class ClaudeCodeCoder {
   }
 
   spawnClaude(prompt, cwd) {
-    const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits', '--max-turns', String(CLAUDE_MAX_TURNS), '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(','), '--disallowedTools', CLAUDE_DENIED_TOOLS.join(',')];
-    const child = (this.spawnImpl ?? spawn)('claude', args, { cwd, env: { ...this.env, PATH: claudePath(this.env) }, shell: process.platform === 'win32' });
+    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits', '--max-turns', String(CLAUDE_MAX_TURNS), '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(','), '--disallowedTools', CLAUDE_DENIED_TOOLS.join(',')];
+    const windows = this.platform === 'win32';
+    const child = (this.spawnImpl ?? spawn)('claude', windows ? args.map(winQuote) : args, { cwd, env: { ...this.env, PATH: claudePath(this.env) }, shell: windows });
+    child.stdin?.end?.(prompt);
     return new Promise((resolve) => {
       let output = '';
       let timedOut = false;
       const started = Date.now();
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGTERM');
-        setTimeout(() => child.kill('SIGKILL'), 5000).unref();
+        if (windows && child.pid) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F']);
+        else {
+          child.kill('SIGTERM');
+          setTimeout(() => child.kill('SIGKILL'), 5000).unref();
+        }
       }, this.timeoutMs);
       const progress = new ProgressLog({ dir: cwd });
       let quietSince = Date.now();

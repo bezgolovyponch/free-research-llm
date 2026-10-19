@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CodeSandbox, diffStats, failedGates, failureDetail, gateSummary, restoreBackup } from '../../src/coder/sandbox.mjs';
+import { CodeSandbox, PromoteError, diffStats, failedGates, failureDetail, gateSummary, restoreBackup } from '../../src/coder/sandbox.mjs';
 
 async function repo() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-sbx-root-'));
@@ -102,5 +102,38 @@ describe('CodeSandbox', () => {
       { file: 'src/b.mjs', added: 2, removed: 0, created: true },
     ]);
     await Promise.all([root, backup].map((d) => fs.rm(d, { recursive: true, force: true })));
+  });
+
+  it('promotes only what the agent changed, never reverts files the app changed meanwhile, and refuses protected files', async () => {
+    const root = await repo();
+    await fs.mkdir(path.join(root, 'scripts'), { recursive: true });
+    await fs.writeFile(path.join(root, 'scripts/quality.mjs'), 'gate\n');
+    await fs.writeFile(path.join(root, 'src/b.mjs'), 'export const b = 1;\n');
+    const dir = path.join(root, '..', `${path.basename(root)}-work`);
+    const sandbox = new CodeSandbox({ root, dir, listFiles: () => ['src/a.mjs', 'src/b.mjs', 'tests/a.test.ts', 'scripts/quality.mjs'], gate: async () => ({ passed: true, output: '' }) });
+    await sandbox.prepare();
+    await fs.writeFile(path.join(dir, 'src/a.mjs'), 'export const a = 2;\n');
+    await fs.writeFile(path.join(root, 'src/b.mjs'), 'export const b = 99;\n');
+    expect(await sandbox.changedAll()).toEqual(['src/a.mjs']);
+    await sandbox.promote(path.join(dir, '..', `${path.basename(root)}-bak1`));
+    expect(await fs.readFile(path.join(root, 'src/b.mjs'), 'utf8')).toBe('export const b = 99;\n');
+    expect(await fs.readFile(path.join(root, 'src/a.mjs'), 'utf8')).toBe('export const a = 2;\n');
+
+    const second = new CodeSandbox({ root, dir: `${dir}2`, listFiles: () => ['src/a.mjs', 'scripts/quality.mjs'], gate: async () => ({ passed: true, output: '' }) });
+    await second.prepare();
+    await fs.writeFile(path.join(`${dir}2`, 'scripts/quality.mjs'), 'weakened\n');
+    await expect(second.promote(path.join(root, '..', 'bak2'))).rejects.toThrow(/protected files \(scripts\/quality\.mjs\)/);
+    expect(await fs.readFile(path.join(root, 'scripts/quality.mjs'), 'utf8')).toBe('gate\n');
+
+    const third = new CodeSandbox({ root, dir: `${dir}3`, listFiles: () => ['src/a.mjs'], gate: async () => ({ passed: true, output: '' }) });
+    await third.prepare();
+    await fs.writeFile(path.join(`${dir}3`, 'src/a.mjs'), 'export const a = 3;\n');
+    await fs.writeFile(path.join(root, 'src/a.mjs'), 'export const a = 7;\n');
+    const conflict = third.promote(path.join(root, '..', 'bak3'));
+    await expect(conflict).rejects.toBeInstanceOf(PromoteError);
+    await expect(third.promote(path.join(root, '..', 'bak3'))).rejects.toThrow(/changed in the app while the change was being made \(src\/a\.mjs\)/);
+    expect(await fs.readFile(path.join(root, 'src/a.mjs'), 'utf8')).toBe('export const a = 7;\n');
+    await Promise.all([sandbox, second, third].map((x) => x.discard()));
+    await fs.rm(root, { recursive: true, force: true });
   });
 });

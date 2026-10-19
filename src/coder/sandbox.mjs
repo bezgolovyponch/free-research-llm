@@ -2,7 +2,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { applyEdit, countTests } from './edits.mjs';
+import { createHash } from 'node:crypto';
+import { applyEdit, countTests, editablePath } from './edits.mjs';
 
 const GATE_TIMEOUT_MS = 20 * 60 * 1000;
 
@@ -62,6 +63,16 @@ function explainFailures(cwd, gates) {
   return parts.join('\n');
 }
 
+export class PromoteError extends Error {}
+
+async function hashOf(file) {
+  try {
+    return createHash('sha256').update(await fs.readFile(file)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
 export class CodeSandbox {
   constructor({ root, dir, gate = npmGate, listFiles = null, explain = explainFailures }) {
     this.root = root;
@@ -79,12 +90,14 @@ export class CodeSandbox {
     await fs.rm(this.dir, { recursive: true, force: true });
     await fs.mkdir(this.dir, { recursive: true });
     this.files = [];
+    this.baseline = new Map();
     for (const rel of this.listFiles()) {
       const from = path.join(this.root, rel);
       if (!(await exists(from))) continue;
       await fs.mkdir(path.dirname(path.join(this.dir, rel)), { recursive: true });
       await fs.copyFile(from, path.join(this.dir, rel));
       this.files.push(rel);
+      this.baseline.set(rel, await hashOf(from));
     }
     const modules = path.join(this.root, 'node_modules');
     if (await exists(modules)) await fs.symlink(modules, path.join(this.dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
@@ -153,12 +166,30 @@ export class CodeSandbox {
 
   async changedAll() {
     const out = [];
-    for (const rel of await this.walk()) if ((await this.read(rel)) !== (await readOrNull(path.join(this.root, rel)))) out.push(rel);
+    for (const rel of await this.walk()) {
+      if (rel === '.gitignore' && this.baseline?.has(rel) === false) continue;
+      const now = await hashOf(path.join(this.dir, rel));
+      if (!this.baseline?.has(rel) || this.baseline.get(rel) !== now) out.push(rel);
+    }
     return out.sort();
+  }
+
+  async conflicts(files) {
+    const protectedFiles = files.filter((rel) => !editablePath(rel));
+    const movedUnder = [];
+    for (const rel of files) {
+      if (!this.baseline?.has(rel)) {
+        if (await exists(path.join(this.root, rel))) movedUnder.push(rel);
+      } else if ((await hashOf(path.join(this.root, rel))) !== this.baseline.get(rel)) movedUnder.push(rel);
+    }
+    return { protectedFiles, movedUnder };
   }
 
   async promote(backupDir) {
     const files = await this.changedAll();
+    const { protectedFiles, movedUnder } = await this.conflicts(files);
+    if (protectedFiles.length) throw new PromoteError(`the change edits protected files (${protectedFiles.join(', ')}); nothing was applied`);
+    if (movedUnder.length) throw new PromoteError(`these files changed in the app while the change was being made (${movedUnder.join(', ')}); nothing was applied, press Try again to redo it on the current app`);
     const manifest = [];
     for (const rel of files) {
       const original = await readOrNull(path.join(this.root, rel));
