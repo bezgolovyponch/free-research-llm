@@ -95,6 +95,11 @@ describe('router admin', () => {
     expect(view.strategy).toBe('fastest');
     expect(view.route.deep.filter((r: { ready: boolean }) => r.ready).map((r: { id: string }) => r.id)).toEqual(['gemini', 'groq']);
     expect(view.summary).toMatchObject({ ready: 1, cooling: 1, calls: 2, success: 0.5 });
+    expect(view.inUse).toEqual(['groq']);
+    expect(view.canAdd[0]).toBe('gemini');
+    expect(view.canAdd).not.toContain('groq');
+    expect(view.models.find((m: { id: string }) => m.id === 'mistral').capability).toBe('capability 4/5 · Mistral Large');
+    expect(view.usage).toMatchObject({ total: 0 });
     expect(summaryOf([], {})).toMatchObject({ calls: 0, success: null });
   });
 });

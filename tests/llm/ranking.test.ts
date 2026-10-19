@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY, STRATEGIES, providerStats, rankRole, routeFor } from '../../src/llm/ranking.mjs';
+import { CAPABILITY, STRATEGIES, providerStats, rankRole, routeFor, usageInfo } from '../../src/llm/ranking.mjs';
 
 const now = Date.parse('2026-10-19T12:00:00Z');
 const ts = (min: number) => new Date(now - min * 60000).toISOString();
@@ -54,5 +54,22 @@ describe('router ranking', () => {
     expect(cooling[0].why).toContain('cooling 40 s, skipped until then');
     expect(Object.keys(STRATEGIES)).toEqual(['balanced', 'fastest', 'smartest', 'custom']);
     expect(CAPABILITY.gemini[0]).toBe(5);
+  });
+
+  it('describes each provider in use: share of calls, outcomes, hourly calls, models, purposes and today against the free daily limit', () => {
+    const rows = [
+      ...calls('groq', 'fast', 3, 700).map((r) => ({ ...r, model: 'gpt-oss-20b', purpose: 'research', tokens: 100 })),
+      { ts: ts(5), provider: 'groq', tier: 'fast', ok: false, error: 'groq HTTP 413: Request too large', purpose: 'research' },
+      { ts: ts(130), provider: 'groq', tier: 'deep', ok: false, error: 'socket hang up', purpose: 'critique' },
+      { ts: ts(20), provider: 'cerebras', tier: 'deep', ok: true, ms: 900, tokens: 400000, model: 'gpt-oss-120b', purpose: 'synthesize' },
+      { ts: ts(60 * 30), provider: 'groq', tier: 'fast', ok: true, ms: 1 },
+    ];
+    const u = usageInfo(rows, { now });
+    expect(u.total).toBe(6);
+    expect(u.providers.groq).toMatchObject({ calls: 5, ok: 3, rateLimited: 1, errors: 1, share: 0.833, medianMs: 700, models: [{ model: 'gpt-oss-20b', calls: 3 }], purposes: [{ purpose: 'research', calls: 4 }, { purpose: 'critique', calls: 1 }] });
+    expect(u.providers.groq.hourly[23]).toBe(4);
+    expect(u.providers.groq.hourly[21]).toBe(1);
+    expect(u.providers.groq.today).toMatchObject({ limit: 1000, unit: 'requests', requests: 5, used: 0.005 });
+    expect(u.providers.cerebras.today).toMatchObject({ limit: 1000000, unit: 'tokens', tokens: 400000, used: 0.4 });
   });
 });

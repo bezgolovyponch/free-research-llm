@@ -137,6 +137,7 @@ export class App {
       reload: () => this.reloadKeys(),
       statuses: () => this.router.status(),
       ledger: () => this.router.ledger,
+      history: () => this.logs.read('model-calls', 20000),
       applyOrder: (order) => {
         const forced = routeOrderFrom(this.env);
         this.router.routeOrder = { fast: this.env.FRL_FAST_ORDER ? forced.fast : order.fast, deep: this.env.FRL_DEEP_ORDER ? forced.deep : order.deep };

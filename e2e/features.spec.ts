@@ -145,6 +145,10 @@ test('the + next to the models indicator opens the router page: strategy, ranked
   await expect(body.getByRole('radio', { name: 'Balanced' })).toHaveAttribute('aria-checked', 'true');
   await expect(body.locator('.rt-roles .card').first()).toContainText('Deep role');
   await expect(body.locator('.rt-row[data-rt="pollinations"] .why').first()).toContainText('disabled by FRL_POLLINATIONS=0');
+  await expect(body.locator('h2', { hasText: 'In use' })).toBeVisible();
+  await expect(body.locator('h2', { hasText: 'Can be added' })).toBeVisible();
+  await expect(body.locator('[data-use]')).toHaveCount(0);
+  await expect(body.locator('[data-rrow="groq"]')).toContainText('Adds: capability 4/5');
   await expect(body.locator('[data-rrow="groq"]')).toContainText('1,000 req/day');
   await expect(body.locator('[data-rrow="groq"] a')).toHaveAttribute('href', 'https://console.groq.com/keys');
   await expect(body.locator('[data-rrow="groq"] input[type="password"]')).toBeVisible();

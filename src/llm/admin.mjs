@@ -1,6 +1,6 @@
 import { PROVIDER_PRESETS, ROUTE_ORDER, SEARCH_KEYS } from './presets.mjs';
 import { KeyChecker } from '../keycheck.mjs';
-import { STRATEGIES, routeFor } from './ranking.mjs';
+import { CAPABILITY, STRATEGIES, routeFor, usageInfo } from './ranking.mjs';
 
 export const FREE_TIERS_CHECKED = '2026-10-18';
 export const FREE_TIERS = {
@@ -101,6 +101,7 @@ export function catalogRows({ env, statuses = [], ledger = [], links = {} }) {
       signup: p.signup || null,
       link: p.signup ? links[p.signup] ?? null : null,
       free: FREE_TIERS[p.id] ?? '',
+      capability: CAPABILITY[p.id] ? `capability ${CAPABILITY[p.id][0]}/5 · ${CAPABILITY[p.id][1]}` : '',
       saved,
       keyless: !p.keyEnv,
       enabled: order.enabled.includes(p.id),
@@ -150,8 +151,9 @@ export function summaryOf(models, stats) {
 }
 
 export class RouterAdmin {
-  constructor({ env, secrets, reload, statuses, ledger, applyOrder, checker = new KeyChecker(), links = new LinkVerifier(), now = () => Date.now() }) {
+  constructor({ env, secrets, reload, statuses, ledger, applyOrder, history = null, checker = new KeyChecker(), links = new LinkVerifier(), now = () => Date.now() }) {
     this.now = now;
+    this.history = history ?? (async () => this.ledger());
     this.env = env;
     this.secrets = secrets;
     this.reload = reload;
@@ -190,6 +192,9 @@ export class RouterAdmin {
       strategies: Object.entries(STRATEGIES).map(([id, s]) => ({ id, ...s })),
       route: { deep: route.deep, fast: route.fast },
       summary: summaryOf(catalog.models, route.stats),
+      usage: usageInfo(await this.history(), { now: this.now() }),
+      inUse: catalog.models.filter((m) => m.saved || (m.keyless && m.state === 'ready')).map((m) => m.id),
+      canAdd: catalog.models.filter((m) => !m.saved && !(m.keyless && m.state === 'ready')).sort((a, b) => (CAPABILITY[b.id]?.[0] ?? 0) - (CAPABILITY[a.id]?.[0] ?? 0) || a.id.localeCompare(b.id)).map((m) => m.id),
       store: this.secrets?.label ?? 'this session only (no key store)',
     };
   }

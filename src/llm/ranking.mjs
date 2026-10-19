@@ -103,3 +103,64 @@ export function routeFor({ strategy, providers, ledger, enabled, customOrder, no
   const fast = rankRole({ role: 'fast', strategy, providers: used, stats, customOrder, now });
   return { deep, fast, order: { deep: deep.map((r) => r.id), fast: fast.map((r) => r.id) }, stats };
 }
+
+export const DAILY_LIMITS = {
+  groq: { requests: 1000, note: '1,000 requests/day per model' },
+  openrouter: { requests: 50, note: '50 requests/day on :free models' },
+  sambanova: { requests: 20, note: '20 requests/day' },
+  cerebras: { tokens: 1000000, note: '1M tokens/day' },
+  cloudflare: { note: '10,000 neurons/day (not countable here)' },
+  gemini: { note: 'per-model daily limit, shown in AI Studio' },
+  mistral: { note: '1B tokens/month per model' },
+  cohere: { note: '1,000 calls/month' },
+  pollinations: { note: 'no daily cap; 1 reply per 30 s without a key' },
+};
+
+function utcDay(ts) {
+  return String(ts ?? '').slice(0, 10);
+}
+
+export function usageInfo(rows, { now = Date.now(), windowMs = WINDOW_MS } = {}) {
+  const today = new Date(now).toISOString().slice(0, 10);
+  const per = {};
+  let total = 0;
+  for (const row of rows) {
+    if (!row?.provider || row.provider === 'router' || !row.ts) continue;
+    const age = now - Date.parse(row.ts);
+    const u = (per[row.provider] ??= { calls: 0, ok: 0, rateLimited: 0, errors: 0, tokens: 0, ms: [], hourly: Array(24).fill(0), models: {}, purposes: {}, today: { requests: 0, tokens: 0 } });
+    if (utcDay(row.ts) === today) {
+      u.today.requests++;
+      u.today.tokens += Number(row.tokens) || 0;
+    }
+    if (age > windowMs || age < 0) continue;
+    total++;
+    u.calls++;
+    u.hourly[23 - Math.min(23, Math.floor(age / 3600000))]++;
+    if (row.ok) {
+      u.ok++;
+      u.tokens += Number(row.tokens) || 0;
+      if (Number(row.ms) > 0) u.ms.push(Number(row.ms));
+      if (row.model) u.models[row.model] = (u.models[row.model] ?? 0) + 1;
+    } else if (/429|413|quota|rate|limit|402/i.test(String(row.error ?? ''))) u.rateLimited++;
+    else u.errors++;
+    if (row.purpose) u.purposes[row.purpose] = (u.purposes[row.purpose] ?? 0) + 1;
+  }
+  const providers = Object.fromEntries(Object.entries(per).map(([id, u]) => {
+    const limit = DAILY_LIMITS[id] ?? {};
+    const used = limit.requests ? u.today.requests / limit.requests : limit.tokens ? u.today.tokens / limit.tokens : null;
+    return [id, {
+      calls: u.calls,
+      ok: u.ok,
+      rateLimited: u.rateLimited,
+      errors: u.errors,
+      tokens: u.tokens,
+      share: total ? Math.round((u.calls / total) * 1000) / 1000 : 0,
+      medianMs: median(u.ms),
+      hourly: u.hourly,
+      models: Object.entries(u.models).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([model, calls]) => ({ model, calls })),
+      purposes: Object.entries(u.purposes).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([purpose, calls]) => ({ purpose, calls })),
+      today: { ...u.today, limit: limit.requests ?? limit.tokens ?? null, unit: limit.requests ? 'requests' : limit.tokens ? 'tokens' : null, used: used === null ? null : Math.round(used * 1000) / 1000, note: limit.note ?? '' },
+    }];
+  }));
+  return { total, providers };
+}
