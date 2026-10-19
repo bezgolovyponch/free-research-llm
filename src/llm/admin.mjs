@@ -1,6 +1,7 @@
 import { PROVIDER_PRESETS, ROUTE_ORDER, SEARCH_KEYS } from './presets.mjs';
 import { KeyChecker } from '../keycheck.mjs';
 import { CAPABILITY, STRATEGIES, routeFor, usageInfo } from './ranking.mjs';
+import { GUIDES_CHECKED, guidesFor } from './guides.mjs';
 
 export const FREE_TIERS_CHECKED = '2026-10-18';
 export const FREE_TIERS = {
@@ -89,7 +90,7 @@ export function catalogRows({ env, statuses = [], ledger = [], links = {} }) {
     return { ok: rows.filter((r) => r.ok).length, failed: rows.filter((r) => !r.ok).length };
   };
   const models = PROVIDER_PRESETS.map((p) => {
-    const saved = Boolean((p.keyEnv && env[p.keyEnv]) || (p.baseEnv && env[p.baseEnv]));
+    const saved = Boolean((p.keyEnv && env[p.keyEnv]) || (p.baseEnv && env[p.baseEnv]) || (p.optionalKeyEnv && env[p.optionalKeyEnv]));
     const status = statuses.find((s) => s.id === p.id);
     return {
       kind: 'model',
@@ -99,6 +100,8 @@ export function catalogRows({ env, statuses = [], ledger = [], links = {} }) {
       accountEnv: p.accountEnv ?? null,
       baseEnv: p.baseEnv ?? null,
       modelEnv: p.modelEnv ?? null,
+      optionalEnv: p.optionalKeyEnv ?? null,
+      guide: guidesFor([p.baseEnv, p.modelEnv, p.accountEnv, p.keyEnv]),
       signup: p.signup || null,
       link: p.signup ? links[p.signup] ?? null : null,
       free: FREE_TIERS[p.id] ?? '',
@@ -122,13 +125,14 @@ export function catalogRows({ env, statuses = [], ledger = [], links = {} }) {
     saved: Boolean(env[k.env]),
     state: env[k.env] ? 'saved' : 'empty',
     detail: env[k.env] ? 'saved; Test checks it with one search' : 'no key yet',
+    guide: guidesFor([k.env]),
   }));
-  return { models, search, order: order.enabled, orderIsCustom: order.custom, overrides: ['FRL_FAST_ORDER', 'FRL_DEEP_ORDER'].filter((n) => env[n]), freeTiersChecked: FREE_TIERS_CHECKED };
+  return { models, search, order: order.enabled, orderIsCustom: order.custom, overrides: ['FRL_FAST_ORDER', 'FRL_DEEP_ORDER'].filter((n) => env[n]), freeTiersChecked: FREE_TIERS_CHECKED, guidesChecked: GUIDES_CHECKED };
 }
 
 export function editableNames() {
   const names = new Set(SEARCH_KEYS.map((k) => k.env));
-  for (const p of PROVIDER_PRESETS) for (const n of [p.keyEnv, p.accountEnv, p.baseEnv, p.modelEnv]) if (n) names.add(n);
+  for (const p of PROVIDER_PRESETS) for (const n of [p.keyEnv, p.accountEnv, p.baseEnv, p.modelEnv, p.optionalKeyEnv]) if (n) names.add(n);
   return names;
 }
 

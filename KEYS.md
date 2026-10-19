@@ -86,9 +86,9 @@ Search keys only (model keys already saved): `node src/frl.mjs keys setup search
 
 **Step 2b. Optional, unlimited search: SearXNG on your Mac.** Install and open Docker Desktop (https://www.docker.com/products/docker-desktop/), wait for "Engine running", then:
 ```bash
-./searxng.command
+node src/frl.mjs searxng
 ```
-It starts the open-source SearXNG container on http://127.0.0.1:8888 (only this Mac can reach it) with JSON output on, and saves `SEARXNG_URL` in the Keychain. It restarts with Docker. Stop it: `docker rm -f frl-searxng`.
+(On a Mac, double-clicking **`searxng.command`** runs the same; **Terminal → Start SearXNG search** runs it from the app.) It starts the open-source SearXNG container on http://127.0.0.1:8888 (only this Mac can reach it) with JSON output on, and saves `SEARXNG_URL` in the Keychain. It restarts with Docker. Stop it: `docker rm -f frl-searxng`.
 
 **Step 3. Start the app.** Double-click **`start.command`** (macOS) or **`start.cmd`** (Windows), or run `node src/frl.mjs start` in the folder. The terminal prints which keys came from the Keychain and the live route, for example:
 ```

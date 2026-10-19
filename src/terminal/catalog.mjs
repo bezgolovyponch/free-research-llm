@@ -11,6 +11,7 @@ export const CONSOLE_COMMANDS = [
   { id: 'keys-list', group: 'Keys', label: 'List keys', run: 'node src/frl.mjs keys list', what: 'which keys are saved (masked)' },
   { id: 'keys-export', group: 'Keys', label: 'Export keys', run: 'node src/frl.mjs keys export', what: 'encrypted, passphrase-protected bundle of your keys for another computer' },
   { id: 'keys-import', group: 'Keys', label: 'Import keys', run: 'node src/frl.mjs keys import', what: 'paste a bundle from another computer' },
+  { id: 'searxng', group: 'Keys', label: 'Start SearXNG search', run: 'node src/frl.mjs searxng', what: 'unlimited free web search in Docker (Docker Desktop must be running); saves its address' },
   { id: 'local-install', group: 'Local GPU', label: 'Install llama.cpp', run: 'node src/frl.mjs local install', what: 'download the official llama.cpp build for this computer (Vulkan on Windows), checksum-verified' },
   { id: 'local-models', group: 'Local GPU', label: 'Which model fits', run: 'node src/frl.mjs local models', what: 'models by GPU memory, with the start command' },
   { id: 'local-status', group: 'Local GPU', label: 'Local model status', run: 'node src/frl.mjs local status', what: 'is the local model server running' },

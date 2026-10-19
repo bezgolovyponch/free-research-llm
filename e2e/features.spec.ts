@@ -150,7 +150,12 @@ test('the + next to the models indicator opens the router page: strategy, ranked
   await expect(body.locator('[data-use]')).toHaveCount(0);
   await expect(body.locator('[data-rrow="groq"]')).toContainText('Adds: capability 4/5');
   await expect(body.locator('[data-rrow="groq"]')).toContainText('1,000 req/day');
-  await expect(body.locator('[data-rrow="groq"] a')).toHaveAttribute('href', 'https://console.groq.com/keys');
+  await expect(body.locator('[data-rrow="groq"] a[href="https://console.groq.com/keys"]').first()).toBeVisible();
+  await expect(body.locator('[data-rrow="groq"] .rt-guide')).toContainText('How to get it');
+  await expect(body.locator('[data-rrow="groq"] .rt-guide')).toContainText('Create API Key');
+  await expect(body.locator('[data-rrow="groq"] .rt-guide')).toContainText('gsk_');
+  await expect(body.locator('[data-rrow="groq"] .rt-guide')).toContainText('checked 2026-10-19');
+  await expect(body.locator('[data-rrow="groq"] .rt-guide ol.steps li')).toHaveCount(4);
   await expect(body.locator('[data-rrow="groq"] input[type="password"]')).toBeVisible();
   await noSideScroll(page);
   await body.getByRole('radio', { name: 'Fastest' }).click();

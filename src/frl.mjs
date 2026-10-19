@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import { KeyChecker } from './keycheck.mjs';
 import { TICKET_ID, claudePrompt } from './changes.mjs';
 import { spawnSync } from 'node:child_process';
 import { PROVIDER_PRESETS, SEARCH_KEYS } from './llm/presets.mjs';
+import { guideFor } from './llm/guides.mjs';
 import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helperArgs, parseHelpers, recommendModel, serverArgs, speedOf } from './local/llamacpp.mjs';
 import { CREDSTORE, KeychainSecrets, runCommand, secretNames } from './secrets.mjs';
 import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
@@ -194,7 +196,8 @@ const keyCommands = {
     for (const k of KEY_LIST) {
       if (scope === 'search' && !k.search) continue;
       const saved = Boolean(await secrets.read(k.env));
-      console.log(`${saved ? '[saved]' : '[empty]'} ${k.label}\n        ${k.signup}`);
+      const guide = guideFor(k.env);
+      console.log(`${saved ? '[saved]' : '[empty]'} ${k.label}\n${guide ? guide.steps.map((t, i) => `        ${i + 1}. ${t}`).join('\n') : `        ${k.signup}`}`);
       const value = await ask(`        ${k.plain ? 'type' : 'paste'} ${k.env}: `, { hidden: !k.plain });
       if (value === '-') console.log((await secrets.remove(k.env)) ? '        deleted' : '        nothing to delete');
       else if (value && k.plain) console.log((await secrets.write(k.env, value), `        saved ${value}`));
@@ -205,6 +208,8 @@ const keyCommands = {
   async set([name]) {
     const k = KEY_LIST.find((x) => x.env === name);
     if (!k) return console.log(`usage: node src/frl.mjs keys set NAME   (one of: ${KEY_LIST.map((x) => x.env).join(', ')})`);
+    const guide = guideFor(k.env);
+    if (guide) console.log(guide.steps.map((t, i) => `  ${i + 1}. ${t}`).join('\n'));
     const value = await ask(`${k.label}\n${k.plain ? 'type' : 'paste'} ${k.env}: `, { hidden: !k.plain });
     if (!value) return console.log('nothing saved');
     if (k.plain) {
@@ -362,6 +367,28 @@ const commands = {
     console.log(passed ? `\nChange ${id} done: the gate passed. The result is in the App chat.` : `\nChange ${id} is not done: the gate failed. Run "node src/frl.mjs change ${id}" again to continue.`);
   },
 
+  async searxng() {
+    const port = 8888;
+    if ((await run('docker', ['info'], { shell: false, stdio: 'ignore' })) !== 0) return console.log('Docker is not answering. Open Docker Desktop, wait for "Engine running", then run this again.');
+    const dir = path.join(os.homedir(), '.config', 'free-research-llm', 'searxng');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'settings.yml'), 'use_default_settings: true\nserver:\n  limiter: false\n  public_instance: false\nsearch:\n  formats:\n    - html\n    - json\n');
+    await run('docker', ['rm', '-f', 'frl-searxng'], { shell: false, stdio: 'ignore' });
+    const started = await run('docker', ['run', '--name', 'frl-searxng', '-d', '--restart', 'unless-stopped', '-p', `127.0.0.1:${port}:8080`, '-v', `${dir}:/etc/searxng/`, '-e', `SEARXNG_SECRET=${randomBytes(32).toString('hex')}`, 'docker.io/searxng/searxng:latest'], { shell: false });
+    if (started !== 0) return console.log('docker run failed: see the output above.');
+    console.log('Waiting for SearXNG to start…');
+    for (let i = 0; i < 30; i++) {
+      const answered = await fetch(`http://127.0.0.1:${port}/search?q=test&format=json`).then((r) => r.ok, () => false);
+      if (answered) {
+        await secrets.write('SEARXNG_URL', `http://127.0.0.1:${port}`);
+        console.log(`SearXNG is running at http://127.0.0.1:${port} (unlimited, no key) and SEARXNG_URL is saved in the ${secrets.label}.`);
+        return reloadApp();
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    console.log('SearXNG did not answer yet. Check: docker logs frl-searxng');
+  },
+
   async local([action, ...rest]) {
     const flag = (name, fallback = '') => {
       const i = rest.indexOf(`--${name}`);
@@ -440,6 +467,7 @@ if (!commands[command]) {
   node src/frl.mjs keys export        encrypted bundle of your keys for another computer
   node src/frl.mjs keys import        paste a bundle on the other computer
   node src/frl.mjs change C1 [--claude]  run an App chat change ticket with the free-model coder (or Claude Code), gated by quality
+  node src/frl.mjs searxng           start the free, unlimited SearXNG search engine in Docker and save its address
   node src/frl.mjs local ...         run a model on this PC's GPU (llama.cpp), optionally with helper devices: install | models | start | helper | status | bench
   node src/frl.mjs logs               last lines of the app log`);
 } else {

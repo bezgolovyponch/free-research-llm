@@ -20,7 +20,7 @@ export const SECRET_PATTERNS = [
 ];
 
 export function secretNames() {
-  const names = PROVIDER_PRESETS.flatMap((p) => [p.keyEnv, p.accountEnv, p.baseEnv, p.modelEnv]).filter(Boolean);
+  const names = PROVIDER_PRESETS.flatMap((p) => [p.keyEnv, p.accountEnv, p.baseEnv, p.modelEnv, p.optionalKeyEnv]).filter(Boolean);
   return [...new Set([...names, ...SEARCH_KEYS.map((k) => k.env), 'FRL_ACCESS_TOKEN', 'FRL_PROVIDER_ORDER', 'FRL_ROUTER_STRATEGY'])];
 }
 

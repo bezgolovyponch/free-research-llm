@@ -180,7 +180,7 @@ export const SEARCH_KEYS = [
   { env: 'FIRECRAWL_API_KEY', label: 'Firecrawl search (free monthly credits)', signup: 'https://www.firecrawl.dev/app/api-keys' },
   { env: 'SERPER_API_KEY', label: 'Serper Google search (2,500 free queries once)', signup: 'https://serper.dev/api-keys' },
   { env: 'BRAVE_API_KEY', label: 'Brave search ($5/month credit, card required)', signup: 'https://api-dashboard.search.brave.com' },
-  { env: 'SEARXNG_URL', label: 'SearXNG on this Mac (unlimited, run ./searxng.command)', signup: 'http://127.0.0.1:8888' },
+  { env: 'SEARXNG_URL', label: 'SearXNG on this Mac (unlimited, run node src/frl.mjs searxng)', signup: 'http://127.0.0.1:8888' },
 ];
 
 export const NON_CHAT_MODEL = /embed|whisper|tts|audio|image|vision-only|guard|moderation|rerank|transcribe|aqa|imagen|veo|lyria|native-audio|computer-use|robotics|orpheus|playai|compound|ocr|reward|parakeet|retriever|nemoguard|safety|clip|kosmos|deplot|paligemma|vila|neva|flux|stable-diffusion|bge-|m2m|translate/i;

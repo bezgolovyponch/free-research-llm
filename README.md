@@ -64,7 +64,9 @@ Reports are written to `reports/<project>.md`.
 
 **[KEYS.md](KEYS.md)** lists which free keys to get (verified 2026-10-17), the exact clicks for each, and how the router uses them. Short version: get **Gemini + Groq + LangSearch + Tavily**, then click **Terminal → Add keys** in the app (or run `node src/frl.mjs keys setup`) to save them in the system key store. Optional extras: Mistral, Cerebras, NVIDIA, Exa, OpenRouter, SambaNova, Cloudflare, Cohere, Puter.
 
-Supported providers: Gemini, Groq, Cerebras, Mistral, NVIDIA, SambaNova, OpenRouter (`:free` only), Cloudflare Workers AI, Cohere, Puter, Ollama (local), and any custom OpenAI-compatible endpoint. Free only: no paid provider is wired in. Search: LangSearch, Tavily, Exa, Linkup, Jina, Firecrawl, Serper, Brave, SearXNG (local Docker, `./searxng.command`) and Wikipedia, plus the Jina reader for pages that return too little text.
+Every key has numbered steps inside the app too: open **Models & router** and press **How to get it** on a provider or search card (the same steps print in the terminal from `node src/frl.mjs keys list` and `keys set NAME`; `src/llm/guides.mjs`, checked 2026-10-19).
+
+Supported providers: Gemini, Groq, Cerebras, Mistral, NVIDIA, SambaNova, OpenRouter (`:free` only), Cloudflare Workers AI, Cohere, Puter, Ollama (local), and any custom OpenAI-compatible endpoint. Free only: no paid provider is wired in. Search: LangSearch, Tavily, Exa, Linkup, Jina, Firecrawl, Serper, Brave, SearXNG (local Docker, `node src/frl.mjs searxng`) and Wikipedia, plus the Jina reader for pages that return too little text.
 
 The **deep** role (issue tree, retries, memo) and the **fast** role (research every sub-question) each have their own provider order, and the reviewer always uses a different provider. Keys are read from the shell environment first, then from the macOS Keychain. They are never read from or written to a project file.
 
@@ -92,5 +94,5 @@ Model IDs are not hard-coded. Each provider's `/models` list is read at start an
 ## Honest limits
 
 - Free models are weaker than frontier models. The checks catch invented sources and bad arithmetic, but they cannot prove that a cited page says what the claim says. The reviewer pass reduces that risk without removing it.
-- Wikipedia-only search is thin for prices and listings. Add free LangSearch and Tavily keys (or run `./searxng.command`) for real web results, or upload listings as CSV.
+- Wikipedia-only search is thin for prices and listings. Add free LangSearch and Tavily keys (or run `node src/frl.mjs searxng`) for real web results, or upload listings as CSV.
 - Tax and legal answers are research, not advice. Confirm with a licensed advisor before filing.

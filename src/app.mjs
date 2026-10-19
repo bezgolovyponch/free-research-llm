@@ -25,6 +25,7 @@ import { ChangeBook } from './changes.mjs';
 import { FreeCoder } from './coder/free-coder.mjs';
 import { KeyChecker } from './keycheck.mjs';
 import { LinkVerifier, RouterAdmin } from './llm/admin.mjs';
+import { KEY_GUIDES } from './llm/guides.mjs';
 import { accessLinks, lanAddresses } from './service.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -306,6 +307,7 @@ export class App {
       providers: this.router.status(),
       route: this.router.route(),
       searchKeys: SEARCH_KEYS.map((k) => ({ ...k, set: Boolean(this.env[k.env] || this.sessionSearchEnv[k.env]) })),
+      guides: KEY_GUIDES,
       search: this.search.describe(),
       ledger: this.router.ledger.slice(-40),
       calls: this.router.calls,
