@@ -44,4 +44,11 @@ describe('service', () => {
     ]);
     expect(accessLinks({ port: 4600, token: 't', tailscale: 'frl.tail1234.ts.net.', funnel: true }).at(-1)).toEqual({ label: 'anywhere, any device (HTTPS)', url: 'https://frl.tail1234.ts.net/?token=t' });
   });
+
+  it('points the service at Homebrew\'s stable opt link, so a Node upgrade does not break it', async () => {
+    const { stableNodePath } = await import('../src/service.mjs');
+    expect(stableNodePath('/opt/homebrew/Cellar/node@24/24.22.0/bin/node')).toBe('/opt/homebrew/opt/node@24/bin/node');
+    expect(stableNodePath('/usr/local/Cellar/node/26.1.0/bin/node')).toBe('/usr/local/opt/node/bin/node');
+    expect(stableNodePath('/usr/bin/node')).toBe('/usr/bin/node');
+  });
 });

@@ -54,7 +54,7 @@ Measured against GitHub's community profile, OpenSSF Scorecard and the Best Prac
 
 Still open:
 
-- **`engines` floor.** `package.json` says `node >=20`; Node 20 reached end of life on 2026-03-24. CI already tests 22 and 24. Raising the floor to 22 is the correct next step, but the machine this app is developed on still runs Node 20, so the change needs to happen when that machine moves.
+- **`engines` floor.** Done on 2026-10-19: `package.json` requires `^22.12.0 || >=24.0.0` (Node 20 reached end of life on 2026-03-24), the development machine runs Node 24.22.0, and CI tests 22 and 24.
 - **Tags and release notes.** `v1.0.0` with notes from `SESSION-LOG.md` would satisfy the badge's release-notes criterion. Not done here because no release was requested.
 - **A linter.** Biome (lint only, no formatter) is the cheapest fit for ~50 untyped ESM modules: anonymous, unused or undefined identifiers are the bug class the hand-written gate cannot see. Not added yet because the first run needs triage before it can gate a commit; adding it blind would either fail every build or be ignored.
 - **CodeQL / scorecard-action** as a separate non-blocking workflow. Deferred: it needs a second workflow and permissions review.

@@ -4,7 +4,7 @@ What the app is and how its chats work: [CONCEPT.md](CONCEPT.md). Windows PC: [W
 
 ## A. One-time setup (about 5 minutes)
 
-1. **Install Node.js 20 or newer.** Get the LTS installer from https://nodejs.org. Check it with `node -v`.
+1. **Install Node.js 22.12 or newer (24 recommended).** Get the LTS installer from https://nodejs.org. Check it with `node -v`.
 2. **Get the app.**
    ```bash
    git clone https://github.com/bezgolovyponch/free-research-llm.git

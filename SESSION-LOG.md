@@ -3,6 +3,13 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-19 · session 13 — Node 24, dependency PRs
+
+- **Merged** Dependabot PR #1: GitHub Actions `checkout`, `setup-node` and `upload-artifact` updated to v7. Green on Node 22 and 24 after a rebase; the earlier red run was one flaky e2e test.
+- **Node 24 on this Mac:** `brew install node@24`, unlink node@20, link node@24 (24.22.0, npm 11.19.1). Then `npm ci` and the gate PASSED. npm 11 blocks dependency install scripts, so `allowScripts` in `package.json` approves `node-pty` and `esbuild`; the terminal's `node-pty` was checked to open a pty.
+- `engines` is now `^22.12.0 || >=24.0.0`, with GUIDE, README and OSS-REVIEW updated. The always-on service was re-registered on Node 24. Its plist points at Homebrew's stable `opt` link (`stableNodePath`), so a `brew upgrade` no longer breaks it.
+- **PR #2** (vitest 5) can now be merged here (vitest 5 needs Node ^22.12 or ^24).
+
 ## 2026-10-19 · session 12 — results computed from the current pieces, with probabilities
 
 - **Asked:** results were inappropriate. They must come from the pieces and sub-pieces, be regenerated after every run and update, and give the most probable result the research supports. Also: why can only Claude Code change the app?

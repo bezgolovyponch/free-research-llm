@@ -37,7 +37,7 @@ Grades: **verified** · **supported** · **weak** · **unsupported**. The grade 
 
 ## Quick start
 
-You need Node.js 20+ on macOS, Windows or Linux. Runtime dependencies: `ws` and xterm.js for the in-app terminal, plus `node-pty` (optional) for a full shell.
+You need Node.js 22.12+ (24 recommended) on macOS, Windows or Linux. Runtime dependencies: `ws` and xterm.js for the in-app terminal, plus `node-pty` (optional) for a full shell.
 
 ```bash
 git clone https://github.com/bezgolovyponch/free-research-llm.git

@@ -86,3 +86,8 @@ ${credentials.map((name) => `LoadCredentialEncrypted=${name}:/etc/credstore.encr
 WantedBy=multi-user.target
 `;
 }
+
+export function stableNodePath(execPath) {
+  const m = String(execPath).match(/^(.*)\/Cellar\/([^/]+)\/[^/]+\/bin\/node$/);
+  return m ? `${m[1]}/opt/${m[2]}/bin/node` : execPath;
+}

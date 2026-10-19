@@ -15,7 +15,7 @@ import { PROVIDER_PRESETS, SEARCH_KEYS } from './llm/presets.mjs';
 import { guideFor } from './llm/guides.mjs';
 import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helperArgs, parseHelpers, recommendModel, serverArgs, speedOf } from './local/llamacpp.mjs';
 import { CREDSTORE, KeychainSecrets, runCommand, secretNames } from './secrets.mjs';
-import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
+import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, stableNodePath, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 4600);
@@ -123,7 +123,7 @@ const SERVICES = {
   darwin: {
     async install() {
       await fs.mkdir(path.dirname(PLIST), { recursive: true });
-      await fs.writeFile(PLIST, launchAgentPlist({ nodePath: process.execPath, root: ROOT, port: PORT, pathEnv: process.env.PATH ?? '' }));
+      await fs.writeFile(PLIST, launchAgentPlist({ nodePath: stableNodePath(process.execPath), root: ROOT, port: PORT, pathEnv: process.env.PATH ?? '' }));
       const domain = `gui/${process.getuid()}`;
       await runCommand('launchctl', ['bootout', `${domain}/${SERVICE_LABEL}`]).catch(() => {});
       for (let i = 0; i < 20 && (await runCommand('launchctl', ['print', `${domain}/${SERVICE_LABEL}`]).then(() => true, () => false)); i++) await new Promise((r) => setTimeout(r, 500));
@@ -169,7 +169,7 @@ const SERVICES = {
         const exists = await runCommand('sudo', ['test', '-f', `${CREDSTORE}/${name}`]).then(() => true, () => false);
         if (exists) present.push(name);
       }
-      const unit = systemdUnit({ nodePath: process.execPath, root: ROOT, user: os.userInfo().username, port: PORT, credentials: present });
+      const unit = systemdUnit({ nodePath: stableNodePath(process.execPath), root: ROOT, user: os.userInfo().username, port: PORT, credentials: present });
       await runCommand('sudo', ['tee', UNIT_PATH], { input: unit });
       await runCommand('sudo', ['systemctl', 'daemon-reload']);
       await runCommand('sudo', ['systemctl', 'enable', SYSTEMD_UNIT]);
