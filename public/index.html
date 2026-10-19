@@ -424,10 +424,10 @@
 
     <section class="view" id="view-assistant">
       <div class="ap-wrap">
-        <div class="ap-head"><div id="apChanges" class="small" style="float:right;max-width:46%;text-align:right"></div><h1>App assistant</h1><p class="small muted" style="margin-top:4px">Everything about the app itself: how it works, keys, other devices, Windows, cloud, terminal, updates. Answers come only from the app's facts and guides, pass the reply audit, and every action waits for your button.</p></div>
+        <div class="ap-head"><div id="apChanges" class="small" style="float:right;max-width:46%;text-align:right"></div><h1>App assistant</h1><p class="small muted" style="margin-top:4px">Everything about the app itself: how it works, keys, other devices, Windows, cloud, terminal, updates. Answers come only from the app's facts and guides, pass the reply audit, and every action waits for your button. For changes you choose Claude Code or the free models; both edit a sandbox copy and the quality gate decides whether the app changes.</p></div>
         <div id="apMsgs"></div>
         <div class="attach-row" id="apFiles"></div>
-        <form id="apForm" class="chat-form" autocomplete="off"><button type="button" class="icon-btn" id="apAttach" aria-label="Attach files to the app chat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 11.5l-8.5 8.5a5 5 0 01-7-7L14 4.5a3.5 3.5 0 015 5L10.5 18a2 2 0 01-3-3L15 7.5"/></svg></button><input type="file" id="apFile" multiple hidden accept="image/*,.pdf,.csv,.tsv,.txt,.md,.json,.html,.htm,.xml,.log,.mp3,.wav"><textarea id="apIn" rows="1" placeholder="Ask about the app… Enter sends" aria-label="App chat message"></textarea><button class="btn primary" id="apSend" type="submit">Send</button></form>
+        <form id="apForm" class="chat-form" autocomplete="off"><button type="button" class="icon-btn" id="apAttach" aria-label="Attach files to the app chat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 11.5l-8.5 8.5a5 5 0 01-7-7L14 4.5a3.5 3.5 0 015 5L10.5 18a2 2 0 01-3-3L15 7.5"/></svg></button><input type="file" id="apFile" multiple hidden accept="image/*,.pdf,.csv,.tsv,.txt,.md,.json,.html,.htm,.xml,.log,.mp3,.wav"><textarea id="apIn" rows="1" placeholder="Ask about the app, or describe a change (Claude Code or free models)… Enter sends" aria-label="App chat message"></textarea><button class="btn primary" id="apSend" type="submit">Send</button></form>
       </div>
     </section>
 
@@ -947,9 +947,19 @@ function auditHtml(m){
   if(m.audit.passed)return '<div class="audit ok">✓ audit passed'+(m.audit.revised?" after one revision":"")+"</div>";
   return '<div class="audit">⚠ audit: '+m.audit.issues.map(i=>esc(i.type.replace(/-/g," "))+(i.detail?" — "+esc(trunc(i.detail,80)):"")).join(" · ")+" (removed or flagged)</div>";
 }
+function coders(){return (STATE.status&&STATE.status.coders)||[{id:"free",label:"free models",available:true}];}
+function claudeReady(){return coders().some(c=>c.id==="claude"&&c.available);}
 function proposalHtml(m,p){
   const state=p.state==="proposed"?"":'<span class="small faint">'+esc(p.state)+(p.result&&p.result.message?" · "+esc(trunc(p.result.message,90)):"")+"</span>";
-  const btns=p.state!=="proposed"?"":(p.type==="command"?'<button class="btn primary sm" data-run-cmd="'+esc(p.run)+'" data-at="'+esc(m.at)+'" data-pid="'+esc(p.pid)+'">Run in Terminal</button>':'<button class="btn primary sm" data-decide="1" data-key="'+esc(m._key||"")+'" data-at="'+esc(m.at)+'" data-pid="'+esc(p.pid)+'">'+(p.type==="change"?"Create ticket &amp; implement":"Confirm")+"</button>")+'<button class="btn ghost sm" data-decide="0" data-key="'+esc(m._key||"")+'" data-at="'+esc(m.at)+'" data-pid="'+esc(p.pid)+'">Dismiss</button>';
+  let btns="";
+  if(p.state==="proposed"){
+    if(p.type==="command")btns='<button class="btn primary sm" data-run-cmd="'+esc(p.run)+'" data-at="'+esc(m.at)+'" data-pid="'+esc(p.pid)+'">Run in Terminal</button>';
+    else if(p.type==="change"){
+      btns='<button class="btn primary sm" data-decide="1" data-engine="claude" data-key="'+esc(m._key||"")+'" data-at="'+esc(m.at)+'" data-pid="'+esc(p.pid)+'"'+(claudeReady()?"":" disabled")+' title="'+(claudeReady()?"Claude Code edits a sandbox copy; the quality gate decides. It uses your Claude plan.":"Claude Code is not installed on this computer")+'">Implement with Claude Code</button>'
+        +'<button class="btn secondary sm" data-decide="1" data-engine="free" data-key="'+esc(m._key||"")+'" data-at="'+esc(m.at)+'" data-pid="'+esc(p.pid)+'" title="Free models edit a sandbox copy; the quality gate decides.">with free models</button>';
+    } else btns='<button class="btn primary sm" data-decide="1" data-key="'+esc(m._key||"")+'" data-at="'+esc(m.at)+'" data-pid="'+esc(p.pid)+'">Confirm</button>';
+    btns+='<button class="btn ghost sm" data-decide="0" data-key="'+esc(m._key||"")+'" data-at="'+esc(m.at)+'" data-pid="'+esc(p.pid)+'">Dismiss</button>';
+  }
   const open=p.state==="done"&&p.result&&p.result.projectId&&p.type!=="delete"?'<button class="btn secondary sm" data-open-project="'+esc(p.result.projectId)+'">Open research</button>':"";
   return '<div class="proposal"><span class="lbl">'+esc(p.label||p.type)+"</span>"+btns+open+state+"</div>";
 }
@@ -972,8 +982,8 @@ function linksHtml(){
 async function showLinks(){try{CHAT.links=await api("/api/access");renderChat();renderAppPage();}catch(e){toast(e.message);}}
 function scrollChat(force){const b=$("chatMsgs");if(force||CHAT.stick)b.scrollTop=b.scrollHeight;}
 $("chatMsgs").addEventListener("scroll",()=>{const b=$("chatMsgs");CHAT.stick=b.scrollHeight-b.scrollTop-b.clientHeight<40;});
-async function decide(at,pid,accept){
-  try{const r=await api("/api/chat/decide",{method:"POST",body:{at,pid,accept}});CHAT.appThread=r.thread;if(r.error)toast(r.error);else if(accept)toast(r.proposal.result&&r.proposal.result.message||"done");loadProjects();renderChat();renderAppPage();
+async function decide(at,pid,accept,engine){
+  try{const body={at,pid,accept};if(engine)body.engine=engine;const r=await api("/api/chat/decide",{method:"POST",body});CHAT.appThread=r.thread;if(r.error)toast(r.error);else if(accept)toast(r.proposal.result&&r.proposal.result.message||"done");loadProjects();renderChat();renderAppPage();
     const p=r.proposal;if(accept&&p.type==="delete"&&p.state==="done"&&STATE.project&&STATE.project.id===p.projectId){STATE.project=null;showPage("home");}
     if(accept&&p.type==="change"&&p.state==="done"&&p.result&&p.result.run)openTerminal(p.result.run);}
   catch(e){toast(e.message);}
@@ -985,7 +995,7 @@ async function decideProject(key,at,pid,accept){
 }
 function onMsgClick(e){
   const o=e.target.closest("[data-open-project]");if(o){openProject(o.dataset.openProject);return;}
-  const d=e.target.closest("[data-decide]");if(d){d.disabled=true;if(d.dataset.key)decideProject(d.dataset.key,d.dataset.at,d.dataset.pid,d.dataset.decide==="1");else decide(d.dataset.at,d.dataset.pid,d.dataset.decide==="1");return;}
+  const d=e.target.closest("[data-decide]");if(d){d.disabled=true;if(d.dataset.key)decideProject(d.dataset.key,d.dataset.at,d.dataset.pid,d.dataset.decide==="1");else decide(d.dataset.at,d.dataset.pid,d.dataset.decide==="1",d.dataset.engine||"");return;}
   const r=e.target.closest("[data-run-cmd]");if(r){const cmd=r.dataset.runCmd,at=r.dataset.at,pid=r.dataset.pid;openTerminal(cmd);decide(at,pid,true);return;}
   if(e.target.closest("[data-show-links]"))showLinks();
 }
@@ -1001,7 +1011,7 @@ function chatTarget(){
   if(CHAT.scope==="node"&&key!=="Q")return{kind:"node",key,title:"This piece · "+key+" "+trunc((byId(key)||{}).title,40),thread:((p&&p.chats)||{})[key]||[]};
   return{kind:"research",key:"Q",title:"Whole research · "+trunc(p?p.question:"",50),thread:((p&&p.chats)||{}).Q||[]};
 }
-const HINTS={app:'Ask about the app itself ("how do I open this on my Windows PC?", "keep it running in the cloud for free"), or describe a change to the app ("add a CSV export to Results, with a test"): it becomes a change ticket: free models implement it in a sandbox copy and it reaches the app only if the quality gate passes.',node:'Request + desired output, e.g. Request: "read Golf listings in DE and CZ 2000–4000 EUR" · Desired output: "median Golf price in both countries in EUR, with 3 listing links". The desired output is kept as a regression check on this piece.',results:'Ask about the results: "which listing has the best margin?", "why does the memo say insufficient data when the checks pass?", "re-research D2.2 with official Czech fees".',research:'Request + desired output for the whole research, e.g. Request: "add a driver for registration costs" · Desired output: "net margin per model after CZ registration, in EUR". Kept as a regression check. Questions about the app go to the App chat.'};
+const HINTS={app:'Ask about the app itself ("how do I open this on my Windows PC?"), or describe a change to the app ("add a CSV export to Results, with a test", "make the Run button green"): it becomes a change ticket and you pick the implementer — Claude Code (uses your Claude plan) or the free models. Either works in a sandbox copy and the app changes only when the quality gate passes. Follow-ups like "make it smaller" or "try again" continue from the current app.',node:'Request + desired output, e.g. Request: "read Golf listings in DE and CZ 2000–4000 EUR" · Desired output: "median Golf price in both countries in EUR, with 3 listing links". The desired output is kept as a regression check on this piece.',results:'Ask about the results: "which listing has the best margin?", "why does the memo say insufficient data when the checks pass?", "re-research D2.2 with official Czech fees".',research:'Request + desired output for the whole research, e.g. Request: "add a driver for registration costs" · Desired output: "net margin per model after CZ registration, in EUR". Kept as a regression check. Questions about the app go to the App chat.'};
 function withPending(t,thread){
   const th=thread.slice();const pend=CHAT.pending;const p=STATE.project;
   if(pend&&pend.key===t.key&&(t.kind==="app"||(p&&pend.pid===p.id))){
@@ -1021,14 +1031,14 @@ function renderChat(){
   $("chatTitle").textContent=t.title;
   const two=t.kind==="node"||t.kind==="research";
   $("desiredRow").style.display=two?"":"none";
-  $("chatIn").placeholder=two?"Request: what do you want…":t.kind==="results"?"Ask about the results…":"Ask about the app, or describe a change to it…";
+  $("chatIn").placeholder=two?"Request: what do you want…":t.kind==="results"?"Ask about the results…":"Ask about the app, or describe a change (Claude Code or free models)…";
   $("chatState").textContent=p&&isLooping(p)?"loop running":p&&RUNNING_PHASES.includes(p.phase)?"research running":"";
   const th=withPending(t,t.thread);
   $("chatMsgs").innerHTML=th.length?th.map(m=>msgHtml(t.kind==="app"?m:Object.assign({},m,{_key:t.key}))).join(""):'<div class="small faint" style="padding:6px 2px">'+HINTS[t.kind]+"</div>";
   renderFiles("dock");
   scrollChat(false);
 }
-async function loadChanges(){try{const list=await api("/api/changes");const box=$("apChanges");box.innerHTML=list.length?"<b>App changes</b> <span class=\"small faint\">free models implement · the quality gate decides</span><br>"+list.slice(-5).reverse().map(t=>'<span class="mono">'+esc(t.id)+"</span> "+esc(trunc(t.title,40))+' · <span style="color:'+(t.state==="done"?"var(--gr)":t.state==="failed"?"var(--rd)":"var(--dim)")+'">'+esc(t.state)+"</span>"+(t.state==="done"?' <button class="btn ghost sm" data-change-undo="'+esc(t.id)+'">Undo</button>':["failed","queued","reverted"].includes(t.state)?' <button class="btn ghost sm" data-change-run="'+esc(t.id)+'">'+(t.state==="queued"?"Implement":"Try again")+"</button>":"")).join("<br>"):"";box.querySelectorAll("[data-change-run],[data-change-undo]").forEach(b=>b.addEventListener("click",async()=>{const id=b.dataset.changeRun||b.dataset.changeUndo;try{const r=await api("/api/changes/"+id+"/"+(b.dataset.changeRun?"run":"undo"),{method:"POST"});toast(r.message||id+" "+(r.state||""));}catch(e){toast(e.message);}loadChanges();}));}catch(e){return;}}
+async function loadChanges(){try{const list=await api("/api/changes");const box=$("apChanges");const col={done:"var(--gr)",failed:"var(--rd)",running:"var(--bl)",queued:"var(--am)",reverted:"var(--dim)"};box.innerHTML=list.length?"<b>App changes</b> <span class=\"small faint\">Claude Code or free models · sandbox copy · the quality gate decides</span><br>"+list.slice(-5).reverse().map(t=>{const engine=t.engine==="claude"?"Claude Code":"free models";const tip=t.result&&t.result.summary?' title="'+esc(trunc(t.result.summary,180))+'"':"";const acts=t.state==="done"?' <button class="btn ghost sm" data-change-undo="'+esc(t.id)+'">Undo</button>':t.state==="running"?"":' <button class="btn ghost sm" data-change-run="'+esc(t.id)+'" data-change-engine="'+esc(t.engine||"free")+'">'+(t.state==="queued"?"Implement":"Try again")+"</button>"+(claudeReady()&&t.engine!=="claude"?' <button class="btn ghost sm" data-change-run="'+esc(t.id)+'" data-change-engine="claude">with Claude Code</button>':"");return '<span class="mono">'+esc(t.id)+"</span> "+esc(trunc(t.title,40))+" · "+esc(engine)+' · <span style="color:'+(col[t.state]||"var(--dim)")+'">'+esc(t.state)+"</span>"+acts;}).join("<br>"):"";box.querySelectorAll("[data-change-run],[data-change-undo]").forEach(b=>b.addEventListener("click",async()=>{const id=b.dataset.changeRun||b.dataset.changeUndo;b.disabled=true;try{const r=await api("/api/changes/"+id+"/"+(b.dataset.changeRun?"run":"undo"),{method:"POST",body:b.dataset.changeRun?{engine:b.dataset.changeEngine||"free"}:{}});toast(r.message||id+" "+(r.state||""));}catch(e){toast(e.message);}loadChanges();}));}catch(e){return;}}
 function renderAppPage(){
   if(STATE.page!=="assistant")return;
   loadChanges();

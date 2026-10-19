@@ -37,6 +37,25 @@ describe('CodeSandbox', () => {
     await Promise.all([root, backup].map((d) => fs.rm(d, { recursive: true, force: true })));
   });
 
+  it('sees edits an agent made directly in the copy, ignores run artifacts, and promotes only files that differ', async () => {
+    const root = await repo();
+    const dir = path.join(root, '..', `${path.basename(root)}-agent-work`);
+    const sandbox = new CodeSandbox({ root, dir, listFiles: () => ['src/a.mjs', 'tests/a.test.ts'], gate: async () => ({ passed: true, output: 'quality gate: PASSED' }) });
+    await sandbox.prepare();
+    await fs.writeFile(path.join(dir, 'src/a.mjs'), 'export const a = 3;\n');
+    await fs.writeFile(path.join(dir, 'src/new.mjs'), 'export const n = 1;\n');
+    await fs.mkdir(path.join(dir, 'test-results'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'test-results', 'trace.json'), '{}');
+    expect(await sandbox.changedAll()).toEqual(['src/a.mjs', 'src/new.mjs']);
+    const backup = path.join(root, '..', `${path.basename(root)}-agent-backup`);
+    await sandbox.promote(backup);
+    expect(await fs.readFile(path.join(root, 'src/a.mjs'), 'utf8')).toBe('export const a = 3;\n');
+    expect(await fs.readFile(path.join(root, 'src/new.mjs'), 'utf8')).toBe('export const n = 1;\n');
+    expect(await fs.access(path.join(root, 'test-results')).then(() => true, () => false)).toBe(false);
+    await sandbox.discard();
+    await Promise.all([root, backup].map((d) => fs.rm(d, { recursive: true, force: true })));
+  });
+
   it('fails without running the gate when a change removes tests', async () => {
     const root = await repo();
     const dir = path.join(root, '..', `${path.basename(root)}-work`);

@@ -387,7 +387,8 @@ FACTS (checked by code just now):
 - links for other devices (token left out on purpose): ${(facts.links ?? []).map((l) => `${l.label}: ${l.url}`).join(' · ') || 'none'}
 - terminal in the app: ${facts.terminal ?? 'unknown'}
 - models ready: ${status.models.join(', ') || 'none'} · search: ${status.search.join(', ') || 'none'} · loops running: ${status.improving.join(', ') || 'none'}
-- app change tickets: ${(facts.changes ?? []).map((t) => `${t.id} ${t.state}${t.result ? ` (${t.result.passed ? 'gate passed' : 'gate failed'})` : ''}: ${t.title}`).join(' · ') || 'none yet'}
+- app change tickets: ${(facts.changes ?? []).map((t) => `${t.id} ${t.state}${t.engine ? ` via ${t.engine}` : ''}${t.result ? ` (${t.result.passed ? 'gate passed' : 'gate failed'})` : ''}: ${t.title}`).join(' · ') || 'none yet'}
+- implementers for app changes: ${(facts.coders ?? []).map((c) => `${c.id} (${c.label}) ${c.available ? 'available' : 'not installed'}`).join(' · ') || 'free models'}
 
 RESEARCHES (id | phase | pieces passing | expected result met | question):
 ${list}
@@ -408,7 +409,8 @@ RULES:
 2. Never write a URL that is not written above. Never write keys, tokens or passwords.
 3. You run nothing yourself. Direct actions (open, stop, links) run when you return them. Everything else is a proposal shown as a button: tell the user to press it, never say it is done.
 4. Propose a new research only when the user asks to research a question. Questions about the app itself are never researches.
-4b. You are where the user asks for CHANGES TO THE APP ITSELF (a feature to add, something to change or improve, a bug, tests or checks). For those, propose ONE "change" ticket: restate the request precisely, write the desired output as something a person can check in the running app, and list the tests or checks to add. The app's free-model coder implements the ticket in a sandbox copy, and it reaches the app only when the quality gate passes. Never claim you changed the app.
+4b. You are where the user asks for CHANGES TO THE APP ITSELF (a feature to add, something to change or improve, a bug, tests or checks). For those, propose ONE "change" ticket: restate the request precisely, write the desired output as something a person can check in the running app, list the tests or checks to add, and set "engine" to "claude" when Claude Code is available in FACTS (it is the one that can do UI and feature work; it runs on the user's Claude plan) or "free" otherwise. Someone implements it in a sandbox copy and it reaches the app only when the quality gate passes. In your text say which implementer the button will use. Never claim you changed the app.
+4c. The user may talk to you in follow-ups: "make the button green instead", "that broke the export", "try again". Each such follow-up is a new "change" ticket that continues from the current app, so restate the delta precisely and mention the earlier ticket id in the request when the facts list one.
 5. Commands: only the TERMINAL COMMANDS above (propose by id; in your text call them by their button label, e.g. **Links for other devices**) or commands written in DOCUMENTS, copied exactly. Never describe screens or dialogs that FACTS and DOCUMENTS do not describe.
 6. Be concrete: numbered steps, exact button names and commands.
 
@@ -420,7 +422,7 @@ Actions:
 - {"type":"create","question":"","expected":""}  (proposal: new research)
 - {"type":"improve","projectId":"","hours":2}  (proposal: start the improve loop)
 - {"type":"delete","projectId":""}  (proposal: delete a research)
-- {"type":"change","title":"","request":"","desired":"","tests":[""],"area":""}  (proposal: a change to the app itself, implemented by the free-model coder and decided by the quality gate)
+- {"type":"change","title":"","request":"","desired":"","tests":[""],"area":"","engine":"claude"}  (proposal: a change to the app itself, implemented by Claude Code or the free-model coder in a sandbox copy, decided by the quality gate)
 JSON shape: {"reply":"answer to the user","actions":[]}${feedback ? `\n\n${feedback}` : ''}`,
     },
   ];

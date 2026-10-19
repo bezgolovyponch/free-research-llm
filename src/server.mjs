@@ -174,6 +174,11 @@ export function createServer(app, gate = new AccessGate()) {
       return app.appChat.decide(String(body.at ?? ''), String(body.pid ?? ''), { accept: body.accept !== false });
     }],
     ['GET', /^\/api\/changes$/, async () => app.changes.all()],
+    ['GET', /^\/api\/changes\/(C\d{1,5})\/?$/, async (req, [id]) => {
+      const ticket = await app.changes.get(id);
+      if (!ticket) throw new HttpError(404, `change ${id} not found`);
+      return { ticket, attempts: await app.changes.attempts(id) };
+    }],
     ['POST', /^\/api\/changes\/(C\d{1,5})\/report$/, async (req, [id]) => {
       const ticket = await app.changes.report(id, await readJson(req));
       if (ticket.state === 'running') app.noteApp(`Change ${id} started in the Terminal: ${ticket.title}`);
@@ -184,8 +189,13 @@ export function createServer(app, gate = new AccessGate()) {
       const ticket = await app.changes.get(id);
       if (!ticket) throw new HttpError(404, `change ${id} not found`);
       if (ticket.state === 'done') throw new HttpError(409, `${id} is already applied; undo it first`);
-      const { started, message } = app.coder.start(id);
-      return { started, message };
+      const body = await readJson(req);
+      try {
+        const { started, message } = app.coder.start(id, body.engine ?? ticket.engine ?? 'free');
+        return { started, message, engine: body.engine ?? ticket.engine ?? 'free' };
+      } catch (error) {
+        throw new HttpError(409, error.message);
+      }
     }],
     ['POST', /^\/api\/changes\/(C\d{1,5})\/undo$/, async (req, [id]) => {
       try {

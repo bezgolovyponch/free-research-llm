@@ -27,6 +27,22 @@ test('app assistant: research requests become a proposal that only the Confirm b
   expect((await (await page.request.get('/api/projects')).json()).length).toBe(before + 1);
 });
 
+test('app assistant turns a change request into a ticket with two implementers, and creates nothing before the button', async ({ page }) => {
+  await page.goto('/#page=assistant');
+  const before = (await (await page.request.get('/api/changes')).json()).length;
+  await page.locator('#apIn').fill('make the Run button green');
+  await page.locator('#apSend').click();
+  const reply = page.locator('#apMsgs .msg.assistant').last();
+  await expect(reply.locator('.proposal')).toContainText('Green Run button', { timeout: 20000 });
+  await expect(reply.getByRole('button', { name: 'Implement with Claude Code' })).toBeVisible();
+  await expect(reply.getByRole('button', { name: 'with free models' })).toBeVisible();
+  await expect(reply.locator('.proposal')).toContainText('the quality gate decides');
+  expect((await (await page.request.get('/api/changes')).json()).length).toBe(before);
+  const status = await (await page.request.get('/api/status')).json();
+  expect(status.coders.map((c: { id: string }) => c.id)).toEqual(['free', 'claude']);
+  await noSideScroll(page);
+});
+
 test('results tab shows what was delivered and has its own chat', async ({ page }) => {
   await page.goto('/');
   await page.locator('#inQuestion').fill('Which used vans bought in Germany resell in Czechia with a 10% margin?');

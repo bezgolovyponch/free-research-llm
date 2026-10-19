@@ -3,6 +3,23 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-19 · session 10 — change the app by talking to it (Claude Code or free models), and repository standards
+
+**Asked:** (1) revise how the AI chats work so a change can be made from the App assistant the way one works with a coding agent — describe it in the chat and have UI and features changed, with follow-ups. (2) Review ready-made open-source solutions, then optimise and bring the project up to standards.
+
+**Built:**
+- **Two implementers for one app change.** A change proposal now offers **Implement with Claude Code** (primary when the CLI is installed; uses the Claude plan) and **with free models**. Both are selected per task; the ticket remembers which one ran (`engine`).
+- `src/coder/claude-code.mjs`: Claude Code runs inside the same sandbox copy (`data/work/C<id>`) with `--permission-mode acceptEdits`, a tool allowlist, a hard 45-minute limit and a kill, no skip-permissions flag, and no network writes into the app. The gate failure goes back for a second run; if no file changed and Claude failed (for example the plan's session limit), the ticket fails with that exact reason instead of pretending a change happened. Cost from Claude's JSON output (`total_cost_usd`) is reported in the chat and on the ticket.
+- `src/coder/runner.mjs` dispatches by engine, reports which implementers are available, refuses a missing one, and undoes with the engine that applied the change. `/api/status` exposes the list; `POST /api/changes/:id/run` accepts `{engine}`; `GET /api/changes/:id` returns the ticket and its attempts.
+- `promote` now sees files an agent edited directly in the sandbox (walks the copy, ignores `test-results/`, `playwright-report/`, `data/`), not only files the free coder marked as touched.
+- Chat and UI: proposal buttons per implementer; App changes shows the engine, state, gate summary, **Undo** and **Try again** (with either implementer); the prompt knows which implementers are installed and that a follow-up becomes the next ticket.
+- Docs: CONCEPT (how the two implementers work, the gate stays the only write path), GUIDE (a "Change the app by talking to it" section), README layout, and [OSS-REVIEW.md](OSS-REVIEW.md).
+- **Repository standards:** `.github/workflows/ci.yml` (job `test`, Node 22 and 24, `npm ci`, Playwright browsers, the full gate, failure artifacts), fail-closed e2e when `CI` is set, Dependabot (npm + actions), `SECURITY.md`, `CONTRIBUTING.md`, `.editorconfig`, `.gitattributes`, bug-report and PR templates.
+
+**Verified:** `npm run quality` PASSED (248 unit tests, 18 e2e). Live on a temporary second instance (temp data dir, real Claude CLI): asking for a change produced the ticket, the Claude run started in the sandbox, and when Claude's plan answered "You've hit your session limit · resets 9:40pm" the ticket failed with exactly that text, the chat said "stopped before any edit … the app is unchanged", and no file in the repo changed.
+
+**Open:** a *successful* Claude edit was not observed in this session because the Claude plan hit its session limit; the path is covered by unit tests with a fake CLI and by the full error path above. The new CI workflow has not run on GitHub yet (no push before this session's commit). `engines` still says Node >=20 while Node 20 is end-of-life; CI tests 22 and 24. A linter (Biome, lint only) and a diff-before-apply step are analysed in [OSS-REVIEW.md](OSS-REVIEW.md) but not added.
+
 ## 2026-10-19 · session 9 — how to get each key, in the app and the terminal; one SearXNG command
 
 **Asked:** the router cards said "Get a free key" but not how to get one, and the exact clicks lived only in KEYS.md. Put the steps where the key is pasted (router cards, the Setup key box, the terminal), for every model provider and search engine, with what a key starts with, which ones need a card, and when the steps were checked. SearXNG setup was a macOS-only `.command`; make it one command that also works on Windows and from the app Terminal.

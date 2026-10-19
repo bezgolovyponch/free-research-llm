@@ -4,7 +4,7 @@ import { appChatPrompt } from './research/prompts.mjs';
 import { MAX_THREAD } from './research/notify.mjs';
 import { ReplyAudit, auditFeedback } from './chat/reply-audit.mjs';
 import { CONSOLE_COMMANDS, commandById } from './terminal/catalog.mjs';
-import { normalizeTicket } from './changes.mjs';
+import { ENGINES, engineOf, normalizeTicket } from './changes.mjs';
 
 const DIRECT = new Set(['open', 'stop', 'links']);
 const PROPOSALS = new Set(['create', 'delete', 'improve', 'command', 'change']);
@@ -28,7 +28,7 @@ export function validAppActions(raw, projectIds) {
     if (a.type === 'create' && String(a.question ?? '').trim().length >= 8) proposals.push({ type: 'create', question: String(a.question).trim().slice(0, 600), expected: String(a.expected ?? '').trim().slice(0, 400) });
     if ((a.type === 'delete' || a.type === 'improve') && ids.has(String(a.projectId))) proposals.push({ type: a.type, projectId: String(a.projectId), ...(a.type === 'improve' ? { hours: Math.min(MAX_LOOP_HOURS, Math.max(0.25, Number(a.hours) || 2)) } : {}) });
     if (a.type === 'command' && commandById(String(a.id))) proposals.push({ type: 'command', id: String(a.id), run: commandById(String(a.id)).run });
-    if (a.type === 'change' && normalizeTicket(a)) proposals.push({ type: 'change', ...normalizeTicket(a) });
+    if (a.type === 'change' && normalizeTicket(a)) proposals.push({ type: 'change', ...normalizeTicket(a), engine: ENGINES.includes(a.engine) ? a.engine : null });
   }
   return { direct: direct.slice(0, MAX_ACTIONS), proposals: proposals.slice(0, MAX_ACTIONS).map((p, i) => ({ pid: `p${i + 1}`, state: 'proposed', ...p })) };
 }
@@ -38,7 +38,7 @@ export function proposalLabel(p, projects = []) {
   if (p.type === 'create') return `Start research: ${p.question.slice(0, 90)}`;
   if (p.type === 'delete') return `Delete research: ${name(p.projectId)}`;
   if (p.type === 'improve') return `Run the improve loop ${p.hours} h on: ${name(p.projectId)}`;
-  if (p.type === 'change') return `App change: ${p.title} — create the ticket; free models implement it and the quality gate decides`;
+  if (p.type === 'change') return `App change: ${p.title} — create the ticket; the quality gate decides whether it reaches the app`;
   return `Run in Terminal: ${p.run}`;
 }
 
@@ -183,15 +183,18 @@ export class AppChat {
     }
     if (p.type === 'change') {
       if (!this.changes) throw new ProposalError('app changes are not available here');
-      const ticket = await this.changes.create(p);
+      const engine = engineOf(p.engine);
+      if (this.coder?.available && !this.coder.available(engine)) throw new ProposalError(engine === 'claude' ? 'Claude Code is not installed on this computer: install it from https://docs.claude.com/en/docs/claude-code, or ask for the change with the free-model coder' : `the ${engine} coder is not available here`);
+      const ticket = await this.changes.create({ ...p, engine });
       if (!this.coder) return { ticketId: ticket.id, run: `node src/frl.mjs change ${ticket.id} --claude`, message: `Change ${ticket.id} created (data/changes/${ticket.id}.md) and sent to the Terminal for Claude Code.` };
-      this.coder.start(ticket.id);
-      return { ticketId: ticket.id, message: `Change ${ticket.id} created (data/changes/${ticket.id}.md). Free models implement it in a sandbox copy; it reaches the app only if the quality gate passes. Progress is posted here.` };
+      const started = this.coder.start(ticket.id, engine);
+      if (started && started.started === false) throw new ProposalError(started.message || `change ${ticket.id} could not start`);
+      return { ticketId: ticket.id, engine, message: `Change ${ticket.id} created (data/changes/${ticket.id}.md). ${engine === 'claude' ? 'Claude Code implements it in a sandbox copy, on your Claude plan' : 'Free models implement it in a sandbox copy'}; it reaches the app only if the quality gate passes. Progress is posted here.` };
     }
     return { message: `Sent to the Terminal: ${p.run}` };
   }
 
-  async decide(at, pid, { accept = true } = {}) {
+  async decide(at, pid, { accept = true, engine = null } = {}) {
     const { thread, result } = await this.update(async (t) => {
       const message = t.find((m) => m.role === 'assistant' && m.at === at && (m.proposals ?? []).some((p) => p.pid === pid));
       if (!message) throw new ProposalError('that proposal no longer exists');
@@ -201,6 +204,10 @@ export class AppChat {
         proposal.state = 'dismissed';
         return { proposal };
       }
+      if (engine != null) {
+        if (!ENGINES.includes(engine)) throw new ProposalError(`engine must be one of ${ENGINES.join(', ')}`);
+        proposal.engine = engine;
+      }
       try {
         const outcome = await this.runProposal(proposal);
         proposal.state = 'done';
@@ -208,6 +215,10 @@ export class AppChat {
         t.push({ role: 'app', content: outcome.message, at: new Date().toISOString(), ...(outcome.projectId && proposal.type !== 'delete' ? { projectId: outcome.projectId } : {}) });
         return { proposal };
       } catch (error) {
+        if (proposal.type === 'change' && /not installed|not available/.test(error.message)) {
+          proposal.error = error.message;
+          return { proposal, error: error.message };
+        }
         proposal.state = 'failed';
         proposal.result = { message: error.message };
         return { proposal, error: error.message };

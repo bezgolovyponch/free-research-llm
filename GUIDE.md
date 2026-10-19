@@ -101,3 +101,14 @@ npm install       # once: installs vitest and activates the pre-commit gate
 npm run quality   # syntax, secrets, no comments, a test per module, unit tests, mobile e2e (iPhone + Pixel)
 ```
 A commit is refused while the gate fails. Rules: [PROTOCOLS.md](PROTOCOLS.md). Build history: [SESSION-LOG.md](SESSION-LOG.md).
+
+### Change the app by talking to it
+
+Open **App assistant** and describe the change in plain words ("make the Run button green", "add a CSV export to Results, with a test"). The assistant answers with a **ticket**: the request, the desired output you can check in the running app, and the tests to add. Nothing is created before you press a button. Then choose the implementer:
+
+| Button | What runs | Cost |
+|---|---|---|
+| **Implement with Claude Code** | Claude Code edits a sandbox copy of the app (`data/work/C<id>`); the quality gate decides | your Claude plan |
+| **with free models** | the free-model coder does the same with the free keys | none |
+
+Progress, the files it touched and what Claude Code cost appear in the same chat. **Undo** and **Try again** (with either implementer) are next to the ticket in **App changes**. A follow-up message — "make it smaller instead", "that broke the export", "try again" — becomes the next ticket and starts from the app as it is now. Nothing reaches the live app without `quality gate: PASSED`; see [CONCEPT.md](CONCEPT.md#changing-the-app-from-the-app-chat).

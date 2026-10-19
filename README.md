@@ -80,11 +80,12 @@ Model IDs are not hard-coded. Each provider's `/models` list is read at start an
 | `src/cli.mjs` | one-shot terminal runner |
 | `src/app.mjs` | composition root: providers, search, store, engine |
 | `src/llm/` | provider presets, OpenAI-compatible client, failover router, scripted demo provider |
+| `src/coder/` | app change implementers: sandbox copy, Claude Code runner, free-model coder, quality gate before anything reaches the app |
 | `src/research/` | engine, prompts, issue tree, mechanical verifier, safe calculator, domain templates, JSON extraction |
 | `src/search/` | search backends, per-query rotation, quota benching, page text fetch |
 | `src/secrets.mjs` | reads and writes keys in the system key store: macOS Keychain, Windows user environment, Linux secret-tool or systemd encrypted credentials |
 | `src/frl.mjs` | the `frl` command: start, always-on service (macOS, Windows, Linux), links, keys, update, restart |
-| `src/appchat.mjs` | the App chat: grounded in app facts and guides, direct actions open/stop/links, everything else a proposal you confirm |
+| `src/appchat.mjs` | the App chat: grounded in app facts and guides, direct actions open/stop/links, everything else a proposal you confirm; app changes run with Claude Code or the free models |
 | `src/chat/` | reply audit (links, secrets, commands, claims), guide search, file reading (photos, PDFs, audio via a free vision model) |
 | `src/terminal/` | shared shell sessions (node-pty, or a basic piped shell), the WebSocket bridge with origin check, the command buttons |
 | `src/data/csv.mjs` | CSV parsing + column profiling (your data becomes source D1) |

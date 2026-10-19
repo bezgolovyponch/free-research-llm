@@ -2,7 +2,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export const TICKET_ID = /^C\d{1,5}$/;
+export const ENGINES = ['free', 'claude'];
+export const ENGINE_LABELS = { free: 'free models', claude: 'Claude Code (uses your Claude plan)' };
 const STATES = new Set(['queued', 'running', 'done', 'failed', 'reverted']);
+
+export function engineOf(value) {
+  return ENGINES.includes(value) ? value : 'free';
+}
 
 function text(value, max) {
   return String(value ?? '').replace(/\r/g, '').trim().slice(0, max);
@@ -20,9 +26,10 @@ export function normalizeTicket(raw) {
 }
 
 export function ticketMarkdown(t) {
+  const who = engineOf(t.engine) === 'claude' ? 'Claude Code implements it in a sandbox copy of the app and applies it only when the quality gate passes; it uses your Claude plan.' : 'The free-model coder implements it in a sandbox copy and applies it only when the quality gate passes; `node src/frl.mjs change ' + t.id + ' --claude` hands it to Claude Code instead.';
   return `# ${t.id} · ${t.title}
 
-Requested in the App chat on ${t.createdAt.slice(0, 16).replace('T', ' ')}. The free-model coder implements it in a sandbox copy and applies it only when the quality gate passes; \`node src/frl.mjs change ${t.id} --claude\` hands it to Claude Code instead.
+Requested in the App chat on ${t.createdAt.slice(0, 16).replace('T', ' ')}. ${who}
 
 ## Request (what the user wants)
 
@@ -38,7 +45,7 @@ ${t.tests.length ? t.tests.map((x) => `- ${x}`).join('\n') : '- Derive them from
 ${t.area ? `\n## Area\n\n${t.area}\n` : ''}
 ## How to work
 
-1. Run AUDIT-PROTOCOL.md Part 1 before planning. Ask the user in this terminal when a decision is theirs.
+1. Run AUDIT-PROTOCOL.md Part 1 before planning. Ask in the App chat or the Terminal when a decision is theirs.
 2. Keep CONCEPT.md: a model proposes, code decides; chats stay in their scope; nothing runs without a gate or a button.
 3. Done means: the desired output exists in the running app, \`npm run quality\` prints \`quality gate: PASSED\`, SESSION-LOG.md has the entry, and AUDIT-PROTOCOL.md Part 2 is answered.
 4. Do not commit or push unless the request says so.
@@ -80,10 +87,11 @@ export class ChangeBook {
   async create(raw) {
     const fields = normalizeTicket(raw);
     if (!fields) throw new Error('a change needs a request (8+ characters) and a desired output');
+    const engine = engineOf(raw?.engine);
     return this.update(async (tickets) => {
       let n = tickets.length + 1;
       while (tickets.some((t) => t.id === `C${n}`)) n++;
-      const ticket = { id: `C${n}`, ...fields, state: 'queued', createdAt: new Date().toISOString(), result: null };
+      const ticket = { id: `C${n}`, ...fields, engine, state: 'queued', createdAt: new Date().toISOString(), result: null };
       await fs.mkdir(this.dir, { recursive: true });
       await fs.writeFile(path.join(this.dir, `${ticket.id}.md`), ticketMarkdown(ticket));
       tickets.push(ticket);
@@ -95,7 +103,23 @@ export class ChangeBook {
     return (await this.all()).find((t) => t.id === id) ?? null;
   }
 
-  async report(id, { state, passed = null, summary = '', files = null } = {}) {
+  async attempts(id) {
+    if (!TICKET_ID.test(String(id))) throw new Error('unknown change id');
+    try {
+      const text = await fs.readFile(path.join(this.dir, `${id}.attempts.jsonl`), 'utf8');
+      return text.split('\n').filter(Boolean).slice(-40).map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  async report(id, { state, passed = null, summary = '', files = null, engine = null } = {}) {
     if (!TICKET_ID.test(String(id))) throw new Error('unknown change id');
     if (!STATES.has(state)) throw new Error(`state must be one of ${[...STATES].join(', ')}`);
     return this.update((tickets) => {
@@ -103,6 +127,7 @@ export class ChangeBook {
       if (!ticket) throw new Error(`change ${id} not found`);
       ticket.state = state;
       ticket.updatedAt = new Date().toISOString();
+      if (engine) ticket.engine = engineOf(engine);
       if (state === 'done' || state === 'failed' || state === 'reverted') ticket.result = { passed: Boolean(passed), summary: text(summary, 1500), at: ticket.updatedAt };
       if (files) ticket.files = list(files, 60);
       return ticket;

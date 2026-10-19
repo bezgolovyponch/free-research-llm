@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in the app does not work as described
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you paste anything: remove API keys, tokens and personal data.
+        For a security problem use SECURITY.md, not this form.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Press ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git log -1 --oneline`, or the release tag.
+  - type: input
+    id: system
+    attributes:
+      label: Operating system and Node version
+      placeholder: macOS 15.3, Node 22.14
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: Terminal output, `node src/frl.mjs logs`, or the quality gate lines. Remove keys and tokens first.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed keys, tokens and personal data from this report
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md)
+          required: true

@@ -105,11 +105,32 @@ describe('AppChat', () => {
     const started: string[] = [];
     Object.assign(chat as unknown as Record<string, unknown>, { changes: new ChangeBook({ dir: path.join(dir, 'changes') }), coder: { start: (id: string) => { started.push(id); return { started: true }; } } });
     const r = await chat.send('chart the loop score');
-    expect(r.proposals[0].label).toContain('free models implement it and the quality gate decides');
+    expect(r.proposals[0].label).toContain('the quality gate decides');
     const decided = await chat.decide(r.thread.at(-1).at, 'p1');
     expect(started).toEqual(['C1']);
     expect(decided.proposal.result.run).toBeUndefined();
     expect(decided.proposal.result.message).toContain('only if the quality gate passes');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('starts the implementer the user picked and refuses Claude Code when it is not installed', async () => {
+    const change = { type: 'change', title: 'Green Run button', request: 'Make the Run button green in the header', desired: 'The Run button is green', tests: ['e2e/features.spec.ts'], engine: 'claude' };
+    const { dir, chat } = await setup([{ reply: 'A ticket.', actions: [change] }]);
+    const { ChangeBook } = await import('../src/changes.mjs');
+    const started: string[] = [];
+    Object.assign(chat as unknown as Record<string, unknown>, {
+      changes: new ChangeBook({ dir: path.join(dir, 'changes') }),
+      coder: { available: (engine: string) => engine === 'free', start: (id: string, engine: string) => (started.push(`${engine}:${id}`), { started: true }) },
+    });
+    const r = await chat.send('make the run button green');
+    expect(r.proposals[0]).toMatchObject({ type: 'change', engine: 'claude' });
+    const refused = await chat.decide(r.thread.at(-1).at, 'p1', { engine: 'claude' });
+    expect(refused.proposal.state).toBe('proposed');
+    expect(refused.error).toContain('not installed');
+    const free = await chat.decide(r.thread.at(-1).at, 'p1', { engine: 'free' });
+    expect(free.proposal.state).toBe('done');
+    expect(started).toEqual(['free:C1']);
+    expect((await (chat as unknown as { changes: InstanceType<typeof ChangeBook> }).changes.all())[0]).toMatchObject({ engine: 'free' });
     await fs.rm(dir, { recursive: true, force: true });
   });
 

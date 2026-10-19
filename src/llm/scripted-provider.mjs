@@ -81,6 +81,8 @@ const RESPONDERS = {
     ] };
   },
   [TASK_MARKERS.appChat]: (prompt) => {
+    const wantsChange = /USER: .*(run button|change the|add a button|make the)/i.test(prompt);
+    if (wantsChange) return { reply: 'DEMO app assistant: here is the change ticket; choose Claude Code or the free models below.', actions: [{ type: 'change', title: 'Green Run button', request: 'Make the Run button green in the header', desired: 'The Run button is green in the running app', tests: ['e2e/features.spec.ts'], area: 'UI', engine: 'claude' }] };
     const wantsNew = /USER: .*(start|new research)/i.test(prompt);
     return { reply: `DEMO app assistant: ${wantsNew ? 'press the button below to start this research.' : 'here is what I see.'}`, actions: wantsNew ? [{ type: 'create', question: 'Which e-bike rental size breaks even in Prague?', expected: 'break-even fleet size' }] : [] };
   },

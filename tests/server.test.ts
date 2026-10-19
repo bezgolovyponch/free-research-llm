@@ -110,14 +110,20 @@ describe('HTTP server', () => {
     expect((await app.appChat.thread()).at(-1).content).toContain(`Change ${ticket.id} finished — quality gate PASSED`);
   });
 
-  it('starts the free-model coder on a ticket and undoes only an applied change', async () => {
+  it('starts the coder the user picked on a ticket and undoes only an applied change', async () => {
     expect((await call('POST', '/api/changes/C999/run')).status).toBe(404);
     const ticket = await app.changes.create({ request: 'Show the loop score as a chart', desired: 'A chart in Gates & logs' });
-    const started: string[] = [];
-    app.coder.start = ((id: string) => { started.push(id); return { started: true, message: `${id} queued for the free-model coder` }; }) as typeof app.coder.start;
-    expect((await call('POST', `/api/changes/${ticket.id}/run`)).body).toEqual({ started: true, message: `${ticket.id} queued for the free-model coder` });
-    expect(started).toEqual([ticket.id]);
+    const started: Array<[string, string]> = [];
+    app.coder.start = ((id: string, engine: string) => { started.push([id, engine]); return { started: true, message: `${id} queued for the ${engine} coder` }; }) as typeof app.coder.start;
+    expect((await call('POST', `/api/changes/${ticket.id}/run`)).body).toMatchObject({ started: true, engine: 'free' });
+    expect((await call('POST', `/api/changes/${ticket.id}/run`, { engine: 'claude' })).body).toMatchObject({ started: true, engine: 'claude', message: `${ticket.id} queued for the claude coder` });
+    expect(started).toEqual([[ticket.id, 'free'], [ticket.id, 'claude']]);
     expect((await call('POST', `/api/changes/${ticket.id}/undo`)).status).toBe(409);
+    await fs.writeFile(path.join(dir, 'changes', `${ticket.id}.attempts.jsonl`), `${JSON.stringify({ step: 'claude', gate: 'FAIL  tests' })}\n`);
+    const detail = await call('GET', `/api/changes/${ticket.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.body).toMatchObject({ ticket: { id: ticket.id }, attempts: [{ step: 'claude', gate: 'FAIL  tests' }] });
+    expect((await call('GET', '/api/changes/C999')).status).toBe(404);
   });
 
   it('serves the results exports and the current action plan with every project', async () => {

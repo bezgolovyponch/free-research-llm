@@ -47,7 +47,7 @@ The memo never stops at "insufficient data". The model must give a decision and 
 | **Piece** | Side panel, a piece selected | That one sub-question | Edit, split, add or remove pieces, re-research, suggest sub-issues; attached files become sources of that piece |
 | **Research** | Side panel, **Research** | The whole tree of one research | The same actions, on any piece of that research |
 | **Results** | **Results** tab, or the **Results** chat button | What was delivered and how sure it is | Re-research, split or get suggestions for a weak piece |
-| **App** | **App assistant** in the sidebar, or the **App** chat button | The app itself: how it works, keys, other devices, Windows, cloud, terminal, updates, all researches together, and **every change to the app** | Open or stop a research and show device links directly. It only **proposes** a new research, a deletion, a loop, a terminal command or an **app change ticket**: nothing happens until you press the button |
+| **App** | **App assistant** in the sidebar, or the **App** chat button | The app itself: how it works, keys, other devices, Windows, cloud, terminal, updates, all researches together, and **every change to the app** | Open or stop a research and show device links directly. It only **proposes** a new research, a deletion, a loop, a terminal command or an **app change ticket**: nothing happens until you press the button, and for a change you then choose **Claude Code** or the **free models** |
 
 - A question about the app typed into a research chat is moved to the App chat, answered there, and never stored in the research.
 - App reports (app started, keys reloaded, research created, finished, deleted, loop started or ended, resumed after a restart) are written into the App chat. Reports about one research are written into that research's chat.
@@ -55,14 +55,21 @@ The memo never stops at "insufficient data". The model must give a decision and 
 
 ## Changing the app from the App chat
 
-Describe what to add, change or improve (features, tests, checks) in the App chat. It answers with an **app change ticket**: the request, a desired output you can check in the running app, and the tests to add. **Create ticket & implement** writes `data/changes/C1.md` and hands it to the app's **free-model coder** (`src/coder/`), which uses the same free keys as research:
+Describe what to add, change or improve (features, UI, tests, checks) in the App chat. It answers with an **app change ticket**: the request, a desired output you can check in the running app, and the tests to add. Then you pick the **implementer** with one click:
 
-1. It copies the app into a sandbox (`data/work/C1`). Code searches the files for the ticket's words, so the model starts from the right file; large files are shown as excerpts around those words. A free deep model then returns exact search/replace edits.
-2. Code applies the edits in the sandbox only. Edits may touch `src/`, `tests/`, `e2e/`, `public/` and top-level docs, never the quality gate, the coder, auth, secrets, the terminal or `package.json`. A change may add tests, never remove them.
-3. `npm run quality` runs in the sandbox. On FAIL, the failing tests and their assertions go back to the model: up to 6 model turns and 4 gate runs. If none passes, the app is unchanged. Every attempt is logged in `data/changes/C1.attempts.jsonl`.
+- **Claude Code** (the primary button, when it is installed on this computer). It uses your Claude plan and is the one that handles real UI and feature work.
+- **Free models** (`src/coder/free-coder.mjs`). No Claude credits; weaker, and it needs more attempts for larger changes.
+
+Both work the same way, and neither writes to the live app directly:
+
+1. Code copies the app into a sandbox (`data/work/C1`), so the ticket can only change that copy. Claude Code runs there with its own tools; the free coder has code search the files for the ticket's words, shows it excerpts and takes exact search/replace edits.
+2. The sandbox may change `src/`, `tests/`, `e2e/`, `public/` and top-level docs, never the quality gate, the coder, auth, secrets, the terminal or `package.json`. A change may add tests, never remove them; the gate checks the test count before it runs.
+3. `npm run quality` runs in the sandbox. On FAIL, the failing tests and assertions go back to the implementer: up to 2 Claude Code runs or 6 free-model turns, and 4 gate runs. If none passes, the app is unchanged and the chat says exactly which gate failed. Every attempt is logged in `data/changes/C1.attempts.jsonl`.
 4. On PASS, code backs up the original files (`data/work/C1.backup`), copies the changed files into the app, and restarts it when it runs as the always-on service. **Undo** next to the ticket restores the backup.
 
-Every step is posted in the App chat. The model proposes the code; the gate decides whether it reaches the app. `node src/frl.mjs change C1` runs the same coder from the Terminal; `node src/frl.mjs change C1 --claude` hands the ticket to Claude Code instead (that uses your Claude plan).
+Every step is posted in the App chat, including the files changed and what Claude Code cost. **Undo** and **Try again** (with either implementer) are next to every ticket in App changes. A follow-up message — "make the button green instead", "that broke the export", "try again" — becomes the next ticket and starts from the app as it is now.
+
+The model proposes the code; the gate decides whether it reaches the app. `node src/frl.mjs change C1` runs the free coder from the Terminal; `node src/frl.mjs change C1 --claude` hands the ticket to Claude Code there.
 
 ## The reply audit (every chat, every reply)
 

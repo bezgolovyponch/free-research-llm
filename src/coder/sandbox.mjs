@@ -133,8 +133,31 @@ export class CodeSandbox {
     return out.sort();
   }
 
+  async walk(base = this.dir, prefix = '') {
+    const out = [];
+    let entries = [];
+    try {
+      entries = await fs.readdir(base, { withFileTypes: true });
+    } catch {
+      return out;
+    }
+    for (const entry of entries) {
+      if (['node_modules', '.git', 'data', 'test-results', 'playwright-report', '.cache', 'coverage'].includes(entry.name)) continue;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) out.push(...(await this.walk(path.join(base, entry.name), rel)));
+      else if (entry.isFile()) out.push(rel);
+    }
+    return out;
+  }
+
+  async changedAll() {
+    const out = [];
+    for (const rel of await this.walk()) if ((await this.read(rel)) !== (await readOrNull(path.join(this.root, rel)))) out.push(rel);
+    return out.sort();
+  }
+
   async promote(backupDir) {
-    const files = await this.changed();
+    const files = await this.changedAll();
     const manifest = [];
     for (const rel of files) {
       const original = await readOrNull(path.join(this.root, rel));

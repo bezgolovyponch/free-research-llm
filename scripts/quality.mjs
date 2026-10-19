@@ -65,7 +65,10 @@ const gates = {
   },
 
   e2e() {
-    if (!fs.existsSync(path.join(ROOT, 'node_modules/@playwright/test'))) return { passed: true, detail: 'skipped: Playwright not installed (npm install, npx playwright install chromium webkit)' };
+    if (!fs.existsSync(path.join(ROOT, 'node_modules/@playwright/test'))) {
+      const ci = Boolean(process.env.CI);
+      return { passed: !ci, detail: ci ? 'Playwright is not installed and CI is set: the gate cannot run e2e, so it fails instead of skipping' : 'skipped: Playwright not installed (npm install, npx playwright install chromium webkit)' };
+    }
     const result = run('npx', ['playwright', 'test', '--reporter=line']);
     const summary = `${result.stdout}${result.stderr}`.match(/(\d+ passed[^\n]*|\d+ failed[^\n]*)/g);
     return { passed: result.status === 0, detail: summary ? summary.join(', ') : `${result.stdout}${result.stderr}`.slice(-300) };

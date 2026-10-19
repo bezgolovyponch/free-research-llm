@@ -23,6 +23,8 @@ import { MediaReader } from './chat/media.mjs';
 import { TerminalHub } from './terminal/hub.mjs';
 import { ChangeBook } from './changes.mjs';
 import { FreeCoder } from './coder/free-coder.mjs';
+import { ClaudeCodeCoder } from './coder/claude-code.mjs';
+import { ChangeRunner } from './coder/runner.mjs';
 import { KeyChecker } from './keycheck.mjs';
 import { LinkVerifier, RouterAdmin } from './llm/admin.mjs';
 import { KEY_GUIDES } from './llm/guides.mjs';
@@ -147,7 +149,11 @@ export class App {
       links: new LinkVerifier({ fetchImpl }),
     });
     this.changes = new ChangeBook({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'changes') });
-    this.coder = new FreeCoder({ router: this.router, root: ROOT_DIR, workDir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'work'), changes: this.changes, note: (m) => this.noteApp(m), restart: () => this.restartForCode(env) });
+    const workDir = path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'work');
+    const restart = () => this.restartForCode(env);
+    this.freeCoder = new FreeCoder({ router: this.router, root: ROOT_DIR, workDir, changes: this.changes, note: (m) => this.noteApp(m), restart });
+    this.claudeCoder = new ClaudeCodeCoder({ root: ROOT_DIR, workDir, changes: this.changes, note: (m) => this.noteApp(m), restart });
+    this.coder = new ChangeRunner({ coders: { free: this.freeCoder, claude: this.claudeCoder }, changes: this.changes });
     this.appChat = new AppChat({
       changes: this.changes,
       coder: this.coder,
@@ -207,12 +213,15 @@ export class App {
   }
 
   async facts() {
+    const claude = this.claudeCoder?.available?.() ?? { installed: false, version: '' };
     return {
       platform: PLATFORM_NAMES[process.platform] ?? process.platform,
       local: `http://127.0.0.1:${this.port}`,
       remote: this.remote,
       links: this.remote ? accessLinks({ port: this.port, lan: lanAddresses(os.networkInterfaces()) }).slice(1) : [],
       terminal: { full: 'on (real shell)', basic: 'on (basic shell: node-pty missing)', off: 'off (FRL_TERMINAL=0)' }[await this.terminal.mode()],
+      claude: claude.installed ? `installed (${claude.version})` : 'not installed',
+      coders: this.coder?.engines?.() ?? [],
     };
   }
 
@@ -313,6 +322,7 @@ export class App {
       calls: this.router.calls,
       improving: [...this.improver.active.keys()],
       improveAll: this.improver.allStatus(),
+      coders: this.coder?.engines?.() ?? [],
     };
   }
 }
