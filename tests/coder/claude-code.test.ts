@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ChangeBook } from '../../src/changes.mjs';
-import { ClaudeCodeCoder, claudePromptFor, detectClaude, parseClaudeOutput } from '../../src/coder/claude-code.mjs';
+import { ClaudeCodeCoder, ProgressLog, describeEvent, claudePromptFor, detectClaude, parseClaudeOutput } from '../../src/coder/claude-code.mjs';
 
 type FakeChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; kill: () => void };
 
@@ -133,5 +133,35 @@ describe('ClaudeCodeCoder', () => {
     expect(parseClaudeOutput(`${JSON.stringify({ result: 'ok', total_cost_usd: 0.5, is_error: false, num_turns: 4 })}`)).toEqual({ text: 'ok', costUsd: 0.5, turns: 4, isError: false });
     expect(parseClaudeOutput('plain text')).toEqual({ text: 'plain text', costUsd: 0, turns: 0, isError: false });
     expect(detectClaude((() => ({ status: 1, stdout: '' })) as never)).toEqual({ installed: false, version: '' });
+  });
+
+  it('streams what Claude Code is doing into the App chat, like a live session', async () => {
+    const events = [
+      { type: 'system', subtype: 'init' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/tmp/sandbox/C1/public/index.html' } }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/tmp/sandbox/C1/public/index.html' } }, { type: 'text', text: 'Making the Run button green.' }] } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'npm run quality' } }] } },
+      { type: 'result', subtype: 'success', result: 'done', total_cost_usd: 0.2, num_turns: 4, is_error: false },
+    ];
+    const t = await setup({ output: events.map((e) => JSON.stringify(e)).join('\n') });
+    await t.coder.start(t.ticket.id).job;
+    expect(t.runs[0].args).toEqual(expect.arrayContaining(['--output-format', 'stream-json', '--verbose']));
+    const live = t.notes.find((n: string) => n.startsWith('Claude Code ('));
+    expect(live).toContain('read 1 file');
+    expect(live).toContain('edited public/index.html');
+    expect(live).toContain('ran npm run quality');
+    expect(live).toContain('says: "Making the Run button green."');
+    expect(t.notes.at(-1)).toContain('$0.20');
+    expect(t.notes.at(-1)).toContain('What changed:');
+  });
+
+  it('turns stream events into short progress lines and ignores everything else', () => {
+    expect(describeEvent('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/s/C2/src/x.mjs"}}]}}', '/s/C2')).toEqual([{ verb: 'wrote', target: 'src/x.mjs' }]);
+    expect(describeEvent('not json')).toEqual([]);
+    expect(describeEvent('{"type":"user","message":{"content":[]}}')).toEqual([]);
+    const log = new ProgressLog({ dir: '/s' });
+    for (const f of ['a', 'b', 'c', 'd', 'e']) log.add(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: `/s/${f}.mjs` } }] } }));
+    expect(log.flush()).toBe('edited a.mjs, b.mjs, c.mjs, d.mjs +1 more');
+    expect(log.flush()).toBe('');
   });
 });

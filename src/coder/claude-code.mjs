@@ -1,14 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { CodeSandbox, restoreBackup } from './sandbox.mjs';
+import { CodeSandbox, diffStats, restoreBackup } from './sandbox.mjs';
 
 export const CLAUDE_TIMEOUT_MS = 45 * 60 * 1000;
 export const MAX_CLAUDE_RUNS = 2;
 export const CLAUDE_MAX_TURNS = 80;
 export const CLAUDE_ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash(npm run quality)', 'Bash(npx vitest *)', 'Bash(npx playwright test *)', 'Bash(node --check *)', 'Bash(ls *)'];
 export const CLAUDE_DENIED_TOOLS = ['Bash(git push *)', 'Bash(git commit *)', 'Bash(git reset *)', 'Bash(rm *)', 'Bash(curl *)', 'Bash(wget *)', 'WebFetch', 'WebSearch'];
-const MAX_OUTPUT = 6000;
+const MAX_OUTPUT = 20000;
+export const PROGRESS_EVERY_MS = 20000;
 const NOTE_EVERY_MS = 5 * 60 * 1000;
 
 const SEARCH_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'].join(path.delimiter);
@@ -57,7 +58,8 @@ HOW TO WORK
 }
 
 export class ClaudeCodeCoder {
-  constructor({ root, workDir, changes, note = () => {}, restart = null, sandboxFactory = null, spawnImpl = null, detect = detectClaude, env = process.env, timeoutMs = CLAUDE_TIMEOUT_MS }) {
+  constructor({ root, workDir, changes, note = () => {}, restart = null, sandboxFactory = null, spawnImpl = null, detect = detectClaude, env = process.env, timeoutMs = CLAUDE_TIMEOUT_MS, progressEveryMs = PROGRESS_EVERY_MS }) {
+    this.progressEveryMs = progressEveryMs;
     this.root = root;
     this.workDir = workDir;
     this.changes = changes;
@@ -97,7 +99,7 @@ export class ClaudeCodeCoder {
   }
 
   spawnClaude(prompt, cwd) {
-    const args = ['-p', prompt, '--output-format', 'json', '--permission-mode', 'acceptEdits', '--max-turns', String(CLAUDE_MAX_TURNS), '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(','), '--disallowedTools', CLAUDE_DENIED_TOOLS.join(',')];
+    const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits', '--max-turns', String(CLAUDE_MAX_TURNS), '--allowedTools', CLAUDE_ALLOWED_TOOLS.join(','), '--disallowedTools', CLAUDE_DENIED_TOOLS.join(',')];
     const child = (this.spawnImpl ?? spawn)('claude', args, { cwd, env: { ...this.env, PATH: claudePath(this.env) }, shell: process.platform === 'win32' });
     return new Promise((resolve) => {
       let output = '';
@@ -108,9 +110,26 @@ export class ClaudeCodeCoder {
         child.kill('SIGTERM');
         setTimeout(() => child.kill('SIGKILL'), 5000).unref();
       }, this.timeoutMs);
-      const beat = setInterval(() => this.note(`Claude Code is still working (${Math.round((Date.now() - started) / 60000)} min). The app is unchanged until the gate passes.`), NOTE_EVERY_MS);
+      const progress = new ProgressLog({ dir: cwd });
+      let quietSince = Date.now();
+      const flush = () => {
+        const line = progress.flush();
+        if (line) {
+          this.note(`Claude Code (${Math.max(1, Math.round((Date.now() - started) / 60000))} min): ${line}`);
+          quietSince = Date.now();
+        } else if (Date.now() - quietSince >= NOTE_EVERY_MS) {
+          this.note(`Claude Code is still working (${Math.round((Date.now() - started) / 60000)} min). The app is unchanged until the gate passes.`);
+          quietSince = Date.now();
+        }
+      };
+      const beat = setInterval(flush, this.progressEveryMs);
+      let pending = '';
       const eat = (d) => {
         output = `${output}${d}`.slice(-MAX_OUTPUT * 3);
+        pending += d;
+        const lines = pending.split('\n');
+        pending = lines.pop();
+        for (const l of lines) progress.add(l);
       };
       child.stdout?.on('data', eat);
       child.stderr?.on('data', eat);
@@ -122,6 +141,8 @@ export class ClaudeCodeCoder {
       child.on('close', (code) => {
         clearTimeout(timer);
         clearInterval(beat);
+        progress.add(pending);
+        flush();
         resolve({ code: timedOut ? 124 : code ?? 1, output, timedOut });
       });
     });
@@ -172,7 +193,8 @@ export class ClaudeCodeCoder {
           const cost = answer.costUsd ? ` Claude Code cost about $${answer.costUsd.toFixed(2)} on your Claude plan.` : '';
           const done = await this.changes.report(id, { state: 'done', passed: true, summary: `${last.summary}${cost}`, files: promoted, engine: 'claude' });
           const restarting = Boolean(this.restart?.());
-          this.note(`Change ${id} applied with Claude Code: quality gate PASSED. Files: ${promoted.join(', ')}.\n${last.summary}${cost}\nUndo: the Undo button next to ${id} in App changes.${restarting ? ' The app restarts to load it.' : ' Restart the app to load it: node src/frl.mjs restart'}`);
+          const stats = diffStats({ root: this.root, backupDir: backup, files: promoted });
+          this.note(`Change ${id} applied with Claude Code: quality gate PASSED.\nWhat changed:\n${stats.map((f) => `- ${f.file} +${f.added} −${f.removed}${f.created ? ' (new)' : ''}`).join('\n')}\n${last.summary}${cost}\nUndo: the Undo button next to ${id} in App changes.${restarting ? ' The app restarts to load it.' : ' Restart the app to load it: node src/frl.mjs restart'}`);
           return done;
         }
         feedback = failureText(last);
@@ -206,6 +228,52 @@ export class ClaudeCodeCoder {
     const restarting = Boolean(this.restart?.());
     this.note(`Change ${id} undone: ${files.join(', ')} restored.${restarting ? ' The app restarts.' : ' Restart the app to load it: node src/frl.mjs restart'}`);
     return reverted;
+  }
+}
+
+const VERB = { Read: 'read', Glob: 'searched', Grep: 'searched', Edit: 'edited', Write: 'wrote', Bash: 'ran' };
+
+export function describeEvent(line, dir = '') {
+  let event;
+  try {
+    event = JSON.parse(String(line).trim());
+  } catch {
+    return [];
+  }
+  if (event?.type !== 'assistant') return [];
+  const rel = (p) => String(p ?? '').replace(dir ? `${dir}/` : /^$/, '').replace(/^\.\//, '');
+  return (event.message?.content ?? []).flatMap((c) => {
+    if (c?.type === 'tool_use' && VERB[c.name]) {
+      const input = c.input ?? {};
+      const target = c.name === 'Bash' ? String(input.command ?? '').slice(0, 80) : rel(input.file_path ?? input.path ?? input.pattern ?? '');
+      return [{ verb: VERB[c.name], target }];
+    }
+    if (c?.type === 'text' && String(c.text ?? '').trim()) return [{ verb: 'says', target: String(c.text).trim().replace(/\s+/g, ' ').slice(0, 220) }];
+    return [];
+  });
+}
+
+export class ProgressLog {
+  constructor({ dir = '' } = {}) {
+    this.dir = dir;
+    this.items = [];
+  }
+
+  add(line) {
+    this.items.push(...describeEvent(line, this.dir));
+  }
+
+  flush() {
+    if (!this.items.length) return '';
+    const groups = new Map();
+    let said = '';
+    for (const { verb, target } of this.items) {
+      if (verb === 'says') said = target;
+      else groups.set(verb, [...new Set([...(groups.get(verb) ?? []), target])]);
+    }
+    this.items = [];
+    const parts = [...groups].map(([verb, targets]) => (verb === 'read' || verb === 'searched' ? `${verb} ${targets.length} file${targets.length === 1 ? '' : 's'}` : `${verb} ${targets.slice(0, 4).join(', ')}${targets.length > 4 ? ` +${targets.length - 4} more` : ''}`));
+    return [...parts, ...(said ? [`says: "${said}"`] : [])].join(' · ');
   }
 }
 

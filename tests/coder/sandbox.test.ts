@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CodeSandbox, failedGates, failureDetail, gateSummary, restoreBackup } from '../../src/coder/sandbox.mjs';
+import { CodeSandbox, diffStats, failedGates, failureDetail, gateSummary, restoreBackup } from '../../src/coder/sandbox.mjs';
 
 async function repo() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-sbx-root-'));
@@ -87,5 +87,20 @@ describe('CodeSandbox', () => {
 
   it('keeps only the PASS/FAIL lines of the gate output', () => {
     expect(gateSummary('noise\nPASS  syntax ok\nFAIL  tests 1 failed\nquality gate: FAILED')).toBe('PASS  syntax ok\nFAIL  tests 1 failed');
+  });
+
+  it('summarises what a promoted change did to each file: lines added and removed, and new files', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-diff-root-'));
+    const backup = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-diff-bak-'));
+    await fs.mkdir(path.join(root, 'src'), { recursive: true });
+    await fs.mkdir(path.join(backup, 'src'), { recursive: true });
+    await fs.writeFile(path.join(backup, 'src/a.mjs'), 'one\ntwo\nthree\n');
+    await fs.writeFile(path.join(root, 'src/a.mjs'), 'one\nTWO\nthree\nfour\n');
+    await fs.writeFile(path.join(root, 'src/b.mjs'), 'x\ny\n');
+    expect(diffStats({ root, backupDir: backup, files: ['src/a.mjs', 'src/b.mjs'] })).toEqual([
+      { file: 'src/a.mjs', added: 2, removed: 1, created: false },
+      { file: 'src/b.mjs', added: 2, removed: 0, created: true },
+    ]);
+    await Promise.all([root, backup].map((d) => fs.rm(d, { recursive: true, force: true })));
   });
 });

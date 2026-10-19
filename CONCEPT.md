@@ -71,6 +71,8 @@ Every step is posted in the App chat, including the files changed and what Claud
 
 The model proposes the code; the gate decides whether it reaches the app. `node src/frl.mjs change C1` runs the free coder from the Terminal; `node src/frl.mjs change C1 --claude` hands the ticket to Claude Code there.
 
+While a change runs, the App chat shows what the implementer is doing every 20 seconds (files read, files edited, commands run, what it says). When the change is applied, it lists every changed file with its added and removed lines.
+
 ## Every suggestion is ready to execute
 
 Wherever the app tells you to do something, it gives the exact steps: the exact page (URL), button or field name, and command. This covers getting a key, fixing a weak piece, or starting a local model. Key steps for every provider are taken from the provider's own docs and dated (`src/llm/guides.mjs`). They appear on **Models & router** ("How to get it"), on **Setup**, in `node src/frl.mjs keys setup` and `keys set`, and in the App chat. The App chat must copy them instead of saying "go to the website", and its reply audit accepts their links and commands.

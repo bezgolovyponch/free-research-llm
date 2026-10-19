@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { applyEdit, countTests } from './edits.mjs';
 
@@ -188,4 +189,15 @@ export async function restoreBackup(root, backupDir) {
     else await fs.rm(path.join(root, file), { force: true });
   }
   return manifest.map((m) => m.file);
+}
+
+export function diffStats({ root, backupDir, files, run = spawnSync }) {
+  return files.map((file) => {
+    const before = path.join(backupDir, file);
+    const after = path.join(root, file);
+    const created = !existsSync(before);
+    const r = run('git', ['diff', '--no-index', '--numstat', '--', created ? (process.platform === 'win32' ? 'NUL' : '/dev/null') : before, after], { encoding: 'utf8' });
+    const [added, removed] = String(r.stdout ?? '').trim().split(/\s+/);
+    return { file, added: Number(added) || 0, removed: Number(removed) || 0, created };
+  });
 }

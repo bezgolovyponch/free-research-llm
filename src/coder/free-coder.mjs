@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { CodeSandbox, restoreBackup } from './sandbox.mjs';
+import { CodeSandbox, diffStats, restoreBackup } from './sandbox.mjs';
 import { EditError, editablePath, normalizeEdits } from './edits.mjs';
 import { FULL_FILE_CHARS, REPO_MAP, fileView, rankFiles, ticketTerms } from './context.mjs';
 
@@ -148,7 +148,8 @@ export class FreeCoder {
           const promoted = await sandbox.promote(backup);
           const ticketDone = await this.changes.report(id, { state: 'done', passed: true, summary: last.summary, files: promoted });
           const restarting = Boolean(this.restart?.());
-          this.note(`Change ${id} applied after attempt ${attempt}: quality gate PASSED. Files: ${promoted.join(', ')}.\n${last.summary}\nUndo: the Undo button next to ${id} in App changes.${restarting ? ' The app restarts to load it.' : ' Restart the app to load it: node src/frl.mjs restart'}`);
+          const stats = diffStats({ root: this.root, backupDir: backup, files: promoted });
+          this.note(`Change ${id} applied after attempt ${attempt}: quality gate PASSED.\nWhat changed:\n${stats.map((f) => `- ${f.file} +${f.added} −${f.removed}${f.created ? ' (new)' : ''}`).join('\n')}\n${last.summary}\nUndo: the Undo button next to ${id} in App changes.${restarting ? ' The app restarts to load it.' : ' Restart the app to load it: node src/frl.mjs restart'}`);
           return ticketDone;
         }
         feedback = failureFeedback(last);
