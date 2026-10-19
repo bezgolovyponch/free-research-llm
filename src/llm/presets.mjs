@@ -132,6 +132,16 @@ export const PROVIDER_PRESETS = [
     fallbackModels: { fast: 'openai', deep: 'openai' },
   },
   {
+    id: 'llamacpp',
+    label: 'llama.cpp on this PC (your GPU, unlimited)',
+    baseURL: 'http://127.0.0.1:8090/v1',
+    baseEnv: 'LLAMACPP_BASE_URL',
+    keyEnv: null,
+    signup: 'https://github.com/ggml-org/llama.cpp/releases',
+    local: true,
+    prefer: { fast: [], deep: [] },
+  },
+  {
     id: 'ollama',
     label: 'Ollama (local, no key)',
     baseURL: 'http://localhost:11434/v1',
@@ -157,8 +167,8 @@ export const PROVIDER_PRESETS = [
 ];
 
 export const ROUTE_ORDER = {
-  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'pollinations', 'ollama'],
-  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'pollinations', 'ollama'],
+  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'llamacpp', 'pollinations', 'ollama'],
+  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'llamacpp', 'pollinations', 'ollama'],
 };
 
 export const SEARCH_KEYS = [

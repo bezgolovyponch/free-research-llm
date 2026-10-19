@@ -11,6 +11,7 @@ import { KeyChecker } from './keycheck.mjs';
 import { TICKET_ID, claudePrompt } from './changes.mjs';
 import { spawnSync } from 'node:child_process';
 import { PROVIDER_PRESETS, SEARCH_KEYS } from './llm/presets.mjs';
+import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helperArgs, parseHelpers, recommendModel, serverArgs, speedOf } from './local/llamacpp.mjs';
 import { CREDSTORE, KeychainSecrets, runCommand, secretNames } from './secrets.mjs';
 import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
 
@@ -24,8 +25,8 @@ const secrets = new KeychainSecrets();
 
 const KEY_LIST = [
   ...PROVIDER_PRESETS.filter((p) => p.keyEnv || p.baseEnv).flatMap((p) => [
-    ...(p.baseEnv ? [{ env: p.baseEnv, label: `${p.label}: base URL (FreeLLMAPI: http://localhost:3001/v1)`, signup: p.signup, plain: true }] : []),
-    ...(p.modelEnv ? [{ env: p.modelEnv, label: `${p.label}: model (FreeLLMAPI: auto)`, signup: p.signup, plain: true }] : []),
+    ...(p.baseEnv ? [{ env: p.baseEnv, label: `${p.label}: base URL${p.id === 'custom' ? ' (FreeLLMAPI: http://localhost:3001/v1)' : p.baseURL ? ` (default ${p.baseURL})` : ''}`, signup: p.signup, plain: true }] : []),
+    ...(p.modelEnv ? [{ env: p.modelEnv, label: `${p.label}: model${p.id === 'custom' ? ' (FreeLLMAPI: auto)' : ''}`, signup: p.signup, plain: true }] : []),
     ...(p.accountEnv ? [{ env: p.accountEnv, label: `${p.label}: account ID`, signup: p.signup }] : []),
     ...(p.keyEnv ? [{ env: p.keyEnv, label: p.label, signup: p.signup }] : []),
   ]),
@@ -361,6 +362,59 @@ const commands = {
     console.log(passed ? `\nChange ${id} done: the gate passed. The result is in the App chat.` : `\nChange ${id} is not done: the gate failed. Run "node src/frl.mjs change ${id}" again to continue.`);
   },
 
+  async local([action, ...rest]) {
+    const flag = (name, fallback = '') => {
+      const i = rest.indexOf(`--${name}`);
+      return i >= 0 && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[i + 1] : fallback;
+    };
+    const installer = new LlamaCppInstaller({ dir: path.join(ROOT, 'data', 'llama'), run: (c, a) => run(c, a, { shell: false }), log: (m) => console.log(m) });
+    const current = await installer.current();
+    const need = () => console.log('llama.cpp is not installed yet: node src/frl.mjs local install');
+    if (action === 'install') {
+      const done = await installer.install({ gpu: rest[0] && !rest[0].startsWith('--') ? rest[0] : undefined, tag: flag('tag', 'latest') });
+      return console.log(`\nllama.cpp ${done.tag} (${done.gpu}) installed.\n  server: ${done.server}\n  helper: ${done.helper}\nNext: node src/frl.mjs local models   then   node src/frl.mjs local start --model <one of them>`);
+    }
+    if (action === 'models') {
+      console.log('Pick by the free memory of your GPU (VRAM). The file downloads once on the first start.\n');
+      for (const m of MODELS) console.log(`  ${String(m.vram).padStart(2)} GB+  ${m.hf.padEnd(38)} ${String(m.size).padStart(5)} GB file · ${m.use}`);
+      const vram = flag('vram');
+      if (vram) console.log(`\nFor ${vram} GB: node src/frl.mjs local start --model ${recommendModel(vram).hf}`);
+      return;
+    }
+    if (action === 'helper') {
+      if (!current) return need();
+      const args = helperArgs({ host: flag('host'), port: Number(flag('port', HELPER_PORT)) });
+      console.log(`Helper device: lending this machine's GPU to the main PC at ${flag('host')}:${flag('port', HELPER_PORT)}.\nIt has no password: keep it on your home network or Tailscale only. Press Ctrl+C to stop.\n`);
+      return run(current.helper, args, { shell: false });
+    }
+    if (action === 'start') {
+      if (!current) return need();
+      const helpers = parseHelpers(flag('helpers'));
+      const port = Number(flag('port', SERVER_PORT));
+      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split') });
+      await secrets.write('LLAMACPP_BASE_URL', `http://127.0.0.1:${port}/v1`).catch(() => {});
+      console.log(`Local model on http://127.0.0.1:${port}/v1${helpers.length ? ` with helpers ${helpers.join(', ')}` : ''}. The research app uses it as the "llamacpp" provider (Models & router). Press Ctrl+C to stop.\n`);
+      void reloadApp();
+      return run(current.server, args, { shell: false });
+    }
+    if (action === 'status' || action === 'bench') {
+      const port = Number(flag('port', SERVER_PORT));
+      console.log(current ? `llama.cpp ${current.tag} (${current.gpu}) at ${path.dirname(current.server)}` : 'llama.cpp: not installed');
+      try {
+        const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
+        console.log(`server on port ${port}: ${health.status}`);
+      } catch {
+        return console.log(`server on port ${port}: not running (node src/frl.mjs local start --model ...)`);
+      }
+      if (action === 'status') return;
+      const prompt = 'Summarise in two sentences why used-car prices differ between Germany and Czechia. '.repeat(40);
+      const reply = await (await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'bench', messages: [{ role: 'user', content: prompt }], max_tokens: 64 }) })).json();
+      const speed = speedOf(reply);
+      return console.log(speed ? `prefill (reading): ${speed.prefillPerSecond} tokens/s over ${speed.promptTokens} tokens · decode (writing): ${speed.decodePerSecond} tokens/s` : 'no timings in the reply');
+    }
+    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N] [--split a,b] | helper --host LAN-IP [--port 50052] | status | bench');
+  },
+
   async logs() {
     const text = await fs.readFile(path.join(ROOT, 'data', 'logs', 'server.out'), 'utf8').catch(() => 'no log yet');
     console.log(text.split('\n').slice(-40).join('\n'));
@@ -386,6 +440,7 @@ if (!commands[command]) {
   node src/frl.mjs keys export        encrypted bundle of your keys for another computer
   node src/frl.mjs keys import        paste a bundle on the other computer
   node src/frl.mjs change C1 [--claude]  run an App chat change ticket with the free-model coder (or Claude Code), gated by quality
+  node src/frl.mjs local ...         run a model on this PC's GPU (llama.cpp), optionally with helper devices: install | models | start | helper | status | bench
   node src/frl.mjs logs               last lines of the app log`);
 } else {
   try {

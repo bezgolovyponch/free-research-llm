@@ -142,3 +142,7 @@ node src/frl.mjs restart
 | The phone or Mac cannot open the PC's link | Run `node src/frl.mjs install` (it turns remote access on), allow Node.js on Private networks in Windows Firewall, and make sure the Wi-Fi is set to **Private** in Windows settings |
 | Terminal says "basic shell (node-pty missing)" | Run `npm.cmd install` again in the app folder. Basic mode still runs commands, but full-screen programs need the real shell |
 | `git pull` fails during update | You changed files in the folder. Run `git status` to see them, then `git stash` and update again |
+
+## Use your own GPU
+
+Run a local model with no quota next to the free cloud models: [LOCAL-GPU.md](LOCAL-GPU.md).

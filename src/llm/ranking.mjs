@@ -19,7 +19,23 @@ export const CAPABILITY = {
   cloudflare: [2, 'Llama 3.3 70B fp8, small daily pool'],
   pollinations: [2, 'small keyless model, 1 reply per 30 s'],
   ollama: [1, 'a 7–8B model on this computer'],
+  llamacpp: [2, 'depends on the model you run'],
 };
+
+export function localCapability(model) {
+  const text = String(model ?? '');
+  if (/\d+(?:\.\d+)?\s*m\b/i.test(text) && !/\d+(?:\.\d+)?\s*b\b/i.test(text)) return 1;
+  const size = Number(text.match(/(\d+(?:\.\d+)?)\s*b\b/i)?.[1] ?? NaN);
+  if (!Number.isFinite(size)) return null;
+  return size >= 27 ? 4 : size >= 14 ? 3 : size >= 4 ? 2 : 1;
+}
+
+export function capabilityOf(p) {
+  const local = p.local || p.id === 'llamacpp' || p.id === 'ollama';
+  const measured = local ? localCapability(p.servedModel ?? p.deep) : null;
+  if (measured) return [measured, `${p.servedModel ?? p.deep} on your own hardware`];
+  return CAPABILITY[p.id] ?? [3, 'unrated'];
+}
 
 const WEIGHTS = {
   deep: { capability: 0.45, reliability: 0.35, speed: 0.2 },
@@ -65,13 +81,14 @@ function reasonFor(row, role, strategy, rank) {
   else if (strategy === 'smartest') parts.push(`capability ${row.capability}/5`);
   else parts.push(`score ${row.score.toFixed(2)}: capability ${row.capability}/5, reliability ${Math.round(row.reliability * 100)}%, ${row.medianMs ? `${(row.medianMs / 1000).toFixed(1)} s` : 'no timing yet'}`);
   if (row.reliability < MIN_RELIABILITY && row.calls >= 4) parts.push(`moved down: only ${Math.round(row.reliability * 100)}% of calls worked`);
+  if (row.capability <= 1 && strategy !== 'custom' && strategy !== 'smartest') parts.push('kept last: too small for research');
   return parts.join(' · ');
 }
 
 export function rankRole({ role, strategy, providers, stats, customOrder = [], now = Date.now() }) {
   const rows = providers.map((p) => {
     const s = stats[p.id] ?? { calls: 0, ok: 0, failed: 0, rateLimited: 0, reliability: 0.5, medianMs: {} };
-    const [capability, capabilityBasis] = CAPABILITY[p.id] ?? [3, 'unrated'];
+    const [capability, capabilityBasis] = capabilityOf(p);
     return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, capability, capabilityBasis, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, medianMs: s.medianMs[role] ?? null };
   });
   const timed = rows.filter((r) => r.medianMs).map((r) => r.medianMs);
@@ -81,7 +98,7 @@ export function rankRole({ role, strategy, providers, stats, customOrder = [], n
     const speed = r.medianMs && fastest ? fastest / r.medianMs : 0.5;
     r.score = w.capability * (r.capability / 5) + w.reliability * r.reliability + w.speed * speed;
   }
-  const weak = (r) => (r.reliability < MIN_RELIABILITY && r.calls >= 4 ? 1 : 0);
+  const weak = (r) => (r.capability <= 1 ? 2 : 0) + (r.reliability < MIN_RELIABILITY && r.calls >= 4 ? 1 : 0);
   const custom = (r) => {
     const i = customOrder.indexOf(r.id);
     return i < 0 ? customOrder.length : i;
@@ -114,6 +131,7 @@ export const DAILY_LIMITS = {
   mistral: { note: '1B tokens/month per model' },
   cohere: { note: '1,000 calls/month' },
   pollinations: { note: 'no daily cap; 1 reply per 30 s without a key' },
+  llamacpp: { note: 'unlimited: your own GPU' },
 };
 
 function utcDay(ts) {

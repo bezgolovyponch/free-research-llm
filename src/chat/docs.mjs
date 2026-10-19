@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { shellLines, urlsIn } from './reply-audit.mjs';
 
-export const APP_DOCS = ['CONCEPT.md', 'GUIDE.md', 'WINDOWS.md', 'CLOUD.md', 'KEYS.md', 'FREE-ROUTING.md', 'PROTOCOLS.md', 'README.md'];
+export const APP_DOCS = ['CONCEPT.md', 'GUIDE.md', 'WINDOWS.md', 'CLOUD.md', 'KEYS.md', 'FREE-ROUTING.md', 'LOCAL-GPU.md', 'PROTOCOLS.md', 'README.md'];
 const SECTION_CHARS = 1800;
 const STOP = new Set('the a an and or to of in on for is it this that how what with my me i you do can be are from at by as'.split(' '));
 

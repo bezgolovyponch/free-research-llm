@@ -16,6 +16,7 @@ export const FREE_TIERS = {
   puter: 'your Puter account’s free monthly allowance (size not published)',
   pollinations: 'no key: 1 reply per 30 s per IP; a free key raises the limit',
   ollama: 'runs on this computer, unlimited, no key',
+  llamacpp: 'your own GPU, unlimited, no key; start it with node src/frl.mjs local start (LOCAL-GPU.md)',
   custom: 'any OpenAI-compatible endpoint, e.g. FreeLLMAPI on http://localhost:3001/v1 (FREE-ROUTING.md)',
 };
 

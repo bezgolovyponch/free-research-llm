@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY, STRATEGIES, providerStats, rankRole, routeFor, usageInfo } from '../../src/llm/ranking.mjs';
+import { CAPABILITY, STRATEGIES, capabilityOf, localCapability, providerStats, rankRole, routeFor, usageInfo } from '../../src/llm/ranking.mjs';
 
 const now = Date.parse('2026-10-19T12:00:00Z');
 const ts = (min: number) => new Date(now - min * 60000).toISOString();
@@ -71,5 +71,16 @@ describe('router ranking', () => {
     expect(u.providers.groq.hourly[21]).toBe(1);
     expect(u.providers.groq.today).toMatchObject({ limit: 1000, unit: 'requests', requests: 5, used: 0.005 });
     expect(u.providers.cerebras.today).toMatchObject({ limit: 1000000, unit: 'tokens', tokens: 400000, used: 0.4 });
+  });
+
+  it('rates a local model by its size, so a small one never outranks a strong free provider on capability', () => {
+    expect([localCapability('Qwen3-32B'), localCapability('gpt-oss-20b'), localCapability('Qwen3-4B'), localCapability('gemma-3-270m'), localCapability('local')]).toEqual([4, 3, 2, 1, null]);
+    expect(capabilityOf({ id: 'llamacpp', deep: 'gpt-oss-20b', local: true })).toEqual([3, 'gpt-oss-20b on your own hardware']);
+    expect(capabilityOf({ id: 'llamacpp', deep: 'local', local: true })).toEqual([2, 'depends on the model you run']);
+    const tiny = { id: 'llamacpp', label: 'local', state: 'ready', deep: 'gemma-3-270m-it', fast: 'gemma-3-270m-it', local: true, coolingDownMs: 0 };
+    const stats = providerStats([...calls('llamacpp', 'fast', 20, 50), ...calls('cerebras', 'fast', 10, 900)], { now });
+    const rows = rankRole({ role: 'fast', strategy: 'balanced', providers: [tiny, providers[1]], stats });
+    expect(rows.map((r: { id: string }) => r.id)).toEqual(['cerebras', 'llamacpp']);
+    expect(rows[1].why).toContain('kept last: too small for research');
   });
 });
