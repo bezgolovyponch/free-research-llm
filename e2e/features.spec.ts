@@ -52,6 +52,8 @@ test('results tab shows what was delivered and has its own chat', async ({ page 
   await expect(page.locator('#resultsBody')).toContainText('Memo verdict');
   await noSideScroll(page);
   await expect(page.locator('#resultsBody')).toContainText('Best estimate');
+  await expect(page.locator('#computedResult')).toContainText('Evidence probability');
+  await expect(page.locator('#computedResult')).toContainText('Analysis of Competing Hypotheses');
   const csvHref = await page.locator('#resultsBody a', { hasText: 'Pieces & actions (.csv)' }).getAttribute('href');
   const csv = await page.request.get(csvHref!);
   expect(csv.headers()['content-disposition']).toContain('-pieces.csv');

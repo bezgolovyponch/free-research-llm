@@ -183,7 +183,10 @@ describe('ResearchEngine', () => {
     let p = await engine.editNode(project.id, 'D2.1', { question: 'What does an e-bike cost in Germany in 2026?' });
     const status = (id: string) => p.nodes.find((n: { id: string }) => n.id === id)?.status;
     expect([status('D2.1'), status('D2'), status('D2.2'), status('D1.1')]).toEqual(['pending', 'pending', 'pending', 'verified']);
-    expect(p.report).toBeNull();
+    expect(p.report).not.toBeNull();
+    expect(p.phase).toBe('tree-ready');
+    const { resultModel } = await import('../../src/research/result.mjs');
+    expect(resultModel(p).changedSince).toEqual(expect.arrayContaining(['D2', 'D2.1']));
     p = await engine.expandNode(project.id, 'D3.1');
     expect(p.nodes.filter((n: { parentId: string }) => n.parentId === 'D3.1').map((n: { id: string }) => n.id)).toEqual(['D3.1.a', 'D3.1.b']);
     p = await engine.addNode(project.id, 'Q', { question: 'What do competitors charge?' });
@@ -213,5 +216,25 @@ describe('ResearchEngine', () => {
     const stopped = await engine.run(project.id);
     expect(stopped.phase).toBe('cancelled');
     expect(stopped.report).toBeNull();
+  });
+
+  it('regrades finished pieces whose answers say the evidence does not settle them, and rewrites the memo from the current pieces on request', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Should I import e-bikes from Germany to Czechia?' });
+    const done = await engine.run(project.id);
+    const leaf = done.nodes.find((n: { id: string; status: string }) => n.id === 'D1.1');
+    leaf.status = 'verified';
+    leaf.finding.answer = 'The 2026 import volume is not established by the supplied evidence.';
+    await engine.store.save(done);
+    const changed = engine.regrade(done);
+    expect(changed).toEqual(['D1.1']);
+    expect(leaf.status).toBe('weak');
+    expect(leaf.verification.checks.find((c: { id: string }) => c.id === 'concrete')).toMatchObject({ passed: false });
+    expect(done.nodes.find((n: { id: string }) => n.id === 'D1').status).toBe('pending');
+    await engine.store.save(done);
+    const rewritten = await engine.resynthesize(project.id);
+    expect(rewritten.report.basis['D1.1']).toBeTruthy();
+    expect(rewritten.report.actionItems.length).toBeGreaterThan(0);
+    expect(rewritten.report.kind).toBe('decision');
   });
 });

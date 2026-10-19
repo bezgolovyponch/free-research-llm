@@ -109,5 +109,10 @@ describe('verify: code-read data', () => {
     const web = verifyFinding({ finding, sources: [{ ...sources[0], kind: 'web' }] });
     expect(web.grade).toBe('weak');
   });
-});
 
+  it('fails the concreteness check when the answer opens by saying the evidence does not settle it', async () => {
+    const { isEvidenceGap } = await import('../../src/research/verify.mjs');
+    for (const gap of ['The exact 2024–2026 CAGR for AI chemistry tools is not established by the supplied evidence, so the hypothesis is not validated.', 'The EU TAM for AI-driven molecular design in 2026 is not directly reported in the supplied evidence and must be treated as an assumption.', 'There is no direct pricing data provided in the evidence for DeepMedChem.', 'The hypothesis is not validated: the evidence-supported DistributorCount is 0.']) expect(isEvidenceGap(gap)).toBe(true);
+    for (const ok of ['The median Golf price in Germany is 3,400 EUR, from 12 listings.', 'Registration is not available online in Brno; it is done in person for 800 CZK.', 'Transport costs 350–450 EUR. Data for Slovakia is not available.']) expect(isEvidenceGap(ok)).toBe(false);
+  });
+});

@@ -52,9 +52,21 @@ function expectsNumber(node) {
   return Boolean(node && (node.unit || ['calculation', 'comparison', 'data'].includes(node.method)));
 }
 
+const EVIDENCE_GAP = /\bnot (?:directly )?(?:reported|established|determinable|validated|verifiable|available|known|found)\b|\bcannot be (?:definitively )?(?:determined|validated|verified|established|refuted|confirmed)\b|\bthere (?:is|are) no (?:direct|specific|verifiable|reliable)\b|\bis not possible\b|\bno verifiable\b|\bmust be treated as an assumption\b|\bunverified hypothesis\b|\bhypothesis is not validated\b/i;
+const EVIDENCE_WORD = /\b(?:evidence|data|sources?|supplied|hypothes[ie]s|reported|corpus)\b/i;
+
+export function firstSentence(text) {
+  return String(text ?? '').split(/(?<=[.!?])\s+/)[0] ?? '';
+}
+
+export function isEvidenceGap(answer) {
+  const lead = firstSentence(answer);
+  return EVIDENCE_GAP.test(lead) && EVIDENCE_WORD.test(lead);
+}
+
 function checkConcrete(finding, node) {
   const answer = String(finding?.answer ?? '');
-  if (NON_ANSWER.test(answer)) return check('concrete', 'Gives a concrete answer, not "unknown"', false, 'answer says the evidence cannot settle it');
+  if (NON_ANSWER.test(answer) || isEvidenceGap(answer)) return check('concrete', 'Gives a concrete answer, not "unknown"', false, 'answer says the evidence cannot settle it');
   if (!expectsNumber(node)) return null;
   const numeric = /\d/.test(answer) || (finding?.claims ?? []).some((c) => /\d/.test(c.text) || typeof c.value === 'number');
   return check('concrete', 'Gives a concrete answer, not "unknown"', numeric, numeric ? `numeric answer for ${node.metric || 'the metric'}` : `no number given for ${node.metric || 'the metric'} (${node.unit || node.method})`);

@@ -3,6 +3,28 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-19 · session 12 — results computed from the current pieces, with probabilities
+
+- **Asked:** results were inappropriate. They must come from the pieces and sub-pieces, be regenerated after every run and update, and give the most probable result the research supports. Also: why can only Claude Code change the app?
+- **Core issues found in the DeepMedChem action-plan research:**
+  1. Non-answers passed the gates: D1.3 and D4.2 were *verified* and D1.1, D2.3 and D5.x *supported*, while their answers say "not established by the supplied evidence", "hypothesis is not validated", "not directly reported".
+  2. A plan question was forced into GO/NO-GO, and the model copied the prompt placeholder (`GO-IF <…>`).
+  3. The Results chat answered from an older memo.
+  4. An edit set the memo to null while the phase stayed `done`, so results vanished and the loop skipped its baseline.
+  5. Nothing weighted the result by evidence strength.
+- **Built:**
+  - **Stricter gate:** `isEvidenceGap` in `src/research/verify.mjs`, applied to the first sentence and tested on the real answers. `engine.regrade` lowers finished pieces at the start of each run, and their parents are rolled up again.
+  - **Computed result** (`src/research/result.mjs`, sent with every project and SSE update via `withResults`):
+    - each grade becomes a probability (verified 0.9, supported 0.75, weak 0.4, unsupported 0.15), combined up the tree by weighted log-odds, extremized ×1.5 when sources are combined (Satopää et al., 2014; one source keeps its own value);
+    - the question type is detected (plan, decision, estimate, list);
+    - plans: actions ranked by probability × impact, from the pieces each cites;
+    - decisions: options scored by consistent minus inconsistent evidence (Analysis of Competing Hypotheses, Heuer).
+  - **Memo:** the prompt returns `actions` or `options` for the question type; placeholders are stripped.
+  - **Out of date memo:** the memo keeps a basis hash per piece, and Results lists the pieces changed since it was written. **Rewrite memo from current pieces** calls `POST /api/projects/:id/synthesize`. A tree edit now keeps the old memo and sets the phase to `tree-ready`, so the loop re-runs its baseline.
+  - **Results chat:** it gets the computed result and is told to trust it over the memo. Answers written before the current result are marked.
+  - **App chat rule 4b:** it now says both implementers can edit the UI, server, tests and docs; Claude Code is more reliable, the free models cost nothing.
+- **Live:** the DeepMedChem research is now plan type, 26% evidence probability, 7 pieces regraded. The rewritten memo by free models gives the verdict "Accelerate delivery of the three core AI chemistry features within 6 months", with five ranked actions from 35% down to 17%, each citing its pieces.
+
 ## 2026-10-19 · session 11 — exact steps everywhere, Claude Code shell limits, clean-up
 
 - **Asked:** guidance like "NVIDIA: open the marketplace" is not enough; every suggestion in the app must be an exact, ready-to-execute instruction. Then: clear temp and cache files; the App assistant should change the app the way this chat does; review open-source solutions and bring the app up to standard.

@@ -1,4 +1,5 @@
 import { MAX_NODES, METHODS } from './tree.mjs';
+import { resultModel } from './result.mjs';
 
 const SYSTEM = 'You are a rigorous research analyst. You decompose questions MECE-style, use only evidence you are given, label every assumption, show calculations as formulas, and never invent sources, URLs or numbers. You reply with a single JSON object only.';
 
@@ -168,7 +169,14 @@ JSON shape: {"answer":"","claims":[{"text":"","sourceIds":[],"assumption":false}
   ];
 }
 
-export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected }) {
+const KIND_RULE = {
+  plan: 'This question asks for a PLAN. Return "actions": the concrete actions to take, best first. Each action names the piece ids whose findings support it in "nodeIds", an "impact" from 1 to 5, and a "horizon" (e.g. "0-3 months"). Use only actions the findings support; when support is weak, say so in "why". The verdict is one line that names the top action.',
+  decision: 'This question asks for a DECISION. Return "options" (at least GO and NO-GO, plus GO-IF variants when relevant), each with "support" (piece ids consistent with it) and "against" (piece ids inconsistent with it), as in an Analysis of Competing Hypotheses. The verdict is the option the evidence contradicts least.',
+  estimate: 'This question asks for a NUMBER. Put the computed value, its low and high range and the piece ids it rests on in "bestEstimate". The verdict states the number with its unit.',
+  list: 'This question asks for a LIST. The verdict says how many items were found and verified; the item list is attached by machine.',
+};
+
+export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision' }) {
   const drivers = nodes.filter((n) => n.parentId === 'Q');
   const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}`);
   return [
@@ -187,9 +195,10 @@ DECISION RULE: ${template.decisionRule}
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
 ${lines.join('\n')}
 
-Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a verdict (GO, NO-GO or GO-IF <condition>) and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
+${KIND_RULE[kind] ?? KIND_RULE.decision}
+Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a result of the type asked above and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:
-{"verdict":"GO | NO-GO | GO-IF <condition> (one line, always a decision)","confidence":"low|medium|high","bestEstimate":{"value":"the computed answer","unit":"","low":"","high":"","basis":"node ids it rests on"},"summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
+{"verdict":"one line; never copy angle brackets or placeholders","confidence":"low|medium|high","actions":[{"action":"","why":"","nodeIds":["D1.1"],"impact":3,"horizon":""}],"options":[{"option":"GO","support":["D1"],"against":["D2"]}],"bestEstimate":{"value":"the computed answer","unit":"","low":"","high":"","basis":"node ids it rests on"},"summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
 Drivers: ${drivers.map((d) => d.id).join(', ')}.`,
     },
   ];
@@ -305,6 +314,17 @@ JSON shape: {"reply":"short answer to the user","actions":[],"spec":{}}${feedbac
   ];
 }
 
+function computedText(m) {
+  const pct = (p) => `${Math.round(p * 100)}%`;
+  const lines = [`- type: ${m.kind} · overall evidence probability ${pct(m.probability)} · drivers: ${m.drivers.map((d) => `${d.id} ${pct(d.probability)}`).join(', ')}`];
+  if (m.changedSince.length) lines.push(`- changed since the memo was written: ${m.changedSince.join(', ')}`);
+  if (m.regraded.length) lines.push(`- graded lower because the answer says the evidence does not settle it: ${m.regraded.join(', ')}`);
+  for (const a of m.actions ?? []) lines.push(`- action (${pct(a.probability)}, impact ${a.impact}/5): ${a.action} [${a.nodeIds.join(', ') || 'no piece cited'}]`);
+  for (const o of m.options ?? []) lines.push(`- option ${o.option}: ${pct(o.probability)} (support ${o.support.join(', ') || 'none'}; against ${o.against.join(', ') || 'none'})`);
+  if (m.estimate) lines.push(`- estimate ${m.estimate.value} ${m.estimate.unit} (${m.estimate.low}–${m.estimate.high}), ${pct(m.estimate.probability)}`);
+  return lines.join('\n');
+}
+
 export function resultsSummary(project) {
   const ar = project.acceptanceResult;
   const good = project.nodes.filter((n) => ['verified', 'supported'].includes(n.status));
@@ -315,7 +335,9 @@ EXPECTED RESULT: ${project.acceptance?.expected || 'a decision memo'}
 EXPECTED-RESULT CHECKS: ${ar ? `${Math.round(ar.score * 100)}% met — ${ar.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}` : 'not run'}
 DELIVERED ITEMS (links seen on fetched pages):
 ${ar?.items?.length ? ar.items.slice(0, 15).map((i) => `- ${i.title || i.url} ${i.value ?? ''} ${i.unit ?? ''} <${i.url}>${i.live ? ' live' : ' not live'}${i.inRange ? ' in range' : ''}`).join('\n') : 'none'}
-MEMO VERDICT: ${r?.verdict ?? 'no memo yet'}${r ? ` (${r.confidence} confidence) — ${r.summary}` : ''}
+MEMO VERDICT: ${r?.verdict ?? 'no memo yet'}${r ? ` (${r.confidence} confidence, written ${String(r.generatedAt ?? '').slice(0, 16)}) — ${r.summary}` : ''}
+COMPUTED RESULT (by code from the current pieces; trust this over the memo when they differ):
+${computedText(resultModel(project))}
 KEY NUMBERS: ${r?.keyNumbers?.map((k) => `${k.label} ${k.value} ${k.unit ?? ''} [${k.nodeId}]`).join(' · ') || 'none'}
 PIECES THAT PASS THE CHECKS:
 ${good.map((n) => `${n.id} [${n.status}] ${n.title}: ${String(n.finding?.answer ?? '').slice(0, 300)}`).join('\n') || 'none'}
@@ -411,7 +433,7 @@ RULES:
 2. Never write a URL that is not written above. Never write keys, tokens or passwords.
 3. You run nothing yourself. Direct actions (open, stop, links) run when you return them. Everything else is a proposal shown as a button: tell the user to press it, never say it is done.
 4. Propose a new research only when the user asks to research a question. Questions about the app itself are never researches.
-4b. You are where the user asks for CHANGES TO THE APP ITSELF (a feature to add, something to change or improve, a bug, tests or checks). For those, propose ONE "change" ticket: restate the request precisely, write the desired output as something a person can check in the running app, list the tests or checks to add, and set "engine" to "claude" when Claude Code is available in FACTS (it is the one that can do UI and feature work; it runs on the user's Claude plan) or "free" otherwise. Someone implements it in a sandbox copy and it reaches the app only when the quality gate passes. In your text say which implementer the button will use. Never claim you changed the app.
+4b. You are where the user asks for CHANGES TO THE APP ITSELF (a feature to add, something to change or improve, a bug, tests or checks). For those, propose ONE "change" ticket: restate the request precisely, write the desired output as something a person can check in the running app, list the tests or checks to add, and set "engine" to "claude" when Claude Code is available in FACTS, otherwise "free". Both implementers can change anything the app lets them edit: the UI (public/index.html), server code, tests and docs. Claude Code is more reliable for larger UI and feature work and uses the user's Claude plan; the free models cost nothing but depend on free quotas and often need several attempts. The user picks with the buttons "Implement with Claude Code" or "with free models". Never say only one of them can do it. Either way it edits a sandbox copy and reaches the app only when the quality gate passes. Never claim you changed the app.
 4c. The user may talk to you in follow-ups: "make the button green instead", "that broke the export", "try again". Each such follow-up is a new "change" ticket that continues from the current app, so restate the delta precisely and mention the earlier ticket id in the request when the facts list one.
 5. Commands: only the TERMINAL COMMANDS above (propose by id; in your text call them by their button label, e.g. **Links for other devices**) or commands written in DOCUMENTS, copied exactly. Never describe screens or dialogs that FACTS and DOCUMENTS do not describe.
 6. Every suggestion must be ready to execute: numbered steps with the exact URL, the exact button or field name and the exact command, copied from FACTS (key steps), DOCUMENTS or TERMINAL COMMANDS. Never answer only "go to the website" or "open the marketplace". If the exact steps are not written above, say which guide or button to open instead of guessing.

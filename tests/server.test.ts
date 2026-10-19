@@ -138,5 +138,9 @@ describe('HTTP server', () => {
     expect((await csv.text()).replace(/^\ufeff/, '').startsWith('piece,title,role,grade')).toBe(true);
     expect((await call('GET', `/api/projects/${created.id}/results.json`)).body).toMatchObject({ question: 'Should I sell used e-bikes in Brno this spring?', pieces: expect.any(Array) });
     expect((await fetch(`${base}/api/projects/${created.id}/items.csv`)).status).toBe(200);
+    expect(done.results.model).toMatchObject({ kind: 'decision', probability: expect.any(Number), changedSince: [] });
+    expect(typeof done.report.model).toBe('string');
+    const rewritten = (await call('POST', `/api/projects/${created.id}/synthesize`)).body;
+    expect(rewritten.report.basis).toBeTruthy();
   });
 });

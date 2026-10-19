@@ -10,6 +10,7 @@ import { ROOT_ID, blankNode, childrenOf, isLeaf, listingSpec, normalizeTree, pro
 import { needsEscalation, verifyFinding } from './verify.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
+import { basisOf, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
@@ -334,12 +335,13 @@ export class ResearchEngine {
     const reply = await this.router.complete({
       purpose: 'synthesize',
       tier: 'deep',
-      messages: synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected }),
+      messages: synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project) }),
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
     project.report = {
-      verdict: String(r.verdict ?? '').slice(0, 300),
+      verdict: sanitizeVerdict(r.verdict).slice(0, 300),
+      kind: questionKind(project),
       confidence: CONFIDENCE.includes(r.confidence) ? r.confidence : 'low',
       summary: String(r.summary ?? '').slice(0, 2500),
       keyNumbers: (Array.isArray(r.keyNumbers) ? r.keyNumbers : []).slice(0, 12),
@@ -350,6 +352,9 @@ export class ResearchEngine {
       nextSteps: (Array.isArray(r.nextSteps) ? r.nextSteps : []).slice(0, 10),
       evidenceQuality: { ...counts, weak: project.nodes.filter((n) => ['weak', 'unsupported', 'failed'].includes(n.status)).map((n) => n.id) },
       bestEstimate: normalizeEstimate(r.bestEstimate),
+      actionItems: (Array.isArray(r.actions) ? r.actions : []).slice(0, 12).map((x) => ({ action: String(x?.action ?? '').slice(0, 300), why: String(x?.why ?? '').slice(0, 300), horizon: String(x?.horizon ?? '').slice(0, 60), impact: Math.min(5, Math.max(1, Number(x?.impact) || 3)), nodeIds: nodeIdsIn(x?.nodeIds ?? x) })).filter((x) => x.action),
+      options: (Array.isArray(r.options) ? r.options : []).slice(0, 6).map((o) => ({ option: String(o?.option ?? '').slice(0, 160), support: nodeIdsIn(o?.support), against: nodeIdsIn(o?.against) })).filter((o) => o.option),
+      basis: basisOf(project.nodes),
       model: `${reply.provider}/${reply.model}`,
       generatedAt: new Date().toISOString(),
     };
@@ -395,6 +400,7 @@ export class ResearchEngine {
       project.phase = 'researching';
       project.error = null;
       for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';
+      this.regrade(project);
       this.emit(project, 'phase', 'researching sub-questions in dependency order');
       await this.store.save(project);
       const byId = new Map(project.nodes.map((n) => [n.id, n]));
@@ -466,7 +472,26 @@ export class ResearchEngine {
     for (const n of project.nodes) {
       if (n.dependsOn.includes(nodeId) && n.status !== 'pending') this.resetWithAncestors(project, n.id);
     }
-    project.report = null;
+    if (project.phase === 'done') project.phase = 'tree-ready';
+  }
+
+  regrade(project) {
+    const byId = new Map(project.nodes.map((n) => [n.id, n]));
+    const changed = [];
+    for (const node of project.nodes) {
+      if (!isLeaf(project.nodes, node) || effectiveGrade(node) === node.status) continue;
+      node.status = effectiveGrade(node);
+      const detail = 'the answer says the evidence does not settle it';
+      if (node.verification) {
+        node.verification.grade = node.status;
+        node.verification.failures = [...new Set([...(node.verification.failures ?? []), detail])];
+        node.verification.checks = [...(node.verification.checks ?? []).filter((c) => c.id !== 'concrete'), { id: 'concrete', label: 'Gives a concrete answer, not "unknown"', passed: false, detail }];
+      }
+      changed.push(node.id);
+      for (let up = byId.get(node.parentId); up; up = byId.get(up.parentId)) Object.assign(up, { status: 'pending', finding: null, verification: null, critique: null, error: null });
+    }
+    if (changed.length) this.emit(project, 'edit', `re-graded with the stricter answer check: ${changed.join(', ')} (now weak)`);
+    return changed;
   }
 
   async resetResearch(id, { tree = false } = {}) {
@@ -540,6 +565,21 @@ export class ResearchEngine {
     project.report = null;
     this.emit(project, 'edit', `${nodeId}: removed with ${doomed.size - 1} sub-node(s)`);
     return this.store.save(project);
+  }
+
+  async resynthesize(id) {
+    if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
+    this.running.add(id);
+    try {
+      const project = await this.load(id);
+      await this.synthesize(project);
+      this.checkSpecs(project);
+      project.phase = project.nodes.every((n) => DONE.has(n.status)) ? 'done' : project.phase;
+      this.emit(project, 'phase', 'memo rewritten from the current pieces');
+      return await this.store.save(project);
+    } finally {
+      this.running.delete(id);
+    }
   }
 
   async rerunNode(id, nodeId, hint = '') {

@@ -10,6 +10,7 @@ import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { TEMPLATES } from './research/templates.mjs';
 import { itemsCsv, piecesCsv, resultsJson, toMarkdown } from './report.mjs';
 import { resultStatus } from './research/gaps.mjs';
+import { resultModel } from './research/result.mjs';
 import { knowledgeRecord } from './research/knowledge.mjs';
 import { ProposalError } from './appchat.mjs';
 import { UnsupportedFileError } from './chat/media.mjs';
@@ -46,6 +47,13 @@ async function readJson(req) {
   } catch {
     throw new HttpError(400, 'invalid JSON body');
   }
+}
+
+export function withResults(project) {
+  if (!project || typeof project !== 'object' || !Array.isArray(project.nodes) || typeof project.question !== 'string') return project;
+  const { plan, ...status } = resultStatus(project);
+  const results = { status, actions: plan.slice(0, 40), model: resultModel(project) };
+  return { ...project, results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
 }
 
 function send(res, status, body, type = 'application/json; charset=utf-8') {
@@ -136,10 +144,7 @@ export function createServer(app, gate = new AccessGate()) {
       return project;
     }],
     ['GET', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
-      const project = await app.engine.load(id);
-      const { plan, ...status } = resultStatus(project);
-      const results = { status, actions: plan.slice(0, 40) };
-      return { ...project, results, report: project.report ? { ...project.report, ...results } : null };
+      return withResults(await app.engine.load(id));
     }],
     ['DELETE', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
       if (app.engine.running.has(id) || app.improver.isActive(id)) throw new ProjectBusyError('stop it first: the research is running');
@@ -214,6 +219,10 @@ export function createServer(app, gate = new AccessGate()) {
       return { ok: true, message: 'restarting: the page reconnects in a few seconds' };
     }],
     ['GET', /^\/api\/projects\/([\w-]+)\/handoff$/, async (req, [id]) => (await app.handoffs.read(id)) ?? { projectId: id, note: 'no handoff yet: one is written every time a run or loop stops' }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/synthesize$/, async (req, [id]) => {
+      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      return app.engine.resynthesize(id);
+    }],
     ['GET', /^\/api\/projects\/([\w-]+)\/knowledge$/, async (req, [id]) => knowledgeRecord(await app.engine.load(id))],
     ['POST', /^\/api\/projects\/([\w-]+)\/chat$/, async (req, [id]) => {
       const body = await readJson(req);
@@ -268,7 +277,7 @@ export function createServer(app, gate = new AccessGate()) {
   async function serveEvents(req, res, id) {
     const project = await app.engine.load(id);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: current })}\n\n`);
+    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: withResults(current) })}\n\n`);
     push({ type: 'hello', message: 'connected' }, project);
     const unsubscribe = app.engine.subscribe(id, push);
     const ping = setInterval(() => res.write(': ping\n\n'), 20000);
@@ -315,7 +324,7 @@ export function createServer(app, gate = new AccessGate()) {
       }
       for (const [method, pattern, handler] of routes) {
         const match = url.pathname.match(pattern);
-        if (match && req.method === method) return send(res, 200, await handler(req, match.slice(1)));
+        if (match && req.method === method) return send(res, 200, withResults(await handler(req, match.slice(1))));
       }
       throw new HttpError(404, 'not found');
     } catch (error) {
