@@ -184,4 +184,7 @@ test('the + next to the models indicator opens the router page: strategy, ranked
   await body.getByRole('radio', { name: 'Balanced' }).click();
   await body.locator('[data-rsave="groq"]').click();
   await expect(body.locator('[data-rmsg="groq"]')).toContainText('type or paste a value first');
+  await body.locator('[data-rrow="groq"] input[type="password"]').fill('gsk_typed_but_not_saved');
+  await page.waitForTimeout(8500);
+  await expect(body.locator('[data-rrow="groq"] input[type="password"]')).toHaveValue('gsk_typed_but_not_saved');
 });

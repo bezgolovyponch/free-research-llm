@@ -637,7 +637,11 @@ function renderRouterPage(){
   h+='<h2 style="margin-top:20px">Can be added ('+add.length+')</h2><p class="small muted">Free providers you are not using yet, most capable first. Each one adds its own free quota to the circle. Keys are tested with the provider before they are saved in '+esc(v.store)+'. Free limits checked on '+esc(v.freeTiersChecked)+"; the provider's own page wins.</p>"+'<div class="rt-cards">'+add.map(m=>rtCard({...m,capNote:true})).join("")+"</div>";
   h+='<h2 style="margin-top:20px">Routing order in detail</h2><div class="rt-roles"><div class="card"><h2>Deep role</h2><p class="small muted">Builds the tree, retries failed checks, reviews, writes the memo. Few calls; capability matters most.</p>'+rtRouteRows(v.route.deep,v.strategy==="custom")+'</div><div class="card"><h2>Fast role</h2><p class="small muted">Researches every piece. Many calls; speed and reliability matter most.</p>'+rtRouteRows(v.route.fast,v.strategy==="custom")+"</div></div>";
   h+='<details style="margin-top:18px"><summary><b>Search engines</b> <span class="small muted">('+v.search.filter(x=>x.saved).length+" of "+v.search.length+' connected)</span></summary><div class="rt-cards">'+v.search.map(rtCard).join("")+"</div></details>";
-  const body=$("rtBody");body.innerHTML=h;
+  const body=$("rtBody");
+  const typed={};body.querySelectorAll("[data-rname]").forEach(i=>{if(i.value)typed[i.closest("[data-rrow]").dataset.rrow+"|"+i.dataset.rname]=i.value;});
+  const focus=document.activeElement&&body.contains(document.activeElement)&&document.activeElement.dataset.rname?document.activeElement.closest("[data-rrow]").dataset.rrow+"|"+document.activeElement.dataset.rname:"";
+  body.innerHTML=h;
+  body.querySelectorAll("[data-rname]").forEach(i=>{const k=i.closest("[data-rrow]").dataset.rrow+"|"+i.dataset.rname;if(typed[k])i.value=typed[k];if(k===focus)i.focus();});
   body.querySelectorAll("[data-rstrat]").forEach(b=>b.addEventListener("click",async()=>{try{await api("/api/router/strategy",{method:"POST",body:{strategy:b.dataset.rstrat}});await loadRouter();}catch(e){toast(e.message);}}));
   body.querySelectorAll("[data-ruse]").forEach(c=>c.addEventListener("change",async()=>{try{await api("/api/router/use",{method:"POST",body:{id:c.dataset.ruse,on:c.checked}});await loadRouter();await loadStatus();}catch(e){toast(e.message);c.checked=!c.checked;}}));
   const move=(id,d)=>{const o=v.route.deep.filter(r=>r.ready).map(r=>r.id);const rest=v.order.filter(x=>!o.includes(x));const i=o.indexOf(id),j=i+d;if(i<0||j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];api("/api/router/order",{method:"POST",body:{order:[...o,...rest]}}).then(loadRouter,e=>toast(e.message));};
@@ -662,7 +666,9 @@ async function saveRouterCard(id,force){
   renderRouterPage();
 }
 async function loadRouter(verify){try{RT.view=await api("/api/router"+(verify?"?verify=1":""));renderRouterPage();}catch(e){$("rtBody").innerHTML='<div class="notice err small">'+esc(e.message)+"</div>";}}
-function openRouter(){showPage("router");setTimeout(()=>{if(STATE.page==="router")loadRouter();},8000);}
+function openRouter(){RT.touched=false;showPage("router");setTimeout(()=>{if(STATE.page==="router"&&!RT.touched)loadRouter();},8000);}
+$("rtBody").addEventListener("pointerdown",()=>{RT.touched=true;});
+$("rtBody").addEventListener("input",()=>{RT.touched=true;});
 $("btnRouter").addEventListener("click",openRouter);
 $("btnRouter2").addEventListener("click",openRouter);
 $("rtVerify").addEventListener("click",async()=>{$("rtVerify").disabled=true;await loadRouter(true);$("rtVerify").disabled=false;});
