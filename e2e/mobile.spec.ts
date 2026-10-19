@@ -30,12 +30,14 @@ test('builds a tree, opens a piece as a sheet, chats in it, runs, and finds it i
   await noSideScroll(page);
 
   await page.locator('#outline .orow[data-node="D1"]').click();
+  await expect(page.locator('#pieceReport')).toContainText('D1 ·');
+  await expect(page.locator('#pieceReport .role').first()).toContainText('Driver');
+  await page.locator('.tabs .tab', { hasText: 'Chat' }).click();
   await expect(page.locator('#inspector')).toHaveClass(/\bon\b/);
-  await expect(page.locator('#inspBody h2')).toBeVisible();
-  await page.locator('#inspTabs button[data-mode="chat"]').click();
   const input = page.locator('#chatIn');
   await expect(input).toBeVisible();
   await expect(page.locator('#chatTitle')).toContainText('D1');
+  await page.locator('#chatDesired').fill('a list of what is missing');
   await input.fill('what is missing here?');
   await page.waitForTimeout(1200);
   await expect(input).toHaveValue('what is missing here?');
@@ -43,12 +45,14 @@ test('builds a tree, opens a piece as a sheet, chats in it, runs, and finds it i
   await expect(page.locator('#chatMsgs .msg.user')).toHaveCount(1);
   await expect(page.locator('#chatMsgs .msg.user')).toContainText('what is missing here?');
   await expect(page.locator('#chatMsgs .msg.assistant').last()).toContainText('DEMO assistant', { timeout: 20000 });
+  await expect(page.locator('#chatMsgs .msg.user').last()).toContainText('Desired output: a list of what is missing');
   await expect(input).toHaveValue('');
   await page.locator('#chatScopes button[data-scope="app"]').click();
-  await expect(page.locator('#chatTitle')).toContainText('Whole application');
+  await expect(page.locator('#chatTitle')).toContainText('The app itself');
   await input.fill('which research is furthest along?');
   await page.locator('#chatSend').click();
   await expect(page.locator('#chatMsgs .msg.assistant').last()).toContainText('DEMO app assistant', { timeout: 20000 });
+  await expect(page.locator('#chatMsgs .msg.assistant').last().locator('.audit')).toContainText('audit passed');
   await page.locator('#chatScopes button[data-scope="node"]').click();
   await expect(page.locator('#chatMsgs .msg.user')).toContainText('what is missing here?');
 
@@ -65,7 +69,7 @@ test('builds a tree, opens a piece as a sheet, chats in it, runs, and finds it i
   await noSideScroll(page);
 
   await page.getByRole('button', { name: 'Open menu' }).click();
-  await expect(page.locator('#projList .pitem').first()).toContainText('cars to sell 2000-4000');
+  await expect(page.locator('#projList')).toContainText('cars to sell 2000-4000');
   await page.locator('#sidebar .navlink', { hasText: 'History' }).click();
   await expect(page.locator('#histProjects')).toContainText('cars to sell 2000-4000');
   await noSideScroll(page);

@@ -1,5 +1,7 @@
 # GUIDE — exact steps to get an issue solved
 
+What the app is and how its chats work: [CONCEPT.md](CONCEPT.md). Windows PC: [WINDOWS.md](WINDOWS.md). Always on in a free cloud server: [CLOUD.md](CLOUD.md).
+
 ## A. One-time setup (about 5 minutes)
 
 1. **Install Node.js 20 or newer.** Get the LTS installer from https://nodejs.org. Check it with `node -v`.
@@ -8,10 +10,10 @@
    git clone https://github.com/bezgolovyponch/free-research-llm.git
    cd free-research-llm
    ```
-3. **Get free keys and save them.** The full list with verified limits and exact clicks is in **[KEYS.md](KEYS.md)**. In short: create **Gemini**, **Groq**, **LangSearch** and **Tavily** keys (more is better: Mistral, Cerebras, NVIDIA, Exa, Jina; unlimited search: `./searxng.command`), then double-click **`keys.command`** and paste each key when asked. They are stored in the macOS Keychain, not in a file.
+3. **Get free keys and save them.** The full list with verified limits and exact clicks is in **[KEYS.md](KEYS.md)**. In short: create **Gemini**, **Groq**, **LangSearch** and **Tavily** keys (more is better: Mistral, Cerebras, NVIDIA, Exa, Jina; unlimited search: `./searxng.command`), then start the app, click **Terminal → Add keys** (or run `node src/frl.mjs keys setup`) and paste each key when asked. They are stored in the system key store (macOS Keychain, Windows user environment), not in a file. On a Mac, double-clicking **`keys.command`** does the same.
 4. Alternative without the Keychain: put `export GROQ_API_KEY="…"` lines in `~/.zshrc`, or paste keys in the app's **Setup** tab, which keeps them for the current session only.
 5. Fully offline option: install Ollama (https://ollama.com/download), then run `ollama pull qwen2.5:7b`. It needs no key.
-6. **Start the app:** run `npm start`, or on a Mac double-click `start.command`. Open **http://127.0.0.1:4600**.
+6. **Start the app:** run `npm install` once, then `node src/frl.mjs start`. On a Mac you can double-click `start.command`, on Windows `start.cmd`. Open **http://127.0.0.1:4600**.
 7. **Check Setup.** At least one provider must show **● ready** with a fast and a deep model. The **Routing** card shows which provider answers which role.
 
 To try the flow before you have a key, run `npm run demo`. Every answer is scripted and labelled DEMO.
@@ -56,7 +58,9 @@ Rules of thumb: give one decision per project; state numbers with currency and y
 
 | Symptom | Fix |
 |---|---|
-| Setup shows "○ no key" everywhere | Run `./keys.command` and paste at least one key, then restart. The terminal line "keys from macOS Keychain: …" confirms they loaded. |
+| Setup shows "○ no key" everywhere | **Terminal → Add keys** (`node src/frl.mjs keys setup`), paste at least one key. **Terminal → Check keys** tests them. |
+| A chat reply shows **⚠ audit** | The reply had an unknown link, a key value, an unknown command or a claimed action that did not run. Those parts were removed. Ask again, or use the Terminal buttons |
+| A message typed in a research chat moved to the App chat | It was about the app itself. App questions are answered only in the App chat (see [CONCEPT.md](CONCEPT.md)) |
 | Provider "● error … HTTP 401" | The key is wrong or revoked. Create a new one. |
 | "all free model quotas are cooling down" | The daily or minute quota is used up. Add a second provider or wait, then press **Run / resume**. |
 | Many amber nodes saying "number(s) without source" | Search found little. Add `TAVILY_API_KEY`, upload a CSV, or re-research with a hint naming a site. |
@@ -68,13 +72,27 @@ Rules of thumb: give one decision per project; state numbers with currency and y
 - **History** tab: every session, research, verdict, expected-result score and loop, newest first. Each project links its **knowledge** record (facts / claims / hypotheses with evidence) and its full **log**.
 - Files: `data/logs/history.jsonl`, `data/logs/project-<id>.jsonl`, `data/logs/model-calls.jsonl`, `data/logs/quality.jsonl`.
 
-## F. Open it from your phone or another computer
+## F. Terminal, other devices, always on
 
-1. Once: `npm link` (makes the `frl` command available everywhere).
-2. `frl install` (macOS): the app runs in the background, starts at login and restarts if it stops. It accepts other devices only with an access token kept in the Keychain.
-3. `frl url` prints the links: this Mac, your Wi-Fi (phone, other PC) and, if Tailscale is installed on both devices, a link that works from anywhere. Open the link once on the other device; it remembers the token.
-4. Other computer with its own copy: on this Mac `frl keys export` (choose a passphrase), on the other computer `frl keys import` (paste the bundle, type the passphrase). Keys go to that computer's key store (macOS Keychain, Linux secret-tool, Windows user environment). The bundle is encrypted (AES-256-GCM, scrypt); send the passphrase separately.
-5. Other commands: `frl status`, `frl logs`, `frl token --rotate`, `frl uninstall`, `frl start [--remote]`.
+The **Terminal** button (sidebar, or the `>_` icon on a phone) opens a real shell on the computer that runs the app: zsh on macOS, PowerShell on Windows. Every device that opens the app shares the same session. The buttons above it run the same commands on every system:
+
+| Button | Command |
+|---|---|
+| Status | `node src/frl.mjs status` |
+| Links for other devices | `node src/frl.mjs url` |
+| Install always-on | `node src/frl.mjs install` (macOS login service, Windows logon task, Linux systemd) |
+| Add keys · Check keys · List keys | `node src/frl.mjs keys setup` · `node src/frl.mjs keys check` · `node src/frl.mjs keys list` |
+| Export keys · Import keys | `node src/frl.mjs keys export` · `node src/frl.mjs keys import` |
+| Update from GitHub · Restart app | `node src/frl.mjs update` · `node src/frl.mjs restart` |
+| Quality gate | `npm run quality` |
+| (from an App chat change ticket) | `node src/frl.mjs change <id>` |
+| Public HTTPS link | `tailscale funnel --bg 4600` |
+| Claude Code | `claude` |
+
+1. **Install always-on** makes the app start at login, restart if it stops, and accept other devices that bring the access token.
+2. **Links for other devices** prints the links: this computer, your Wi-Fi (phone, other PC) and, with Tailscale on both devices, a link that works from anywhere. Open a link once on the other device; it remembers the token. The App chat can show the same links on screen (they are never saved in the chat).
+3. Another computer with its own copy: **Export keys** here (choose a passphrase), **Import keys** there (paste the bundle, type the passphrase). The bundle is encrypted (AES-256-GCM, scrypt); send the passphrase separately.
+4. Anyone with a token link can use the app and its terminal. To cut off old links: `node src/frl.mjs token --rotate`, then restart.
 
 ## G. Check and ship changes
 

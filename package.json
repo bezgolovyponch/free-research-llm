@@ -1,7 +1,7 @@
 {
   "name": "free-research-llm",
   "version": "1.0.0",
-  "description": "Free research LLM: one prompt in, a decomposed, source-checked analytical answer out. Runs locally on free model quotas.",
+  "description": "Free research LLM: one prompt in, a decomposed, source-checked analytical answer out. Runs on free model quotas, on macOS, Windows, Linux or a free cloud VM.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -18,11 +18,19 @@
     "check": "node --check src/server.mjs && vitest run",
     "quality": "node scripts/quality.mjs",
     "hooks": "git config core.hooksPath .githooks",
-    "postinstall": "git config core.hooksPath .githooks || true",
+    "postinstall": "node scripts/postinstall.mjs",
     "e2e": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "ws": "^8.22.0"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
   }
 }

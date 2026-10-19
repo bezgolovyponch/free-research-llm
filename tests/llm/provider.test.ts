@@ -20,6 +20,15 @@ describe('pickModel', () => {
 });
 
 describe('OpenAICompatibleProvider', () => {
+  it('picks a vision model only from the vision preferences', async () => {
+    const gemini = PROVIDER_PRESETS.find((x) => x.id === 'gemini')!;
+    const fetchImpl = fakeFetch([[/\/models$/, () => jsonResponse({ data: [{ id: 'models/gemini-3.5-flash-lite' }, { id: 'models/gemini-3.8-flash' }] })]]);
+    const p = await new OpenAICompatibleProvider({ preset: gemini, apiKey: 'k', fetchImpl }).discover();
+    expect(p.selected.vision).toBe('gemini-3.5-flash-lite');
+    expect(p.canServe('vision')).toBe(true);
+    expect(pickModel(['a', 'b'], ['zzz'], false, { strict: true })).toBeNull();
+  });
+
   it('is not configured without its key', async () => {
     const p = await new OpenAICompatibleProvider({ preset: groq, fetchImpl: fakeFetch([]) }).discover();
     expect(p.state).toBe('not-configured');
@@ -32,7 +41,9 @@ describe('OpenAICompatibleProvider', () => {
       [/\/chat\/completions$/, () => jsonResponse({ choices: [{ message: { content: '{"ok":true}' } }], usage: { total_tokens: 9 } })],
     ]);
     const p = await new OpenAICompatibleProvider({ preset: groq, apiKey: 'k', fetchImpl }).discover();
-    expect(p.selected).toEqual({ fast: 'llama-3.1-8b-instant', deep: 'llama-3.3-70b-versatile' });
+    expect(p.selected).toEqual({ fast: 'llama-3.1-8b-instant', deep: 'llama-3.3-70b-versatile', vision: null });
+    expect(p.canServe('vision')).toBe(false);
+    expect(p.canServe('fast')).toBe(true);
     const reply = await p.chat({ messages: [{ role: 'user', content: 'hi' }], tier: 'deep' });
     expect(reply).toMatchObject({ content: '{"ok":true}', model: 'llama-3.3-70b-versatile', provider: 'groq' });
     const sent = fetchImpl.calls.at(-1)!;
@@ -67,7 +78,7 @@ describe('OpenAICompatibleProvider', () => {
     const down = fakeFetch([[/\/models$/, () => new Response('nope', { status: 404 })]]);
     const p = await new OpenAICompatibleProvider({ preset: cerebras, apiKey: 'k', fetchImpl: down }).discover();
     expect(p.state).toBe('ready');
-    expect(p.selected).toEqual({ fast: 'gpt-oss-120b', deep: 'gpt-oss-120b' });
+    expect(p.selected).toEqual({ fast: 'gpt-oss-120b', deep: 'gpt-oss-120b', vision: null });
     const denied = fakeFetch([[/\/models$/, () => new Response('bad key', { status: 401 })]]);
     const q = await new OpenAICompatibleProvider({ preset: cerebras, apiKey: 'x', fetchImpl: denied }).discover();
     expect(q.state).toBe('error');

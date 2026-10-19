@@ -16,7 +16,7 @@ export class ProviderError extends Error {
   }
 }
 
-export function pickModel(models, preferences, freeOnly = false) {
+export function pickModel(models, preferences, freeOnly = false, { strict = false } = {}) {
   const usable = models.filter((m) => !NON_CHAT_MODEL.test(m) && (!freeOnly || m.endsWith(':free')));
   for (const wanted of preferences) {
     const exact = usable.find((m) => m === wanted);
@@ -24,7 +24,7 @@ export function pickModel(models, preferences, freeOnly = false) {
     const partial = usable.find((m) => m.includes(wanted));
     if (partial) return partial;
   }
-  return usable[0] ?? null;
+  return strict ? null : (usable[0] ?? null);
 }
 
 export function retryAfterFromText(body, floorMs = 0) {
@@ -51,7 +51,7 @@ export class OpenAICompatibleProvider {
     this.fetchImpl = fetchImpl;
     this.timeoutMs = timeoutMs;
     this.models = [];
-    this.selected = { fast: modelOverrides.fast ?? null, deep: modelOverrides.deep ?? null };
+    this.selected = { fast: modelOverrides.fast ?? null, deep: modelOverrides.deep ?? null, vision: null };
     this.state = 'unknown';
     this.detail = '';
     this.minIntervalMs = preset.minIntervalMs ?? 0;
@@ -120,6 +120,7 @@ export class OpenAICompatibleProvider {
       this.selected.fast = this.modelOverrides.fast ?? envModel ?? pickModel(this.models, this.preset.prefer.fast, this.preset.freeOnly);
       this.selected.deep = this.modelOverrides.deep ?? envModel ?? pickModel(this.models, this.preset.prefer.deep, this.preset.freeOnly) ?? this.selected.fast;
       this.selected.fast ??= this.selected.deep;
+      this.selected.vision = this.preset.prefer.vision ? pickModel(this.models, this.preset.prefer.vision, this.preset.freeOnly, { strict: true }) : null;
       this.state = this.selected.fast ? 'ready' : 'no-models';
       this.detail = this.selected.fast ? `fast=${this.selected.fast} deep=${this.selected.deep}` : 'no chat model available';
     } catch (error) {
@@ -139,6 +140,10 @@ export class OpenAICompatibleProvider {
       }
     }
     return this;
+  }
+
+  canServe(tier) {
+    return this.ready && (tier !== 'vision' || Boolean(this.selected.vision));
   }
 
   async chat({ messages, tier = 'fast', json = true, temperature = 0.2, maxTokens = 4000 }) {
@@ -181,6 +186,7 @@ export class OpenAICompatibleProvider {
       configured: this.configured,
       fast: this.selected.fast,
       deep: this.selected.deep,
+      vision: this.selected.vision,
       local: Boolean(this.preset.local),
       keyEnv: this.preset.keyEnv,
       accountEnv: this.preset.accountEnv ?? null,

@@ -1,13 +1,15 @@
-import { scoreProject } from './score.mjs';
+import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, listingSpec, nextNodeId, urlList } from './tree.mjs';
+import { passingSpecs, regressions, specHolders } from './specs.mjs';
 
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, researching: 0 };
 const MAX_HOURS = 72;
 const MAX_TRIALS_KEPT = 200;
 const QUOTA_PAUSE_MS = 5 * 60 * 1000;
 const MIN_GAIN = 0.001;
+const REMOVAL_MIN_GAIN = 0.01;
 const DEFAULT_SLICE_MINUTES = 20;
 const QUOTA_ERROR = /no model provider|cooling down|rate limit|quota/i;
 
@@ -19,8 +21,8 @@ function strings(value, max) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => String(v).trim()).filter(Boolean).slice(0, max);
 }
 
-export function projectScore(project) {
-  const base = scoreProject(project);
+export function projectScore(project, pieces = []) {
+  const base = scoreProject(project, pieces);
   const acceptance = project?.acceptanceResult?.score ?? null;
   return { ...base, acceptance, score: acceptance === null ? base.score : round(0.6 * acceptance + 0.4 * base.score) };
 }
@@ -35,11 +37,55 @@ export function distinctResearches(list) {
   return [...newest.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).map((p) => p.id);
 }
 
-export function improvementTargets(project) {
+export function inScope(nodes, scope, exclude = []) {
+  if (!scope?.length) return new Set(nodes.map((n) => n.id));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const ids = new Set();
+  for (const selected of scope.filter((id) => byId.has(id))) {
+    for (let cursor = byId.get(selected); cursor; cursor = byId.get(cursor.parentId)) {
+      for (const n of nodes) if (n.parentId === cursor.parentId) ids.add(n.id);
+    }
+    const below = new Set([selected]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const n of nodes) if (below.has(n.parentId) && !below.has(n.id)) { below.add(n.id); grew = true; }
+    }
+    for (const id of below) ids.add(id);
+  }
+  for (const id of exclude) ids.delete(id);
+  return ids;
+}
+
+export function scopeScore(project, scope, pieces = [], exclude = []) {
+  const ids = inScope(project.nodes, scope, exclude);
+  const nodes = project.nodes.filter((n) => ids.has(n.id));
+  const grades = gradeAverage(nodes, pieces);
+  const keys = specHolders(project).filter(([id]) => ids.has(id)).flatMap(([id, h]) => h.specs.map((s) => `${id}/${s.id}`));
+  const passing = passingSpecs(project);
+  const specs = keys.length ? keys.filter((k) => passing.has(k)).length / keys.length : null;
+  return { score: round(specs === null ? grades : 0.5 * grades + 0.5 * specs), grades: round(grades), specs, nodes: nodes.length };
+}
+
+export function scoredPieces(project, scope = [], exclude = []) {
+  return [...inScope(project.nodes, scope, exclude)];
+}
+
+export function allChecksPass(before, after) {
+  const keys = (p) => specHolders(p).flatMap(([id, h]) => h.specs.map((s) => `${id}/${s.id}`));
+  const passing = passingSpecs(after);
+  return [...new Set([...keys(before), ...keys(after)])].every((k) => passing.has(k));
+}
+
+export function acceptsTrial(before, after, removed = []) {
+  return after > before + (removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
+}
+
+export function improvementTargets(project, scope = [], exclude = []) {
+  const ids = inScope(project.nodes, scope, exclude);
   const leaves = project.nodes
-    .filter((n) => isLeaf(project.nodes, n))
+    .filter((n) => ids.has(n.id) && isLeaf(project.nodes, n))
     .sort((a, b) => (GRADE_RANK[a.status] ?? 0) - (GRADE_RANK[b.status] ?? 0) || b.impact * b.uncertainty - a.impact * a.uncertainty);
-  return [ROOT_ID, ...leaves.map((n) => n.id)];
+  return [...(exclude.includes(ROOT_ID) ? [] : [ROOT_ID]), ...leaves.map((n) => n.id)];
 }
 
 function nodeFields(raw, id, parentId) {
@@ -112,6 +158,14 @@ export class ProjectImprover {
     return this.active.has(id);
   }
 
+  scopeOf(id) {
+    return this.active.get(id)?.scope ?? [];
+  }
+
+  excludeOf(id) {
+    return this.active.get(id)?.exclude ?? [];
+  }
+
   remainingHours(id) {
     const state = this.active.get(id);
     return state ? Math.max(0, (state.deadline - this.now()) / 3600000) : 0;
@@ -132,7 +186,7 @@ export class ProjectImprover {
       state.stopped = true;
       state.shutdown = true;
       if (state.before) await this.restore(id, state.before).catch(() => {});
-      await this.saveHandoff(id, 'app stopped', { loopHoursLeft: Math.max(0, (state.deadline - this.now()) / 3600000) });
+      await this.saveHandoff(id, 'app stopped', { loopHoursLeft: Math.max(0, (state.deadline - this.now()) / 3600000), loopScope: state.scope ?? [], loopExclude: state.exclude ?? [] });
     }
   }
 
@@ -145,10 +199,12 @@ export class ProjectImprover {
     return state.stopped || this.all?.stopped;
   }
 
-  start(id, { hours = 1 } = {}) {
+  start(id, { hours = 1, nodes = [], exclude = [] } = {}) {
     if (this.active.has(id)) throw new Error('the self-improving loop is already running for this project');
     const h = Math.min(MAX_HOURS, Math.max(0.05, Number(hours) || 1));
-    const state = { stopped: false, deadline: this.now() + h * 3600 * 1000, hours: h };
+    const scope = (Array.isArray(nodes) ? nodes : []).map(String).filter((n) => n && n !== ROOT_ID).slice(0, 60);
+    const skipped = scope.length ? (Array.isArray(exclude) ? exclude : []).map(String).filter((n) => n && !scope.includes(n)).slice(0, 120) : [];
+    const state = { stopped: false, deadline: this.now() + h * 3600 * 1000, hours: h, scope, exclude: skipped };
     this.active.set(id, state);
     void (async () => {
       this.engine.quiet.add(id);
@@ -229,6 +285,7 @@ export class ProjectImprover {
   async record(id, patch, trial) {
     const project = await this.engine.load(id);
     const improve = { trials: [], ...(project.improve ?? {}), ...patch };
+    if (trial) trial = { ...trial, scoreDelta: round(trial.score - trial.before) };
     if (trial) improve.trials = [...improve.trials, trial].slice(-MAX_TRIALS_KEPT);
     project.improve = improve;
     if ('active' in patch) appendAppMessage(project, loopSummary(improve, !patch.active));
@@ -245,15 +302,24 @@ export class ProjectImprover {
 
   async loop(id, state) {
     let project = await this.engine.load(id);
-    await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, error: null });
+    const scope = state.scope ?? [];
+    const exclude = state.exclude ?? [];
+    state.pieces = new Set();
+    state.measure = (p) => (scope.length ? scopeScore(p, scope, [...state.pieces], exclude) : projectScore(p, [...state.pieces]));
+    await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, scope, exclude, error: null });
     if (project.phase !== 'done') project = await this.engine.run(id);
-    let best = projectScore(project);
+    state.pieces = new Set(scoredPieces(project, scope, exclude));
+    let best = state.measure(project);
     await this.record(id, { baseline: best.score, best: best.score });
     let quiet = 0;
     while (this.live(state)) {
       let improved = false;
-      for (const nodeId of improvementTargets(await this.engine.load(id))) {
-        if (!this.live(state)) break;
+      const tried = new Set();
+      while (this.live(state)) {
+        const current = await this.engine.load(id);
+        const nodeId = improvementTargets(current, scope, exclude).find((t) => !tried.has(t));
+        if (!nodeId) break;
+        tried.add(nodeId);
         const outcome = await this.trial(id, nodeId, best, state);
         if (outcome.kept) {
           best = outcome.score;
@@ -283,6 +349,8 @@ export class ProjectImprover {
       const project = structuredClone(before);
       if (this.stopped(state)) return { kept: false };
       const touched = applyVariant(project, nodeId, variant);
+      const removed = touched.filter((t) => !project.nodes.some((n) => n.id === t));
+      if (removed.length) base.removedPieceId = removed.join(', ');
       if (!touched.length) {
         await this.record(id, {}, { ...base, change, outcome: 'no-change', score: best.score });
         return { kept: false };
@@ -302,6 +370,12 @@ export class ProjectImprover {
           await this.record(id, {}, { ...base, change, outcome: 'reverted-piece', score: best.score, detail: `${nodeId} fell from ${oldNode.status} to ${node.status}` });
           return { kept: false };
         }
+        const broken = regressions(before, project).filter((k) => k.startsWith(`${nodeId}/`));
+        if (broken.length) {
+          await this.restore(id, before);
+          await this.record(id, {}, { ...base, change, outcome: 'reverted-regression', score: best.score, detail: `breaks passing check(s): ${broken.join(', ')}` });
+          return { kept: false };
+        }
       }
       if (this.stopped(state)) {
         await this.restore(id, before);
@@ -316,8 +390,20 @@ export class ProjectImprover {
         await this.record(id, {}, { ...base, change, outcome: 'reverted-stopped', score: best.score });
         return { kept: false };
       }
-      const score = projectScore(after);
-      if (score.score > best.score + MIN_GAIN) {
+      const broken = regressions(before, after);
+      if (broken.length) {
+        await this.restore(id, before);
+        await this.record(id, {}, { ...base, change, outcome: 'reverted-regression', score: best.score, detail: `breaks passing check(s): ${broken.join(', ')}` });
+        return { kept: false };
+      }
+      if (removed.length && !allChecksPass(before, after)) {
+        await this.restore(id, before);
+        await this.record(id, {}, { ...base, change, outcome: 'reverted-regression', score: best.score, detail: `removing ${base.removedPieceId} needs every regression check to pass` });
+        return { kept: false };
+      }
+      const score = (state.measure ?? projectScore)(after);
+      if (acceptsTrial(best.score, score.score, removed)) {
+        for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
         await this.record(id, { best: score.score }, { ...base, change, outcome: 'kept', score: score.score });
         return { kept: true, score };
       }

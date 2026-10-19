@@ -8,6 +8,8 @@ import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPr
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, listingSpec, normalizeTree, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding } from './verify.mjs';
+import { evaluateAll } from './specs.mjs';
+import { provisionalVerdict, resultStatus } from './gaps.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
@@ -71,6 +73,13 @@ function keyNumbers(finding) {
   return (finding?.claims ?? []).filter((c) => /\d/.test(c.text)).slice(0, 3).map((c) => c.text).join('; ');
 }
 
+export function normalizeEstimate(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const field = (v) => String(v ?? '').trim().slice(0, 120);
+  const e = { value: field(raw.value), unit: field(raw.unit), low: field(raw.low), high: field(raw.high), basis: field(raw.basis) };
+  return e.value ? e : null;
+}
+
 export class ResearchEngine {
   constructor({ router, search, store, demo = false, rates = null, onEvent = () => {}, markets = null, marketHistory = null, onStop = async () => {} }) {
     this.onStop = onStop;
@@ -97,7 +106,7 @@ export class ResearchEngine {
   emit(project, type, message, extra = {}) {
     const event = { ts: new Date().toISOString(), type, message, ...extra };
     project.log = [...(project.log ?? []), event].slice(-LOG_LIMIT);
-    this.onEvent(project.id, event);
+    this.onEvent(project.id, event, project);
     for (const listener of this.listeners.get(project.id) ?? []) listener(event, project);
   }
 
@@ -139,25 +148,25 @@ export class ResearchEngine {
   }
 
   dataSources(project, node = null) {
-    return [...(project.data ? [project.data] : []), ...(node?.attachments ?? []).map((a) => ({ id: a.id, kind: 'data', title: `your file: ${a.name}`, url: '', domain: 'user-file', snippet: a.text.slice(0, 300), text: a.text, provider: 'upload' }))];
+    return [...(project.data ? [project.data] : []), ...(node?.attachments ?? []).map((a) => ({ id: a.id, kind: 'data', title: `your file: ${a.name}${a.readBy ? ` (read by ${a.readBy})` : ''}`, url: '', domain: 'user-file', snippet: a.text.slice(0, 300), text: a.text, provider: 'upload' }))];
   }
 
-  async addAttachment(id, nodeId, { name = '', text = '' } = {}) {
+  async addAttachment(id, nodeId, { name = '', text = '', readBy = '' } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('stop the run before adding files');
     const project = await this.load(id);
     const node = project.nodes.find((n) => n.id === nodeId);
     if (!node) throw new NotFoundError(`node ${nodeId} not found`);
     const fileName = String(name).trim().slice(0, 120) || 'file.txt';
-    if (!ATTACHMENT_TYPES.test(fileName)) throw new Error('attach a text file: CSV, TSV, TXT, MD, JSON or HTML (for a PDF, export or paste its text first)');
+    if (!readBy && !ATTACHMENT_TYPES.test(fileName)) throw new Error('attach a text file: CSV, TSV, TXT, MD, JSON or HTML (for a PDF, export or paste its text first)');
     const raw = String(text);
     if (!raw.trim()) throw new Error('the file is empty');
     node.attachments = node.attachments ?? [];
     if (node.attachments.length >= MAX_ATTACHMENTS) throw new Error(`a piece can hold ${MAX_ATTACHMENTS} files; remove one first`);
-    const isTable = /\.(csv|tsv)$/i.test(fileName);
-    const body = isTable ? describeProfile(profileTable(parseCsv(raw)), fileName) : /\.html?$/i.test(fileName) ? htmlToText(raw) : raw;
+    const isTable = !readBy && /\.(csv|tsv)$/i.test(fileName);
+    const body = readBy ? raw : isTable ? describeProfile(profileTable(parseCsv(raw)), fileName) : /\.html?$/i.test(fileName) ? htmlToText(raw) : raw;
     let n = 1;
     while (node.attachments.some((a) => a.id === `U${n}`)) n++;
-    node.attachments.push({ id: `U${n}`, name: fileName, size: raw.length, kind: isTable ? 'table' : 'text', text: body.slice(0, ATTACHMENT_TEXT_LIMIT), truncated: body.length > ATTACHMENT_TEXT_LIMIT, addedAt: new Date().toISOString() });
+    node.attachments.push({ id: `U${n}`, name: fileName, size: raw.length, kind: readBy ? 'read' : isTable ? 'table' : 'text', ...(readBy ? { readBy } : {}), text: body.slice(0, ATTACHMENT_TEXT_LIMIT), truncated: body.length > ATTACHMENT_TEXT_LIMIT, addedAt: new Date().toISOString() });
     this.resetWithAncestors(project, nodeId);
     this.emit(project, 'edit', `${nodeId}: file "${fileName}" attached as source U${n}`, { nodeId });
     return this.store.save(project);
@@ -340,11 +349,22 @@ export class ResearchEngine {
       openQuestions: strings(r.openQuestions, 10),
       nextSteps: (Array.isArray(r.nextSteps) ? r.nextSteps : []).slice(0, 10),
       evidenceQuality: { ...counts, weak: project.nodes.filter((n) => ['weak', 'unsupported', 'failed'].includes(n.status)).map((n) => n.id) },
+      bestEstimate: normalizeEstimate(r.bestEstimate),
       model: `${reply.provider}/${reply.model}`,
       generatedAt: new Date().toISOString(),
     };
+    this.planActions(project);
     await this.checkAcceptance(project);
     this.emit(project, 'report', `decision memo ready: ${project.report.verdict}`);
+  }
+
+  planActions(project) {
+    if (!project.report) return null;
+    const status = resultStatus(project);
+    project.report.verdict = provisionalVerdict(project.report.verdict, status).slice(0, 400);
+    project.report.status = { provisional: status.provisional, coverage: status.coverage, confidence: status.confidence, blocking: status.blocking, counts: status.counts };
+    project.report.actions = status.plan.slice(0, 40);
+    return status;
   }
 
   async checkAcceptance(project) {
@@ -354,6 +374,14 @@ export class ResearchEngine {
     const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
+  }
+
+  checkSpecs(project) {
+    const results = evaluateAll(project);
+    if (!results.length) return results;
+    const failed = results.filter((r) => !r.passed);
+    this.emit(project, 'checks', `regression checks: ${results.length - failed.length}/${results.length} pass${failed.length ? ` · failing: ${failed.map((r) => `${r.nodeId}/${r.specId}${r.regressed ? ' (regressed)' : ''}`).join(', ')}` : ''}`);
+    return results;
   }
 
   async run(id, { hints = {} } = {}) {
@@ -392,6 +420,7 @@ export class ResearchEngine {
         await this.store.save(project);
       }
       await this.synthesize(project);
+      this.checkSpecs(project);
       project.phase = 'done';
       this.running.delete(id);
       this.emit(project, 'phase', 'done');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { App, ProviderFactory, buildSearch, routeOrderFrom } from '../src/app.mjs';
+import { App, ProviderFactory, appNoteFor, buildSearch, routeOrderFrom } from '../src/app.mjs';
 import { fakeFetch, jsonResponse } from './helpers/fake-fetch';
 
 describe('App composition', () => {
@@ -9,7 +9,7 @@ describe('App composition', () => {
     const providers = await factory.buildAll();
     expect(providers.map((p) => p.id)).toEqual(['gemini', 'groq']);
     expect(providers[0].state).toBe('not-configured');
-    expect(providers[1].selected).toEqual({ fast: 'llama-3.1-8b-instant', deep: 'big' });
+    expect(providers[1].selected).toEqual({ fast: 'llama-3.1-8b-instant', deep: 'big', vision: null });
   });
 
   it('accepts a session key without writing it anywhere and falls back to demo only when asked', async () => {
@@ -82,3 +82,31 @@ describe('App save and resume', () => {
   });
 });
 
+describe('App reports in the app conversation', () => {
+  it('turns research events into short app notes and ignores the rest', () => {
+    const project = { question: 'Cars DE to CZ?', nodes: [{ status: 'verified' }, { status: 'weak' }] };
+    expect(appNoteFor({ type: 'created', message: 'x' }, project)).toBe('New research: Cars DE to CZ?');
+    expect(appNoteFor({ type: 'phase', message: 'done' }, project)).toBe('Research finished — Cars DE to CZ? · 1/2 pieces pass');
+    expect(appNoteFor({ type: 'improve-state', message: 'self-improving loop ended: time limit reached' }, project)).toBe('Self-improving loop ended: time limit reached — Cars DE to CZ?');
+    expect(appNoteFor({ type: 'search', message: 'x' }, project)).toBeNull();
+  });
+
+  it('marks researches that were running when the app stopped as cancelled, so none look busy forever', async () => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { ScriptedProvider } = await import('../src/llm/scripted-provider.mjs');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-stale-'));
+    const app = new App({ env: {}, dataDir: dir, providers: [new ScriptedProvider()], search: { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ backends: [] }) } });
+    const project = await app.engine.createProject({ question: 'Which kiosk spot in Brno pays back fastest?' });
+    project.phase = 'researching';
+    await app.store.save(project);
+    expect(await app.settleStale()).toEqual([project.id]);
+    expect((await app.engine.load(project.id)).phase).toBe('cancelled');
+    expect(await app.settleStale()).toEqual([]);
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await app.appChat.thread()).map((m: { content: string }) => m.content)).toContain('New research: Which kiosk spot in Brno pays back fastest?');
+    await app.logs.queue;
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});

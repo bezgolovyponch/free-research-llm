@@ -21,4 +21,15 @@ describe('AccessGate', () => {
     expect(gate.decide(req('10.0.0.2', { cookie: `a=b; frl_token=${encodeURIComponent(token)}` }), url())).toEqual({ allowed: true, setCookie: null });
     expect(gate.decide(req('10.0.0.2', { authorization: `Bearer ${token}` }), url()).allowed).toBe(true);
   });
+
+  it('does not trust requests a local proxy forwards from the internet (Tailscale Funnel, tunnels)', () => {
+    const token = newAccessToken();
+    const gate = new AccessGate({ token });
+    expect(gate.decide(req('127.0.0.1', { 'x-forwarded-for': '203.0.113.7' }), url()).allowed).toBe(false);
+    expect(gate.decide(req('127.0.0.1', { 'tailscale-funnel-request': '?1' }), url()).allowed).toBe(false);
+    expect(gate.decide(req('127.0.0.1', { 'x-forwarded-for': '203.0.113.7' }), url(`?token=${token}`)).allowed).toBe(true);
+    const cloud = new AccessGate({ token, behindProxy: true });
+    expect(cloud.decide(req('127.0.0.1'), url()).allowed).toBe(false);
+    expect(cloud.decide(req('127.0.0.1', { authorization: `Bearer ${token}` }), url()).allowed).toBe(true);
+  });
 });

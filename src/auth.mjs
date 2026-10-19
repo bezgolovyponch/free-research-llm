@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const COOKIE = 'frl_token';
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const PROXY_HEADERS = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'forwarded', 'x-real-ip', 'cf-connecting-ip', 'tailscale-funnel-request', 'tailscale-user-login'];
 
 function cookieValue(header, name) {
   for (const part of String(header ?? '').split(';')) {
@@ -22,12 +23,17 @@ export function newAccessToken() {
 }
 
 export class AccessGate {
-  constructor({ token = '' } = {}) {
+  constructor({ token = '', behindProxy = false } = {}) {
     this.token = token;
+    this.behindProxy = behindProxy;
+  }
+
+  proxied(req) {
+    return PROXY_HEADERS.some((h) => req.headers?.[h] !== undefined);
   }
 
   isLoopback(req) {
-    return LOOPBACK.has(req.socket?.remoteAddress ?? '');
+    return !this.behindProxy && !this.proxied(req) && LOOPBACK.has(req.socket?.remoteAddress ?? '');
   }
 
   presented(req, url) {

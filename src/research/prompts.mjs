@@ -13,6 +13,8 @@ export const TASK_MARKERS = {
   chat: 'TASK=NODE_CHAT',
   suggest: 'TASK=SUGGEST_SUBISSUES',
   appChat: 'TASK=APP_CHAT',
+  resultsChat: 'TASK=RESULTS_CHAT',
+  readFile: 'TASK=READ_FILE',
 };
 
 function constraintsText(constraints = {}) {
@@ -185,9 +187,9 @@ DECISION RULE: ${template.decisionRule}
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
 ${lines.join('\n')}
 
-Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. If the drivers that decide the success criteria are weak, unsupported or answered "unknown", the verdict MUST be "INSUFFICIENT DATA — <the missing inputs>", not NO-GO: missing evidence is not evidence against. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
+Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a verdict (GO, NO-GO or GO-IF <condition>) and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:
-{"verdict":"GO | NO-GO | GO-IF <condition> | INSUFFICIENT DATA — <what is missing> (one line)","confidence":"low|medium|high","summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
+{"verdict":"GO | NO-GO | GO-IF <condition> (one line, always a decision)","confidence":"low|medium|high","bestEstimate":{"value":"the computed answer","unit":"","low":"","high":"","basis":"node ids it rests on"},"summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
 Drivers: ${drivers.map((d) => d.id).join(', ')}.`,
     },
   ];
@@ -199,6 +201,13 @@ function acceptanceBlock(result) {
   const bad = result.items.filter((i) => !i.live || i.inRange === false).slice(0, 5).map((i) => `- ${i.url} live=${i.live} inRange=${i.inRange}`).join('\n');
   return `${checks}${bad ? `\nfailing items:\n${bad}` : ''}`;
 }
+
+function specsText(specs = []) {
+  if (!specs.length) return 'none';
+  return specs.map((s) => `${s.id} want "${s.desired}"${s.last ? ` — ${s.last.passed ? 'passing' : `failing: ${s.last.checks.filter((c) => !c.passed).map((c) => c.label).join(', ')}`}` : ''}`).join(' | ');
+}
+
+const SPEC_RULE = `"spec": machine checks taken ONLY from the DESIRED OUTPUT: {"mustMention":[words the answer must contain],"needsNumber":true|false,"valueRange":[min,max] or null,"unit":"","itemCount":number of linked items wanted or null,"minGrade":"supported"|"verified"}. Code stores it as a regression test for this piece and re-checks it after every run and every loop change.`;
 
 export function variantPrompt({ project, node, score, trials }) {
   const isRoot = node.id === 'Q';
@@ -224,6 +233,7 @@ instructions: ${node.instructions || 'none'}
 answer: ${node.finding?.answer ?? 'none'}
 failed checks: ${(node.verification?.failures ?? []).join(' | ') || 'none'}
 reviewer: ${(node.critique?.issues ?? []).join(' | ') || 'none'}
+desired outputs the user set (regression checks; a change that breaks a passing one is reverted): ${specsText(node.specs)}
 sources it found:
 ${sources}
 
@@ -255,8 +265,14 @@ children:
 ${children || 'none'}`;
 }
 
-export function chatPrompt({ project, node, thread, message }) {
-  const history = thread.slice(-10).map((m) => `${m.role === 'app' ? 'APP REPORT' : m.role.toUpperCase()}: ${String(m.content).slice(0, 1500)}`).join('\n');
+function historyText(thread, limit = 1500, { auditedOnly = false } = {}) {
+  return thread.filter((m) => !auditedOnly || m.role !== 'assistant' || m.audit).slice(-10).map((m) => `${m.role === 'app' ? 'APP REPORT' : m.role.toUpperCase()}: ${String(m.content).slice(0, limit)}${(m.files ?? []).length ? ` [files: ${m.files.map((f) => f.name).join(', ')}]` : ''}`).join('\n');
+}
+
+const SCOPE_RULE = 'If the message is about the app itself rather than this research (installing, keys, devices, links, Windows, cloud, terminal, git, updates, how the app works), return {"scope":"app","reply":"","actions":[]} and nothing else: the App chat answers it.';
+const AUDIT_RULES = 'Never write a URL that is not written above. Never write keys or tokens. Never say a change happened: changes run only from the actions you return, and the app reports them.';
+
+export function chatPrompt({ project, node, thread, message, desired = '', files = '', feedback = '' }) {
   const id = node?.id ?? 'Q';
   return [
     { role: 'system', content: SYSTEM },
@@ -268,11 +284,13 @@ You are the research assistant for ONE piece of a research tree. Talk with the u
 ${nodeSummary(project, node)}
 
 CONVERSATION SO FAR:
-${history || 'none'}
+${historyText(thread) || 'none'}
 
-USER: ${message}
-
-Allowed actions (use only when the user asks for a change or a re-check):
+${files}USER REQUEST (what they want): ${message}
+DESIRED OUTPUT (the result they want to achieve): ${desired || 'not given'}
+${specsText(id === 'Q' ? project.specs : node?.specs) !== 'none' ? `EARLIER DESIRED OUTPUTS ON THIS ${id === 'Q' ? 'RESEARCH' : 'PIECE'}: ${specsText(id === 'Q' ? project.specs : node?.specs)}
+` : ''}
+Allowed actions (use only when the user asks for a change or a re-check; choose the ones that move the answer toward the DESIRED OUTPUT):
 - {"type":"edit","nodeId":"${id === 'Q' ? 'D1' : id}","fields":{"question":"","searchQueries":[""],"sourceUrls":[""],"listings":{"countries":["DE"],"make":"","model":"","minEur":0,"maxEur":0},"instructions":"","method":"lookup|calculation|comparison|estimate|data"}}
 - {"type":"add","parentId":"${id}","question":"","searchQueries":[""],"sourceUrls":[""],"listings":null,"method":"lookup"}
 ("listings" makes code read real car listings: DE kleinanzeigen.de, CZ bazos.cz + aaaauto.cz)
@@ -280,7 +298,52 @@ Allowed actions (use only when the user asks for a change or a re-check):
 - {"type":"expand","nodeId":"","hint":""}  (break into sub-issues)
 - {"type":"suggest","nodeId":"${id}"}  (research a suggestion list of sub-issues)
 - {"type":"rerun","nodeId":"","hint":""}  (re-research the piece; use last)
-JSON shape: {"reply":"short answer to the user","actions":[]}`,
+RULES: ${AUDIT_RULES} ${SCOPE_RULE}
+${SPEC_RULE}
+JSON shape: {"reply":"short answer to the user","actions":[],"spec":{}}${feedback ? `\n\n${feedback}` : ''}`,
+    },
+  ];
+}
+
+export function resultsSummary(project) {
+  const ar = project.acceptanceResult;
+  const good = project.nodes.filter((n) => ['verified', 'supported'].includes(n.status));
+  const weak = project.nodes.filter((n) => !['verified', 'supported'].includes(n.status));
+  const r = project.report;
+  return `ROOT QUESTION: ${project.question}
+EXPECTED RESULT: ${project.acceptance?.expected || 'a decision memo'}
+EXPECTED-RESULT CHECKS: ${ar ? `${Math.round(ar.score * 100)}% met — ${ar.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}` : 'not run'}
+DELIVERED ITEMS (links seen on fetched pages):
+${ar?.items?.length ? ar.items.slice(0, 15).map((i) => `- ${i.title || i.url} ${i.value ?? ''} ${i.unit ?? ''} <${i.url}>${i.live ? ' live' : ' not live'}${i.inRange ? ' in range' : ''}`).join('\n') : 'none'}
+MEMO VERDICT: ${r?.verdict ?? 'no memo yet'}${r ? ` (${r.confidence} confidence) — ${r.summary}` : ''}
+KEY NUMBERS: ${r?.keyNumbers?.map((k) => `${k.label} ${k.value} ${k.unit ?? ''} [${k.nodeId}]`).join(' · ') || 'none'}
+PIECES THAT PASS THE CHECKS:
+${good.map((n) => `${n.id} [${n.status}] ${n.title}: ${String(n.finding?.answer ?? '').slice(0, 300)}`).join('\n') || 'none'}
+STILL WEAK, AND WHY:
+${weak.map((n) => `${n.id} [${n.status}] ${n.title}: ${(n.verification?.failures ?? n.finding?.gaps ?? []).slice(0, 2).join('; ')}`).join('\n') || 'none'}`;
+}
+
+export function resultsChatPrompt({ project, thread, message, files = '', feedback = '' }) {
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.resultsChat}
+You explain the RESULTS of one research to the user: what was delivered, how sure it is, where the expected-result checks and the memo disagree, and what to do next. Use only the results below and the user's files. You cannot change findings or grades. When the user wants a weak piece fixed, return an action.
+
+${resultsSummary(project)}
+
+CONVERSATION SO FAR:
+${historyText(thread) || 'none'}
+
+${files}USER: ${message}
+
+Allowed actions:
+- {"type":"rerun","nodeId":"","hint":""}  (re-research a piece with a hint)
+- {"type":"expand","nodeId":"","hint":""}  (split a weak piece)
+- {"type":"suggest","nodeId":""}
+RULES: ${AUDIT_RULES} Say which piece id each statement comes from. ${SCOPE_RULE}
+JSON shape: {"reply":"short answer to the user","actions":[]}${feedback ? `\n\n${feedback}` : ''}`,
     },
   ];
 }
@@ -308,34 +371,57 @@ JSON shape: {"suggestions":[{"title":"","question":"","why":"","method":"lookup|
   ];
 }
 
-export function appChatPrompt({ projects, status, thread, message }) {
+export function appChatPrompt({ projects, status, facts = {}, docs = [], commands = [], thread, message, files = [], feedback = '' }) {
   const list = projects.slice(0, 25).map((p) => `${p.id} | ${p.phase} | ${p.good}/${p.nodes} ok | expected ${p.expectedScore === null || p.expectedScore === undefined ? 'n/a' : `${Math.round(p.expectedScore * 100)}%`} | ${p.question}`).join('\n') || 'none';
-  const history = thread.slice(-10).map((m) => `${m.role === 'app' ? 'APP REPORT' : m.role.toUpperCase()}: ${String(m.content).slice(0, 1200)}`).join('\n');
+  const fileText = files.length ? `FILES THE USER ATTACHED:\n${files.map((f, i) => `[F${i + 1}] ${f.name} (${f.kind}${f.model ? `, read by ${f.model}` : ''}):\n${f.text}`).join('\n\n')}\n\n` : '';
   return [
-    { role: 'system', content: SYSTEM },
+    { role: 'system', content: 'You are the assistant of a local research app. You answer only from the facts and documents you are given, never invent links, commands, keys or capabilities, and reply with a single JSON object only.' },
     {
       role: 'user',
       content: `${TASK_MARKERS.appChat}
-You are the assistant for the whole research application. You see every research, the connected free models and search engines. Answer questions about them and, when asked, start or steer work with actions. You never write findings: research runs do, and machine checks grade them.
+You are the App assistant of Free Research LLM, running on the user's computer. You answer questions about the app itself (how it works, installing, keys, other devices, Windows, cloud, terminal, updates) and about all researches together. You never write findings: research runs do, and machine checks grade them.
+
+FACTS (checked by code just now):
+- computer: ${facts.platform ?? 'unknown'} · app address: ${facts.local ?? 'http://127.0.0.1:4600'}
+- remote access: ${facts.remote ? 'ON (other devices need the token link; never write the token)' : 'OFF (only this computer can open it)'}
+- links for other devices (token left out on purpose): ${(facts.links ?? []).map((l) => `${l.label}: ${l.url}`).join(' · ') || 'none'}
+- terminal in the app: ${facts.terminal ?? 'unknown'}
+- models ready: ${status.models.join(', ') || 'none'} · search: ${status.search.join(', ') || 'none'} · loops running: ${status.improving.join(', ') || 'none'}
+- app change tickets: ${(facts.changes ?? []).map((t) => `${t.id} ${t.state}${t.result ? ` (${t.result.passed ? 'gate passed' : 'gate failed'})` : ''}: ${t.title}`).join(' · ') || 'none yet'}
 
 RESEARCHES (id | phase | pieces passing | expected result met | question):
 ${list}
 
-MODELS READY: ${status.models.join(', ') || 'none'}
-SEARCH: ${status.search.join(', ') || 'none'}
-LOOPS RUNNING: ${status.improving.join(', ') || 'none'}
+TERMINAL COMMANDS (the user runs these in the app's Terminal; propose one by id):
+${commands.map((c) => `- ${c.id}: ${c.label} — ${c.what} (runs: ${c.run})`).join('\n')}
+
+DOCUMENTS (excerpts from the app's own guides; name the file when you use one):
+${docs.map((d) => `--- ${d.file} › ${d.heading}\n${d.text}`).join('\n') || 'none matched'}
 
 CONVERSATION SO FAR:
-${history || 'none'}
+${historyText(thread, 1000, { auditedOnly: true }) || 'none'}
 
-USER: ${message}
+${fileText}USER: ${message}
 
-Allowed actions (use ids from the list above):
-- {"type":"create","question":"","expected":""}  (new research; its tree is built for review)
-- {"type":"improve","projectId":"","hours":2}  (start the self-improving loop)
-- {"type":"stop","projectId":""}  (stop a loop or run)
-- {"type":"open","projectId":""}  (show a research to the user)
-JSON shape: {"reply":"short answer to the user","actions":[]}`,
+RULES:
+1. Answer only from FACTS, DOCUMENTS, RESEARCHES and FILES. If they do not cover it, say so plainly; for changes to the app itself propose a "change" ticket.
+2. Never write a URL that is not written above. Never write keys, tokens or passwords.
+3. You run nothing yourself. Direct actions (open, stop, links) run when you return them. Everything else is a proposal shown as a button: tell the user to press it, never say it is done.
+4. Propose a new research only when the user asks to research a question. Questions about the app itself are never researches.
+4b. You are where the user asks for CHANGES TO THE APP ITSELF (a feature to add, something to change or improve, a bug, tests or checks). For those, propose ONE "change" ticket: restate the request precisely, write the desired output as something a person can check in the running app, and list the tests or checks to add. The app's free-model coder implements the ticket in a sandbox copy, and it reaches the app only when the quality gate passes. Never claim you changed the app.
+5. Commands: only the TERMINAL COMMANDS above (propose by id; in your text call them by their button label, e.g. **Links for other devices**) or commands written in DOCUMENTS, copied exactly. Never describe screens or dialogs that FACTS and DOCUMENTS do not describe.
+6. Be concrete: numbered steps, exact button names and commands.
+
+Actions:
+- {"type":"open","projectId":""}  (direct: open a research for the user)
+- {"type":"stop","projectId":""}  (direct: stop a loop or run)
+- {"type":"links"}  (direct: show the live links for other devices, with the token, on this screen only)
+- {"type":"command","id":""}  (proposal: run a terminal command)
+- {"type":"create","question":"","expected":""}  (proposal: new research)
+- {"type":"improve","projectId":"","hours":2}  (proposal: start the improve loop)
+- {"type":"delete","projectId":""}  (proposal: delete a research)
+- {"type":"change","title":"","request":"","desired":"","tests":[""],"area":""}  (proposal: a change to the app itself, implemented by the free-model coder and decided by the quality gate)
+JSON shape: {"reply":"answer to the user","actions":[]}${feedback ? `\n\n${feedback}` : ''}`,
     },
   ];
 }

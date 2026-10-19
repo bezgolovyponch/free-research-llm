@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROVIDER_PRESETS, ROUTE_ORDER, SEARCH_KEYS } from './llm/presets.mjs';
@@ -17,6 +18,14 @@ import { appendAppMessage } from './research/notify.mjs';
 import { MarketplaceService } from './search/marketplaces.mjs';
 import { RobotsPolicy } from './search/robots.mjs';
 import { ProjectStore } from './store.mjs';
+import { DocsIndex } from './chat/docs.mjs';
+import { MediaReader } from './chat/media.mjs';
+import { TerminalHub } from './terminal/hub.mjs';
+import { ChangeBook } from './changes.mjs';
+import { FreeCoder } from './coder/free-coder.mjs';
+import { KeyChecker } from './keycheck.mjs';
+import { LinkVerifier, RouterAdmin } from './llm/admin.mjs';
+import { accessLinks, lanAddresses } from './service.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -86,6 +95,18 @@ export function buildSearch({ env, fetchImpl }) {
 }
 
 const HISTORY_EVENT = /^(created|report|acceptance|improve-state|error):|^phase:(done|stopped|tree ready)/;
+const RUNNING_PHASES = new Set(['decomposing', 'researching', 'synthesizing']);
+const PLATFORM_NAMES = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
+
+export function appNoteFor(event, project) {
+  const q = String(project?.question ?? event.projectId ?? '').slice(0, 110);
+  const tail = project ? ` · ${(project.nodes ?? []).filter((n) => ['verified', 'supported'].includes(n.status)).length}/${(project.nodes ?? []).length} pieces pass` : '';
+  if (event.type === 'created') return `New research: ${q}`;
+  if (event.type === 'improve-state' && /loop (started|ended)/.test(event.message)) return `${event.message[0].toUpperCase()}${event.message.slice(1)} — ${q}`;
+  if (event.type === 'phase' && event.message === 'done') return `Research finished — ${q}${tail}`;
+  if (event.type === 'error') return `Research error — ${q}: ${String(event.message).slice(0, 200)}`;
+  return null;
+}
 
 export class App {
   constructor({ env = process.env, fetchImpl = fetch, dataDir, logDir, providers, search, secrets = null } = {}) {
@@ -102,17 +123,41 @@ export class App {
     this.handoffs = new HandoffWriter({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'handoff') });
     const rates = new ExchangeRates({ fetchImpl });
     this.markets = env.FRL_MARKETPLACES === '0' ? null : new MarketplaceService({ fetchImpl, rates, robots: new RobotsPolicy({ fetchImpl }) });
-    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, markets: this.markets, marketHistory: new EventLog({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'market') }), onEvent: (projectId, event) => this.recordEvent(projectId, event), onStop: (project, options) => this.saveHandoff(project, options) });
+    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, markets: this.markets, marketHistory: new EventLog({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'market') }), onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
     this.improver = new ProjectImprover({ engine: this.engine });
     this.suggester = new SubIssueSuggester({ engine: this.engine });
-    this.chat = new NodeChat({ engine: this.engine, suggester: this.suggester, improver: this.improver });
+    this.port = Number(env.PORT || 4600);
+    this.remote = false;
+    this.media = new MediaReader({ router: this.router });
+    this.docs = new DocsIndex({ root: ROOT_DIR });
+    this.terminal = new TerminalHub({ cwd: ROOT_DIR, env, enabled: env.FRL_TERMINAL !== '0' });
+    this.routerAdmin = new RouterAdmin({
+      env,
+      secrets,
+      reload: () => this.reloadKeys(),
+      statuses: () => this.router.status(),
+      ledger: () => this.router.ledger,
+      applyOrder: () => {
+        this.router.routeOrder = routeOrderFrom(this.env);
+      },
+      checker: new KeyChecker({ fetchImpl }),
+      links: new LinkVerifier({ fetchImpl }),
+    });
+    this.changes = new ChangeBook({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'changes') });
+    this.coder = new FreeCoder({ router: this.router, root: ROOT_DIR, workDir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'work'), changes: this.changes, note: (m) => this.noteApp(m), restart: () => this.restartForCode(env) });
     this.appChat = new AppChat({
+      changes: this.changes,
+      coder: this.coder,
       engine: this.engine,
       improver: this.improver,
       router: this.router,
+      docs: this.docs,
+      media: this.media,
+      facts: () => this.facts(),
       file: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'chat', 'app-chat.json'),
       statusOf: () => ({ models: this.router.status().filter((p) => p.state === 'ready').map((p) => p.id), search: this.search.describe().backends, improving: [...this.improver.active.keys()] }),
     });
+    this.chat = new NodeChat({ engine: this.engine, suggester: this.suggester, improver: this.improver, appChat: this.appChat, media: this.media });
     this.fixedProviders = Boolean(providers);
   }
 
@@ -124,6 +169,7 @@ export class App {
   }
 
   async shutdown() {
+    this.terminal.closeAll();
     await this.improver.shutdown();
     for (const id of [...this.engine.running]) {
       if (this.improver.isActive(id)) continue;
@@ -144,11 +190,12 @@ export class App {
     for (const record of await this.handoffs.resumable()) {
       try {
         const project = await this.engine.load(record.projectId);
-        if (record.resume.loopHoursLeft > 0.05) this.improver.start(project.id, { hours: record.resume.loopHoursLeft });
+        if (record.resume.loopHoursLeft > 0.05) this.improver.start(project.id, { hours: record.resume.loopHoursLeft, nodes: record.resume.loopScope ?? [], exclude: record.resume.loopExclude ?? [] });
         else this.engine.start(project.id);
         await this.handoffs.clearResume(project.id);
         resumed.push(project.id);
         void this.logs.append('history', { projectId: project.id, type: 'session', message: record.resume.loopHoursLeft > 0.05 ? `loop resumed after restart (${record.resume.loopHoursLeft.toFixed(1)} h)` : 'research run resumed after restart' });
+        this.noteApp(`Resumed after restart: ${String(project.question).slice(0, 110)}`);
       } catch {
         continue;
       }
@@ -156,9 +203,54 @@ export class App {
     return resumed;
   }
 
-  recordEvent(projectId, event) {
+  async facts() {
+    return {
+      platform: PLATFORM_NAMES[process.platform] ?? process.platform,
+      local: `http://127.0.0.1:${this.port}`,
+      remote: this.remote,
+      links: this.remote ? accessLinks({ port: this.port, lan: lanAddresses(os.networkInterfaces()) }).slice(1) : [],
+      terminal: { full: 'on (real shell)', basic: 'on (basic shell: node-pty missing)', off: 'off (FRL_TERMINAL=0)' }[await this.terminal.mode()],
+    };
+  }
+
+  restartForCode(env) {
+    if (env.FRL_SUPERVISED !== '1' || !this.onRestart) return false;
+    setTimeout(() => this.onRestart(), 1500);
+    return true;
+  }
+
+  noteApp(content) {
+    void (async () => {
+      try {
+        await this.appChat.note(content);
+      } catch {
+        return;
+      }
+    })();
+  }
+
+  recordEvent(projectId, event, project = null) {
     void this.logs.append(`project-${projectId}`, event);
     if (HISTORY_EVENT.test(`${event.type}:${event.message}`)) void this.logs.append('history', { projectId, type: event.type, message: event.message });
+    const note = appNoteFor({ ...event, projectId }, project);
+    if (note) this.noteApp(note);
+  }
+
+  async settleStale() {
+    const settled = [];
+    for (const p of await this.store.list()) {
+      if (!RUNNING_PHASES.has(p.phase) || this.engine.running.has(p.id) || this.improver.isActive(p.id)) continue;
+      try {
+        const project = await this.engine.load(p.id);
+        project.phase = 'cancelled';
+        this.engine.emit(project, 'phase', 'cancelled (the app stopped while it ran; press Run to continue)');
+        await this.store.save(project);
+        settled.push(p.id);
+      } catch {
+        continue;
+      }
+    }
+    return settled;
   }
 
   async history() {
@@ -183,6 +275,7 @@ export class App {
     this.factory.env = this.env;
     await this.refreshProviders();
     void this.logs.append('history', { type: 'session', message: `keys reloaded${changed.length ? `: ${changed.join(', ')}` : ' (no change)'} · search: ${this.search.describe().backends.join(', ')}` });
+    this.noteApp(`Keys reloaded${changed.length ? `: ${changed.join(', ')}` : ' (no change)'} · models: ${this.router.status().filter((p) => p.state === 'ready').map((p) => p.id).join(', ') || 'none'} · search: ${this.search.describe().backends.join(', ')}`);
     return { changed, status: this.status() };
   }
 

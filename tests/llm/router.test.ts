@@ -80,6 +80,14 @@ describe('ModelRouter route order', () => {
     const router = new ModelRouter({ providers: [g, q], routeOrder: { fast: ['groq', 'gemini'], deep: ['gemini', 'groq'] } });
     await expect(router.complete({ messages: [], tier: 'fast' })).resolves.toMatchObject({ provider: 'groq' });
     await expect(router.complete({ messages: [], tier: 'deep' })).resolves.toMatchObject({ provider: 'gemini' });
-    expect(router.route()).toEqual({ fast: ['groq', 'gemini'], deep: ['gemini', 'groq'] });
+    expect(router.route()).toEqual({ fast: ['groq', 'gemini'], deep: ['gemini', 'groq'], vision: ['gemini', 'groq'] });
+  });
+
+  it('sends vision work only to providers that have a vision model', async () => {
+    const g = Object.assign(provider('gemini', ['seen']), { canServe: (tier: string) => tier !== 'vision' || true });
+    const q = Object.assign(provider('groq', ['{}']), { canServe: (tier: string) => tier !== 'vision' });
+    const router = new ModelRouter({ providers: [q, g] });
+    await expect(router.complete({ messages: [], tier: 'vision', json: false })).resolves.toMatchObject({ provider: 'gemini' });
+    expect(router.route().vision).toEqual(['gemini']);
   });
 });

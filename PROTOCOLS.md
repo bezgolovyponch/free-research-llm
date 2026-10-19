@@ -43,6 +43,10 @@ Tests: `tests/research/verify.test.ts`, `tests/research/acceptance.test.ts`.
 
 ## 3. Change protocol (chat, edits, suggestions)
 
+- Four chats with separate threads: piece, research, results, app ([CONCEPT.md](CONCEPT.md)). A message about the app itself sent to a research chat is answered by the App chat and not stored in the research (`NodeChat.send`, `scope: "app"`).
+- **The App chat cannot create, delete, loop or run anything by itself.** It may open a research, stop one, or show device links. A new research, a deletion, a loop and a terminal command are proposals that run only when you press Confirm or Run in Terminal (`validAppActions`, `AppChat.decide`). Test: `tests/appchat.test.ts`.
+- **Reply audit** on every chat reply: unknown links and key values are removed; unknown commands, placeholders and claimed-but-not-run actions are flagged; one revision, then a visible ⚠ mark (`ReplyAudit`). Test: `tests/chat/reply-audit.test.ts`.
+
 - The chat can only **edit, add, remove, expand, suggest, re-research** existing nodes. It cannot write answers, grades or sources. Unknown action types and unknown node ids are dropped by `validActions`.
 - Any change resets that node, its ancestors and every node that depends on it to *pending*, so nothing stale survives (`resetWithAncestors`).
 - Sub-issue suggestions are researched first: a search runs, the model proposes, and code marks each suggestion **quoted** (its quote is found in a cited page), **cited**, or **not grounded** (`gradeSuggestion`).
@@ -55,7 +59,18 @@ Tests: `tests/research/verify.test.ts`, `tests/research/acceptance.test.ts`.
 3. **Piece test**: the changed leaf is re-researched; if its grade drops, revert immediately.
 4. **Whole test**: the full model re-runs; keep only if the score rises by more than 0.001, otherwise revert to the exact previous project.
 5. Stop at the time limit or on Stop (checked before and after every step, so Stop takes effect within one model call). On a quota error: revert, pause up to 5 min, continue.
-Every trial is recorded with before/after score (`project.improve.trials`). Test: `tests/research/improve.test.ts`.
+6. **Scope:** the whole research, or only the pieces the user ticked (and their sub-pieces); with a scope, only those pieces are changed and scored (`inScope`, `scopeScore`).
+7. **Regression gate:** after the piece test and the whole test, every regression check that passed before must still pass, or the change is reverted (`regressions`, outcome `reverted-regression`).
+Every trial is recorded with before/after score (`project.improve.trials`). Tests: `tests/research/improve.test.ts`, `tests/research/specs.test.ts`.
+
+## 4b. Regression check protocol
+
+- Piece and Research chat messages carry a request and a desired output (both required). The model proposes machine checks from the desired output only; code normalizes them (`normalizeSpec`) and stores them on the piece or on Q (`addSpec`).
+- After every run, code evaluates every check against the piece's answer, claims, items, calculation and grade (Q: memo and delivered items) and marks passing, not met, or regressed (`evaluateAll`). Results appear in the piece report and in Gates & logs.
+
+## 4c. App change protocol
+
+- App changes are requested in the App chat and become tickets (`data/changes/C<n>.md`) only on the user's button (`ChangeBook`). The free-model coder (`FreeCoder`, `src/coder/`) implements a ticket in a sandbox copy, runs `npm run quality` there, retries with the failure up to 4 times, and copies the files into the app only on PASS, with a backup for Undo (`POST /api/changes/C<n>/run`, `/undo`). It cannot edit the gate, itself, auth, secrets, the terminal or `package.json`, and a change that lowers the test count fails before the gate runs. `--claude` hands a ticket to Claude Code instead. Tests: `tests/coder/*.test.ts`, `tests/changes.test.ts`.
 
 ## 5. Logging and audit protocol
 
@@ -77,13 +92,15 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 | secrets | no API key patterns in any tracked file (plus `gitleaks` when installed) |
 | noComments | no comments in source |
 | testsPresent | every logic module in `src/` has `tests/<same path>.test.ts` |
+| e2e | Playwright on iPhone 14 (WebKit) and Pixel 7 (Chromium): home, tree, piece chat, App assistant proposal + Confirm, Results tab + chat with a file, Terminal running a command |
 | tests | the full Vitest suite passes |
 
 ## 7. Keys and privacy protocol
 
-- Keys live only in the macOS Keychain (`keys.command`) or the shell environment; never in a file. The secrets gate enforces it.
-- The server binds to `127.0.0.1` only. SearXNG binds to `127.0.0.1:8888`.
-- Paid providers are off: `FRL_PAID_CALL_LIMIT` defaults to 0.
+- Keys live only in the system key store (macOS Keychain, Windows user environment, Linux secret-tool, or systemd encrypted credentials on a server) or the shell environment; never in a file. The secrets gate enforces it. `node src/frl.mjs keys …` reads and writes them on every system.
+- The server binds to `127.0.0.1` unless remote access is on (`node src/frl.mjs install` or `start --remote`); then every other device needs the access token. A request forwarded by a local proxy (Tailscale Funnel, tunnels: `X-Forwarded-*`, `Forwarded`, `Tailscale-*` headers) is never treated as this computer (`AccessGate.isLoopback`); `FRL_BEHIND_PROXY=1` distrusts loopback entirely. SearXNG binds to `127.0.0.1:8888`.
+- **Terminal:** a real shell for whoever passes the access gate. The WebSocket also requires the page's `Origin` to match the host, so another website cannot open it from your browser (`sameOrigin`). The shell does not get the access token in its environment. `FRL_TERMINAL=0` turns it off. Tests: `tests/terminal/socket.test.ts`, `tests/auth.test.ts`.
+- No paid provider is wired in.
 - Scraping reads public pages only; no logins, no anti-bot evasion. For sites that block readers, upload a CSV export.
 
 ## Credits

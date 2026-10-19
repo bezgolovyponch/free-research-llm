@@ -37,16 +37,17 @@ Grades: **verified** · **supported** · **weak** · **unsupported**. The grade 
 
 ## Quick start
 
-You need Node.js 20+. There are no runtime dependencies.
+You need Node.js 20+ on macOS, Windows or Linux. Runtime dependencies: `ws` and xterm.js for the in-app terminal, plus `node-pty` (optional) for a full shell.
 
 ```bash
 git clone https://github.com/bezgolovyponch/free-research-llm.git
 cd free-research-llm
-./keys.command                   # paste free keys once (see KEYS.md); stored in macOS Keychain
-npm start                        # → http://127.0.0.1:4600
+npm install
+node src/frl.mjs keys setup      # paste free keys once (see KEYS.md); stored in the system key store
+node src/frl.mjs start           # → http://127.0.0.1:4600
 ```
 
-On a Mac you can double-click `start.command` instead. To see the whole flow without any key, run `npm run demo`. It uses scripted answers and labels everything DEMO.
+Double-click `start.command` (macOS) or `start.cmd` (Windows) instead, if you prefer. Windows step by step: **[WINDOWS.md](WINDOWS.md)**. Always on in a free cloud server, open from any device: **[CLOUD.md](CLOUD.md)**. What the app is, its four chats and the reply audit: **[CONCEPT.md](CONCEPT.md)**. To see the whole flow without any key, run `npm run demo`. It uses scripted answers and labels everything DEMO.
 
 From the terminal you can use the same engine without the UI:
 
@@ -57,13 +58,13 @@ npm run ask -- "Which RAV4 specs clear €1,500 margin DE→PL?" --csv listings.
 
 Reports are written to `reports/<project>.md`.
 
-**[GUIDE.md](GUIDE.md)** has the exact step-by-step instructions. **[AUDIT.md](AUDIT.md)** explains what was wrong with the tour-business calibration (FREECC) and what changed.
+**[GUIDE.md](GUIDE.md)** has the exact step-by-step instructions. Anyone changing the app follows **[AUDIT-PROTOCOL.md](AUDIT-PROTOCOL.md)**.
 
 ## Keys and routing
 
-**[KEYS.md](KEYS.md)** lists which free keys to get (verified 2026-10-17), the exact clicks for each, and how the router uses them. Short version: get **Gemini + Groq + LangSearch + Tavily**, then double-click **`keys.command`** to save them in the macOS Keychain. Optional extras: Mistral, Cerebras, NVIDIA, Exa, OpenRouter, SambaNova, Cloudflare, Cohere, Puter.
+**[KEYS.md](KEYS.md)** lists which free keys to get (verified 2026-10-17), the exact clicks for each, and how the router uses them. Short version: get **Gemini + Groq + LangSearch + Tavily**, then click **Terminal → Add keys** in the app (or run `node src/frl.mjs keys setup`) to save them in the system key store. Optional extras: Mistral, Cerebras, NVIDIA, Exa, OpenRouter, SambaNova, Cloudflare, Cohere, Puter.
 
-Supported providers: Gemini, Groq, Cerebras, Mistral, NVIDIA, SambaNova, OpenRouter (`:free` only), Cloudflare Workers AI, Cohere, Puter, Ollama (local), any custom OpenAI-compatible endpoint, and DeepSeek (paid; used only if `FRL_PAID_CALL_LIMIT` > 0). Search: LangSearch, Tavily, Exa, Linkup, Jina, Firecrawl, Serper, Brave, SearXNG (local Docker, `./searxng.command`) and Wikipedia, plus the Jina reader for pages that return too little text.
+Supported providers: Gemini, Groq, Cerebras, Mistral, NVIDIA, SambaNova, OpenRouter (`:free` only), Cloudflare Workers AI, Cohere, Puter, Ollama (local), and any custom OpenAI-compatible endpoint. Free only: no paid provider is wired in. Search: LangSearch, Tavily, Exa, Linkup, Jina, Firecrawl, Serper, Brave, SearXNG (local Docker, `./searxng.command`) and Wikipedia, plus the Jina reader for pages that return too little text.
 
 The **deep** role (issue tree, retries, memo) and the **fast** role (research every sub-question) each have their own provider order, and the reviewer always uses a different provider. Keys are read from the shell environment first, then from the macOS Keychain. They are never read from or written to a project file.
 
@@ -79,11 +80,14 @@ Model IDs are not hard-coded. Each provider's `/models` list is read at start an
 | `src/llm/` | provider presets, OpenAI-compatible client, failover router, scripted demo provider |
 | `src/research/` | engine, prompts, issue tree, mechanical verifier, safe calculator, domain templates, JSON extraction |
 | `src/search/` | search backends, per-query rotation, quota benching, page text fetch |
-| `src/secrets.mjs` | loads missing keys from the macOS Keychain (`keys.command` writes them) |
+| `src/secrets.mjs` | reads and writes keys in the system key store: macOS Keychain, Windows user environment, Linux secret-tool or systemd encrypted credentials |
+| `src/frl.mjs` | the `frl` command: start, always-on service (macOS, Windows, Linux), links, keys, update, restart |
+| `src/appchat.mjs` | the App chat: grounded in app facts and guides, direct actions open/stop/links, everything else a proposal you confirm |
+| `src/chat/` | reply audit (links, secrets, commands, claims), guide search, file reading (photos, PDFs, audio via a free vision model) |
+| `src/terminal/` | shared shell sessions (node-pty, or a basic piped shell), the WebSocket bridge with origin check, the command buttons |
 | `src/data/csv.mjs` | CSV parsing + column profiling (your data becomes source D1) |
-| `public/index.html` | the decomposition UI (single file, no external resources) |
+| `public/index.html` | the UI (single file; the terminal loads xterm.js from the app itself, no CDN) |
 | `tests/` | Vitest suites (`npm test`, needs `npm install` once) |
-| `prompts/ONE-PROMPT.md` | the same method as a single prompt for any chat LLM |
 
 ## Honest limits
 

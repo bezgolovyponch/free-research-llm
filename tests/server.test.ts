@@ -74,4 +74,63 @@ describe('HTTP server', () => {
     expect((await call('GET', '/api/projects/..%2F..%2Fetc')).status).toBe(404);
     expect((await call('GET', '/nope')).status).toBe(404);
   });
+
+  it('serves the terminal, its commands, the access links and the xterm files, and refuses restarts it cannot recover from', async () => {
+    const info = await call('GET', '/api/terminal');
+    expect(info.body).toMatchObject({ mode: expect.stringMatching(/full|basic/), sessions: [] });
+    expect(info.body.commands.map((c: { id: string }) => c.id)).toContain('keys-setup');
+    const session = await call('POST', '/api/terminal', { cols: 80, rows: 24 });
+    expect(session.body.id).toMatch(/^[0-9a-f]{12}$/);
+    expect((await call('DELETE', `/api/terminal/${session.body.id}`)).body).toEqual({ ok: true });
+    expect((await call('GET', '/api/access')).body).toEqual({ remote: false, links: [{ label: 'this Mac', url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/) }] });
+    const js = await fetch(`${base}/vendor/xterm.js`);
+    expect(js.headers.get('content-type')).toMatch(/javascript/);
+    expect((await call('POST', '/api/app/restart')).status).toBe(409);
+  });
+
+  it('turns an app-chat research request into a proposal, then into a research only on confirm', async () => {
+    const before = (await call('GET', '/api/projects')).body.length;
+    const sent = await call('POST', '/api/chat', { message: 'start a new research on e-bikes' });
+    expect(sent.body.proposals[0]).toMatchObject({ type: 'create', state: 'proposed' });
+    expect((await call('GET', '/api/projects')).body.length).toBe(before);
+    const decided = await call('POST', '/api/chat/decide', { at: sent.body.thread.at(-1).at, pid: 'p1' });
+    expect(decided.body.proposal.state).toBe('done');
+    expect((await call('GET', '/api/projects')).body.length).toBe(before + 1);
+    expect((await call('POST', '/api/chat/decide', { at: 'nope', pid: 'p1' })).status).toBe(409);
+    expect((await call('POST', '/api/chat', { message: 'read this', files: [{ name: 'a.docx', data: 'eA==' }] })).status).toBe(415);
+  });
+
+  it('lists app change tickets and records the gate result the terminal reports', async () => {
+    const ticket = await app.changes.create({ request: 'Add a CSV export to the Results tab', desired: 'A Download CSV button' });
+    expect((await call('GET', '/api/changes')).body.map((t: { id: string }) => t.id)).toContain(ticket.id);
+    const done = await call('POST', `/api/changes/${ticket.id}/report`, { state: 'done', passed: true, summary: 'PASS  tests 183 passed' });
+    expect(done.body).toMatchObject({ state: 'done', result: { passed: true } });
+    expect((await call('POST', '/api/changes/C999/report', { state: 'done' })).status).toBe(400);
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await app.appChat.thread()).at(-1).content).toContain(`Change ${ticket.id} finished — quality gate PASSED`);
+  });
+
+  it('starts the free-model coder on a ticket and undoes only an applied change', async () => {
+    expect((await call('POST', '/api/changes/C999/run')).status).toBe(404);
+    const ticket = await app.changes.create({ request: 'Show the loop score as a chart', desired: 'A chart in Gates & logs' });
+    const started: string[] = [];
+    app.coder.start = ((id: string) => { started.push(id); return { started: true, message: `${id} queued for the free-model coder` }; }) as typeof app.coder.start;
+    expect((await call('POST', `/api/changes/${ticket.id}/run`)).body).toEqual({ started: true, message: `${ticket.id} queued for the free-model coder` });
+    expect(started).toEqual([ticket.id]);
+    expect((await call('POST', `/api/changes/${ticket.id}/undo`)).status).toBe(409);
+  });
+
+  it('serves the results exports and the current action plan with every project', async () => {
+    const created = (await call('POST', '/api/projects', { question: 'Should I sell used e-bikes in Brno this spring?' })).body;
+    await call('POST', `/api/projects/${created.id}/run`);
+    const done = await waitFor(created.id, 'done');
+    expect(done.report.status).toMatchObject({ coverage: expect.any(Number), confidence: expect.any(String) });
+    expect(Array.isArray(done.report.actions)).toBe(true);
+    expect(done.results.status).toEqual(done.report.status);
+    const csv = await fetch(`${base}/api/projects/${created.id}/pieces.csv`);
+    expect([csv.status, csv.headers.get('content-type'), csv.headers.get('content-disposition')]).toEqual([200, 'text/csv; charset=utf-8', `attachment; filename="${created.id}-pieces.csv"`]);
+    expect((await csv.text()).replace(/^\ufeff/, '').startsWith('piece,title,role,grade')).toBe(true);
+    expect((await call('GET', `/api/projects/${created.id}/results.json`)).body).toMatchObject({ question: 'Should I sell used e-bikes in Brno this spring?', pieces: expect.any(Array) });
+    expect((await fetch(`${base}/api/projects/${created.id}/items.csv`)).status).toBe(200);
+  });
 });

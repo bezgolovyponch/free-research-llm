@@ -41,7 +41,7 @@ export class ModelRouter {
 
   available({ avoid, tier = 'fast' } = {}) {
     const time = this.now();
-    const usable = this.ordered(tier).filter((p) => p.ready && (this.cooldownUntil.get(p.id) ?? 0) <= time);
+    const usable = this.ordered(tier).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
     if (!avoid) return usable;
     const preferred = usable.filter((p) => p.id !== avoid);
     return preferred.length ? [...preferred, ...usable.filter((p) => p.id === avoid)] : usable;
@@ -117,8 +117,8 @@ export class ModelRouter {
   }
 
   route() {
-    const ids = (tier) => this.ordered(tier).filter((p) => p.ready).map((p) => p.id);
-    return { fast: ids('fast'), deep: ids('deep') };
+    const ids = (tier) => this.ordered(tier).filter((p) => (p.canServe ? p.canServe(tier) : p.ready)).map((p) => p.id);
+    return { fast: ids('fast'), deep: ids('deep'), vision: ids('vision') };
   }
 
   status() {

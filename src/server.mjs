@@ -8,10 +8,22 @@ import { KeychainSecrets } from './secrets.mjs';
 import { AccessGate, newAccessToken } from './auth.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { TEMPLATES } from './research/templates.mjs';
-import { toMarkdown } from './report.mjs';
+import { itemsCsv, piecesCsv, resultsJson, toMarkdown } from './report.mjs';
+import { resultStatus } from './research/gaps.mjs';
 import { knowledgeRecord } from './research/knowledge.mjs';
+import { ProposalError } from './appchat.mjs';
+import { UnsupportedFileError } from './chat/media.mjs';
+import { CONSOLE_COMMANDS } from './terminal/catalog.mjs';
+import { attachTerminalSockets } from './terminal/socket.mjs';
+import { accessLinks, lanAddresses } from './service.mjs';
+import os from 'node:os';
 
-const MAX_BODY = 8 * 1024 * 1024;
+const MAX_BODY = 32 * 1024 * 1024;
+const VENDOR = {
+  '/vendor/xterm.js': ['node_modules/@xterm/xterm/lib/xterm.js', 'text/javascript; charset=utf-8'],
+  '/vendor/xterm.css': ['node_modules/@xterm/xterm/css/xterm.css', 'text/css; charset=utf-8'],
+  '/vendor/addon-fit.js': ['node_modules/@xterm/addon-fit/lib/addon-fit.js', 'text/javascript; charset=utf-8'],
+};
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -25,7 +37,7 @@ async function readJson(req) {
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new HttpError(413, 'request body too large (max 8 MB)');
+    if (size > MAX_BODY) throw new HttpError(413, 'request body too large (max 32 MB)');
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
@@ -45,7 +57,8 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
 function statusFor(error) {
   if (error instanceof HttpError) return error.status;
   if (error instanceof NotFoundError) return 404;
-  if (error instanceof ProjectBusyError) return 409;
+  if (error instanceof ProjectBusyError || error instanceof ProposalError) return 409;
+  if (error instanceof UnsupportedFileError) return 415;
   return 400;
 }
 
@@ -67,6 +80,37 @@ export function createServer(app, gate = new AccessGate()) {
       await app.setKey(body.provider, body.key, body.baseURL);
       return app.status();
     }],
+    ['GET', /^\/api\/router$/, async (req) => app.routerAdmin.view({ verify: new URL(req.url, 'http://x').searchParams.get('verify') === '1' })],
+    ['POST', /^\/api\/router\/keys$/, async (req) => {
+      const body = await readJson(req);
+      try {
+        return await app.routerAdmin.save(String(body.name ?? ''), body.value, { force: body.force === true });
+      } catch (error) {
+        if (error instanceof RangeError) throw new HttpError(400, error.message);
+        throw error;
+      }
+    }],
+    ['POST', /^\/api\/router\/keys\/([A-Z0-9_]+)\/test$/, async (req, [name]) => {
+      try {
+        return await app.routerAdmin.test(name);
+      } catch (error) {
+        throw new HttpError(400, error.message);
+      }
+    }],
+    ['DELETE', /^\/api\/router\/keys\/([A-Z0-9_]+)$/, async (req, [name]) => {
+      try {
+        return await app.routerAdmin.remove(name);
+      } catch (error) {
+        throw new HttpError(400, error.message);
+      }
+    }],
+    ['POST', /^\/api\/router\/order$/, async (req) => {
+      try {
+        return await app.routerAdmin.order((await readJson(req)).order);
+      } catch (error) {
+        throw new HttpError(400, error.message);
+      }
+    }],
     ['GET', /^\/api\/templates$/, async () => TEMPLATES],
     ['GET', /^\/api\/projects$/, async () => app.store.list()],
     ['POST', /^\/api\/projects$/, async (req) => {
@@ -76,9 +120,17 @@ export function createServer(app, gate = new AccessGate()) {
       if (body.autoRun !== false) app.engine.start(project.id);
       return project;
     }],
-    ['GET', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => app.engine.load(id)],
+    ['GET', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
+      const project = await app.engine.load(id);
+      const { plan, ...status } = resultStatus(project);
+      const results = { status, actions: plan.slice(0, 40) };
+      return { ...project, results, report: project.report ? { ...project.report, ...results } : null };
+    }],
     ['DELETE', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
+      if (app.engine.running.has(id) || app.improver.isActive(id)) throw new ProjectBusyError('stop it first: the research is running');
+      const project = await app.store.get(id);
       await app.store.remove(id);
+      if (project) app.noteApp(`Research deleted: ${String(project.question).slice(0, 110)}`);
       return { ok: true };
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/run$/, async (req, [id]) => {
@@ -98,14 +150,60 @@ export function createServer(app, gate = new AccessGate()) {
     ['GET', /^\/api\/logs\/model-calls$/, async () => app.logs.read('model-calls')],
     ['GET', /^\/api\/history$/, async () => app.history()],
     ['GET', /^\/api\/chat$/, async () => app.appChat.thread()],
-    ['POST', /^\/api\/chat$/, async (req) => app.appChat.send((await readJson(req)).message)],
+    ['POST', /^\/api\/chat$/, async (req) => {
+      const body = await readJson(req);
+      return app.appChat.send(body.message, { files: body.files ?? [] });
+    }],
+    ['POST', /^\/api\/chat\/decide$/, async (req) => {
+      const body = await readJson(req);
+      return app.appChat.decide(String(body.at ?? ''), String(body.pid ?? ''), { accept: body.accept !== false });
+    }],
+    ['GET', /^\/api\/changes$/, async () => app.changes.all()],
+    ['POST', /^\/api\/changes\/(C\d{1,5})\/report$/, async (req, [id]) => {
+      const ticket = await app.changes.report(id, await readJson(req));
+      if (ticket.state === 'running') app.noteApp(`Change ${id} started in the Terminal: ${ticket.title}`);
+      if (ticket.result) app.noteApp(`Change ${id} ${ticket.state === 'done' ? 'finished' : 'did not finish'} — ${ticket.result.passed ? 'quality gate PASSED' : 'quality gate FAILED'}: ${ticket.title}${ticket.result.summary ? `\n${ticket.result.summary}` : ''}`);
+      return ticket;
+    }],
+    ['POST', /^\/api\/changes\/(C\d{1,5})\/run$/, async (req, [id]) => {
+      const ticket = await app.changes.get(id);
+      if (!ticket) throw new HttpError(404, `change ${id} not found`);
+      if (ticket.state === 'done') throw new HttpError(409, `${id} is already applied; undo it first`);
+      const { started, message } = app.coder.start(id);
+      return { started, message };
+    }],
+    ['POST', /^\/api\/changes\/(C\d{1,5})\/undo$/, async (req, [id]) => {
+      try {
+        return await app.coder.undo(id);
+      } catch (error) {
+        throw new HttpError(409, error.message);
+      }
+    }],
+    ['GET', /^\/api\/access$/, async () => ({ remote: app.remote, links: accessLinks({ port: app.port, token: app.remote ? gate.token : '', lan: app.remote ? lanAddresses(os.networkInterfaces()) : [] }) })],
+    ['GET', /^\/api\/terminal$/, async () => ({ mode: await app.terminal.mode(), platform: process.platform, sessions: app.terminal.list(), commands: CONSOLE_COMMANDS })],
+    ['POST', /^\/api\/terminal$/, async (req) => (await app.terminal.create(await readJson(req))).describe()],
+    ['DELETE', /^\/api\/terminal\/([0-9a-f]{12})$/, async (req, [id]) => ({ ok: app.terminal.close(id) })],
+    ['POST', /^\/api\/app\/restart$/, async () => {
+      if (process.env.FRL_SUPERVISED !== '1' || !app.onRestart) throw new HttpError(409, 'the app is not running as the always-on service, so nothing would start it again: run "node src/frl.mjs install" first, or stop it and start it by hand');
+      setTimeout(() => app.onRestart(), 300);
+      return { ok: true, message: 'restarting: the page reconnects in a few seconds' };
+    }],
     ['GET', /^\/api\/projects\/([\w-]+)\/handoff$/, async (req, [id]) => (await app.handoffs.read(id)) ?? { projectId: id, note: 'no handoff yet: one is written every time a run or loop stops' }],
     ['GET', /^\/api\/projects\/([\w-]+)\/knowledge$/, async (req, [id]) => knowledgeRecord(await app.engine.load(id))],
     ['POST', /^\/api\/projects\/([\w-]+)\/chat$/, async (req, [id]) => {
       const body = await readJson(req);
-      return app.chat.send(id, body.nodeId || 'Q', body.message);
+      return app.chat.send(id, body.nodeId || 'Q', body.request ?? body.message, { files: body.files ?? [], desired: body.desired ?? '' });
     }],
-    ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/attachments$/, async (req, [id, nodeId]) => app.engine.addAttachment(id, nodeId, await readJson(req))],
+    ['POST', /^\/api\/projects\/([\w-]+)\/chat\/decide$/, async (req, [id]) => {
+      const body = await readJson(req);
+      return app.chat.decide(id, String(body.key ?? 'R'), String(body.at ?? ''), String(body.pid ?? ''), { accept: body.accept !== false });
+    }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/attachments$/, async (req, [id, nodeId]) => {
+      const body = await readJson(req);
+      if (!body.data) return app.engine.addAttachment(id, nodeId, body);
+      const file = await app.media.read(body);
+      return app.engine.addAttachment(id, nodeId, { name: file.name, text: file.text, readBy: file.model || 'the app' });
+    }],
     ['DELETE', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/attachments\/(U\d+)$/, async (req, [id, nodeId, attachmentId]) => app.engine.removeAttachment(id, nodeId, attachmentId)],
     ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/suggest$/, async (req, [id, nodeId]) => app.suggester.suggest(id, nodeId)],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve$/, async (req, [id]) => {
@@ -114,8 +212,17 @@ export function createServer(app, gate = new AccessGate()) {
       return app.improver.start(id, await readJson(req));
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve\/stop$/, async (req, [id]) => app.improver.stop(id)],
-    ['POST', /^\/api\/improve-all$/, async (req) => app.improver.startAll(await readJson(req))],
-    ['POST', /^\/api\/improve-all\/stop$/, async () => app.improver.stopAll()],
+    ['POST', /^\/api\/improve-all$/, async (req) => {
+      const body = await readJson(req);
+      const result = await app.improver.startAll(body);
+      app.noteApp(`Improve-all started for ${Number(body.hours) || 8} h (${Number(body.sliceMinutes) || 20} min per research)`);
+      return result;
+    }],
+    ['POST', /^\/api\/improve-all\/stop$/, async () => {
+      const result = await app.improver.stopAll();
+      app.noteApp('Improve-all stopped');
+      return result;
+    }],
     ['POST', /^\/api\/projects\/([\w-]+)\/cancel$/, async (req, [id]) => {
       app.engine.cancel(id);
       return { ok: true };
@@ -155,6 +262,11 @@ export function createServer(app, gate = new AccessGate()) {
       return res.end();
     }
     try {
+      if (req.method === 'GET' && VENDOR[url.pathname]) {
+        const [file, type] = VENDOR[url.pathname];
+        res.writeHead(200, { 'content-type': type, 'cache-control': 'max-age=86400' });
+        return res.end(await fs.readFile(path.join(ROOT_DIR, file)));
+      }
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         return send(res, 200, await fs.readFile(path.join(ROOT_DIR, 'public', 'index.html'), 'utf8'), 'text/html; charset=utf-8');
       }
@@ -168,6 +280,14 @@ export function createServer(app, gate = new AccessGate()) {
         res.setHeader('content-disposition', `attachment; filename="${project.id}.md"`);
         return send(res, 200, toMarkdown(project), 'text/markdown; charset=utf-8');
       }
+      const exported = url.pathname.match(/^\/api\/projects\/([\w-]+)\/(results\.json|pieces\.csv|items\.csv)$/);
+      if (req.method === 'GET' && exported) {
+        const project = await app.engine.load(exported[1]);
+        const [kind, ext] = exported[2].split('.');
+        res.setHeader('content-disposition', `attachment; filename="${project.id}-${kind}.${ext}"`);
+        if (ext === 'json') return send(res, 200, resultsJson(project));
+        return send(res, 200, `\ufeff${kind === 'pieces' ? piecesCsv(project) : itemsCsv(project)}`, 'text/csv; charset=utf-8');
+      }
       for (const [method, pattern, handler] of routes) {
         const match = url.pathname.match(pattern);
         if (match && req.method === method) return send(res, 200, await handler(req, match.slice(1)));
@@ -179,28 +299,37 @@ export function createServer(app, gate = new AccessGate()) {
   });
 }
 
-export async function startServer({ app = new App(), port = Number(process.env.PORT || 4600), host = process.env.HOST || '127.0.0.1', token = '' } = {}) {
+export async function startServer({ app = new App(), port = Number(process.env.PORT || 4600), host = process.env.HOST || '127.0.0.1', token = '', behindProxy = process.env.FRL_BEHIND_PROXY === '1' } = {}) {
   await app.refreshProviders();
-  const server = createServer(app, new AccessGate({ token }));
+  const gate = new AccessGate({ token, behindProxy });
+  const server = createServer(app, gate);
+  attachTerminalSockets(server, { hub: app.terminal, gate });
   await new Promise((resolve) => server.listen(port, host, resolve));
+  app.port = server.address().port;
+  app.remote = Boolean(token);
   return { app, server, url: `http://${host === '0.0.0.0' ? 'localhost' : host}:${server.address().port}` };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const secrets = new KeychainSecrets();
   const fromKeychain = process.env.FRL_KEYCHAIN === '0' ? [] : await secrets.fillMissing(process.env);
-  const remote = process.env.HOST && process.env.HOST !== '127.0.0.1' && process.env.HOST !== 'localhost';
+  const remote = (Boolean(process.env.HOST) && process.env.HOST !== '127.0.0.1' && process.env.HOST !== 'localhost') || process.env.FRL_BEHIND_PROXY === '1';
   let token = process.env.FRL_ACCESS_TOKEN || '';
   if (remote && !token) {
     token = newAccessToken();
-    await secrets.write('FRL_ACCESS_TOKEN', token);
+    try {
+      await secrets.write('FRL_ACCESS_TOKEN', token);
+    } catch {
+      console.log('  could not save a new access token in the key store: run "node src/frl.mjs install" (it creates one), then restart');
+    }
   }
-  const { app, url } = await startServer({ app: new App({ secrets, dataDir: process.env.FRL_DATA_DIR || undefined }), token: remote ? token : '' });
+  const { app, url } = await startServer({ app: new App({ secrets: process.env.FRL_KEYCHAIN === '0' ? null : secrets, dataDir: process.env.FRL_DATA_DIR || undefined }), token: remote ? token : '' });
   if (remote) console.log('  remote access ON: other devices need the token link from "frl url"');
   if (fromKeychain.length) console.log(`  keys from macOS Keychain: ${fromKeychain.join(', ')}`);
   const status = app.status();
   const ready = status.providers.filter((p) => p.state === 'ready');
   void app.logs.append('history', { type: 'session', message: `app started · models: ${ready.map((p) => p.id).join(', ') || 'none'} · search: ${status.search.backends.join(', ')}` });
+  app.noteApp(`App started on ${process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux'} · remote access ${remote ? 'on' : 'off'} · models: ${ready.map((p) => p.id).join(', ') || 'none'} · search: ${status.search.backends.join(', ')} · terminal: ${await app.terminal.mode()}`);
   console.log(`\n  Free Research LLM is running → ${url}\n`);
   let stopping = false;
   const stop = async (signal) => {
@@ -212,12 +341,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     await app.logs.queue;
     process.exit(0);
   };
+  app.onRestart = () => void stop('restart requested');
   process.on('SIGTERM', () => void stop('SIGTERM'));
   process.on('SIGINT', () => void stop('SIGINT'));
   if (process.env.FRL_AUTO_RESUME !== '0') {
     const resumed = await app.resumeInterrupted();
     if (resumed.length) console.log(`  resumed after restart: ${resumed.join(', ')}`);
   }
+  const stale = await app.settleStale();
+  if (stale.length) console.log(`  marked as stopped (they were running when the app last stopped): ${stale.join(', ')}`);
   console.log(ready.length ? `  models: ${ready.map((p) => `${p.id} (${p.fast})`).join(', ')}` : '  models: NONE connected yet — run ./keys.command (or open Setup in the page)');
   if (ready.length) console.log(`  route deep: ${status.route.deep.join(' → ')}\n  route fast: ${status.route.fast.join(' → ')}`);
   console.log(`  search: ${status.search.backends.join(', ') || 'off'}${status.demo ? '\n  DEMO MODE: scripted answers, not real research' : ''}\n`);

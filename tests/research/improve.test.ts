@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { ProjectImprover, applyVariant, distinctResearches, improvementTargets, projectScore } from '../../src/research/improve.mjs';
+import { ProjectImprover, applyVariant, distinctResearches, improvementTargets, inScope, projectScore, scopeScore } from '../../src/research/improve.mjs';
+import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
@@ -30,6 +31,18 @@ describe('improve helpers', () => {
 
   it('targets the structure first, then the weakest, highest-priority leaves', () => {
     expect(improvementTargets(tree())).toEqual(['Q', 'D2', 'D1.1', 'D1.2']);
+  });
+
+  it('limits the loop to the focus of the ticked pieces minus what the user excluded, and scores only that', () => {
+    const p = tree();
+    expect([...inScope(p.nodes, ['D1'])]).toEqual(['D1', 'D2', 'D1.1', 'D1.2']);
+    expect(improvementTargets(p, ['D1'], ['Q'])).toEqual(['D2', 'D1.1', 'D1.2']);
+    expect(improvementTargets(p, ['D1'])[0]).toBe('Q');
+    expect(improvementTargets(p, ['ghost'], ['Q'])).toEqual([]);
+    const only = ['Q', 'D1', 'D2', 'D1.1'];
+    expect(scopeScore(p, ['D1.2'], [], only)).toMatchObject({ score: 1, nodes: 1, specs: null });
+    addSpec(p, 'D1.2', normalizeSpec({ mustMention: ['Brno'] }, { request: 'r', desired: 'price in Brno' }));
+    expect(scopeScore(p, ['D1.2'], [], only)).toMatchObject({ grades: 1, specs: 0, score: 0.5 });
   });
 
   it('applies node edits and splits, and root adds/removes while keeping two top-level pieces', () => {
@@ -126,5 +139,57 @@ describe('ProjectImprover handoffs', () => {
     expect(stops.filter((s) => s.reason === 'loop stopped by user')).toEqual([]);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
+
+  it('reverts a change that breaks a regression check that used to pass, and runs only on the selected pieces', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-scope-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }) });
+    const created = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    const done = await engine.run(created.id);
+    addSpec(done, 'D2.1', normalizeSpec({ mustMention: ['DEMO answer'] }, { request: 'baseline', desired: 'the demo answer' }));
+    await engine.store.save(done);
+    let clock = 0;
+    const improver = new ProjectImprover({ engine, now: () => (clock += 1000), sleep: async () => {} });
+    improver.propose = async () => ({ change: 'rewrite the question', question: 'Completely different question?' });
+    const originalLeaf = engine.researchLeaf.bind(engine);
+    engine.researchLeaf = async (project: { nodes: unknown[] }, node: { id: string; finding: { answer: string } }) => {
+      await originalLeaf(project, node);
+      node.finding.answer = 'changed';
+    };
+    const tree = (await engine.load(created.id)).nodes.map((n: { id: string }) => n.id);
+    const others = tree.filter((n: string) => n !== 'D2.1');
+    improver.start(created.id, { hours: 0.004, nodes: ['D2.1'], exclude: ['Q', ...others] });
+    expect(improver.scopeOf(created.id)).toEqual(['D2.1']);
+    expect(improver.excludeOf(created.id)).toEqual(['Q', ...others]);
+    for (let i = 0; i < 500 && improver.isActive(created.id); i++) await new Promise((r) => setTimeout(r, 10));
+    const saved = await engine.load(created.id);
+    expect(saved.improve.scope).toEqual(['D2.1']);
+    expect(saved.improve.exclude).toEqual(['Q', ...others]);
+    expect(saved.improve.trials.length).toBeGreaterThan(0);
+    expect(saved.improve.trials.every((x: { nodeId: string }) => x.nodeId === 'D2.1')).toBe(true);
+    expect(saved.improve.trials[0]).toMatchObject({ outcome: 'reverted-regression', detail: expect.stringContaining('D2.1/R1') });
+    expect(saved.nodes.find((n: { id: string }) => n.id === 'D2.1').question).not.toBe('Completely different question?');
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
 });
 
+describe('loop focus for selected pieces', () => {
+  const nodes = [
+    { id: 'D1', parentId: 'Q' }, { id: 'D1.1', parentId: 'D1' }, { id: 'D1.2', parentId: 'D1' }, { id: 'D1.2.1', parentId: 'D1.2' }, { id: 'D1.3', parentId: 'D1' },
+    { id: 'D2', parentId: 'Q' }, { id: 'D2.1', parentId: 'D2' }, { id: 'D3', parentId: 'Q' },
+  ];
+
+  it('covers the request, the primary level and the chosen piece with its siblings, never the children of other branches', () => {
+    expect([...inScope(nodes, ['D1.2'])].sort()).toEqual(['D1', 'D1.1', 'D1.2', 'D1.2.1', 'D1.3', 'D2', 'D3']);
+    expect([...inScope(nodes, ['D2'])].sort()).toEqual(['D1', 'D2', 'D2.1', 'D3']);
+    expect(inScope(nodes, []).size).toBe(nodes.length);
+  });
+
+  it('drops the pieces the user excluded from the highlighted path, including the request', () => {
+    expect([...inScope(nodes, ['D1.2'], ['D2', 'D1.3'])].sort()).toEqual(['D1', 'D1.1', 'D1.2', 'D1.2.1', 'D3']);
+    const project = { nodes: nodes.map((n) => ({ ...n, status: 'weak', impact: 1, uncertainty: 1 })) };
+    expect(improvementTargets(project, ['D1.2'])[0]).toBe('Q');
+    expect(improvementTargets(project, ['D1.2'], ['Q', 'D3'])).not.toContain('Q');
+    expect(improvementTargets(project, ['D1.2'], ['Q', 'D3']).sort()).toEqual(['D1.1', 'D1.2.1', 'D1.3']);
+  });
+});

@@ -25,3 +25,35 @@ describe('toMarkdown', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
+
+describe('results export', () => {
+  const p = {
+    id: 'p1',
+    question: 'Golf DE vs CZ?',
+    acceptance: { expected: '10 listings' },
+    report: { verdict: 'PROVISIONAL (low confidence; 1 piece to fix, research or clarify) — GO-IF transport < 400 EUR', confidence: 'low', summary: 's', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: { verified: 1, total: 2, weak: ['D2'] }, bestEstimate: { value: '18', unit: '% margin', low: '9', high: '24', basis: 'D1, D2' } },
+    acceptanceResult: { score: 0.5, checks: [], items: [{ title: 'Golf, "2012"', value: 2400, currency: 'EUR', url: 'https://m.de/1', nodeId: 'D1' }] },
+    nodes: [
+      { id: 'D1', parentId: 'Q', title: 'Prices', question: 'q', status: 'verified', finding: { answer: '=SUM(A1)', claims: [], gaps: [] }, sources: [{ id: 'S1', title: 't', url: 'https://m.de/1' }] },
+      { id: 'D2', parentId: 'Q', title: 'Transport', question: 'q', status: 'weak', impact: 5, uncertainty: 5, finding: { answer: 'about 400', claims: [], gaps: ['carrier quotes'] }, verification: { checks: [] } },
+    ],
+  };
+
+  it('exports pieces with their action, delivered items and everything as JSON; the markdown carries the estimate and the plan', async () => {
+    const { csvField, itemsCsv, piecesCsv, resultsJson } = await import('../src/report.mjs');
+    const pieces = piecesCsv(p).split('\r\n');
+    expect(pieces[0]).toBe('piece,title,role,grade,answer,action,why,next step,priority,moves the verdict,sources,first source');
+    expect(pieces[1]).toBe("D1,Prices,driver,verified,'=SUM(A1),Done,,,,,1,https://m.de/1");
+    expect(pieces[2]).toContain('D2,Transport,driver,weak,about 400,Research further');
+    expect(pieces[2]).toContain('Search for: carrier quotes');
+    expect(itemsCsv(p).split('\r\n')[1]).toBe('"Golf, ""2012""",2400,EUR,https://m.de/1,D1,,');
+    expect(csvField('-cmd')).toBe("'-cmd");
+    const json = resultsJson(p);
+    expect(json).toMatchObject({ bestEstimate: { value: '18' }, confidence: { provisional: true, byChecks: 'low' }, actions: [{ nodeId: 'D2', action: 'research' }], items: [{ url: 'https://m.de/1' }] });
+    expect(json.pieces[0].sources).toEqual([{ id: 'S1', title: 't', url: 'https://m.de/1' }]);
+    const md = toMarkdown(p as never);
+    expect(md).toContain('**Best estimate:** 18 % margin (range 9–24) · rests on D1, D2');
+    expect(md).toContain('## What to fix, research further or clarify');
+    expect(md).toContain('| D2 · Transport | Research further |');
+  });
+});

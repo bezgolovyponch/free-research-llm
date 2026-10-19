@@ -3,22 +3,10 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SECRET_PATTERNS } from '../src/secrets.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
-const SECRET_PATTERNS = [
-  ['google-api-key', /AIza[0-9A-Za-z_-]{35}/],
-  ['google-auth-key', /\bAQ\.[0-9A-Za-z_-]{40,}/],
-  ['groq-key', /gsk_[0-9A-Za-z]{40,}/],
-  ['openrouter-key', /sk-or-v1-[0-9a-f]{40,}/],
-  ['cerebras-key', /csk-[0-9a-z]{40,}/],
-  ['nvidia-key', /nvapi-[0-9A-Za-z_-]{40,}/],
-  ['tavily-key', /tvly-[0-9A-Za-z-]{20,}/],
-  ['jina-key', /jina_[0-9a-f]{30,}/],
-  ['firecrawl-key', /fc-[0-9a-f]{32}/],
-  ['generic-sk-key', /\bsk-[0-9A-Za-z]{32,}\b/],
-  ['private-key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
-];
 
 function run(command, args) {
   return spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });

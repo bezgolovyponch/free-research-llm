@@ -56,7 +56,7 @@ GAP LOOP   a sub-answer that fails the checks: its "gaps" become new searches (n
 Providers without a key are skipped automatically. To change the order:
 `export FRL_DEEP_ORDER="mistral,gemini,groq"` and/or `export FRL_FAST_ORDER="groq,cerebras,gemini"`.
 
-## Step by step (Mac)
+## Step by step (macOS and Windows)
 
 **Step 1. Create the keys.** Open each link, sign in (Google/GitHub sign-in works for most), and create a key. Copy it.
 
@@ -75,15 +75,14 @@ Providers without a key are skipped automatically. To change the order:
 | 7 | https://dashboard.exa.ai/api-keys | the key |
 | 8 | https://openrouter.ai/settings/keys → **Create Key** | key starting `sk-or-…` |
 
-**Step 2. Paste them once into the macOS Keychain.** This is the safest place: no file in the project, and no key in `~/.zshrc`.
-In Finder, open the app folder and double-click **`keys.command`**. If macOS blocks it, right-click it → **Open** → **Open**. Or run it in Terminal:
+**Step 2. Paste them once into the system key store** (macOS Keychain, Windows user environment). No file in the project holds a key.
+In the app, click **Terminal → Add keys**. Or run it in a terminal in the app folder:
 ```bash
-cd ~/Documents/research/free-research-llm-main
-./keys.command
+node src/frl.mjs keys setup
 ```
-It walks the list. For each line, paste the key (it stays invisible) and press **Enter**. Press **Enter** on an empty line to skip a key, or type `-` to delete a saved one. You can run it again any time to add or replace keys.
+On a Mac, double-clicking **`keys.command`** runs the same; on Windows, **`keys.cmd`**. It walks the list. For each line, paste the key (it stays invisible) and press **Enter**. Press **Enter** on an empty line to skip a key, or type `-` to delete a saved one. You can run it again any time to add or replace keys.
 
-Search keys only (model keys already saved): `./keys.command search`. Each key is tested the moment you paste it; a key whose first characters were lost while pasting is repaired automatically. To re-test every saved key: `./keys.command check`. A running app reloads the keys itself (no restart).
+Search keys only (model keys already saved): `node src/frl.mjs keys setup search`. Each key is tested the moment you paste it; a key whose first characters were lost while pasting is repaired automatically. To re-test every saved key: `node src/frl.mjs keys check` (**Terminal → Check keys**). A running app reloads the keys itself (no restart). On Windows, open a new terminal window afterwards so programs started from it see the keys.
 
 **Step 2b. Optional, unlimited search: SearXNG on your Mac.** Install and open Docker Desktop (https://www.docker.com/products/docker-desktop/), wait for "Engine running", then:
 ```bash
@@ -91,7 +90,7 @@ Search keys only (model keys already saved): `./keys.command search`. Each key i
 ```
 It starts the open-source SearXNG container on http://127.0.0.1:8888 (only this Mac can reach it) with JSON output on, and saves `SEARXNG_URL` in the Keychain. It restarts with Docker. Stop it: `docker rm -f frl-searxng`.
 
-**Step 3. Start the app.** Double-click **`start.command`**, or run `npm start` in the folder. The terminal prints which keys came from the Keychain and the live route, for example:
+**Step 3. Start the app.** Double-click **`start.command`** (macOS) or **`start.cmd`** (Windows), or run `node src/frl.mjs start` in the folder. The terminal prints which keys came from the Keychain and the live route, for example:
 ```
 keys from macOS Keychain: GEMINI_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, TAVILY_API_KEY
 route deep: gemini → mistral → groq
@@ -100,7 +99,7 @@ route fast: groq → gemini → mistral
 
 **Step 4. Check in the browser.** Open http://127.0.0.1:4600 → **Setup**. Every key you added should show **● ready** with a model name. The **Routing** card shows the same order as above, and **Web search** shows `tavily, …, wikipedia`.
 
-**Without a Keychain (Linux/Windows, or if you prefer):** use `export GEMINI_API_KEY="…"` lines in your shell profile, or paste a key in **Setup → Paste a key for this session**. Session keys are forgotten when the app stops.
+**On a cloud server** the keys are encrypted with systemd-creds: see [CLOUD.md](CLOUD.md). **Without a key store:** set the variables in your shell environment, or paste a key in **Setup → Connect a key**. Session keys are forgotten when the app stops.
 
 ## Settings worth knowing
 

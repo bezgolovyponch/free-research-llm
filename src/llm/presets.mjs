@@ -8,6 +8,7 @@ export const PROVIDER_PRESETS = [
     prefer: {
       fast: ['gemini-3.8-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite', 'flash-lite', 'flash'],
       deep: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3-pro', 'gemini-2.5-flash', 'flash'],
+      vision: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'],
     },
   },
   {
@@ -79,6 +80,7 @@ export const PROVIDER_PRESETS = [
     prefer: {
       fast: ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3'],
       deep: ['deepseek/deepseek-r1:free', 'deepseek/deepseek-chat-v3', 'deepseek', 'qwen/qwen3', 'llama-3.3-70b'],
+      vision: ['google/gemma-4-31b-it:free', 'google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3.5-super-vl:free'],
     },
   },
   {
@@ -122,7 +124,7 @@ export const PROVIDER_PRESETS = [
     keyEnv: null,
     optionalKeyEnv: 'POLLINATIONS_API_KEY',
     disableEnv: 'FRL_POLLINATIONS',
-    signup: 'https://auth.pollinations.ai',
+    signup: 'https://enter.pollinations.ai',
     minIntervalMs: 31000,
     maxOutputTokens: 1500,
     extraBody: { reasoning_effort: 'low' },
@@ -166,7 +168,7 @@ export const SEARCH_KEYS = [
   { env: 'LINKUP_API_KEY', label: 'Linkup search (€5 free, $20/month with a work email)', signup: 'https://app.linkup.so' },
   { env: 'JINA_API_KEY', label: 'Jina search + reader (10M free tokens once, ~1,000 searches)', signup: 'https://jina.ai/api-dashboard' },
   { env: 'FIRECRAWL_API_KEY', label: 'Firecrawl search (free monthly credits)', signup: 'https://www.firecrawl.dev/app/api-keys' },
-  { env: 'SERPER_API_KEY', label: 'Serper Google search (2,500 free queries once)', signup: 'https://serper.dev/api-key' },
+  { env: 'SERPER_API_KEY', label: 'Serper Google search (2,500 free queries once)', signup: 'https://serper.dev/api-keys' },
   { env: 'BRAVE_API_KEY', label: 'Brave search ($5/month credit, card required)', signup: 'https://api-dashboard.search.brave.com' },
   { env: 'SEARXNG_URL', label: 'SearXNG on this Mac (unlimited, run ./searxng.command)', signup: 'http://127.0.0.1:8888' },
 ];

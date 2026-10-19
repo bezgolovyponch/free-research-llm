@@ -8,7 +8,8 @@ const DRIVERS = [
 ];
 
 function lastUser(messages) {
-  return [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const content = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  return Array.isArray(content) ? content.filter((p) => p.type === 'text').map((p) => p.text).join('\n') : content;
 }
 
 function between(textValue, start, end) {
@@ -67,10 +68,11 @@ const RESPONDERS = {
     return { answer: `DEMO roll-up of ${ids.join(', ')}: positive margin of 300 EUR.`, claims: [{ text: 'Margin 300 EUR per unit', sourceIds: ids, assumption: false }], confidence: 'medium', assumptions: [], gaps: [] };
   },
   [TASK_MARKERS.chat]: (prompt) => {
-    const wantsRerun = /USER: .*re-?research|USER: .*again/i.test(prompt);
+    const wantsRerun = /USER(?: REQUEST[^:]*)?: .*(re-?research|again)/i.test(prompt);
     const node = between(prompt, 'NODE ', ' [');
     return { reply: `DEMO assistant: noted.${wantsRerun && node ? ` Re-researching ${node}.` : ''}`, actions: wantsRerun && node ? [{ type: 'rerun', nodeId: node, hint: 'demo hint' }] : [] };
   },
+  [TASK_MARKERS.resultsChat]: (prompt) => ({ reply: `DEMO results assistant: ${/MEMO VERDICT: (.*)/.exec(prompt)?.[1]?.slice(0, 60) ?? 'no memo yet'}.`, actions: [] }),
   [TASK_MARKERS.suggest]: (prompt) => {
     const ids = sourceIds(prompt.replace('EVIDENCE:', 'EVIDENCE\n').replace('JSON shape', 'RULES:'));
     return { suggestions: [
@@ -80,12 +82,13 @@ const RESPONDERS = {
   },
   [TASK_MARKERS.appChat]: (prompt) => {
     const wantsNew = /USER: .*(start|new research)/i.test(prompt);
-    return { reply: `DEMO app assistant: ${wantsNew ? 'starting a new research.' : 'here is what I see.'}`, actions: wantsNew ? [{ type: 'create', question: 'Which e-bike rental size breaks even in Prague?', expected: 'break-even fleet size' }] : [] };
+    return { reply: `DEMO app assistant: ${wantsNew ? 'press the button below to start this research.' : 'here is what I see.'}`, actions: wantsNew ? [{ type: 'create', question: 'Which e-bike rental size breaks even in Prague?', expected: 'break-even fleet size' }] : [] };
   },
   [TASK_MARKERS.variant]: () => ({ change: 'DEMO: sharper search queries', searchQueries: ['demo sharper query'] }),
   [TASK_MARKERS.synthesize]: () => ({
     verdict: 'GO-IF (DEMO) — margin stays above 0 after real costs are confirmed',
     confidence: 'low',
+    bestEstimate: { value: '300', unit: 'EUR net margin per unit (DEMO)', low: '120', high: '450', basis: 'D2.2' },
     summary: 'This is DEMO output from a scripted model so you can see the full flow. Connect a free model (Setup tab) to get real research.',
     keyNumbers: [{ label: 'Net margin per unit', value: '300', unit: 'EUR', nodeId: 'D2.2' }],
     scenarios: [{ name: 'base', assumptions: 'demo numbers', outcome: '300 EUR margin' }],
@@ -101,7 +104,7 @@ export class ScriptedProvider {
     this.id = id;
     this.label = 'Demo (scripted, not a real model)';
     this.state = 'ready';
-    this.selected = { fast: 'scripted-fast', deep: 'scripted-deep' };
+    this.selected = { fast: 'scripted-fast', deep: 'scripted-deep', vision: 'scripted-vision' };
     this.failures = failures;
     this.calls = [];
   }
@@ -110,11 +113,16 @@ export class ScriptedProvider {
     return true;
   }
 
+  canServe() {
+    return true;
+  }
+
   async chat({ messages, tier = 'fast' }) {
     const prompt = lastUser(messages);
     const marker = Object.keys(RESPONDERS).find((m) => prompt.includes(m));
     this.calls.push({ marker, tier });
     if (this.failures[marker]?.length) throw this.failures[marker].shift();
+    if (marker === TASK_MARKERS.readFile) return { content: 'DEMO reading: a file with the total 2,345 EUR.', model: this.selected[tier], provider: this.id, usage: {} };
     const data = marker ? RESPONDERS[marker](prompt) : { answer: 'ok' };
     return { content: JSON.stringify(data), model: this.selected[tier], provider: this.id, usage: {} };
   }
