@@ -57,7 +57,7 @@ export function fileView(file, body, terms) {
 
 export const REPO_MAP = `public/index.html is the whole web UI (HTML, CSS and JavaScript in one file: tabs, panels, chats, Gates & logs).
 src/server.mjs: HTTP routes. src/app.mjs: composition. src/appchat.mjs: App chat. src/research/*: research engine, gates, loop (improve.mjs), score.mjs, specs.mjs, chat.mjs, prompts.mjs.
-src/llm/*: free-model router. src/search/*: search and marketplaces. tests/** mirrors src/** (Vitest). e2e/*.spec.ts: Playwright on a demo server.`;
+src/llm/*: free-model router. src/search/*: web search, page reading and source selection. tests/** mirrors src/** (Vitest). e2e/*.spec.ts: Playwright on a demo server.`;
 
 export function rankFiles(entries, terms, limit = 4) {
   const scored = entries.map(({ file, body }) => {

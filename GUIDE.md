@@ -20,7 +20,7 @@ To try the flow before you have a key, run `npm run demo`. Every answer is scrip
 
 ## B. Solve an issue
 
-1. **Ask tab: pick the problem type**: Car arbitrage, Glamping/hospitality location, Taxes, Market size, Any analytical question, or Auto-detect.
+1. **Ask tab: pick the problem type**: Competitive strategy / action plan, Glamping/hospitality location, Taxes, Market size, Any analytical question, or Auto-detect.
 2. **Write the decision in 1–2 sentences.** Include *where, when, how much, and what counts as success*. Click "Use the example for this type" to see a strong question.
 3. **Fill the detail fields.** For example: buy market and sell market, regions and capex, or country, tax year and income. Empty fields become assumptions that the memo lists for you to confirm.
 4. **Write the expected result**: what must exist at the end, e.g. "10 links to real listings priced 2000-4000 EUR" or "ranked list of 3 cities with rent per m² in EUR". The model turns it into checks that code runs on the final output (item count, live links, value range, required words).
@@ -48,7 +48,7 @@ To try the flow before you have a key, run `npm run demo`. Every answer is scrip
 
 | Type | Weak | Strong |
 |---|---|---|
-| Cars arbitrage | Is car flipping profitable? | Net margin per car buying 2015-2019 RAV4 hybrids under 150k km on mobile.de and selling on otomoto.pl, including transport, excise, registration, inspection and 30 days holding cost. Which specs clear €1,500? |
+| Competitive strategy | How do we beat our competitors? | 6-month action plan for our startup (paste its website address) against our two main rivals (paste their addresses) in the EU and US: which three actions have the strongest public evidence (their products, pricing pages, partnerships, papers)? |
 | Glamping | Where to build glamping? | Which of Šumava, Krkonoše, České Švýcarsko gives a 6-tent glamping site the best payback on €250k capex, target 60% occupancy and payback under 4 years? |
 | Taxes | How to pay less tax? | Czech IT freelancer, €70k invoiced in 2026, no employees: total tax + social + health under flat-rate tax vs 60% lump-sum expenses vs an s.r.o. paying out dividends. |
 

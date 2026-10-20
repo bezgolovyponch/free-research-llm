@@ -1,6 +1,6 @@
 import { PROVIDER_PRESETS, ROUTE_ORDER, SEARCH_KEYS } from './presets.mjs';
 import { KeyChecker } from '../keycheck.mjs';
-import { CAPABILITY, STRATEGIES, routeFor, usageInfo } from './ranking.mjs';
+import { CAPABILITY, PURPOSE_CLASS, STRATEGIES, purposePlan, routeFor, usageInfo } from './ranking.mjs';
 import { GUIDES_CHECKED, guidesFor } from './guides.mjs';
 
 export const FREE_TIERS_CHECKED = '2026-10-18';
@@ -137,7 +137,7 @@ export function editableNames() {
 }
 
 export function strategyOf(env) {
-  return STRATEGIES[env.FRL_ROUTER_STRATEGY] ? env.FRL_ROUTER_STRATEGY : 'balanced';
+  return STRATEGIES[env.FRL_ROUTER_STRATEGY] ? env.FRL_ROUTER_STRATEGY : 'max';
 }
 
 export function summaryOf(models, stats) {
@@ -176,7 +176,10 @@ export class RouterAdmin {
   route() {
     const strategy = strategyOf(this.env);
     const enabled = modelOrder(this.env).enabled;
-    return { strategy, ...routeFor({ strategy, providers: this.statuses(), ledger: this.ledger(), enabled, customOrder: enabled, now: this.now() }) };
+    const base = routeFor({ strategy: strategy === 'max' ? 'balanced' : strategy, providers: this.statuses(), ledger: this.ledger(), enabled, customOrder: enabled, now: this.now() });
+    if (strategy !== 'max') return { strategy, ...base };
+    const plan = purposePlan({ providers: this.statuses(), stats: base.stats, usage: usageInfo(this.ledger(), { now: this.now() }).providers, enabled });
+    return { strategy, ...base, order: { ...base.order, byPurpose: plan.byPurpose }, plan: { reserved: plan.reserved, classes: plan.orders, purposes: PURPOSE_CLASS } };
   }
 
   apply() {
@@ -196,6 +199,7 @@ export class RouterAdmin {
       strategy: route.strategy,
       strategies: Object.entries(STRATEGIES).map(([id, s]) => ({ id, ...s })),
       route: { deep: route.deep, fast: route.fast },
+      plan: route.plan ?? null,
       summary: summaryOf(catalog.models, route.stats),
       usage: usageInfo(await this.history(), { now: this.now() }),
       inUse: catalog.models.filter((m) => m.saved || (m.keyless && m.state === 'ready')).map((m) => m.id),

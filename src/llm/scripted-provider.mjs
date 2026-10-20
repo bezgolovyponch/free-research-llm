@@ -98,7 +98,7 @@ const RESPONDERS = {
     risks: ['demo data is not real'],
     openQuestions: ['which model provider will you connect?'],
     nextSteps: [{ step: 'Connect a free model', why: 'real research needs a real model', how: 'Setup tab → paste a Groq or Gemini key' }],
-    actions: [{ action: 'DEMO: confirm real landed costs before buying', why: 'margin rests on D2.2', nodeIds: ['D2.2'], impact: 4, horizon: '0-1 months' }, { action: 'DEMO: test demand with two listings', why: 'D1 is the weakest driver', nodeIds: ['D1'], impact: 3, horizon: '1-2 months' }],
+    actions: [{ action: 'DEMO: confirm real costs before committing', why: 'margin rests on D2.2', nodeIds: ['D2.2'], impact: 4, horizon: '0-1 months' }, { action: 'DEMO: test demand with two listings', why: 'D1 is the weakest driver', nodeIds: ['D1'], impact: 3, horizon: '1-2 months' }],
     options: [{ option: 'GO', support: ['D2.2'], against: ['D1'] }, { option: 'NO-GO', support: ['D1'], against: ['D2.2'] }],
   }),
 };

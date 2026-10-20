@@ -3,7 +3,8 @@ import { TEMPLATES, suggestTemplate, templateById } from '../../src/research/tem
 
 describe('templates', () => {
   it.each([
-    ['Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland?', 'car-arbitrage'],
+    ['Create an action plan to beat our two main competitors in the EU', 'competitive-strategy'],
+    ['Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland?', 'generic'],
     ['Where should I build a glamping site with 6 tents?', 'glamping-location'],
     ['Flat-rate tax or s.r.o. for a freelancer in Czechia?', 'taxes'],
     ['How big is the market for e-bike rentals in Prague?', 'market-sizing'],

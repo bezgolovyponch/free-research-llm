@@ -73,7 +73,7 @@ export class NodeChat {
   async apply(id, action) {
     const e = this.engine;
     if (action.type === 'edit') await e.editNode(id, action.nodeId, action.fields ?? {});
-    if (action.type === 'add') await e.addNode(id, action.parentId, { question: action.question, searchQueries: action.searchQueries, sourceUrls: action.sourceUrls, listings: action.listings, method: action.method });
+    if (action.type === 'add') await e.addNode(id, action.parentId, { question: action.question, searchQueries: action.searchQueries, sourceUrls: action.sourceUrls, method: action.method });
     if (action.type === 'remove') await e.removeNode(id, action.nodeId);
     if (action.type === 'expand') await e.expandNode(id, action.nodeId, action.hint ?? '');
     if (action.type === 'suggest') await this.suggester.suggest(id, action.nodeId);

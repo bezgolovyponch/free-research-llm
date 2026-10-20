@@ -82,7 +82,7 @@ describe('router admin', () => {
   it('switches the routing strategy and providers on or off, and the view shows the ranked route and a summary', async () => {
     const env: Record<string, string> = { GROQ_API_KEY: 'gsk_x' };
     const t = admin(env, async () => ({ ok: true }));
-    expect(strategyOf(env)).toBe('balanced');
+    expect(strategyOf(env)).toBe('max');
     expect(await t.a.setStrategy('fastest')).toMatchObject({ strategy: 'fastest' });
     expect([env.FRL_ROUTER_STRATEGY, t.secrets.saved.get('FRL_ROUTER_STRATEGY')]).toEqual(['fastest', 'fastest']);
     await expect(t.a.setStrategy('random')).rejects.toThrow(/strategy must be/);

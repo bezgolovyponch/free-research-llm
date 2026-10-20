@@ -1,4 +1,5 @@
 export const STRATEGIES = {
+  max: { label: 'Maximum capability', what: 'Each kind of call gets the strongest model that can take it: memo, tree and code go to the most capable; research to capable models with volume, escalating to the strongest when checks fail (FrugalGPT cascade); reviews and roll-ups to fast models of a different family than the one that wrote the answer. The strongest model\'s quota is kept for the important calls, spent keys wait for their daily reset, and prompts too big for a provider skip it.' },
   balanced: { label: 'Balanced', what: 'Reliable and capable first, speed breaks ties. Deep work weighs capability, fast work weighs speed.' },
   fastest: { label: 'Fastest', what: 'Lowest median reply time first, among providers that answer at least half of their calls.' },
   smartest: { label: 'Smartest', what: 'Most capable model first, then the most reliable.' },
@@ -75,7 +76,7 @@ export function providerStats(ledger, { now = Date.now(), windowMs = WINDOW_MS }
 function reasonFor(row, role, strategy, rank) {
   if (!row.ready) return row.notReady;
   const parts = [];
-  if (row.cooling) parts.push(`cooling ${row.cooling} s, skipped until then`);
+  if (row.cooling) parts.push(row.coolingReason ? `benched ${row.cooling > 3600 ? `${Math.round(row.cooling / 3600)} h` : `${row.cooling} s`}: ${row.coolingReason}` : `cooling ${row.cooling} s, skipped until then`);
   if (strategy === 'custom') parts.push(`your position ${rank + 1}`);
   else if (strategy === 'fastest') parts.push(row.medianMs ? `median ${(row.medianMs / 1000).toFixed(1)} s` : 'no timing yet, placed after measured ones');
   else if (strategy === 'smartest') parts.push(`capability ${row.capability}/5`);
@@ -89,7 +90,7 @@ export function rankRole({ role, strategy, providers, stats, customOrder = [], n
   const rows = providers.map((p) => {
     const s = stats[p.id] ?? { calls: 0, ok: 0, failed: 0, rateLimited: 0, reliability: 0.5, medianMs: {} };
     const [capability, capabilityBasis] = capabilityOf(p);
-    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, capability, capabilityBasis, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, medianMs: s.medianMs[role] ?? null };
+    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, medianMs: s.medianMs[role] ?? null };
   });
   const timed = rows.filter((r) => r.medianMs).map((r) => r.medianMs);
   const fastest = timed.length ? Math.min(...timed) : null;
@@ -181,4 +182,39 @@ export function usageInfo(rows, { now = Date.now(), windowMs = WINDOW_MS } = {})
     }];
   }));
   return { total, providers };
+}
+
+export const PURPOSE_CLASS = {
+  synthesize: 'top', decompose: 'top', expand: 'top', code: 'top', 'code-plan': 'top', improve: 'top', suggest: 'top',
+  research: 'research',
+  critique: 'volume', rollup: 'volume', 'app-chat': 'volume', 'results-chat': 'volume', chat: 'volume', media: 'volume',
+};
+export const MAX_PROMPT_TOKENS = { groq: 7000 };
+const RESERVE_UNTIL = 0.7;
+
+export function familyOf(model, providerId = '') {
+  const m = String(model ?? '').toLowerCase();
+  for (const [family, re] of [['gpt-oss', /gpt-oss/], ['gemini', /gemini|gemma/], ['deepseek', /deepseek/], ['llama', /llama/], ['qwen', /qwen/], ['minimax', /minimax/], ['mistral', /mistral|magistral|codestral/], ['claude', /claude/], ['openai', /gpt-|openai/], ['command', /command/]]) if (re.test(m)) return family;
+  return providerId || 'unknown';
+}
+
+function orderBy(rows, compare) {
+  return [...rows].sort((a, b) => Number(b.ready) - Number(a.ready) || compare(a, b) || a.id.localeCompare(b.id)).map((r) => r.id);
+}
+
+export function purposePlan({ providers, stats, usage = {}, enabled }) {
+  const used = providers.filter((p) => enabled.includes(p.id));
+  const deep = rankRole({ role: 'deep', strategy: 'balanced', providers: used, stats });
+  const fast = rankRole({ role: 'fast', strategy: 'balanced', providers: used, stats });
+  const weak = (r) => (r.capability <= 1 ? 2 : 0) + (r.reliability < 0.5 && r.calls >= 4 ? 1 : 0);
+  const spent = (r) => ((usage[r.id]?.today?.used ?? 0) >= 0.9 ? 1 : 0);
+  const reserved = deep.filter((r) => r.ready).sort((a, b) => b.capability - a.capability || b.reliability - a.reliability)[0]?.id;
+  const reservedTight = reserved && (usage[reserved]?.today?.used ?? 0) >= RESERVE_UNTIL;
+  const top = orderBy(deep, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || b.capability - a.capability || b.reliability - a.reliability);
+  const research = orderBy(deep, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved && reservedTight) - Number(b.id === reserved && reservedTight) || b.score - a.score);
+  const volume = orderBy(fast, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved) - Number(b.id === reserved) || (b.capability >= 3) - (a.capability >= 3) || (a.medianMs ?? 1e9) - (b.medianMs ?? 1e9));
+  const orders = { top, research, volume };
+  const byPurpose = Object.fromEntries(Object.entries(PURPOSE_CLASS).map(([purpose, cls]) => [purpose, orders[cls]]));
+  byPurpose['research:deep'] = top;
+  return { byPurpose, reserved: reserved ?? null, orders };
 }

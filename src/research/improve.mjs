@@ -1,7 +1,7 @@
 import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt } from './prompts.mjs';
-import { METHODS, ROOT_ID, blankNode, isLeaf, listingSpec, nextNodeId, urlList } from './tree.mjs';
+import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
 
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, researching: 0 };
@@ -99,7 +99,6 @@ function nodeFields(raw, id, parentId) {
     method: METHODS.includes(raw?.method) ? raw.method : 'lookup',
     searchQueries: strings(raw?.searchQueries, 3),
     sourceUrls: urlList(raw?.sourceUrls),
-    listings: listingSpec(raw?.listings),
   });
 }
 
@@ -133,7 +132,6 @@ export function applyVariant(project, nodeId, variant) {
   if (Array.isArray(variant?.searchQueries) && strings(variant.searchQueries, 3).length) node.searchQueries = strings(variant.searchQueries, 3);
   if (Array.isArray(variant?.sourceUrls) && urlList(variant.sourceUrls).length) node.sourceUrls = urlList(variant.sourceUrls);
   if (METHODS.includes(variant?.method)) node.method = variant.method;
-  if (listingSpec(variant?.listings)) node.listings = listingSpec(variant.listings);
   if (typeof variant?.instructions === 'string' && variant.instructions.trim()) node.instructions = variant.instructions.trim().slice(0, 2000);
   touched.push(node.id);
   for (const raw of (Array.isArray(variant?.split) ? variant.split : []).slice(0, 3)) {

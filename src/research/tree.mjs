@@ -15,18 +15,6 @@ function list(value, max = 6) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => text(v, 200)).filter(Boolean).slice(0, max);
 }
 
-export function listingSpec(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const countries = list(raw.countries, 4).filter((c) => /^[A-Za-z]{2}$/.test(c)).map((c) => c.toUpperCase());
-  const minEur = Number(raw.minEur);
-  const maxEur = Number(raw.maxEur);
-  const spec = { countries, make: text(raw.make, 40), model: text(raw.model, 40), minEur: Number.isFinite(minEur) ? minEur : 0, maxEur: Number.isFinite(maxEur) && maxEur > 0 ? maxEur : 1000000 };
-  if (raw.scan) {
-    const country = (value, fallback) => (/^[A-Za-z]{2}$/.test(String(value ?? '')) ? String(value).toUpperCase() : fallback);
-    return { ...spec, scan: true, from: country(raw.from, countries[0] ?? 'DE'), to: country(raw.to, countries[1] ?? 'CZ') };
-  }
-  return spec.make || spec.model || countries.length ? spec : null;
-}
 
 export function urlList(value, max = 4) {
   return list(value, max * 2).filter((u) => /^https?:\/\/[^\s]+\.[^\s]+/.test(u)).slice(0, max);
@@ -50,7 +38,6 @@ export function blankNode(fields) {
     method: 'lookup',
     searchQueries: [],
     sourceUrls: [],
-    listings: null,
     instructions: '',
     dependsOn: [],
     impact: 3,
@@ -99,27 +86,6 @@ function fixParents(nodes) {
   }
 }
 
-export function moveListingsToLeaves(nodes) {
-  for (const node of [...nodes]) {
-    if (!node.listings || !nodes.some((n) => n.parentId === node.id)) continue;
-    let id = `${node.id}.0`;
-    while (nodes.some((n) => n.id === id)) id = `${id}0`;
-    nodes.push(blankNode({
-      id,
-      parentId: node.id,
-      title: `Data: ${node.title}`.slice(0, 90),
-      question: node.question,
-      metric: node.metric,
-      unit: node.unit,
-      method: 'data',
-      listings: node.listings,
-      impact: node.impact,
-      uncertainty: node.uncertainty,
-    }));
-    node.listings = null;
-  }
-  return nodes;
-}
 
 export function normalizeTree(raw, question) {
   const input = Array.isArray(raw?.nodes) ? raw.nodes.slice(0, MAX_NODES) : [];
@@ -141,14 +107,12 @@ export function normalizeTree(raw, question) {
       method: METHODS.includes(item?.method) ? item.method : 'lookup',
       searchQueries: list(item?.searchQueries, 3),
       sourceUrls: urlList(item?.sourceUrls),
-      listings: listingSpec(item?.listings),
       dependsOn: list(item?.dependsOn, 6),
       impact: clampScore(item?.impact),
       uncertainty: clampScore(item?.uncertainty),
     }));
   });
   fixParents(nodes);
-  moveListingsToLeaves(nodes);
   dropCycles(nodes);
   return {
     decision: text(raw?.decision, 400) || text(question, 400),

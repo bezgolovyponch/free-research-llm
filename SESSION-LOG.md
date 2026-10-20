@@ -3,6 +3,17 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-20 · session 15 — maximum-capability routing; the app is no longer car-specific
+
+- **Routing** (more free keys): the new default strategy **Maximum capability** routes by purpose, combining FrugalGPT's cascade (Chen et al. 2023) with LiteLLM-style quota-aware routing and fallbacks for prompts too big for a model.
+  - Memo, tree and code go to the strongest model; research to capable models with volume; reviews and roll-ups to fast models of a different family than the author. Escalated research (`research:deep`) goes to the strongest.
+  - The strongest model's quota is kept for the important calls once it is 70% used.
+  - Benching: a 402 or a daily-quota error waits for the next UTC day; 401/403 waits 6 h. SambaNova's `402 balance_units:0` was retried on every call before.
+  - Prompts over 7,000 tokens skip Groq (its 8K TPM, the cause of HTTP 413).
+  - The router page shows the three lanes, the reserved model, and why a provider is benched. Code: `purposePlan`, `familyOf` (`src/llm/ranking.mjs`); `ordered(tier, purpose)`, `coolDown` (`src/llm/router.mjs`).
+- **Car arbitrage removed from the app** (the research data is kept and still opens): the car-arbitrage template, the marketplace reader (kleinanzeigen.de, bazos.cz, aaaauto.cz, `src/search/marketplaces.mjs`) and its robots.txt policy, and the `listings` tool in tree, engine, loop, chats and prompts. Placeholders, chat hints, the guide card, the demo, README, GUIDE and PROTOCOLS now use neutral examples.
+- **Flaky e2e cause:** DeepSeek Harness, running e2e for another repo (`~/DVOR-8`), runs `pkill -f chrome-headless-shell`, killing this app's test browsers mid-run.
+
 ## 2026-10-20 · session 14 — diverse, entity-specific research instead of generic content
 
 - **Asked:** review the latest run, whose content is generic, and patch the app for more diverse results.

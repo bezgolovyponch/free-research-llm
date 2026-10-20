@@ -1,12 +1,11 @@
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/search.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
-import { listingsSource, scanSource } from '../search/marketplaces.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
-import { ROOT_ID, blankNode, childrenOf, isLeaf, listingSpec, normalizeTree, progress, researchOrder, urlList } from './tree.mjs';
+import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding } from './verify.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
@@ -83,11 +82,9 @@ export function normalizeEstimate(raw) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, onEvent = () => {}, markets = null, marketHistory = null, onStop = async () => {} }) {
+  constructor({ router, search, store, demo = false, rates = null, onEvent = () => {}, onStop = async () => {} }) {
     this.onStop = onStop;
     this.quiet = new Set();
-    this.markets = markets;
-    this.marketHistory = marketHistory;
     this.router = router;
     this.search = search;
     this.store = store;
@@ -235,8 +232,7 @@ export class ResearchEngine {
     const entities = this.entitiesOf(project);
     node.ownerOnly = ownerOnly(node, entities.subject ? [entities.subject] : []);
     if (this.search?.enabled && !node.ownerOnly) {
-      const listed = node.listings && this.markets ? await this.listingSources(project, node) : [];
-      const direct = [...listed, ...(node.sourceUrls?.length && this.search.readPages ? await this.search.readPages(node.sourceUrls) : [])];
+      const direct = [...(node.sourceUrls?.length && this.search.readPages ? await this.search.readPages(node.sourceUrls) : [])];
       const queries = [...new Set([...entityQueries(node, entities.domains), ...scopedQueries(node, entities.names)])];
       const web = await this.search.search(queries, { maxSources: 8 - direct.length, exclude: direct.map((d) => d.url), wanted: terms(`${node.title} ${node.question}`), entities: entities.domains, usedDomains: this.usedDomains(project, node), names: mentionedNames(node, entities.names) });
       [...direct, ...web].forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
@@ -255,35 +251,6 @@ export class ResearchEngine {
     const { sources, added } = mergeSources(node.sources, found);
     node.sources = sources;
     this.emit(project, 'node', `${node.id}: ${added.length} new source(s) from gap search`, { nodeId: node.id });
-  }
-
-  async scanSources(project, node) {
-    const spec = node.listings;
-    this.emit(project, 'node', `${node.id}: scanning model prices ${spec.from}→${spec.to} on marketplaces (code, robots.txt-checked)`, { nodeId: node.id });
-    const rows = await this.markets.scanModels(spec);
-    const histories = {};
-    for (const row of rows) {
-      const key = `scan-${spec.from}-${row.make}-${row.model}-${spec.minEur}-${spec.maxEur}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-      histories[`${row.make} ${row.model}`] = this.marketHistory ? await this.marketHistory.read(key, 200) : [];
-      if (this.marketHistory) void this.marketHistory.append(key, { ...row.from, gapPct: row.gapPct });
-    }
-    this.emit(project, 'node', `${node.id}: scan done — ${rows.filter((r) => r.gapPct !== null).length}/${rows.length} models comparable; top: ${rows.slice(0, 3).map((r) => `${r.make} ${r.model} ${r.gapPct ?? 'n/a'}%`).join(', ')}`, { nodeId: node.id });
-    return [scanSource(rows, spec, '', histories)];
-  }
-
-  async listingSources(project, node) {
-    if (node.listings.scan) return this.scanSources(project, node);
-    const results = await this.markets.search(node.listings);
-    if (this.markets.lastErrors.length) this.emit(project, 'warn', `${node.id}: marketplaces — ${this.markets.lastErrors.join('; ').slice(0, 200)}`, { nodeId: node.id });
-    const sources = [];
-    for (const result of results.filter((r) => r.listings.length)) {
-      const key = `market-${result.market}-${[node.listings.make, node.listings.model].filter(Boolean).join('-') || 'all'}-${node.listings.minEur}-${node.listings.maxEur}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-      const history = this.marketHistory ? await this.marketHistory.read(key, 200) : [];
-      if (this.marketHistory) void this.marketHistory.append(key, { ...result.stats });
-      sources.push(listingsSource(result, '', history));
-    }
-    this.emit(project, 'node', `${node.id}: ${sources.reduce((n, s) => n + s.listings.length, 0)} listing(s) read from ${sources.map((s) => s.title).join(', ') || 'no marketplace'}`, { nodeId: node.id });
-    return sources;
   }
 
   upstreamFor(project, node) {
@@ -544,7 +511,6 @@ export class ResearchEngine {
     for (const key of ['title', 'question', 'hypothesis', 'metric', 'unit']) if (typeof changes[key] === 'string') node[key] = changes[key].slice(0, 400);
     if (Array.isArray(changes.searchQueries)) node.searchQueries = strings(changes.searchQueries, 3);
     if (Array.isArray(changes.sourceUrls)) node.sourceUrls = urlList(changes.sourceUrls);
-    if ('listings' in changes) node.listings = listingSpec(changes.listings);
     if (typeof changes.instructions === 'string') node.instructions = changes.instructions.slice(0, 2000);
     this.resetWithAncestors(project, nodeId);
     this.emit(project, 'edit', `${nodeId}: edited, will be re-researched`, { nodeId });
@@ -562,7 +528,7 @@ export class ResearchEngine {
     const question = String(fields.question ?? '').trim();
     if (!question) throw new Error('a sub-question needs text');
     const queries = strings(fields.searchQueries, 3);
-    const node = blankNode({ id: `${base}${i}`, parentId, title: String(fields.title || question).slice(0, 60), question, why: String(fields.why ?? '').slice(0, 300), searchQueries: queries.length ? queries : [question], sourceUrls: urlList(fields.sourceUrls), listings: listingSpec(fields.listings), method: ['lookup', 'calculation', 'comparison', 'estimate', 'data'].includes(fields.method) ? fields.method : 'lookup' });
+    const node = blankNode({ id: `${base}${i}`, parentId, title: String(fields.title || question).slice(0, 60), question, why: String(fields.why ?? '').slice(0, 300), searchQueries: queries.length ? queries : [question], sourceUrls: urlList(fields.sourceUrls), method: ['lookup', 'calculation', 'comparison', 'estimate', 'data'].includes(fields.method) ? fields.method : 'lookup' });
     project.nodes.push(node);
     if (parent) this.resetWithAncestors(project, parent.id);
     project.report = null;

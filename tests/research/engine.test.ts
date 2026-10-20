@@ -40,7 +40,7 @@ describe('ResearchEngine', () => {
     const { engine } = engineWith(provider);
     const events: string[] = [];
     const project = await engine.createProject({ question: 'Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland?' });
-    expect(project.templateId).toBe('car-arbitrage');
+    expect(project.templateId).toBe('generic');
     engine.subscribe(project.id, (e: { type: string }) => events.push(e.type));
     const done = await engine.run(project.id);
     expect(done.phase).toBe('done');

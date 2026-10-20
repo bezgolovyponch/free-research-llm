@@ -15,8 +15,6 @@ import { EventLog } from './logs.mjs';
 import { AppChat } from './appchat.mjs';
 import { HandoffWriter } from './research/handoff.mjs';
 import { appendAppMessage } from './research/notify.mjs';
-import { MarketplaceService } from './search/marketplaces.mjs';
-import { RobotsPolicy } from './search/robots.mjs';
 import { ProjectStore } from './store.mjs';
 import { DocsIndex } from './chat/docs.mjs';
 import { MediaReader } from './chat/media.mjs';
@@ -125,8 +123,7 @@ export class App {
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects') });
     this.handoffs = new HandoffWriter({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'handoff') });
     const rates = new ExchangeRates({ fetchImpl });
-    this.markets = env.FRL_MARKETPLACES === '0' ? null : new MarketplaceService({ fetchImpl, rates, robots: new RobotsPolicy({ fetchImpl }) });
-    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, markets: this.markets, marketHistory: new EventLog({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'market') }), onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
+    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
     this.improver = new ProjectImprover({ engine: this.engine });
     this.suggester = new SubIssueSuggester({ engine: this.engine });
     this.port = Number(env.PORT || 4600);
@@ -143,7 +140,7 @@ export class App {
       history: () => this.logs.read('model-calls', 20000),
       applyOrder: (order) => {
         const forced = routeOrderFrom(this.env);
-        this.router.routeOrder = { fast: this.env.FRL_FAST_ORDER ? forced.fast : order.fast, deep: this.env.FRL_DEEP_ORDER ? forced.deep : order.deep };
+        this.router.routeOrder = { fast: this.env.FRL_FAST_ORDER ? forced.fast : order.fast, deep: this.env.FRL_DEEP_ORDER ? forced.deep : order.deep, ...(order.byPurpose && !this.env.FRL_FAST_ORDER && !this.env.FRL_DEEP_ORDER ? { byPurpose: order.byPurpose } : {}) };
       },
       checker: new KeyChecker({ fetchImpl }),
       links: new LinkVerifier({ fetchImpl }),

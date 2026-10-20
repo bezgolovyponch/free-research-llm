@@ -11,7 +11,7 @@ export const TEMPLATES = [
     ],
     drivers: 'Demand / market size; supply & competition; unit economics (revenue, costs, margin); regulation & legal constraints; risks & failure modes; timing / trend.',
     metrics: 'market size, price, volume, margin, payback period, ROI, risk-adjusted outcome',
-    sources: 'official statistics offices, industry reports, marketplaces/listings, regulators, reputable news',
+    sources: 'official statistics offices, industry reports, company pages, regulators, reputable news',
     decisionRule: 'State the decision as GO / NO-GO / GO-IF with the threshold that flips it.',
   },
   {
@@ -28,21 +28,6 @@ export const TEMPLATES = [
     metrics: 'features present/absent per competitor, public customers and partners, announced deals, prices per plan, publications and repository activity, hiring signals',
     sources: 'the companies\' own websites and pricing pages, GitHub repositories, papers (arXiv, bioRxiv, PubMed), press releases, official registers, conference talks, job boards, reputable trade press; avoid market-report teaser pages',
     decisionRule: 'Rank concrete actions by the evidence behind them and their impact; name the piece ids each action rests on.',
-  },
-  {
-    id: 'car-arbitrage',
-    label: 'Car arbitrage (buy here, sell there)',
-    example: 'Is it profitable to buy used 2015-2019 Toyota RAV4 hybrids in Germany and resell them in Poland? Which trims and mileage give the best net margin per car?',
-    fields: [
-      { key: 'buyMarket', label: 'Buy market', placeholder: 'e.g. Germany (mobile.de)' },
-      { key: 'sellMarket', label: 'Sell market', placeholder: 'e.g. Poland (otomoto.pl)' },
-      { key: 'segment', label: 'Models / years / fuel', placeholder: 'e.g. RAV4 hybrid 2015-2019' },
-      { key: 'budget', label: 'Capital per batch', placeholder: 'e.g. €60,000' },
-    ],
-    drivers: 'Price gap buy vs sell market for identical spec (same year, mileage band, trim); landed cost (transport, registration, excise/VAT, technical inspection, translation, plates); time-to-sell & holding cost; condition/fraud risk (mileage rollback, accident history, VIN checks); demand depth and seasonality in sell market; FX risk; legal: margin-scheme VAT vs standard VAT, dealer licensing.',
-    metrics: 'median listing price per spec in each market, landed cost per car, net margin per car, net margin %, days to sell, capital turns per year, annualised ROI',
-    sources: 'marketplace listings read by code with the listings tool (DE: kleinanzeigen.de; CZ: bazos.cz, aaaauto.cz), registration and inspection fee tables, customs/excise and VAT rules for used cars (margin scheme), transport quotes, national used-car price statistics',
-    decisionRule: 'GO only for specs where net margin per car after ALL landed costs and a holding-cost buffer beats the threshold; list those specs ranked by annualised ROI.',
   },
   {
     id: 'glamping-location',
@@ -96,7 +81,6 @@ export function templateById(id) {
 
 export function suggestTemplate(question) {
   const q = String(question ?? '').toLowerCase();
-  if (/\bcars?\b|vehicle|\bauto|arbitrage|resell|\bflip|mileage|toyota|bmw|audi|volkswagen|\bvw\b|mercedes|skoda|škoda|porsche|honda|ford|rav4|mobile\.de|otomoto|autoscout/.test(q)) return 'car-arbitrage';
   if (/glamp|camp|cabin|hotel|guesthouse|airbnb|occupancy|hospitality|holiday (home|rental)/.test(q)) return 'glamping-location';
   if (/\btax|vat|dph|deduct|s\.r\.o|llc|self-employ|freelanc|social (insurance|security)|payroll/.test(q)) return 'taxes';
   if (/compet|rival|\bvs\.?\b|versus|strateg|action plan|go[- ]to[- ]market|positioning|differentiat|outperform|beat\b/.test(q)) return 'competitive-strategy';

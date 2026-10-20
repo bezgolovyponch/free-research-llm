@@ -1,9 +1,21 @@
 import { extractJson } from '../research/json.mjs';
 import { ProviderError } from './provider.mjs';
+import { MAX_PROMPT_TOKENS, familyOf } from './ranking.mjs';
 
 export class NoModelAvailableError extends Error {}
 
 const DEFAULT_COOLDOWN_MS = 60000;
+const BAD_KEY_MS = 6 * 3600 * 1000;
+const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
+
+export function nextUtcMidnight(now) {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) + 60000;
+}
+
+export function estimateTokens(messages) {
+  return Math.ceil((messages ?? []).reduce((n, m) => n + String(m.content ?? '').length, 0) / 3.5);
+}
 const MAX_WAIT_ROUNDS = 3;
 const REPAIR_INSTRUCTION = 'Your previous reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.';
 
@@ -17,6 +29,7 @@ export class ModelRouter {
     this.sleep = sleep;
     this.onLedger = onLedger;
     this.cooldownUntil = new Map();
+    this.cooldownReason = new Map();
     this.ledger = [];
     this.calls = 0;
   }
@@ -29,8 +42,9 @@ export class ModelRouter {
     this.providers = providers;
   }
 
-  ordered(tier) {
-    const order = this.routeOrder?.[tier];
+  ordered(tier, purpose) {
+    const plan = this.routeOrder?.byPurpose;
+    const order = (purpose && plan && (plan[`${purpose}:${tier}`] ?? plan[purpose])) || this.routeOrder?.[tier];
     if (!order) return this.providers;
     const rank = (p) => {
       const i = order.indexOf(p.id);
@@ -39,11 +53,18 @@ export class ModelRouter {
     return [...this.providers].sort((a, b) => rank(a) - rank(b));
   }
 
-  available({ avoid, tier = 'fast' } = {}) {
+  available({ avoid, tier = 'fast', purpose, tokens = 0 } = {}) {
     const time = this.now();
-    const usable = this.ordered(tier).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
+    const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
+    const fits = open.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
+    const usable = fits.length ? [...fits, ...open.filter((p) => !fits.includes(p))] : open;
     if (!avoid) return usable;
-    const preferred = usable.filter((p) => p.id !== avoid);
+    const author = this.providers.find((p) => p.id === avoid);
+    const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
+    const authorFamily = author ? family(author) : null;
+    const other = usable.filter((p) => p.id !== avoid && family(p) !== authorFamily);
+    const sameFamily = usable.filter((p) => p.id !== avoid && family(p) === authorFamily);
+    const preferred = [...other, ...sameFamily];
     return preferred.length ? [...preferred, ...usable.filter((p) => p.id === avoid)] : usable;
   }
 
@@ -55,8 +76,18 @@ export class ModelRouter {
   }
 
   coolDown(provider, error) {
-    const wait = error.retryAfterMs || this.cooldownMs;
-    this.cooldownUntil.set(provider.id, this.now() + wait);
+    const now = this.now();
+    let until = now + (error.retryAfterMs || this.cooldownMs);
+    let reason = 'rate limit';
+    if (error.status === 401 || error.status === 403) {
+      until = now + BAD_KEY_MS;
+      reason = 'key rejected; check it on Models & router';
+    } else if (error.status === 402 || DAILY.test(error.message)) {
+      until = Math.max(until, nextUtcMidnight(now));
+      reason = 'daily quota or credit used up; waits for the daily reset';
+    }
+    this.cooldownUntil.set(provider.id, until);
+    this.cooldownReason.set(provider.id, reason);
   }
 
   shortestCooldownMs() {
@@ -65,12 +96,12 @@ export class ModelRouter {
     return waits.length ? Math.max(0, Math.min(...waits)) : Infinity;
   }
 
-  async waitForCooldown({ avoid, tier, purpose }) {
+  async waitForCooldown({ avoid, tier, purpose, tokens }) {
     const wait = this.shortestCooldownMs();
     if (wait > this.maxWaitMs) return [];
     this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
     await this.sleep(wait);
-    return this.available({ avoid, tier });
+    return this.available({ avoid, tier, purpose, tokens });
   }
 
   async tryProviders(candidates, { messages, tier, json, purpose, temperature }, errors) {
@@ -88,7 +119,7 @@ export class ModelRouter {
           this.record({ purpose, tier, provider: provider.id, ok: false, ms: this.now() - started, error: error.message.slice(0, 200) });
           errors.push(error.message);
           if (error instanceof ProviderError) {
-            if (error.retryable) this.coolDown(provider, error);
+            if (error.retryable || [401, 402, 403].includes(error.status)) this.coolDown(provider, error);
             break;
           }
           attemptMessages = [...messages, { role: 'user', content: REPAIR_INSTRUCTION }];
@@ -101,9 +132,10 @@ export class ModelRouter {
   async complete({ messages, tier = 'fast', json = true, purpose = 'chat', avoid, temperature }) {
     const request = { messages, tier, json, purpose, temperature };
     const errors = [];
-    let candidates = this.available({ avoid, tier });
+    const tokens = estimateTokens(messages);
+    let candidates = this.available({ avoid, tier, purpose, tokens });
     for (let round = 0; round < MAX_WAIT_ROUNDS; round++) {
-      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose });
+      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose, tokens });
       if (!candidates.length) break;
       const reply = await this.tryProviders(candidates, request, errors);
       if (reply) return reply;
@@ -126,6 +158,7 @@ export class ModelRouter {
     return this.providers.map((p) => ({
       ...p.describe(),
       coolingDownMs: Math.max(0, (this.cooldownUntil.get(p.id) ?? 0) - time),
+      coolingReason: (this.cooldownUntil.get(p.id) ?? 0) > time ? this.cooldownReason.get(p.id) ?? 'rate limit' : null,
     }));
   }
 }

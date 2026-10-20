@@ -2,7 +2,7 @@
 
 Ask one analytical question and get back a decomposed, source-checked decision memo. It runs locally on free model quotas.
 
-- **Cars arbitrage:** "Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland? Which specs clear €1,500 per car?"
+- **Competitive strategy:** "Create a 6-month action plan for a startup (its website) against its two main competitors (their websites) in the EU and US."
 - **Glamping location:** "Which Czech region gives a 6-tent glamping site the best payback on €250k?"
 - **Taxes:** "Flat-rate tax, lump-sum expenses or an s.r.o. for a Czech IT freelancer on €70k in 2026?"
 - **Anything else** you can state as a decision: market size, pricing, location, buy-or-build.
@@ -53,7 +53,7 @@ From the terminal you can use the same engine without the UI:
 
 ```bash
 npm run ask -- "Is a 6-tent glamping site in Šumava profitable on €250k?" --template glamping-location --set budget=€250k
-npm run ask -- "Which RAV4 specs clear €1,500 margin DE→PL?" --csv listings.csv
+npm run ask -- "Which EU city gives a coffee kiosk the fastest payback?" --csv my-costs.csv
 ```
 
 Reports are written to `reports/<project>.md`.

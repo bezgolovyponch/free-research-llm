@@ -20,7 +20,7 @@ function parseArgs(argv) {
   return { ...args, question: args.question.join(' ').trim() };
 }
 
-const USAGE = `usage: npm run ask -- "your question" [--template auto|generic|car-arbitrage|glamping-location|taxes|market-sizing] [--csv data.csv] [--set key=value]
+const USAGE = `usage: npm run ask -- "your question" [--template auto|generic|competitive-strategy|glamping-location|taxes|market-sizing] [--csv data.csv] [--set key=value]
        npm run ask -- --resume <project-id>`;
 
 const args = parseArgs(process.argv.slice(2));

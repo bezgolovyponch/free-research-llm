@@ -17,12 +17,11 @@ Each row names the code that enforces it and the test that proves it.
 | 8 Roll up | A parent takes its weakest child's grade | `ResearchEngine.rollup` |
 | 9 Deliver | Only items from verified/supported nodes are collected; the expected-result checks run on them | `collectDeliverables`, `AcceptanceChecker` |
 
-## 1b. Marketplace data protocol
+## 1b. Source protocol
 
-- Listing data comes from built-in connectors, not from the model: DE kleinanzeigen.de, CZ bazos.cz and aaaauto.cz (`src/search/marketplaces.mjs`). A node asks for it with `listings: {countries, make, model, minEur, maxEur}`.
-- Every page is checked against the site's robots.txt first (`RobotsPolicy`, RFC 9309 longest match); disallowed pages are never fetched. Price filters that robots.txt forbids (kleinanzeigen `/*/preis:*`, bazos `cenaod=`) are applied in code instead; sauto.cz forbids bots entirely and is not used.
-- Listings are read from schema.org structured data when the page has it, otherwise from the listing card; prices are converted at ECB rates; median, range and count are computed by code; each fetch is stored in `data/market/` so the price trend builds up over time.
-- The result is a `data` source whose rows and links the gates trust; items must still be copied from those rows.
+- Search runs every query, then picks sources by relevance and difference from those already picked (MMR, `src/search/selection.mjs`): at most 2 per site, at most 2 market-report teaser pages, pages sharing no word with the piece dropped, sites other pieces already use penalised.
+- The companies named in the question, their code, papers, official registers and press releases are primary evidence and rank first; `site:` queries cover the named domains.
+- A private company's own figures are never searched; the piece goes to Clarify for the owner's input.
 
 ## 2. Gate protocol (the model cannot override these)
 

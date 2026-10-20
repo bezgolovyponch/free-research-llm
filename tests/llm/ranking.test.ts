@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY, STRATEGIES, capabilityOf, localCapability, providerStats, rankRole, routeFor, usageInfo } from '../../src/llm/ranking.mjs';
+import { CAPABILITY, PURPOSE_CLASS, STRATEGIES, capabilityOf, familyOf, purposePlan, localCapability, providerStats, rankRole, routeFor, usageInfo } from '../../src/llm/ranking.mjs';
 
 const now = Date.parse('2026-10-19T12:00:00Z');
 const ts = (min: number) => new Date(now - min * 60000).toISOString();
@@ -52,7 +52,7 @@ describe('router ranking', () => {
     expect(route.order).toEqual({ deep: ['cerebras', 'gemini'], fast: ['cerebras', 'gemini'] });
     const cooling = rankRole({ role: 'deep', strategy: 'balanced', providers: [{ ...providers[1], coolingDownMs: 40000 }], stats: {} });
     expect(cooling[0].why).toContain('cooling 40 s, skipped until then');
-    expect(Object.keys(STRATEGIES)).toEqual(['balanced', 'fastest', 'smartest', 'custom']);
+    expect(Object.keys(STRATEGIES)).toEqual(['max', 'balanced', 'fastest', 'smartest', 'custom']);
     expect(CAPABILITY.gemini[0]).toBe(5);
   });
 
@@ -82,5 +82,27 @@ describe('router ranking', () => {
     const rows = rankRole({ role: 'fast', strategy: 'balanced', providers: [tiny, providers[1]], stats });
     expect(rows.map((r: { id: string }) => r.id)).toEqual(['cerebras', 'llamacpp']);
     expect(rows[1].why).toContain('kept last: too small for research');
+  });
+
+  it('maximum capability: strongest for memo/tree/code, capable volume for research, fast other-family models for reviews, and the strongest model\'s quota kept for what matters', () => {
+    const ps = [
+      { id: 'gemini', label: 'Gemini', state: 'ready', deep: 'gemini-3.8-flash', fast: 'gemini-3.5-flash-lite', coolingDownMs: 0 },
+      { id: 'cerebras', label: 'Cerebras', state: 'ready', deep: 'gpt-oss-120b', fast: 'gpt-oss-120b', coolingDownMs: 0 },
+      { id: 'groq', label: 'Groq', state: 'ready', deep: 'openai/gpt-oss-120b', fast: 'openai/gpt-oss-20b', coolingDownMs: 0 },
+      { id: 'pollinations', label: 'Pollinations', state: 'ready', deep: 'openai-fast', fast: 'openai-fast', coolingDownMs: 0 },
+    ];
+    const stats = providerStats([...calls('cerebras', 'fast', 10, 800), ...calls('groq', 'fast', 10, 600), ...calls('gemini', 'deep', 10, 2000), ...calls('pollinations', 'fast', 10, 25000)], { now });
+    const plan = purposePlan({ providers: ps, stats, enabled: ps.map((p) => p.id) });
+    expect(plan.reserved).toBe('gemini');
+    expect(plan.byPurpose.synthesize[0]).toBe('gemini');
+    expect(plan.byPurpose.code[0]).toBe('gemini');
+    expect(plan.byPurpose['research:deep'][0]).toBe('gemini');
+    expect(plan.byPurpose.critique.at(-1)).toBe('gemini');
+    expect(plan.byPurpose.critique.slice(0, 2).sort()).toEqual(['cerebras', 'groq']);
+    const tight = purposePlan({ providers: ps, stats, usage: { gemini: { today: { used: 0.8 } } }, enabled: ps.map((p) => p.id) });
+    expect(tight.byPurpose.research[0]).not.toBe('gemini');
+    expect(tight.byPurpose.synthesize[0]).toBe('gemini');
+    expect(PURPOSE_CLASS.rollup).toBe('volume');
+    expect([familyOf('openai/gpt-oss-120b'), familyOf('gpt-oss-120b'), familyOf('gemini-3.8-flash'), familyOf('DeepSeek-V3.2'), familyOf('x', 'p')]).toEqual(['gpt-oss', 'gpt-oss', 'gemini', 'deepseek', 'p']);
   });
 });

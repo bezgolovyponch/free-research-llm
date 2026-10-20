@@ -20,6 +20,6 @@ export default defineConfig({
     command: 'node src/server.mjs',
     url: `http://127.0.0.1:${PORT}/api/status`,
     reuseExistingServer: false,
-    env: { PORT: String(PORT), HOST: '127.0.0.1', FRL_DEMO: '1', FRL_KEYCHAIN: '0', FRL_POLLINATIONS: '0', FRL_WIKIPEDIA: '0', FRL_MARKETPLACES: '0', FRL_PROVIDER_ORDER: 'pollinations', FRL_DATA_DIR: dataDir },
+    env: { PORT: String(PORT), HOST: '127.0.0.1', FRL_DEMO: '1', FRL_KEYCHAIN: '0', FRL_POLLINATIONS: '0', FRL_WIKIPEDIA: '0', FRL_PROVIDER_ORDER: 'pollinations', FRL_DATA_DIR: dataDir },
   },
 });
