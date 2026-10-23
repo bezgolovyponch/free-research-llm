@@ -172,7 +172,7 @@ export function createServer(app, gate = new AccessGate()) {
       return project;
     }],
     ['GET', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
-      return { ...withResults(await app.engine.load(id)), lanes: app.engine.lanesFor(id) };
+      return { ...withResults(await app.engine.load(id)), ...app.engine.teamOf(id) };
     }],
     ['DELETE', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
       if (app.engine.running.has(id) || app.improver.isActive(id)) throw new ProjectBusyError('stop it first: the research is running');
@@ -181,10 +181,15 @@ export function createServer(app, gate = new AccessGate()) {
       if (project) app.noteApp(`Research deleted: ${String(project.question).slice(0, 110)}`);
       return { ok: true };
     }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/leave$/, async (req, [id]) => {
+      await app.engine.load(id);
+      return app.engine.leaveOne(id, String((await readJson(req)).clientId ?? ''));
+    }],
     ['POST', /^\/api\/projects\/([\w-]+)\/run$/, async (req, [id]) => {
       await app.engine.load(id);
-      if (app.improver.isActive(id)) return app.improver.join(id);
-      if (app.engine.running.has(id)) return app.engine.join(id);
+      const clientId = String((await readJson(req)).clientId ?? '');
+      if (app.improver.isActive(id)) return app.improver.join(id, clientId);
+      if (app.engine.running.has(id)) return app.engine.join(id, clientId);
       app.engine.start(id);
       return { ok: true };
     }],
@@ -270,9 +275,10 @@ export function createServer(app, gate = new AccessGate()) {
     ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/suggest$/, async (req, [id, nodeId]) => app.suggester.suggest(id, nodeId)],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve$/, async (req, [id]) => {
       await app.engine.load(id);
-      if (app.improver.isActive(id)) return app.improver.join(id);
-      if (app.engine.running.has(id)) return app.engine.join(id);
-      return app.improver.start(id, await readJson(req));
+      const body = await readJson(req);
+      if (app.improver.isActive(id)) return app.improver.join(id, String(body.clientId ?? ''));
+      if (app.engine.running.has(id)) return app.engine.join(id, String(body.clientId ?? ''));
+      return app.improver.start(id, body);
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve\/stop$/, async (req, [id]) => app.improver.stop(id)],
     ['POST', /^\/api\/improve-all$/, async (req) => {
@@ -312,7 +318,7 @@ export function createServer(app, gate = new AccessGate()) {
   async function serveEvents(req, res, id) {
     const project = await app.engine.load(id);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: { ...withResults(current), lanes: app.engine.lanesFor(id) } })}\n\n`);
+    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: { ...withResults(current), ...app.engine.teamOf(id) } })}\n\n`);
     push({ type: 'hello', message: 'connected' }, project);
     const unsubscribe = app.engine.subscribe(id, push);
     const ping = setInterval(() => res.write(': ping\n\n'), 20000);

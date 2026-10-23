@@ -541,6 +541,8 @@ const trunc=(s,n)=>{s=String(s||"");return s.length>n?s.slice(0,n-1)+"…":s;};
 const SNAPSHOT=()=>new URLSearchParams(location.hash.slice(1)).has("snapshot");
 const mq={narrow:window.matchMedia("(max-width:1180px)"),phone:window.matchMedia("(max-width:820px)")};
 
+const CLIENT_ID=(()=>{const fresh="c"+Math.random().toString(36).slice(2,12);try{const known=localStorage.getItem("frl-client");if(known)return known;localStorage.setItem("frl-client",fresh);}catch(e){}return fresh;})();
+function iJoined(p){return !!p&&(p.helpers||[]).includes(CLIENT_ID);}
 function toast(msg){const t=$("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",4200);}
 async function api(path,opts={}){
   const res=await fetch(path,{method:opts.method||"GET",headers:{"content-type":"application/json"},body:opts.body?JSON.stringify(opts.body):undefined});
@@ -798,7 +800,11 @@ function renderHead(){
   $("phasePill").innerHTML='<i class="'+(looping||running?"pulse":"")+'" style="background:'+color+'"></i>'+(looping?"improving":esc(p.phase))+(mq.phone.matches&&ns.length?" · "+fin+"/"+ns.length:"")+(p.demo?" · demo":"");
   $("progBar").style.width=(ns.length?Math.round(100*fin/ns.length):0)+"%";
   $("progText").textContent=fin+"/"+ns.length+" researched";
-  $("btnRun").disabled=false;$("btnRun").textContent=running||looping?"⚡ Join"+(p.lanes?" ("+p.lanes+" lanes)":""):"▶ Run";$("btnRun").title=running||looping?"Adds one lane: more pieces at once":"Research every piece that is not done yet";
+  const joined=iJoined(p);
+  $("btnRun").disabled=STATE.runLock&&Date.now()<STATE.runLock;
+  $("btnRun").textContent=running||looping?(joined?"✓ Joined · Leave":"⚡ Join")+(p.lanes?" ("+p.lanes+" lanes)":""):"▶ Run";
+  $("btnRun").classList.toggle("secondary",joined&&(running||looping));$("btnRun").classList.toggle("primary",!(joined&&(running||looping)));
+  $("btnRun").title=running||looping?(joined?"You are working on this research with one lane. Click to give it back":"Adds one lane for this browser: more pieces at once. One lane per browser"):"Research every piece that is not done yet";
   $("btnStop").disabled=!running&&!looping;$("btnStop").textContent=looping?"■ Stop loop":running?"■ Stop run":"■ Stop";
   $("btnLoop").parentElement.style.display=looping?"none":"";$("btnLoop").textContent="Improve loop ▾";
   $("projTitle").title=p.question;
@@ -857,7 +863,7 @@ function renderLoopBox(){
   const scopeLine=looping?'<div class="small" style="margin-top:6px">Scope: <b>'+esc((i.scope&&i.scope.length)?"selected pieces "+i.scope.join(", ")+((i.exclude&&i.exclude.length)?" (excluded: "+i.exclude.join(", ")+")":""):"whole research")+"</b></div>":'<div class="row small" style="margin-top:8px"><label><input type="radio" name="lscope" value="all"'+(scope==="all"?" checked":"")+'> Whole research</label><label><input type="radio" name="lscope" value="sel"'+(scope==="sel"?" checked":"")+(sel.length?"":" disabled")+'> Selected pieces'+(sel.length?" ("+esc(sel.join(", "))+" · "+focusIds().size+" pieces in focus"+(STATE.excluded.size?", excluded "+esc([...STATE.excluded].join(", ")):"")+")":" (select them on the map or tick them in Tree &amp; pieces)")+"</label></div>";
   box.innerHTML='<div class="row"><b>Self-improving loop</b><span class="small muted">tries changes on several pieces at once and keeps one only if its piece does not get worse, no check breaks and the score rises</span><span class="spacer"></span>'+(looping?'<span class="pill"><i class="pulse" style="background:var(--bl)"></i>until '+esc((i.deadline||"").slice(11,16))+" · "+kept+" kept</span>":'<label class="small muted">Hours</label><input id="impHours" value="'+esc(typed||i.hours||2)+'" style="width:64px"><button class="btn primary sm" id="impStart">Start</button>')+"</div>"+scopeLine+(i.trials&&i.trials.length?'<div class="loglist" style="margin-top:8px">'+i.trials.slice(-12).reverse().map(t=>'<div title="'+esc(t.change+(t.detail?" — "+t.detail:""))+'"><span class="mono">'+esc(t.nodeId)+'</span> <b style="color:'+(t.outcome==="kept"?"var(--gr)":t.outcome==="reverted-regression"?"var(--rd)":"var(--faint)")+'">'+esc(t.outcome)+"</b> "+esc(t.score)+" · "+esc(t.change)+"</div>").join("")+"</div>":"");
   box.querySelectorAll('input[name="lscope"]').forEach(r=>r.addEventListener("change",()=>{STATE.loopScope=r.value;}));
-  const st=$("impStart");if(st)st.addEventListener("click",async()=>{const s=(box.querySelector('input[name="lscope"]:checked')||{}).value;try{await api("/api/projects/"+p.id+"/improve",{method:"POST",body:{hours:Number($("impHours").value)||2,nodes:s==="sel"?[...STATE.checked]:[],exclude:s==="sel"?[...STATE.excluded]:[]}});toast(s==="sel"?"loop started on "+STATE.checked.size+" selected piece(s)":"loop started on the whole research");await loadStatus();renderHead();}catch(e){toast(e.message);}});
+  const st=$("impStart");if(st)st.addEventListener("click",async()=>{const s=(box.querySelector('input[name="lscope"]:checked')||{}).value;try{await api("/api/projects/"+p.id+"/improve",{method:"POST",body:{clientId:CLIENT_ID,hours:Number($("impHours").value)||2,nodes:s==="sel"?[...STATE.checked]:[],exclude:s==="sel"?[...STATE.excluded]:[]}});toast(s==="sel"?"loop started on "+STATE.checked.size+" selected piece(s)":"loop started on the whole research");await loadStatus();renderHead();}catch(e){toast(e.message);}});
 }
 $("projTitle").addEventListener("click",()=>$("projTitle").classList.toggle("open"));
 $("btnLoop").addEventListener("click",e=>{e.stopPropagation();$("loopSel").disabled=!STATE.checked.size;$("loopSel").textContent=STATE.checked.size?"Selected pieces ("+STATE.checked.size+")…":"Selected pieces (select them on the map)";$("loopPop").classList.toggle("on");});
@@ -865,7 +871,19 @@ document.addEventListener("click",e=>{if(!e.target.closest("#loopPop"))$("loopPo
 $("loopAll").addEventListener("click",()=>{$("loopPop").classList.remove("on");STATE.loopScope="all";renderLoopBox();$("loopBox").classList.add("on");});
 $("loopSel").addEventListener("click",()=>{$("loopPop").classList.remove("on");if(!STATE.checked.size){STATE.mapSelect=true;setPane("map");drawTree(true);toast("click pieces on the map to select them");return;}STATE.loopScope="sel";renderLoopBox();$("loopBox").classList.add("on");});
 $("mLoop").addEventListener("click",()=>$("loopBox").classList.add("on"));
-$("btnRun").addEventListener("click",async()=>{try{const r=await api("/api/projects/"+STATE.project.id+"/run",{method:"POST"});if(r.joined){STATE.project.lanes=r.lanes;renderHead();toast("joined as a teammate: "+r.lanes+" lanes now work on this research at once");}else toast("running");}catch(e){toast(e.message);}});
+$("btnRun").addEventListener("click",async()=>{
+  const p=STATE.project;if(!p||(STATE.runLock&&Date.now()<STATE.runLock))return;
+  const busy=isLooping(p)||RUNNING_PHASES.includes(p.phase);
+  if(busy&&iJoined(p)&&!confirm("Leave this research? Your lane is removed; the loop keeps running with "+Math.max(1,(p.lanes||2)-1)+" lanes."))return;
+  STATE.runLock=Date.now()+2000;renderHead();setTimeout(()=>{STATE.runLock=0;if(STATE.project)renderHead();},2000);
+  try{
+    if(busy&&iJoined(p)){const r=await api("/api/projects/"+p.id+"/leave",{method:"POST",body:{clientId:CLIENT_ID}});p.helpers=(p.helpers||[]).filter(x=>x!==CLIENT_ID);p.lanes=r.lanes;toast("you left: "+r.lanes+" lanes now");}
+    else{const r=await api("/api/projects/"+p.id+"/run",{method:"POST",body:{clientId:CLIENT_ID}});
+      if(r.joined||r.already){p.lanes=r.lanes;if(r.mine)p.helpers=[...new Set([...(p.helpers||[]),CLIENT_ID])];toast(r.already?"you are already on this research ("+r.lanes+" lanes)":"joined: "+r.lanes+" lanes now work on this research at once");}
+      else toast(r.lanes?"already at the maximum of "+r.lanes+" lanes":"running");}
+    renderHead();
+  }catch(e){toast(e.message);}
+});
 $("btnStop").addEventListener("click",async()=>{const p=STATE.project;try{if(isLooping(p))await api("/api/projects/"+p.id+"/improve/stop",{method:"POST"});else await api("/api/projects/"+p.id+"/cancel",{method:"POST"});toast("stopping after the current step");setTimeout(async()=>{await loadStatus();renderHead();},1500);}catch(e){toast(e.message);}});
 $("moreBtn").addEventListener("click",e=>{e.stopPropagation();$("morePop").classList.toggle("on");});
 document.addEventListener("click",()=>$("morePop").classList.remove("on"));

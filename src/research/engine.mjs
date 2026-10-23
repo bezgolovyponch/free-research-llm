@@ -499,16 +499,31 @@ export class ResearchEngine {
   }
 
   lanesFor(id) {
-    return Math.min(MAX_LANES, this.laneCount + (this.helpers.get(id) ?? 0));
+    return Math.min(MAX_LANES, this.laneCount + (this.helpers.get(id)?.size ?? 0));
   }
 
-  join(id) {
-    const before = this.lanesFor(id);
-    this.helpers.set(id, Math.min(MAX_LANES - this.laneCount, (this.helpers.get(id) ?? 0) + 1));
-    const after = this.lanesFor(id);
+  teamOf(id) {
+    return { lanes: this.lanesFor(id), helpers: [...(this.helpers.get(id) ?? [])] };
+  }
+
+  join(id, clientId = '') {
+    const team = this.helpers.get(id) ?? new Set();
+    const key = String(clientId || `anonymous-${team.size + 1}`).slice(0, 64);
+    const already = team.has(key);
+    if (!already && this.laneCount + team.size < MAX_LANES) team.add(key);
+    this.helpers.set(id, team);
     const project = this.store.cache.get(id);
-    if (project) this.emit(project, 'team', after > before ? `a teammate joined: now ${after} lanes work on this research at once` : `a teammate joined; already at the maximum of ${after} lanes`);
-    return { joined: true, lanes: after };
+    const lanes = this.lanesFor(id);
+    if (project && !already) this.emit(project, 'team', team.has(key) ? `a teammate joined: now ${lanes} lanes work on this research at once` : `a teammate joined; already at the maximum of ${lanes} lanes`);
+    return { joined: team.has(key), already, lanes, mine: team.has(key) };
+  }
+
+  leaveOne(id, clientId = '') {
+    const team = this.helpers.get(id);
+    const removed = Boolean(team?.delete(String(clientId)));
+    const project = this.store.cache.get(id);
+    if (project && removed) this.emit(project, 'team', `a teammate left: now ${this.lanesFor(id)} lanes`);
+    return { left: removed, lanes: this.lanesFor(id), mine: false };
   }
 
   leave(id) {

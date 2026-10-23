@@ -160,7 +160,7 @@ describe('ProjectImprover in parallel lanes', () => {
     };
     improver.start(project.id, { hours: 0.05 });
     await new Promise((r) => setTimeout(r, 5));
-    expect(improver.join(project.id)).toEqual({ joined: true, lanes: 3 });
+    expect(improver.join(project.id, 'pc')).toMatchObject({ joined: true, lanes: 3, mine: true });
     for (let i = 0; i < 800 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
     const saved = await engine.load(project.id);
     expect(proposePeak).toBeGreaterThanOrEqual(2);

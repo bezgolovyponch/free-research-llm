@@ -403,9 +403,9 @@ export class ProjectImprover {
     return improved;
   }
 
-  join(id) {
+  join(id, clientId = '') {
     const state = this.active.get(id);
-    const joined = this.engine.join(id);
+    const joined = this.engine.join(id, clientId);
     state?.spawn?.();
     return joined;
   }

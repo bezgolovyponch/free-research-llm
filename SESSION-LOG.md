@@ -341,3 +341,9 @@ Asked: research how to make the engine produce valid results faster, apply only 
 - Measured (since lanes, 2.8 h): 55 trials, 5 kept (1.8/h); 25 undone after a full re-roll; 3 pieces took 25 trials with 0 kept; reviews 164 of ~250 model-minutes, mostly Pollinations (51 s) and the 1-slot local llama.cpp (402 s average, queueing).
 - Shipped: `no-gain` early exit (exact: such a trial cannot raise the score), 6 h rest for pieces with 3 futile trials, slot-aware routing for local servers, slow-provider demotion. Rules and evidence: PROTOCOLS.md §4h.
 - Measured 31 min after the change (window computed in UTC; a first comparison that read the start time as local time was wrong and is discarded): trials/h 18.8 → 22.9, median review 15.2 s → 9.4 s; kept/h 1.45 → 1.91 on a single keep, too few to call. Reviews over 60 s were still 16 of 54: the other PC's llama.cpp (Qwen3-4B, 1 slot) timed out on all 12 and SambaNova on 7. Added: 2 timeouts in a row bench a provider for 10 min, and timeouts count as slow calls.
+
+## Session 2026-10-23 · Join cannot be double-clicked
+
+Asked: an accidental double click on Join added two lanes; remove one and make it hard to misclick.
+
+- One lane per browser: Join carries a per-browser id, so a second click on the same browser changes nothing; once joined the button reads "✓ Joined · Leave (N lanes)" and asks before giving the lane back (`POST /api/projects/<id>/leave`); every click locks the button for 2 s. The extra lane was removed by the restart (lanes are kept in memory).

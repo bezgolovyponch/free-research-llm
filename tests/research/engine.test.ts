@@ -164,7 +164,14 @@ describe('ResearchEngine', () => {
     const sequential = await single.run(p1.id);
     expect(parallel.nodes.map((n: { id: string; status: string }) => `${n.id}:${n.status}`).sort()).toEqual(sequential.nodes.map((n: { id: string; status: string }) => `${n.id}:${n.status}`).sort());
     expect(engine.lanesFor(project.id)).toBe(2);
-    expect(engine.join(project.id)).toEqual({ joined: true, lanes: 3 });
+    expect(engine.join(project.id, 'pc')).toEqual({ joined: true, already: false, lanes: 3, mine: true });
+    expect(engine.join(project.id, 'pc')).toEqual({ joined: true, already: true, lanes: 3, mine: true });
+    expect(engine.lanesFor(project.id)).toBe(3);
+    engine.join(project.id, 'mac'); engine.join(project.id, 'phone');
+    expect(engine.lanesFor(project.id)).toBe(4);
+    expect(engine.teamOf(project.id)).toEqual({ lanes: 4, helpers: ['pc', 'mac'] });
+    expect(engine.leaveOne(project.id, 'pc')).toEqual({ left: true, lanes: 3, mine: false });
+    expect(engine.leaveOne(project.id, 'pc')).toMatchObject({ left: false, lanes: 3 });
     engine.join(project.id); engine.join(project.id);
     expect(engine.lanesFor(project.id)).toBe(4);
     engine.leave(project.id);

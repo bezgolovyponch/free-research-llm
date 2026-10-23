@@ -152,10 +152,13 @@ describe('teammates', () => {
     await waitFor(created.body.id, 'done');
     app.engine.running.add(created.body.id);
     try {
-      const join = await call('POST', `/api/projects/${created.body.id}/run`);
+      const join = await call('POST', `/api/projects/${created.body.id}/run`, { clientId: 'pc-browser' });
       expect(join.status).toBe(200);
-      expect(join.body).toEqual({ joined: true, lanes: 3 });
-      expect((await call('POST', `/api/projects/${created.body.id}/improve`, { hours: 0.01 })).body).toEqual({ joined: true, lanes: 4 });
+      expect(join.body).toEqual({ joined: true, already: false, lanes: 3, mine: true });
+      expect((await call('POST', `/api/projects/${created.body.id}/run`, { clientId: 'pc-browser' })).body).toMatchObject({ already: true, lanes: 3 });
+      expect((await call('GET', `/api/projects/${created.body.id}`)).body).toMatchObject({ lanes: 3, helpers: ['pc-browser'] });
+      expect((await call('POST', `/api/projects/${created.body.id}/improve`, { hours: 0.01, clientId: 'mac-browser' })).body).toMatchObject({ joined: true, lanes: 4 });
+      expect((await call('POST', `/api/projects/${created.body.id}/leave`, { clientId: 'pc-browser' })).body).toEqual({ left: true, lanes: 3, mine: false });
     } finally {
       app.engine.running.delete(created.body.id);
       app.engine.leave(created.body.id);
