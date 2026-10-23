@@ -295,3 +295,11 @@ Asked: make the Mac and the PC work as one team so the loop is faster; then "res
 - Report: [REVIEW-2026-10-23.md](REVIEW-2026-10-23.md).
 
 Open: the PR still needs a merge by the user (the merge command was refused by the permission check); two loops share the same free quotas; data deletions listed in the report need the user's yes.
+
+## Session 2026-10-23 · one research, one loop, one team
+
+Asked: keep all insights and progress, restart with the improvements and the loop, one link, the PC working in the same team, "no different versions", push, merge, restart, instructions for the other machine.
+
+- One research kept as the current one: `find-appropriate-plots-to-buy-fo-b7772e` (21/25 pieces passing, best 0.409, 90 trials). v2 (`…3ed9dc`, 13/25, best 0.211) was stopped with a handoff and its link turned off; its data is kept.
+- Gemini quota window: the provider now appends `[quota window: per minute|per day]` or the `retryDelay` from the full error body, so a per-minute 429 is no longer benched until midnight; benches restored at start ignore the ambiguous "exceeded your current quota" alone.
+- App restarted on the current code with the one loop.

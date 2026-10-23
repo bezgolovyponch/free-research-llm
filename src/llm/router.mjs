@@ -6,7 +6,7 @@ export class NoModelAvailableError extends Error {}
 
 const DEFAULT_COOLDOWN_MS = 60000;
 const BAD_KEY_MS = 6 * 3600 * 1000;
-const SHORT_LIMIT = /retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute/i;
+const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
 
 export function nextUtcMidnight(now) {
@@ -86,7 +86,8 @@ export class ModelRouter {
       const at = Date.parse(row.ts);
       const badKey = (status === 401 || status === 403) && this.now() - at < BAD_KEY_MS;
       const text = String(row.error ?? '');
-      const daily = !SHORT_LIMIT.test(text) && (status === 402 || DAILY.test(text)) && nextUtcMidnight(at) > this.now();
+      const ambiguous = /exceeded your current quota/i.test(text) && !/quota window|per day|daily/i.test(text);
+      const daily = !ambiguous && !SHORT_LIMIT.test(text) && (status === 402 || DAILY.test(text)) && nextUtcMidnight(at) > this.now();
       if (!badKey && !daily) continue;
       this.coolDown({ id }, { status, message: String(row.error ?? '') });
       restored.push(id);

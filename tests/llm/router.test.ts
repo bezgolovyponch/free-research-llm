@@ -138,6 +138,7 @@ describe('ModelRouter.restoreCooldowns', () => {
       { ts: '2026-10-23T09:00:00Z', provider: 'unknown', ok: false, error: 'HTTP 402' },
       { ts: '2026-10-23T09:55:00Z', provider: 'pollinations', ok: false, error: 'pollinations HTTP 402: {"error":{"code":"FREE_LIMIT","message":"Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s"}}' },
       { ts: '2026-10-23T09:56:00Z', provider: 'openrouter', ok: false, error: 'openrouter HTTP 429: Rate limit exceeded: free-models-per-day. Add 10 credits' },
+      { ts: '2026-10-23T09:57:00Z', provider: 'groq', ok: false, error: 'groq HTTP 429: You exceeded your current quota, please check your plan' },
     ]);
     expect(restored.sort()).toEqual(['gemini', 'openrouter', 'sambanova']);
     expect(router.cooldownReason.get('sambanova')).toMatch(/daily quota or credit/);
@@ -152,6 +153,10 @@ describe('ModelRouter.coolDown', () => {
     const router = new ModelRouter({ providers: [], now: () => now });
     router.coolDown({ id: 'pollinations' }, new ProviderError('pollinations HTTP 402: Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s', { status: 402, retryAfterMs: 5000 }));
     expect(router.cooldownUntil.get('pollinations')).toBe(now + 5000);
+    router.coolDown({ id: 'gemini-minute' }, new ProviderError('gemini HTTP 429: You exceeded your current quota [quota window: per minute]', { status: 429, retryAfterMs: 37000 }));
+    expect(router.cooldownUntil.get('gemini-minute')).toBe(now + 37000);
+    router.coolDown({ id: 'gemini-day' }, new ProviderError('gemini HTTP 429: You exceeded your current quota [quota window: per day]', { status: 429 }));
+    expect(router.cooldownUntil.get('gemini-day')).toBe(nextUtcMidnight(now));
     router.coolDown({ id: 'sambanova' }, new ProviderError('sambanova HTTP 402: balance_units 0', { status: 402 }));
     expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
   });

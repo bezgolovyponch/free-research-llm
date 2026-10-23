@@ -27,8 +27,16 @@ export function pickModel(models, preferences, freeOnly = false, { strict = fals
   return strict ? null : (usable[0] ?? null);
 }
 
+export function quotaWindow(body) {
+  const text = String(body);
+  if (/PerDay|per day|daily/i.test(text)) return ' [quota window: per day]';
+  if (/PerMinute|per minute/i.test(text)) return ' [quota window: per minute]';
+  const delay = text.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  return delay ? ` [retry after ${Math.ceil(Number(delay[1]))}s]` : '';
+}
+
 export function retryAfterFromText(body, floorMs = 0) {
-  const seconds = String(body).match(/retry after (\d+(?:\.\d+)?)\s*s/i);
+  const seconds = String(body).match(/retry after (\d+(?:\.\d+)?)\s*s/i) ?? String(body).match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
   const window = String(body).match(/every (\d+) seconds/i);
   const ms = Math.max(seconds ? Number(seconds[1]) * 1000 : 0, window ? Number(window[1]) * 1000 : 0, /limit/i.test(body) ? floorMs : 0);
   return ms;
@@ -89,7 +97,7 @@ export class OpenAICompatibleProvider {
       const res = await this.fetchImpl(`${this.baseURL}${path}`, { ...init, headers: this.headers(), signal: controller.signal });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        throw new ProviderError(`${this.id} HTTP ${res.status}: ${body.slice(0, 240)}`, { status: res.status, retryAfterMs: retryAfter(res) || retryAfterFromText(body, this.minIntervalMs), provider: this.id });
+        throw new ProviderError(`${this.id} HTTP ${res.status}: ${body.slice(0, 240)}${quotaWindow(body)}`, { status: res.status, retryAfterMs: retryAfter(res) || retryAfterFromText(body, this.minIntervalMs), provider: this.id });
       }
       return await res.json();
     } catch (error) {
