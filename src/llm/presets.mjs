@@ -6,9 +6,9 @@ export const PROVIDER_PRESETS = [
     keyEnv: 'GEMINI_API_KEY',
     signup: 'https://aistudio.google.com/apikey',
     prefer: {
-      fast: ['gemini-3.8-flash-lite', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite', 'flash-lite', 'flash'],
-      deep: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3-pro', 'gemini-2.5-flash', 'flash'],
-      vision: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'],
+      fast: ['gemini-3.8-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemma-4-26b-a4b-it', 'gemini-2.5-flash-lite'],
+      deep: ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-pro', 'gemini-flash-latest', 'gemma-4-31b-it', 'gemma-4-26b-a4b-it', 'gemini-2.5-flash'],
+      vision: ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'],
     },
   },
   {
@@ -18,8 +18,8 @@ export const PROVIDER_PRESETS = [
     keyEnv: 'GROQ_API_KEY',
     signup: 'https://console.groq.com/keys',
     prefer: {
-      fast: ['openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'],
-      deep: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'qwen/qwen3-32b'],
+      fast: ['openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'],
+      deep: ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'llama-3.3-70b-versatile', 'qwen/qwen3-32b', 'openai/gpt-oss-20b'],
     },
   },
   {
@@ -142,6 +142,17 @@ export const PROVIDER_PRESETS = [
     prefer: { fast: [], deep: [] },
   },
   {
+    id: 'llamacpp-lan',
+    label: 'llama.cpp on another PC in your network (its GPU, unlimited)',
+    baseURL: '',
+    baseEnv: 'LLAMACPP_LAN_URL',
+    keyEnv: null,
+    optionalKeyEnv: 'LLAMACPP_LAN_API_KEY',
+    signup: 'https://github.com/ggml-org/llama.cpp/releases',
+    local: true,
+    prefer: { fast: [], deep: [] },
+  },
+  {
     id: 'ollama',
     label: 'Ollama (local, no key)',
     baseURL: 'http://localhost:11434/v1',
@@ -167,8 +178,8 @@ export const PROVIDER_PRESETS = [
 ];
 
 export const ROUTE_ORDER = {
-  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'llamacpp', 'pollinations', 'ollama'],
-  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'llamacpp', 'pollinations', 'ollama'],
+  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'llamacpp-lan', 'llamacpp', 'pollinations', 'ollama'],
+  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'llamacpp-lan', 'llamacpp', 'pollinations', 'ollama'],
 };
 
 export const SEARCH_KEYS = [

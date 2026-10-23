@@ -18,13 +18,14 @@ describe('terminal socket', () => {
   it('streams a shared shell to a same-origin browser and refuses cross-site pages and strangers', async () => {
     const hub = new TerminalHub({ cwd: process.cwd(), env: { ...process.env, FRL_SHELL: '/bin/sh' }, platform: 'linux', loadPty: async () => { throw new Error('none'); } });
     const server = http.createServer();
-    attachTerminalSockets(server, { hub, gate: new AccessGate({ token: 't0ken' }) });
+    attachTerminalSockets(server, { hub, gate: new AccessGate({ token: 't0ken', shares: { match: (t: string) => (t === 'tok' ? 'p1' : null) } }) });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
     const port = (server.address() as { port: number }).port;
     const session = await hub.create();
     const base = `ws://127.0.0.1:${port}/api/terminal/${session.id}/ws`;
     expect((await open(base, { origin: 'https://evil.example' })).status).toBe(403);
     expect((await open(base, { origin: `http://127.0.0.1:${port}`, 'x-forwarded-for': '1.2.3.4' })).status).toBe(401);
+    expect((await open(`${base}?share=tok`, { origin: `http://127.0.0.1:${port}`, 'x-forwarded-for': '1.2.3.4' })).status).toBe(401);
     expect((await open(`ws://127.0.0.1:${port}/api/terminal/000000000000/ws`, { origin: `http://127.0.0.1:${port}` })).status).toBe(404);
     const { ws } = await open(base, { origin: `http://127.0.0.1:${port}` });
     const seen: string[] = [];

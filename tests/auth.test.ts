@@ -32,4 +32,18 @@ describe('AccessGate', () => {
     expect(cloud.decide(req('127.0.0.1'), url()).allowed).toBe(false);
     expect(cloud.decide(req('127.0.0.1', { authorization: `Bearer ${token}` }), url()).allowed).toBe(true);
   });
+
+  it('lets a research link in to that research only, with a Lax cookie, and says so when the link was turned off', () => {
+    const token = newAccessToken();
+    const shares = { match: (given: string) => (given === 'share-tok' ? 'p1' : null) };
+    const gate = new AccessGate({ token, shares });
+    const first = gate.decide(req('10.0.0.2'), url('?share=share-tok'));
+    expect(first).toMatchObject({ allowed: true, share: 'p1' });
+    expect(first.setCookie).toMatch(/^frl_share=share-tok; HttpOnly; SameSite=Lax/);
+    expect(gate.decide(req('10.0.0.2', { cookie: 'frl_share=share-tok' }), url())).toEqual({ allowed: true, share: 'p1', setCookie: null });
+    expect(gate.decide(req('10.0.0.2', { cookie: `frl_share=share-tok; frl_token=${token}` }), url())).toEqual({ allowed: true, setCookie: null });
+    expect(gate.decide(req('10.0.0.2'), url('?share=old'))).toMatchObject({ allowed: false, reason: expect.stringMatching(/turned off or replaced/) });
+    expect(gate.decide(req('127.0.0.1'), url('?share=share-tok'))).toEqual({ allowed: true });
+    expect(new AccessGate({ shares }).decide(req('10.0.0.2'), url('?share=share-tok'))).toMatchObject({ allowed: true, share: 'p1' });
+  });
 });

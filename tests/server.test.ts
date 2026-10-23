@@ -140,7 +140,78 @@ describe('HTTP server', () => {
     expect((await fetch(`${base}/api/projects/${created.id}/items.csv`)).status).toBe(200);
     expect(done.results.model).toMatchObject({ kind: 'decision', probability: expect.any(Number), changedSince: [] });
     expect(typeof done.report.model).toBe('string');
+    expect(Array.isArray(done.results.treeAudit)).toBe(true);
     const rewritten = (await call('POST', `/api/projects/${created.id}/synthesize`)).body;
     expect(rewritten.report.basis).toBeTruthy();
+  });
+});
+
+describe('teammates', () => {
+  it('turns Run or Improve on a running research into one more lane instead of an error', async () => {
+    const created = await call('POST', '/api/projects', { question: 'Which Czech city suits a small specialty bakery best?' });
+    const join = await call('POST', `/api/projects/${created.body.id}/run`);
+    expect(join.status).toBe(200);
+    expect(join.body).toEqual({ joined: true, lanes: 3 });
+    expect((await call('POST', `/api/projects/${created.body.id}/improve`, { hours: 0.01 })).body).toEqual({ joined: true, lanes: 4 });
+    await waitFor(created.body.id, 'done');
+    expect((await call('GET', `/api/projects/${created.body.id}`)).body.lanes).toBe(2);
+  });
+});
+
+describe('research share links', () => {
+  it('opens one research from another computer and nothing else, until the owner turns the link off', async () => {
+    const shareDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-server-share-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ enabled: false, backends: [], lastErrors: [] }) };
+    const shareApp = new App({ env: {}, dataDir: shareDir, providers: [new ScriptedProvider()], search });
+    const started = await startServer({ app: shareApp, port: 0, token: 'owner-token' });
+    const remote = { 'x-forwarded-for': '203.0.113.9' };
+    const owner = async (method: string, url: string, body?: unknown) => (await fetch(started.url + url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
+    try {
+      const shared = await owner('POST', '/api/projects', { question: 'Which Czech city is best for a small bakery?' });
+      const other = await owner('POST', '/api/projects', { question: 'Where should I open a coffee kiosk in Brno?' });
+      expect(await owner('GET', `/api/projects/${shared.id}/share`)).toMatchObject({ enabled: false, links: [] });
+      const view = await owner('POST', `/api/projects/${shared.id}/share`);
+      expect(view).toMatchObject({ projectId: shared.id, enabled: true, remote: true });
+      for (const link of view.links) expect(link.url).toMatch(new RegExp(`/\\?share=${view.token}#p=${shared.id}$`));
+
+      const entry = await fetch(`${started.url}/?share=${view.token}`, { headers: remote, redirect: 'manual' });
+      expect(entry.status).toBe(302);
+      const cookie = String(entry.headers.get('set-cookie')).split(';')[0];
+      expect(cookie).toBe(`frl_share=${view.token}`);
+      const helper = async (method: string, url: string) => {
+        const res = await fetch(started.url + url, { method, headers: { ...remote, cookie, 'content-type': 'application/json' } });
+        return { status: res.status, body: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() };
+      };
+      expect((await helper('GET', '/')).status).toBe(200);
+      expect((await helper('GET', '/api/whoami')).body).toEqual({ share: shared.id, canShare: true });
+      expect((await helper('GET', '/api/projects')).body.map((p: { id: string }) => p.id)).toEqual([shared.id]);
+      expect((await helper('GET', `/api/projects/${shared.id}`)).body.question).toMatch(/bakery/);
+      expect((await helper('GET', '/api/status')).body).toMatchObject({ ledger: [], coders: [] });
+      for (const [m, u] of [['GET', `/api/projects/${other.id}`], ['DELETE', `/api/projects/${shared.id}`], ['POST', `/api/projects/${shared.id}/share`], ['POST', '/api/projects'], ['GET', '/api/terminal'], ['GET', '/api/router'], ['GET', '/api/chat'], ['GET', '/api/access']]) expect((await helper(m, u)).status, `${m} ${u}`).toBe(403);
+      expect((await fetch(`${started.url}/api/projects`, { headers: remote })).status).toBe(401);
+      expect((await fetch(`${started.url}/favicon.ico`, { headers: remote })).status).toBe(204);
+      const script = await fetch(`${started.url}/pc-setup.ps1?share=${view.token}`, { headers: remote, redirect: 'manual' });
+      expect(script.status).toBe(200);
+      expect(await script.text()).toContain('llama-server.exe');
+      expect((await fetch(`${started.url}/pc-setup.ps1`, { headers: remote })).status).toBe(401);
+      expect(view.pcSetup === null || view.pcSetup.includes(`/pc-setup.ps1?share=${view.token}`)).toBe(true);
+      const reachable = await fetch(`${started.url}/reachable`, { headers: remote });
+      expect(reachable.status).toBe(200);
+      expect(await reachable.text()).toContain('is reachable');
+      await shareApp.logs.queue;
+      const access = (await shareApp.logs.read('history')).filter((e: { type: string }) => e.type === 'access').map((e: { message: string }) => e.message);
+      expect(access).toContain('other device 127.0.0.1 opened / · research link (' + shared.id + ')');
+      expect(access.some((m: string) => /refused: missing or wrong access token/.test(m))).toBe(true);
+      expect(access.some((m: string) => m.includes('favicon'))).toBe(false);
+
+      expect(await owner('DELETE', `/api/projects/${shared.id}/share`)).toMatchObject({ enabled: false, token: null });
+      const after = await helper('GET', `/api/projects/${shared.id}`);
+      expect(after.status).toBe(401);
+      expect(after.body).toMatch(/turned off or replaced/);
+    } finally {
+      started.server.close();
+      await shareApp.logs.queue;
+      await fs.rm(shareDir, { recursive: true, force: true, maxRetries: 3 });
+    }
   });
 });

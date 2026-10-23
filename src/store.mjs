@@ -3,12 +3,55 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const ID_PATTERN = /^[a-z0-9-]{6,64}$/;
+const DEFAULT_MAX_CACHED = 8;
+
+function summarize(p) {
+  if (!p || typeof p.id !== 'string' || typeof p.question !== 'string') return null;
+  return {
+    id: p.id,
+    question: p.question,
+    templateId: p.templateId,
+    phase: p.phase,
+    verdict: p.report?.verdict ?? null,
+    demo: Boolean(p.demo),
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+    expected: p.acceptance?.expected ?? '',
+    expectedScore: p.acceptanceResult?.score ?? null,
+    nodes: (p.nodes ?? []).length,
+    good: (p.nodes ?? []).filter((n) => ['verified', 'supported'].includes(n.status)).length,
+    loop: p.improve ? { baseline: p.improve.baseline ?? null, best: p.improve.best ?? null, trials: (p.improve.trials ?? []).length, kept: (p.improve.trials ?? []).filter((t) => t.outcome === 'kept').length } : null,
+  };
+}
 
 export class ProjectStore {
-  constructor({ dir }) {
+  constructor({ dir, maxCached = DEFAULT_MAX_CACHED, isBusy = () => false }) {
     this.dir = dir;
+    this.maxCached = maxCached;
+    this.isBusy = isBusy;
     this.cache = new Map();
+    this.summaries = new Map();
     this.writes = new Map();
+  }
+
+  remember(project) {
+    this.cache.delete(project.id);
+    this.cache.set(project.id, project);
+    for (const id of this.cache.keys()) {
+      if (this.cache.size <= this.maxCached) break;
+      if (id === project.id || this.writes.has(id) || this.isBusy(id)) continue;
+      this.cache.delete(id);
+    }
+    return project;
+  }
+
+  async readFile(id) {
+    try {
+      return JSON.parse(await fs.readFile(this.file(id), 'utf8'));
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
   }
 
   file(id) {
@@ -23,7 +66,7 @@ export class ProjectStore {
 
   async save(project) {
     project.updatedAt = new Date().toISOString();
-    this.cache.set(project.id, project);
+    this.remember(project);
     const target = this.file(project.id);
     const previous = this.writes.get(project.id) ?? Promise.resolve();
     const write = previous.catch(() => {}).then(async () => {
@@ -39,39 +82,29 @@ export class ProjectStore {
   }
 
   async get(id) {
-    if (this.cache.has(id)) return this.cache.get(id);
-    try {
-      const project = JSON.parse(await fs.readFile(this.file(id), 'utf8'));
-      this.cache.set(id, project);
-      return project;
-    } catch (error) {
-      if (error.code === 'ENOENT') return null;
-      throw error;
-    }
+    if (this.cache.has(id)) return this.remember(this.cache.get(id));
+    const project = await this.readFile(id);
+    return project ? this.remember(project) : null;
   }
 
   async list() {
     await fs.mkdir(this.dir, { recursive: true });
     const files = (await fs.readdir(this.dir)).filter((f) => f.endsWith('.json'));
-    const projects = await Promise.all(files.map((f) => this.get(f.slice(0, -5)).catch(() => null)));
-    return projects
-      .filter((p) => p && typeof p.id === 'string' && typeof p.question === 'string')
-      .map((p) => ({
-        id: p.id,
-        question: p.question,
-        templateId: p.templateId,
-        phase: p.phase,
-        verdict: p.report?.verdict ?? null,
-        demo: Boolean(p.demo),
-        createdAt: p.createdAt,
-        updatedAt: p.updatedAt,
-        expected: p.acceptance?.expected ?? '',
-        expectedScore: p.acceptanceResult?.score ?? null,
-        nodes: (p.nodes ?? []).length,
-        good: (p.nodes ?? []).filter((n) => ['verified', 'supported'].includes(n.status)).length,
-        loop: p.improve ? { baseline: p.improve.baseline ?? null, best: p.improve.best ?? null, trials: (p.improve.trials ?? []).length, kept: (p.improve.trials ?? []).filter((t) => t.outcome === 'kept').length } : null,
-      }))
-      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    const present = new Set(files.map((f) => f.slice(0, -5)));
+    for (const id of this.summaries.keys()) if (!present.has(id)) this.summaries.delete(id);
+    const rows = await Promise.all(files.map((f) => this.summaryOf(f.slice(0, -5)).catch(() => null)));
+    return rows.filter(Boolean).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  }
+
+  async summaryOf(id) {
+    const cached = this.cache.get(id);
+    if (cached) return summarize(cached);
+    const { mtimeMs } = await fs.stat(this.file(id));
+    const known = this.summaries.get(id);
+    if (known?.mtimeMs === mtimeMs) return known.summary;
+    const summary = summarize(await this.readFile(id));
+    this.summaries.set(id, { mtimeMs, summary });
+    return summary;
   }
 
   async remove(id) {

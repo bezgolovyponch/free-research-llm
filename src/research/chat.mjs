@@ -5,6 +5,9 @@ import { addSpec, evaluateAll, normalizeSpec } from './specs.mjs';
 import { ROOT_ID } from './tree.mjs';
 import { NotFoundError } from './engine.mjs';
 import { MAX_THREAD } from './notify.mjs';
+import { droppedNote, groundSpec } from './grounding.mjs';
+
+export const OWNER_ONLY_REPLY = 'That is a question about the app itself, not this research. Only the person who runs the app can ask its App assistant.';
 
 const MAX_ACTIONS = 5;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -88,7 +91,7 @@ export class NodeChat {
     return { reply, actions, spec: reply.data?.spec ?? null, scope: reply.data?.scope === 'app' ? 'app' : '', text: String(reply.data?.reply ?? reply.data?.answer ?? '').slice(0, 4000) || '(no reply text)' };
   }
 
-  async send(id, nodeId, message, { files = [], desired = '' } = {}) {
+  async send(id, nodeId, message, { files = [], desired = '', appRedirect = true } = {}) {
     const text = String(message ?? '').trim().slice(0, 4000);
     const want = String(desired ?? '').trim().slice(0, 600);
     if (!text && !files.length) throw new Error('write a message first');
@@ -101,6 +104,7 @@ export class NodeChat {
     const thread = project.chats?.[key] ?? [];
     const ask = { project, focus, key, thread, text: text || 'Read the attached files and tell me what they mean for this.', desired: want, files: read };
     let answer = await this.ask(ask);
+    if (answer.scope === 'app' && !appRedirect && !answer.actions.length) return { redirected: 'owner', reply: OWNER_ONLY_REPLY, actions: [], thread };
     if (answer.scope === 'app' && this.appChat && !answer.actions.length) {
       const moved = await this.appChat.send(text, { files, from: `${project.id}/${key}` });
       return { redirected: 'app', appThread: moved.thread, reply: moved.thread.at(-1)?.content ?? '', actions: [], thread };
@@ -147,7 +151,9 @@ export class NodeChat {
     const fresh = await this.engine.load(id);
     const at = new Date().toISOString();
     if (paused) results.push({ type: paused.looping ? 'loop paused and resumed' : 'run paused and resumed', nodeId: key, ok: true });
-    const spec = key !== RESULTS_KEY && want ? addSpec(fresh, key, normalizeSpec(answer.spec, { request: text, desired: want })) : null;
+    const grounded = key !== RESULTS_KEY && want ? groundSpec(normalizeSpec(answer.spec, { request: text, desired: want }), { desired: want, request: text }) : null;
+    const spec = grounded ? addSpec(fresh, key, grounded.spec) : null;
+    if (grounded?.dropped.length) results.push({ type: 'check', nodeId: key, ok: true, detail: droppedNote(grounded.dropped) });
     if (spec) {
       evaluateAll(fresh);
       results.push({ type: 'check', nodeId: key, ok: true, specId: spec.id });

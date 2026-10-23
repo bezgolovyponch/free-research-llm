@@ -28,7 +28,7 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function decomposePrompt({ question, template, constraints, dataSummary, expected }) {
+export function decomposePrompt({ question, template, constraints, dataSummary, expected, feedback = '' }) {
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -56,16 +56,16 @@ Build an issue tree that answers the QUESTION:
 1b. First think of 4-5 different PERSPECTIVES on the question (e.g. a customer who buys it, a competitor's product lead, an investor, a regulator, a domain scientist), as in Stanford's STORM. The drivers must cover different perspectives, not one checklist.
 2. 3-6 top-level DRIVERS (parentId null): mutually exclusive, together exhaustive for the decision.
 2b. Every leaf names concrete entities from the question (companies, products, places, models) and asks what public evidence can show: their own pages, papers, code, pricing pages, press releases, partnerships, job posts, customer case studies. Never make a leaf that asks for a private company's internal figures (revenue, cash burn, customer count, market share, break-even): put those in "assumptionsToConfirm" for the user.
-3. Under each driver 2-4 LEAF sub-questions (parentId = driver id), each answerable by one lookup, calculation, comparison, estimate or data analysis. Max ${MAX_NODES} nodes total.
+3. Under each driver 2-4 LEAF sub-questions (parentId = driver id; never only one), each answerable by one lookup, calculation, comparison, estimate or data analysis. Max ${MAX_NODES} nodes total. Sibling drivers must not overlap, and no driver may restate the whole question. Titles never start with an id. dependsOn never names the node's own parent or children.
 4. Every node: id (drivers "D1".."D6", leaves "D1.1" etc.), title (<=8 words), question (specific, with geography/time/units), why (how the answer moves the decision), hypothesis (your prior guess; research will not see it), metric, unit, method (one of ${METHODS.join('|')}), searchQueries (2-3 precise web queries that name the entities, never generic how-to queries; include country language terms when useful), dependsOn (ids of OTHER nodes whose answer this needs, e.g. a margin calculation depends on price leaves), impact 1-5 (effect on the decision), uncertainty 1-5 (how unknown it is today).
 5. "assumptionsToConfirm": things the user must confirm.
-5b. "acceptance": machine-checkable criteria taken ONLY from the EXPECTED RESULT: itemCount (number of items/links wanted, else null), urlsLive (true if links are wanted), valueRange ([min,max] if items must have a value such as a price in a range, else null), unit (e.g. EUR), mustMention (words every delivered page must contain, else []).
+5b. "acceptance": machine-checkable criteria taken ONLY from the EXPECTED RESULT: itemCount (number of items/links wanted, else null), urlsLive (true if links are wanted), valueRange ([min,max] if items must have a value such as a price in a range, else null), unit (e.g. EUR), mustMention (only words the EXPECTED RESULT explicitly demands, e.g. "must mention X", "containing X" or a quoted word; a word that only describes the topic or purpose, such as the business type, is NOT a must-mention; else []). Numbers only when the user wrote them. Code drops any criterion the user's text does not state.
 
 5c. "sourceUrls" per node (optional, max 2): exact public pages that answer it directly, e.g. an official statistics table, a company's pricing page or a search page with the filters in the URL. Only well-known real sites; never guess deep IDs.
 6. Be brief: every text field at most 15 words, 1-2 searchQueries per node, compact JSON without indentation. List drivers first, then their leaves.
 
 JSON shape:
-{"decision":"","successCriteria":"","assumptionsToConfirm":[""],"acceptance":{"itemCount":null,"urlsLive":false,"valueRange":null,"unit":"","mustMention":[]},"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"sourceUrls":[],"dependsOn":[],"impact":3,"uncertainty":3}]}`,
+{"decision":"","successCriteria":"","assumptionsToConfirm":[""],"acceptance":{"itemCount":null,"urlsLive":false,"valueRange":null,"unit":"","mustMention":[]},"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"sourceUrls":[],"dependsOn":[],"impact":3,"uncertainty":3}]}${feedback ? `\n\n${feedback}` : ''}`,
     },
   ];
 }
@@ -220,7 +220,7 @@ function specsText(specs = []) {
   return specs.map((s) => `${s.id} want "${s.desired}"${s.last ? ` — ${s.last.passed ? 'passing' : `failing: ${s.last.checks.filter((c) => !c.passed).map((c) => c.label).join(', ')}`}` : ''}`).join(' | ');
 }
 
-const SPEC_RULE = `"spec": machine checks taken ONLY from the DESIRED OUTPUT: {"mustMention":[words the answer must contain],"needsNumber":true|false,"valueRange":[min,max] or null,"unit":"","itemCount":number of linked items wanted or null,"minGrade":"supported"|"verified"}. Code stores it as a regression test for this piece and re-checks it after every run and every loop change.`;
+const SPEC_RULE = `"spec": machine checks taken ONLY from the DESIRED OUTPUT: {"mustMention":[only words the DESIRED OUTPUT explicitly demands (\"must mention X\", quoted words); topic words are not must-mentions],"needsNumber":true|false,"valueRange":[min,max] or null,"unit":"","itemCount":number of linked items wanted or null,"minGrade":"supported"|"verified"}. Code stores it as a regression test for this piece and re-checks it after every run and every loop change.`;
 
 export function variantPrompt({ project, node, score, trials }) {
   const isRoot = node.id === 'Q';
@@ -292,7 +292,7 @@ export function chatPrompt({ project, node, thread, message, desired = '', files
     {
       role: 'user',
       content: `${TASK_MARKERS.chat}
-You are the research assistant for ONE piece of a research tree. Talk with the user about this piece and, when they ask for a change, return actions. You cannot write findings or grades: those come only from research runs that pass machine checks. Never claim a fact is verified unless the node status says verified.
+You are the research assistant for ONE piece of a research tree. Talk with the user about this piece and, when they ask for a change, return actions. Be specific to this piece: name the entities, places and sources it is about, say what the evidence actually shows and what is still missing, and propose concrete next searches or pages, never generic advice. Never propose a piece that duplicates one already in the tree. You cannot write findings or grades: those come only from research runs that pass machine checks. Never claim a fact is verified unless the node status says verified.
 
 ${nodeSummary(project, node)}
 

@@ -11,8 +11,8 @@ Each row names the code that enforces it and the test that proves it.
 | 2 Search | Search engines take turns per query; an engine out of quota (401/402/403/429/432) is benched for 1 h; off-topic Wikipedia hits are dropped | `SearchService.rotation`, `isRelevant` |
 | 3 Scrape | Top 5 pages are fetched; thin pages are re-read through the Jina reader; links on every page are kept, listing-like links first | `SearchService.readPage`, `extractLinks` |
 | 4 Answer | Fast model answers from the evidence only, following the node's instructions | `researchPrompt` |
-| 5 Review | A different provider critiques the answer | `ResearchEngine.critique` (`avoid`) |
-| 6 Gate | Mechanical checks (section 2) grade the answer | `verifyFinding` |
+| 5 Gate | Mechanical checks (section 2) grade the answer first | `verifyFinding` |
+| 6 Review | A different provider critiques the answer, then the gate runs again with the review; skipped when the mechanical checks already failed and another attempt follows (the retry would discard it) | `ResearchEngine.critique` (`avoid`) |
 | 7 Retry | On weak/unsupported: the answer's gaps become new searches, then the deep model retries; max 3 attempts | `searchGaps`, `MAX_ATTEMPTS` |
 | 8 Roll up | A parent takes its weakest child's grade | `ResearchEngine.rollup` |
 | 9 Deliver | Only items from verified/supported nodes are collected; the expected-result checks run on them | `collectDeliverables`, `AcceptanceChecker` |
@@ -71,6 +71,30 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 
 - App changes are requested in the App chat and become tickets (`data/changes/C<n>.md`) only on the user's button (`ChangeBook`). The free-model coder (`FreeCoder`, `src/coder/`) implements a ticket in a sandbox copy, runs `npm run quality` there, retries with the failure up to 4 times, and copies the files into the app only on PASS, with a backup for Undo (`POST /api/changes/C<n>/run`, `/undo`). It cannot edit the gate, itself, auth, secrets, the terminal or `package.json`, and a change that lowers the test count fails before the gate runs. `--claude` hands a ticket to Claude Code instead. Tests: `tests/coder/*.test.ts`, `tests/changes.test.ts`.
 
+## 4d. Lanes and teammates
+
+- **Research runs** research every piece whose prerequisites (children, `dependsOn`) are finished side by side, in 2 lanes by default (`FRL_LANES`, 1–4; `runInLanes` in `src/research/lanes.mjs`). A failed piece counts as finished so the rest continue; a provider outage stops new work and is raised after running work ends.
+- **The self-improving loop** runs one trial per lane at once on different pieces. A trial's slow part (propose, research the piece on a copy, piece grade and regression gates) runs in parallel; keeping it is serialized under one lock (`Mutex`). At commit, `trialConflict` (`src/research/trialmerge.mjs`) refuses a trial whose piece another lane changed, removed or whose new id is taken (`conflict`, retried next pass); otherwise `mergeTrial` applies only that trial's pieces onto the latest research, the whole research is re-rolled, and the same gates as before decide: regression checks, every check passing for a removal, and the score gain (`acceptsTrial`). Basis: optimistic concurrency control (Kung & Robinson, ACM TODS 1981: read, validate, write), asynchronous parallel evaluation as in Population Based Training (Jaderberg et al., arXiv:1711.09846) and AlphaEvolve (arXiv:2506.13131).
+- **Teammates:** pressing **Run** (shown as **⚡ Join** while it works) or **Improve loop** on a research that is already running adds one lane for that run or loop, from this computer or a shared-link PC, up to 4. Lanes return to the default when the run or loop ends. All model calls still use this computer's free quotas; free tiers allow roughly 30 requests a minute per model on Groq (provider console → Limits), and the router falls back to the next provider on a 429.
+
+## 4f. Models: per-model quotas, withdrawn models, benches
+
+- A provider whose models each have their own daily quota (Gemini: `quotaId …PerDayPerProjectPerModel…`) is not benched when one model runs out: that model is retired until the UTC reset and the provider switches to its next preferred model (`retireModel`, `ModelRouter.switchModel`). A model the provider withdrew (HTTP 404 "no longer available") is retired for good. The provider is benched only when no preferred model is left.
+- The provider adds the quota window it read from the full error body to the start of the message (`[quota window: per minute | per day | per day, per model]`, or the `retryDelay`), so a per-minute limit is never benched until midnight.
+- After a restart only lasting benches are restored from the ledger: no credit (402, `balance_units`) until the UTC reset, a rejected key (401/403) for 6 h. A daily 429 is re-checked by the first live call.
+- **Local models:** `llamacpp` is llama.cpp on this computer (`node src/frl.mjs local start --model …`); `llamacpp-lan` is llama.cpp on another computer in the same network, reached at `LLAMACPP_LAN_URL` (steps: Models & router → How to get it, or `src/llm/guides.mjs`). Both are unlimited and cost no quota.
+
+## 4g. Running without stops
+
+- The app runs as an always-on service that restarts it if it stops (`KeepAlive`, `RunAtLoad`). The loop writes a quiet resume checkpoint when it starts and after every pass, so a crash or power cut resumes it like a normal restart.
+- A local model started with `node src/frl.mjs local start … --background` is remembered (`data/llama/serve.json`) and restarted when the app starts (`ensureLocalModel`; `FRL_LOCAL_AUTOSTART=0` turns it off). Every 30 s the app re-checks local providers that were not answering and checks the devices that opened a research link for a model to connect (`PeerWatcher`).
+- A local server never gets a prompt bigger than its context: the provider reads it from llama-server's `/props`.
+- The other PC joins with one PowerShell line from the share panel (`/pc-setup.ps1`, open to research-link holders): it downloads llama.cpp b11739 (CUDA 12.4 for NVIDIA, Vulkan otherwise), picks Qwen3-14B with 11 GB+ graphics memory or Qwen3-4B otherwise, and serves it on port 8090; the app connects it within a minute.
+
+## 4e. Criteria grounding
+
+A model may propose expected-result checks (`mustMention`, item count, value range) and piece checks, but code keeps only what the user's own text states (`src/research/grounding.mjs`): a must-mention word only when it is quoted or follows "mention / contain / include / name"; a count or range only when the number appears in the expected result, question or constraints. Dropped criteria are logged as "not enforced (the model inferred it, your text does not ask for it)". Piece checks are judged against the piece's desired output, where a word the user literally wrote counts as stated. Checks stored before this rule are re-grounded when a run starts and when a loop starts; a loop re-scores the research before measuring its baseline, so a dropped criterion is never counted as a loop gain. Checks the user sets by hand (**Edit expected result**) are kept as written.
+
 ## 5. Logging and audit protocol
 
 | Record | Where |
@@ -80,6 +104,22 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 | Sessions, runs, verdicts, expected-result scores, loop start/end | `data/logs/history.jsonl`, **History** tab, `GET /api/history` |
 | Knowledge record: facts (verified), claims (supported), hypotheses (weak) with re-checkable evidence | `GET /api/projects/<id>/knowledge` |
 | Quality gate verdicts | `data/logs/quality.jsonl` |
+
+## 5b. Temp and cache protocol
+
+The app clears its own temp files on start and then every 6 hours (`TempSweeper` in `src/housekeeping.mjs`). Each sweep that removes something writes one `temp sweep: …` line to History.
+
+| What | Rule |
+|---|---|
+| Coder work folders and backups in `data/work/` | removed when untouched for 7 days |
+| `*.tmp` files anywhere under `data/` (except `data/llama/`) | removed when older than 1 day |
+| `data/logs/project-<id>.jsonl` of research that no longer exists | removed when untouched for 7 days |
+| Any `data/logs/*.jsonl` over 5 MB | trimmed to its newest 20,000 lines |
+| `data/logs/server.out` over 1 MB | trimmed to its newest 2,000 lines |
+
+Never swept: `data/projects/`, `data/handoff/`, `data/changes/`, `data/chat/`, `data/llama/`, logs of existing research. `FRL_SWEEP_HOURS` sets the interval; `0` turns the sweep off. Tests: `tests/housekeeping.test.ts`, `tests/logs.test.ts`.
+
+Agents working on this repo put their own scratch files in their session scratchpad, never in the repo or `data/`, and delete them when the task ends. `test-results/` is Playwright output and may be deleted at any time. Vitest removes every `frl-*` temp folder its run created (`tests/helpers/temp-cleanup.ts`); Playwright removes the e2e data folders of earlier runs before it starts (`e2e/setup.mjs`), so at most one is left.
 
 ## 6. Ship protocol (quality gate)
 
@@ -99,6 +139,9 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 - Keys live only in the system key store (macOS Keychain, Windows user environment, Linux secret-tool, or systemd encrypted credentials on a server) or the shell environment; never in a file. The secrets gate enforces it. `node src/frl.mjs keys …` reads and writes them on every system.
 - The server binds to `127.0.0.1` unless remote access is on (`node src/frl.mjs install` or `start --remote`); then every other device needs the access token. A request forwarded by a local proxy (Tailscale Funnel, tunnels: `X-Forwarded-*`, `Forwarded`, `Tailscale-*` headers) is never treated as this computer (`AccessGate.isLoopback`); `FRL_BEHIND_PROXY=1` distrusts loopback entirely. SearXNG binds to `127.0.0.1:8888`.
 - **Terminal:** a real shell for whoever passes the access gate. The WebSocket also requires the page's `Origin` to match the host, so another website cannot open it from your browser (`sameOrigin`). The shell does not get the access token in its environment. `FRL_TERMINAL=0` turns it off. Tests: `tests/terminal/socket.test.ts`, `tests/auth.test.ts`.
+- **Research share links:** `?share=<token>` opens one research only (`shareAllows` in `src/share.mjs`): its page, its API and its live events. Owner-only: deleting it, managing its share, other researches, the App assistant, keys, router, terminal (HTTP and WebSocket), history, logs, restart. A share token is an HMAC of the access token, the research id and a version number; `data/shares.json` stores only id, version and date, never the token. Turning a link off bumps the version; rotating the access token turns every link off. Questions about the app asked through a share link are answered with a refusal instead of being forwarded to the App assistant. Tests: `tests/share.test.ts`, `tests/auth.test.ts`, `tests/server.test.ts`, `tests/terminal/socket.test.ts`.
+- **Remote visits:** `/reachable` answers every device with a page holding no data, so a network problem can be told apart from a link problem. Each other device that reaches the app is written to History (address, path, let in or refused and why) once per 10 minutes per outcome (`src/visits.mjs`, `tests/visits.test.ts`).
+- **Memory:** `ProjectStore` keeps at most 8 researches parsed in memory (least recently used out, running or looping ones never), and the research list reads summaries from disk without caching them (`tests/store.test.ts`).
 - No paid provider is wired in.
 - Scraping reads public pages only; no logins, no anti-bot evasion. For sites that block readers, upload a CSV export.
 

@@ -59,7 +59,7 @@ const RESPONDERS = {
   [TASK_MARKERS.decompose]: decompose,
   [TASK_MARKERS.expand]: (prompt) => {
     const id = between(prompt, 'Node to break down further: ', ' —');
-    return { nodes: [{ id: `${id}.a`, parentId: id, title: 'Sub-part A', question: 'What is sub-part A?', method: 'lookup' }, { id: `${id}.b`, parentId: id, title: 'Sub-part B', question: 'What is sub-part B?', method: 'lookup' }] };
+    return { nodes: [{ id: `${id}.a`, parentId: id, title: 'Supplier prices', question: 'What do the main suppliers charge per unit?', method: 'lookup' }, { id: `${id}.b`, parentId: id, title: 'Demand growth', question: 'How fast is local demand growing per year?', method: 'lookup' }] };
   },
   [TASK_MARKERS.research]: research,
   [TASK_MARKERS.critique]: () => ({ agree: true, severity: 'none', issues: [], betterAnswer: '' }),

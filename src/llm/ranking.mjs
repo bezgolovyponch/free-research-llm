@@ -21,6 +21,7 @@ export const CAPABILITY = {
   pollinations: [2, 'small keyless model, 1 reply per 30 s'],
   ollama: [1, 'a 7–8B model on this computer'],
   llamacpp: [2, 'depends on the model you run'],
+  'llamacpp-lan': [3, 'depends on the model the other PC runs'],
 };
 
 export function localCapability(model) {
@@ -32,7 +33,7 @@ export function localCapability(model) {
 }
 
 export function capabilityOf(p) {
-  const local = p.local || p.id === 'llamacpp' || p.id === 'ollama';
+  const local = p.local || p.id === 'llamacpp' || p.id === 'llamacpp-lan' || p.id === 'ollama';
   const measured = local ? localCapability(p.servedModel ?? p.deep) : null;
   if (measured) return [measured, `${p.servedModel ?? p.deep} on your own hardware`];
   return CAPABILITY[p.id] ?? [3, 'unrated'];
@@ -133,6 +134,7 @@ export const DAILY_LIMITS = {
   cohere: { note: '1,000 calls/month' },
   pollinations: { note: 'no daily cap; 1 reply per 30 s without a key' },
   llamacpp: { note: 'unlimited: your own GPU' },
+  'llamacpp-lan': { note: 'unlimited: the other PC\'s GPU' },
 };
 
 function utcDay(ts) {

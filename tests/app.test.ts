@@ -23,6 +23,43 @@ describe('App composition', () => {
     expect(JSON.stringify(app.status())).not.toContain('session-key');
   });
 
+  it('uses a llama.cpp server on another PC when its address is saved, and leaves it off otherwise', async () => {
+    const fetchImpl = fakeFetch([[/192\.168\.5\.26:8090\/v1\/models$/, () => jsonResponse({ data: [{ id: 'qwen3-14b' }] })]]);
+    const on = new ProviderFactory({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', LLAMACPP_LAN_URL: 'http://192.168.5.26:8090/v1' }, fetchImpl });
+    const [lan] = await on.buildAll();
+    expect(lan.id).toBe('llamacpp-lan');
+    expect(lan.state).toBe('ready');
+    expect(lan.selected.fast).toBe('qwen3-14b');
+    const off = new ProviderFactory({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan' }, fetchImpl });
+    expect((await off.buildAll())[0].state).not.toBe('ready');
+  });
+
+  it('connects a model found on the other PC and routes to it', async () => {
+    const fetchImpl = fakeFetch([[/192\.168\.5\.26:8090\/v1\/models$/, () => jsonResponse({ data: [{ id: 'pc-model' }] })], [/192\.168\.5\.26:8090\/props$/, () => jsonResponse({ default_generation_settings: { n_ctx: 16384 } })]]);
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', FRL_WIKIPEDIA: '0' }, fetchImpl, dataDir: '/tmp/frl-unused-peer' });
+    await app.refreshProviders();
+    expect(app.status().providers[0].state).not.toBe('ready');
+    app.noteApp = () => {};
+    await app.connectPeer({ id: 'llamacpp-lan', env: 'LLAMACPP_LAN_URL', label: 'llama.cpp', url: 'http://192.168.5.26:8090/v1', models: ['pc-model'] });
+    expect(app.status().providers[0]).toMatchObject({ id: 'llamacpp-lan', state: 'ready', fast: 'pc-model' });
+  });
+
+  it('picks up a local model that finished loading after the app started', async () => {
+    let up = false;
+    const fetchImpl = (async (url: string) => {
+      if (!up) throw Object.assign(new Error('refused'), { name: 'TypeError' });
+      if (url.endsWith('/v1/models')) return jsonResponse({ data: [{ id: 'Qwen3-4B' }] });
+      return jsonResponse({ default_generation_settings: { n_ctx: 16384 } });
+    }) as never;
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'llamacpp', FRL_WIKIPEDIA: '0' }, fetchImpl, dataDir: '/tmp/frl-unused-local' });
+    await app.refreshProviders();
+    expect(app.status().providers[0].state).not.toBe('ready');
+    expect(await app.rediscoverLocal()).toEqual([]);
+    up = true;
+    expect(await app.rediscoverLocal()).toEqual(['llamacpp']);
+    expect(app.status().providers[0]).toMatchObject({ state: 'ready', fast: 'Qwen3-4B' });
+  });
+
   it('enables search backends from the environment, Wikipedia by default', () => {
     expect(buildSearch({ env: {}, fetchImpl: fetch }).describe().backends).toEqual(['wikipedia']);
     expect(buildSearch({ env: { TAVILY_API_KEY: 't', BRAVE_API_KEY: 'b', FRL_WIKIPEDIA: '0' }, fetchImpl: fetch }).describe().backends).toEqual(['tavily', 'brave']);

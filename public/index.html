@@ -107,6 +107,13 @@
   .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:16px; margin-bottom:12px}
   .notice{border-radius:8px; padding:10px 12px; margin-bottom:12px; background:var(--panel2); border-left:3px solid var(--am)}
   .notice.err{border-left-color:var(--rd)}
+  .sharebox{display:none; margin-top:10px}
+  .sharebox.on{display:block}
+  .sharebox input{width:100%; font:12px ui-monospace,monospace}
+  .sharebox .row{margin-top:6px}
+  body.shared #newBtn, body.shared .side-foot, body.shared #btnRouter, body.shared #mobileTerm, body.shared #mobileNew, body.shared #mDelete, body.shared #mShare, body.shared .side-search, body.shared #chatScopes [data-scope="app"]{display:none!important}
+  #sharedBanner{display:none}
+  body.shared #sharedBanner{display:block}
   .pill{display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:3px 10px; font-size:12px; font-weight:650; background:var(--panel2); color:var(--dim); border:1px solid var(--line); white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis}
   .pill i{width:8px; height:8px; border-radius:50%; display:inline-block; flex:0 0 8px}
   .grade{display:inline-block; border-radius:6px; padding:1px 7px; font-size:11px; font-weight:750; letter-spacing:.3px; text-transform:uppercase; border:1px solid currentColor}
@@ -264,7 +271,9 @@
   #pieceTable tr.on td{background:var(--acc-soft)}
   .rep h3{font-size:14px; margin:14px 0 4px}
   .timeline div{font-size:12px; margin:2px 0}
-  .desired-row{padding:8px 10px 0; background:var(--panel)}
+  .desired-row{padding:8px 10px 0; background:var(--panel); display:flex; align-items:center; gap:8px}
+  .desired-label{font-size:12px; font-weight:700; color:var(--dim); white-space:nowrap}
+  .desired-row input{flex:1 1 auto; min-width:0}
   .desired-row input{font-size:13px}
   .msg .want{font-size:11px; margin-top:4px; opacity:.9}
   .gm td,.gm th{text-align:center; padding:6px 4px}
@@ -379,11 +388,14 @@
               <a id="mReport" href="#">Download report (.md)</a>
               <a id="mKnowledge" href="#" target="_blank">Knowledge record (JSON)</a>
               <a id="mLogs" href="#" target="_blank">Event log (JSON)</a>
+              <button id="mShare">Share this research (link for another PC)…</button>
               <button class="danger" id="mDelete">Delete this research</button>
             </div>
           </div>
         </div>
         <div class="loopbox" id="loopBox"></div>
+        <div class="sharebox notice" id="shareBox"></div>
+        <div class="notice" id="sharedBanner">Shared research: you are helping on this one research. Chat, run, add pieces and download results here; the rest of the app stays with its owner.</div>
       </div>
       <div id="workspace">
         <div id="center">
@@ -416,8 +428,8 @@
             <div id="chatTitle" class="small faint" style="padding:6px 14px 0"></div>
             <div id="chatMsgs"></div>
             <div class="attach-row" id="chatFiles"></div>
-            <div class="desired-row" id="desiredRow"><input id="chatDesired" placeholder="Desired output: the result you want (kept as a regression check)" aria-label="Desired output"></div>
-            <form id="chatForm" class="chat-form" autocomplete="off"><button type="button" class="icon-btn" id="chatAttach" aria-label="Attach files" title="Attach photos, screenshots, PDFs, audio or data files"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 11.5l-8.5 8.5a5 5 0 01-7-7L14 4.5a3.5 3.5 0 015 5L10.5 18a2 2 0 01-3-3L15 7.5"/></svg></button><input type="file" id="chatFile" multiple hidden accept="image/*,.pdf,.csv,.tsv,.txt,.md,.json,.html,.htm,.xml,.log,.mp3,.wav"><textarea id="chatIn" rows="1" placeholder="Request: what do you want… Enter sends" aria-label="Chat message" title="Your message takes priority: a running loop or run pauses, your change is applied, then it resumes."></textarea><button class="btn primary" id="chatSend" type="submit">Send</button></form>
+            <div class="desired-row" id="desiredRow"><label for="chatDesired" class="desired-label">Desired output</label><input id="chatDesired" autocomplete="off" spellcheck="true" placeholder="the result you want; kept as a regression check" aria-label="Desired output"></div>
+            <form id="chatForm" class="chat-form" autocomplete="off"><button type="button" class="icon-btn" id="chatAttach" aria-label="Attach files" title="Attach photos, screenshots, PDFs, audio or data files"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 11.5l-8.5 8.5a5 5 0 01-7-7L14 4.5a3.5 3.5 0 015 5L10.5 18a2 2 0 01-3-3L15 7.5"/></svg></button><input type="file" id="chatFile" multiple hidden accept="image/*,.pdf,.csv,.tsv,.txt,.md,.json,.html,.htm,.xml,.log,.mp3,.wav"><textarea id="chatIn" rows="1" placeholder="Request: what you want… Enter sends" aria-label="Chat message" title="Your message takes priority: a running loop or run pauses, your change is applied, then it resumes."></textarea><button class="btn primary" id="chatSend" type="submit">Send</button></form>
           </div>
         </aside>
       </div>
@@ -730,7 +742,7 @@ $("projFilter").addEventListener("input",renderProjectList);
 async function openProject(id){
   if(STATE.es)STATE.es.close();
   if(!STATE.project||STATE.project.id!==id){STATE.checked.clear();STATE.excluded.clear();}
-  STATE.view=null;STATE.selected="Q";
+  STATE.view=null;STATE.selected="Q";SHARE.view=null;renderShare();
   try{STATE.project=await api("/api/projects/"+encodeURIComponent(id));}catch(e){toast(e.message);return;}
   showPage("project");renderAll();
   if(SNAPSHOT())return;
@@ -745,7 +757,8 @@ function kids(id){return nodesOf().filter(n=>n.parentId===id).sort((a,b)=>a.id.l
 function prio(n){return n.impact*n.uncertainty;}
 function select(id,mode){STATE.selected=byId(id)?id:"Q";CHAT.scope=STATE.selected==="Q"?(["app","results"].includes(CHAT.scope)?CHAT.scope:"research"):"node";renderOutline();renderPieces();drawTree(false);renderInspector();renderChat();renderSources();renderGates();syncHash();if(mode&&mq.narrow.matches&&STATE.pane!=="tree")openInspector(mode);}
 function roleOf(n){return !n?"Question":n.parentId==="Q"?"Driver":"Sub-question";}
-function pieceName(n){return n?n.id+" · "+(n.title||trunc(n.question,60)):"Q · Whole research";}
+function cleanTitle(t){return String(t||"").replace(/^\s*(?:Q|D\d+(?:\.\d+)*)\s*[:·.\-–—]\s*/i,"");}
+function pieceName(n){return n?n.id+" · "+(cleanTitle(n.title)||trunc(n.question,60)):"Q · Whole research";}
 
 function renderHead(){
   const p=STATE.project;const ns=p.nodes;
@@ -758,7 +771,7 @@ function renderHead(){
   $("phasePill").innerHTML='<i class="'+(looping||running?"pulse":"")+'" style="background:'+color+'"></i>'+(looping?"improving":esc(p.phase))+(mq.phone.matches&&ns.length?" · "+fin+"/"+ns.length:"")+(p.demo?" · demo":"");
   $("progBar").style.width=(ns.length?Math.round(100*fin/ns.length):0)+"%";
   $("progText").textContent=fin+"/"+ns.length+" researched";
-  $("btnRun").disabled=running||looping;$("btnStop").disabled=!running&&!looping;
+  $("btnRun").disabled=false;$("btnRun").textContent=running||looping?"⚡ Join"+(p.lanes?" ("+p.lanes+" lanes)":""):"▶ Run";$("btnRun").title=running||looping?"Work on this research as a teammate: adds one more lane, so more pieces are researched or tried at once":"";$("btnStop").disabled=!running&&!looping;
   $("btnLoop").textContent=looping?"Loop running":"Improve loop";
   $("mReport").href="/api/projects/"+encodeURIComponent(p.id)+"/report.md";
   $("mHandoff").href="/api/projects/"+encodeURIComponent(p.id)+"/handoff.md";
@@ -789,10 +802,23 @@ document.addEventListener("click",e=>{if(!e.target.closest("#loopPop"))$("loopPo
 $("loopAll").addEventListener("click",()=>{$("loopPop").classList.remove("on");STATE.loopScope="all";renderLoopBox();$("loopBox").classList.add("on");});
 $("loopSel").addEventListener("click",()=>{$("loopPop").classList.remove("on");if(!STATE.checked.size){STATE.mapSelect=true;setPane("map");drawTree(true);toast("click pieces on the map to select them");return;}STATE.loopScope="sel";renderLoopBox();$("loopBox").classList.add("on");});
 $("mLoop").addEventListener("click",()=>$("loopBox").classList.add("on"));
-$("btnRun").addEventListener("click",async()=>{try{await api("/api/projects/"+STATE.project.id+"/run",{method:"POST"});toast("running");}catch(e){toast(e.message);}});
+$("btnRun").addEventListener("click",async()=>{try{const r=await api("/api/projects/"+STATE.project.id+"/run",{method:"POST"});if(r.joined){STATE.project.lanes=r.lanes;renderHead();toast("joined as a teammate: "+r.lanes+" lanes now work on this research at once");}else toast("running");}catch(e){toast(e.message);}});
 $("btnStop").addEventListener("click",async()=>{const p=STATE.project;try{if(isLooping(p))await api("/api/projects/"+p.id+"/improve/stop",{method:"POST"});else await api("/api/projects/"+p.id+"/cancel",{method:"POST"});toast("stopping after the current step");setTimeout(async()=>{await loadStatus();renderHead();},1500);}catch(e){toast(e.message);}});
 $("moreBtn").addEventListener("click",e=>{e.stopPropagation();$("morePop").classList.toggle("on");});
 document.addEventListener("click",()=>$("morePop").classList.remove("on"));
+const SHARE={view:null,mine:null};
+function renderShare(){
+  const v=SHARE.view;const box=$("shareBox");if(!v){box.classList.remove("on");return;}
+  box.classList.add("on");
+  if(!v.enabled){box.innerHTML='<b>Share this research</b><p class="small">Anyone with the link can open this one research on another PC or phone: chat with its pieces, run it and add pieces, using this computer\'s free model quotas. They cannot see your other researches, keys, settings or the terminal.</p>'+(v.remote?"":'<p class="small" style="color:var(--rd)">Remote access is off, so another PC cannot reach this app. Open <b>Terminal</b> and press <b>Install always-on</b>, or run <code>node src/frl.mjs start --remote</code>, then share again.</p>')+'<div class="row"><button class="btn primary sm" id="shareOn"'+(v.remote?"":" disabled")+'>Create link</button><button class="btn secondary sm" id="shareClose">Close</button></div>';}
+  else{box.innerHTML='<b>Link for another PC</b> <span class="small faint">on since '+esc(String(v.since||"").slice(0,16).replace("T"," "))+'</span>'+(v.links.length?v.links.map((l,i)=>'<div class="row"><span class="small">'+esc(l.label)+'</span><input readonly id="shareUrl'+i+'" value="'+esc(l.url)+'"><button class="btn secondary sm" data-copy="'+i+'">Copy</button></div>').join(""):'<p class="small">No network address found. Connect this computer to Wi-Fi, or run <code>node src/frl.mjs share '+esc(v.projectId)+'</code> for Tailscale links.</p>')+(v.pcSetup?'<p class="small" style="margin-top:8px"><b>Let that PC\'s graphics card research too</b> (no Docker): on the PC open PowerShell and run this once. It downloads llama.cpp and a model that fits its graphics memory; the app connects it within a minute.</p><div class="row"><input readonly id="sharePc" value="'+esc(v.pcSetup)+'"><button class="btn secondary sm" data-copy-pc="1">Copy</button></div>':'')+'<p class="small faint">Other PC on the same Wi-Fi: open the link as it is. From anywhere: install Tailscale on both computers and run <code>node src/frl.mjs share '+esc(v.projectId)+'</code> for that link. Keep the link private.</p><div class="row"><button class="btn danger sm" id="shareOff">Turn link off</button><button class="btn secondary sm" id="shareClose">Close</button></div>';}
+  const on=$("shareOn");if(on)on.addEventListener("click",async()=>{try{SHARE.view=await api("/api/projects/"+STATE.project.id+"/share",{method:"POST"});renderShare();}catch(e){toast(e.message);}});
+  const off=$("shareOff");if(off)off.addEventListener("click",async()=>{if(!confirm("Turn the link off? Whoever has it loses access at once."))return;try{SHARE.view=await api("/api/projects/"+STATE.project.id+"/share",{method:"DELETE"});renderShare();toast("link turned off");}catch(e){toast(e.message);}});
+  $("shareClose").addEventListener("click",()=>{SHARE.view=null;renderShare();});
+  const pc=box.querySelector("[data-copy-pc]");if(pc)pc.addEventListener("click",async()=>{const inp=$("sharePc");inp.select();try{await navigator.clipboard.writeText(inp.value);toast("command copied");}catch(e){document.execCommand("copy");toast("command copied");}});
+  box.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",async()=>{const inp=$("shareUrl"+b.dataset.copy);inp.select();try{await navigator.clipboard.writeText(inp.value);toast("link copied");}catch(e){document.execCommand("copy");toast("link copied");}}));
+}
+$("mShare").addEventListener("click",async()=>{try{SHARE.view=await api("/api/projects/"+STATE.project.id+"/share");renderShare();}catch(e){toast(e.message);}});
 $("mEditExpected").addEventListener("click",async()=>{const p=STATE.project;const v=prompt("Expected result (what must be delivered)",(p.acceptance||{}).expected||"");if(v==null)return;try{STATE.project=await api("/api/projects/"+p.id,{method:"PATCH",body:{expected:v}});renderAll();toast("saved; checks apply on the next run");}catch(e){toast(e.message);}});
 $("mResetAll").addEventListener("click",async()=>{if(!confirm("Clear all findings and research the whole tree again? The tree is kept."))return;try{STATE.project=await api("/api/projects/"+STATE.project.id+"/reset",{method:"POST"});renderAll();toast("cleared; press Run");}catch(e){toast(e.message);}});
 $("mRebuild").addEventListener("click",async()=>{if(!confirm("Delete the tree and all findings, and decompose the question again? Chat and expected result are kept."))return;try{STATE.project=await api("/api/projects/"+STATE.project.id+"/reset",{method:"POST",body:{tree:true}});STATE.view=null;renderAll();toast("cleared; press Run");}catch(e){toast(e.message);}});
@@ -864,6 +890,9 @@ function toggleMapPick(id){
 function renderMapInfo(){
   const f=focusIds();const b=$("btnMapSel");b.classList.toggle("primary",STATE.mapSelect);b.classList.toggle("secondary",!STATE.mapSelect);b.setAttribute("aria-pressed",String(STATE.mapSelect));b.textContent=STATE.mapSelect?"Done selecting":"Select pieces";
   $("mapSelInfo").innerHTML=STATE.mapSelect&&!f?'<span class="pill">Click pieces to select them</span>':f?'<span class="pill">'+STATE.checked.size+" selected · "+f.size+" in loop focus"+(STATE.excluded.size?" · "+STATE.excluded.size+" excluded":"")+'</span> <button class="btn ghost sm" id="mapSelClear">Clear</button>':"";
+  const ta=STATE.project&&STATE.project.results&&STATE.project.results.treeAudit||[];
+  if(ta.length&&!STATE.mapSelect)$("mapSelInfo").innerHTML+=' <button class="btn ghost sm" id="mapAudit" style="color:var(--am)">⚠ '+ta.length+" tree check"+(ta.length===1?"":"s")+"</button>";
+  const ma=$("mapAudit");if(ma)ma.addEventListener("click",()=>setPane("gates"));
   const c=$("mapSelClear");if(c)c.addEventListener("click",()=>{STATE.checked.clear();STATE.excluded.clear();drawTree(true);renderOutline();renderTreeBar();renderLoopBox();});
 }
 function drawTree(force){
@@ -875,7 +904,7 @@ function drawTree(force){
   const gE=el("g",{},svg),gN=el("g",{},svg);const maxP=Math.max(1,...p.nodes.map(prio));
   const focus=focusIds(),path=pathIds();renderMapInfo();
   const inF=(id)=>!focus||focus.has(id);
-  p.nodes.forEach(n=>{const a=L.pos[n.id],b=L.pos[n.parentId||"Q"];if(!a||!b)return;const mx=(a.x+b.x)/2;const hot=focus&&focus.has(n.id)&&(n.parentId==="Q"||focus.has(n.parentId));el("path",{d:"M"+a.x+","+a.y+" C"+mx+","+a.y+" "+mx+","+b.y+" "+b.x+","+b.y,fill:"none",stroke:path.has(n.id)?"var(--acc)":hot?"var(--acc)":"var(--edge)","stroke-width":path.has(n.id)?4:hot?2.4:1.6,opacity:focus&&!hot&&!path.has(n.id)?.35:1},gE);n.dependsOn.forEach(dep=>{const c=L.pos[dep];if(!c)return;el("path",{d:"M"+c.x+","+c.y+" Q"+((c.x+a.x)/2-40)+","+((c.y+a.y)/2)+" "+a.x+","+a.y,fill:"none",stroke:"var(--vi)","stroke-width":1.2,"stroke-dasharray":"4 4",opacity:.7},gE);});});
+  p.nodes.forEach(n=>{const a=L.pos[n.id],b=L.pos[n.parentId||"Q"];if(!a||!b)return;const mx=(a.x+b.x)/2;const hot=focus&&focus.has(n.id)&&(n.parentId==="Q"||focus.has(n.parentId));el("path",{d:"M"+a.x+","+a.y+" C"+mx+","+a.y+" "+mx+","+b.y+" "+b.x+","+b.y,fill:"none",stroke:path.has(n.id)?"var(--acc)":hot?"var(--acc)":"var(--edge)","stroke-width":path.has(n.id)?4:hot?2.4:1.6,opacity:focus&&!hot&&!path.has(n.id)?.35:1},gE);n.dependsOn.forEach(dep=>{let own=false;for(let c=byId(n.parentId);c;c=c.parentId&&c.parentId!=="Q"?byId(c.parentId):null)if(c.id===dep)own=true;if(own||(byId(dep)&&String(dep).startsWith(n.id+".")))return;const c=L.pos[dep];if(!c)return;el("path",{d:"M"+c.x+","+c.y+" Q"+((c.x+a.x)/2-40)+","+((c.y+a.y)/2)+" "+a.x+","+a.y,fill:"none",stroke:"var(--vi)","stroke-width":1.2,"stroke-dasharray":"4 4",opacity:.7},gE);});});
   const root=el("g",{class:"node",transform:"translate("+L.pos.Q.x+","+L.pos.Q.y+")"},gN);
   el("circle",{r:26,fill:p.report?"var(--gr)":"var(--acc)",opacity:focus&&STATE.excluded.has("Q")?.35:1},root);
   if(focus)el("circle",{r:31,fill:"none",stroke:STATE.excluded.has("Q")?"var(--rd)":"var(--acc)","stroke-width":3,"stroke-dasharray":STATE.excluded.has("Q")?"5 4":"none"},root);
@@ -1030,7 +1059,7 @@ function withPending(t,thread){
   if(pend&&pend.key===t.key&&(t.kind==="app"||(p&&pend.pid===p.id))){
     const saved=th.some(m=>m.role==="user"&&m.content===pend.text&&String(m.at)>=pend.at.slice(0,19));
     if(!saved)th.push({role:"user",content:pend.text,at:pend.at,files:pend.files});
-    if(!th.length||th[th.length-1].role==="user")th.push({role:"assistant",content:pend.files&&pend.files.length?"reading your files…":"…",at:""});
+    if(!th.length||th[th.length-1].role==="user")th.push({role:"assistant",content:pend.files&&pend.files.length?"reading your files…":(STATE.project&&(isLooping(STATE.project)||RUNNING_PHASES.includes(STATE.project.phase))?"Pausing the running loop so your message goes first. It finishes its current step, which can take a few minutes on free models…":"…"),at:""});
   }
   return th;
 }
@@ -1098,6 +1127,7 @@ async function sendChat(which){
     if(t.kind==="app"){const r=await api("/api/chat",{method:"POST",body:{message:text,files}});CHAT.appThread=r.thread;CHAT.appLoaded=true;afterApp(r);}
     else{const r=await api("/api/projects/"+p.id+"/chat",{method:"POST",body:{nodeId:t.key,request:text,desired,files}});if(desired)$("chatDesired").value="";
       if(r.redirected==="app"){CHAT.appThread=r.appThread;CHAT.appLoaded=true;CHAT.scope="app";toast("This is about the app itself, so the App chat answered it");afterApp({actions:(r.appThread.at(-1)||{}).actions||[]});}
+      if(r.redirected==="owner")toast(r.reply);
       STATE.project=await api("/api/projects/"+p.id);}
   }catch(e){toast(e.message);input.value=text;CHAT.files[which]=files;}
   finally{CHAT.pending=null;CHAT.sending=false;$(page?"apSend":"chatSend").disabled=false;CHAT.stick=true;if(STATE.project)renderAll();else renderChat();renderAppPage();}
@@ -1154,10 +1184,12 @@ function renderPieces(){
   box.querySelectorAll("a[data-src]").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();setPane("sources");}));
 }
 function specCell(specs){if(!specs||!specs.length)return '<span class="faint">—</span>';const ok=specs.filter(s=>s.last&&s.last.passed).length;const reg=specs.some(s=>s.last&&s.last.regressed);return '<span class="small" style="color:'+(reg?"var(--rd)":ok===specs.length?"var(--gr)":"var(--am)")+'">'+ok+"/"+specs.length+(reg?" ⚠":"")+"</span>";}
+const AUDIT_HELP={"single-child":"split it again so it has 2–4 pieces, or merge the one piece into it","duplicate":"remove one of the two (More → piece → Remove) or edit it into something different","restates-question":"remove it: a driver must be one part of the question, not the whole question","misplaced":"remove it and add it under the driver it belongs to","too-deep":"merge the deepest pieces into their parent","too-many-drivers":"merge overlapping drivers","id-in-title":"fixed automatically on the next ▶ Run","dependency-on-own-branch":"fixed automatically on the next ▶ Run"};
+function treeAuditHtml(p){const a=(p.results&&p.results.treeAudit)||[];if(!a.length)return '<div class="card"><h2>Tree checks</h2><p class="small" style="color:var(--gr)">✓ structure passes: no duplicates, every split has 2+ pieces, no piece depends on its own branch.</p></div>';return '<div class="card tablewrap" id="treeChecks"><h2>Tree checks ('+a.length+')</h2><p class="small muted">Structural rules checked by code after every change to the tree.</p><table style="margin-top:6px"><tr><th>Piece</th><th>Problem</th><th>Fix</th></tr>'+a.map(i=>'<tr><td class="mono"><a href="#" data-node="'+esc(i.nodeId)+'">'+esc(i.nodeId)+'</a></td><td class="small">'+esc(i.detail)+'</td><td class="small">'+esc(AUDIT_HELP[i.code]||"")+"</td></tr>").join("")+"</table></div>";}
 function renderGates(){
   const p=STATE.project;const box=$("gatesBody");if(!p||!box)return;
   const ids=[];p.nodes.forEach(n=>(n.verification&&n.verification.checks||[]).forEach(c=>{if(!ids.includes(c.id))ids.push(c.id);}));
-  let h='<div class="card tablewrap"><h2>Mechanical gates per piece</h2><p class="small muted">Code decides each grade. ✓ passed · ✗ failed · blank: not run.</p><table class="gm" style="margin-top:6px"><tr><th>Piece</th><th>Grade</th>'+ids.map(i=>'<th class="small">'+esc(i)+"</th>").join("")+"</tr>"+p.nodes.map(n=>{const m={};(n.verification&&n.verification.checks||[]).forEach(c=>m[c.id]=c);return '<tr class="click" data-g="'+esc(n.id)+'"><td class="small"><b class="mono">'+esc(n.id)+"</b> "+esc(trunc(n.title,26))+"</td><td>"+grade(n.status)+"</td>"+ids.map(i=>"<td title=\""+esc(m[i]?m[i].detail:"")+"\">"+(m[i]?(m[i].passed?'<span style="color:var(--gr)">✓</span>':'<span style="color:var(--rd)">✗</span>'):"")+"</td>").join("")+"</tr>";}).join("")+"</table></div>";
+  let h=treeAuditHtml(p)+'<div class="card tablewrap"><h2>Mechanical gates per piece</h2><p class="small muted">Code decides each grade. ✓ passed · ✗ failed · blank: not run.</p><table class="gm" style="margin-top:6px"><tr><th>Piece</th><th>Grade</th>'+ids.map(i=>'<th class="small">'+esc(i)+"</th>").join("")+"</tr>"+p.nodes.map(n=>{const m={};(n.verification&&n.verification.checks||[]).forEach(c=>m[c.id]=c);return '<tr class="click" data-g="'+esc(n.id)+'"><td class="small"><b class="mono">'+esc(n.id)+"</b> "+esc(trunc(n.title,26))+"</td><td>"+grade(n.status)+"</td>"+ids.map(i=>"<td title=\""+esc(m[i]?m[i].detail:"")+"\">"+(m[i]?(m[i].passed?'<span style="color:var(--gr)">✓</span>':'<span style="color:var(--rd)">✗</span>'):"")+"</td>").join("")+"</tr>";}).join("")+"</table></div>";
   const specs=[["Q",p.specs]].concat(p.nodes.map(n=>[n.id,n.specs])).filter(([,s])=>s&&s.length);
   h+='<div class="card tablewrap"><h2>Regression checks</h2><p class="small muted">Each desired output from a Node or Research chat. A change that breaks a check that passed before is reverted by the loop.</p>'+(specs.length?'<table style="margin-top:6px"><tr><th>Piece</th><th>Check</th><th>Desired output</th><th>State</th></tr>'+specs.flatMap(([id,ss])=>ss.map(s=>"<tr><td class=\"mono\">"+esc(id)+'</td><td class="mono">'+esc(s.id)+'</td><td class="small">'+esc(trunc(s.desired,90))+"</td><td class=\"small\">"+(s.last?(s.last.passed?'<span style="color:var(--gr)">passing</span>':s.last.regressed?'<span style="color:var(--rd)">regressed</span>':'<span style="color:var(--am)">not met</span>'):"—")+"</td></tr>")).join("")+"</table>":'<p class="small faint">None yet.</p>')+"</div>";
   const tr=(p.improve&&p.improve.trials)||[];
@@ -1167,6 +1199,7 @@ function renderGates(){
   h+='<div class="card"><div class="row"><h2>Event log</h2><span class="spacer"></span><label class="small"><input type="checkbox" id="gOnly"'+(only?" checked":"")+'> only '+esc(STATE.selected==="Q"?"the selected piece (select one)":STATE.selected)+'</label><a class="small" href="/api/projects/'+esc(p.id)+'/logs" target="_blank">full log (JSON)</a></div><div class="timeline" style="margin-top:6px;max-height:420px;overflow:auto">'+(log.map(l=>'<div><span class="mono faint">'+esc(l.ts.slice(5,19).replace("T"," "))+"</span> <b>"+esc(l.type)+"</b> "+esc(l.message)+"</div>").join("")||'<span class="faint">no events</span>')+"</div></div>";
   box.innerHTML=h;
   box.querySelectorAll("[data-g]").forEach(r=>r.addEventListener("click",()=>select(r.dataset.g)));
+  box.querySelectorAll("#treeChecks a[data-node]").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();select(a.dataset.node,"details");}));
   $("gOnly").addEventListener("change",e=>{STATE.gatesOnlySelected=e.target.checked;renderGates();});
 }
 
@@ -1296,15 +1329,18 @@ $("allStop").addEventListener("click",async()=>{try{await api("/api/improve-all/
 
 (async function boot(){
   syncChatTab();
+  try{SHARE.mine=await api("/api/whoami");}catch(e){SHARE.mine={share:null};}
+  if(SHARE.mine.share)document.body.classList.add("shared");
   try{STATE.templates=await api("/api/templates");}catch(e){}
   renderTemplates();
   await loadStatus();
   await loadProjects();
   const hp=new URLSearchParams(location.hash.slice(1));
-  if(hp.get("p")){await openProject(hp.get("p"));if(hp.get("v"))setPane(hp.get("v")==="outline"?"tree":hp.get("v"));if(hp.get("n"))select(hp.get("n"));}
+  if(SHARE.mine.share&&hp.get("p")!==SHARE.mine.share){await openProject(SHARE.mine.share);}
+  else if(hp.get("p")){await openProject(hp.get("p"));if(hp.get("v"))setPane(hp.get("v")==="outline"?"tree":hp.get("v"));if(hp.get("n"))select(hp.get("n"));}
   else showPage(hp.get("page")||"home");
   if(mq.phone.matches)$("termCmdsWrap").open=false;
-  window.addEventListener("hashchange",async()=>{const q=new URLSearchParams(location.hash.slice(1));if(q.get("page")&&q.get("page")!==STATE.page)showPage(q.get("page"));else if(q.get("p")&&(!STATE.project||STATE.project.id!==q.get("p")||STATE.page!=="project")){await openProject(q.get("p"));if(q.get("v"))setPane(q.get("v"));}});
+  window.addEventListener("hashchange",async()=>{const q=new URLSearchParams(location.hash.slice(1));if(SHARE.mine&&SHARE.mine.share&&(q.get("page")||q.get("p")!==SHARE.mine.share)){if(!STATE.project||STATE.page!=="project")await openProject(SHARE.mine.share);else syncHash();return;}if(q.get("page")&&q.get("page")!==STATE.page)showPage(q.get("page"));else if(q.get("p")&&(!STATE.project||STATE.project.id!==q.get("p")||STATE.page!=="project")){await openProject(q.get("p"));if(q.get("v"))setPane(q.get("v"));}});
   setInterval(async()=>{if(STATE.page==="setup")loadStatus();else if(STATE.page==="history")loadHistory();else if(STATE.project&&isLooping(STATE.project)){await loadStatus();renderHead();renderProjectList();}},8000);
 })();
 </script>

@@ -3,6 +3,26 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-20 · session 16 — tree audit (structural gate), diverse piece chat
+
+- **Asked:** the tree levels are wrong (screenshot). Audit the decomposition engine and use verification harnesses on it. Make the piece chat more diverse and fix its UI.
+- **Audit of the glamping-plot tree:**
+  - every leaf depended on its own parent (`D1.1 → D1` …), which drew the dashed lines over the tree lines;
+  - the loop added three near-copies of the whole question as drivers (D6–D8) and kept them;
+  - titles carried ids ("D7: …", hence "D7 D7:" in the chat);
+  - D1–D5 had one sub-question each, while other pieces went a level deeper;
+  - "Parcel identification" sat under bike infrastructure.
+  - The same check over all 9 distinct trees found the same defects in older ones too.
+- **Built: a structural gate** (`src/research/treeaudit.mjs`), the same principle as the quality gate (mikoshi-construct: the gate decides, not the author).
+  - Checks: duplicate or overlapping siblings (Dice overlap on stemmed words; pieces naming different places or entities are never duplicates), a driver restating the question, single-child splits, depth > 3, more than 7 drivers, misplaced pieces, ids in titles, dependencies on the own branch.
+  - Auto-repair (`repairTree`) for ids in titles and own-branch dependencies, at tree build and at the start of every run.
+  - Building the tree is verified and revised: on failure the model gets the failures and is asked once more, and the tree with fewer issues is kept.
+  - The loop's added drivers and splits, chat-added pieces, splits and researched suggestions are refused when they duplicate an existing piece.
+  - The audit is sent with every project; **Gates & logs** shows a Tree checks card (problem plus fix), the map shows a ⚠ button, and own-branch dependency lines are no longer drawn.
+  - Tests include a fast-check property test: for any random tree, repair leaves no own-branch dependency or id prefix, and never adds or loses a node.
+- **Piece chat:** it must be specific to the piece (entities, evidence, concrete next searches) and never propose a duplicate. Suggestions use the diverse source selection and drop duplicates. While a loop is running, the waiting bubble says it is pausing the loop. The desired-output field has a label and no browser autofill (the empty white box over Send). Titles are shown without ids.
+- **Demo:** the demo split now returns two different sub-questions (the old A/B pair was correctly flagged as a duplicate).
+
 ## 2026-10-20 · session 15 — maximum-capability routing; the app is no longer car-specific
 
 - **Routing** (more free keys): the new default strategy **Maximum capability** routes by purpose, combining FrugalGPT's cascade (Chen et al. 2023) with LiteLLM-style quota-aware routing and fallbacks for prompts too big for a model.
@@ -227,3 +247,69 @@ Run-time history of your own researches is in the app (**History** tab) and in `
 1. Add Tavily as a second search key (LangSearch and Gemini work as of 2026-10-19).
 2. SearXNG needs Docker Desktop restarted (it hung on 2026-10-18).
 3. Many marketplaces block readers; CSV upload is the reliable path for listing data.
+
+## Session 2026-10-23 · temp and cache rules
+
+Asked: "clear cache and set the rules for llm research or any research to clear temp regularly".
+
+Changed:
+- `src/housekeeping.mjs` `TempSweeper`: runs on app start, then every 6 h (`FRL_SWEEP_HOURS`, `0` = off). Removes `data/work/` entries untouched 7 days, `*.tmp` under `data/` older than 1 day (not `data/llama/`), logs of deleted research untouched 7 days; trims `*.jsonl` over 5 MB to 20,000 lines and `server.out` over 1 MB to 2,000 lines. History gets one `temp sweep: …` line when something is removed.
+- `EventLog.compact` trims through the append queue, so it cannot race writes.
+- Test temp leaks fixed: 177 `frl-*` folders had piled up in the OS temp dir. Vitest global setup now removes the ones its run created; Playwright global setup removes earlier e2e data folders.
+- Rules: PROTOCOLS.md §5b, repo CLAUDE.md, global `~/.claude/rules/research-temp.md`.
+- Cleared now: `test-results/`, 177 temp folders, npm cache (`npm cache clean --force`), Homebrew cache (`brew cleanup -s`, 60.4 MB).
+
+Open: the app on port 4600 is still the old process; it picks up the sweep at its next restart (not restarted without asking). Playwright browsers (871 MB) kept, e2e needs them.
+
+## Session 2026-10-23 · one research on two computers
+
+Asked: "i need to access the app and the particular research from another PC without docker just by the link to use it as a helper for the same research … commit and push merge"; then "make possible to open same research and use two machines to increase the productivity, machines have to clear yourself and dont overload the memory … commit, create an account token, merge".
+
+Changed:
+- Research share links (`src/share.mjs`, `AccessGate` share scope): More → Share this research, or `node src/frl.mjs share <id> [--off]`. The link opens one research only: its page, API and live events. Owner-only routes answer 403; the terminal WebSocket refuses share sessions; project chat questions about the app are refused instead of being forwarded to the App assistant. Tokens are HMACs of the access token, so `data/shares.json` holds no secret.
+- Shared mode UI: banner, one research in the list, no New/terminal/settings/App tab.
+- Memory: `ProjectStore` keeps at most 8 researches in memory (LRU, running/looping never evicted); the research list no longer loads every research into memory.
+- Tests: share, auth, server (share flow over a non-loopback request), terminal socket, chat, store; e2e Share panel.
+- Real use: a second instance on port 4620 with a copy of the research data, reached at the Wi-Fi address in headless Chromium: the link opened only the shared research, terminal and another research returned 403, the App tab was hidden, and a piece added on the owner screen appeared on the shared screen through the live stream. The instance and its data were deleted afterwards.
+
+Open: compute and model quotas stay on the computer that runs the app; the second computer adds a second person working on the research, not a second quota pool.
+
+## Session 2026-10-23 · PC could not open the link; research v2
+
+Asked: "provide a new link, same wifi but PC has no access to the research, also, restart the app here with all new changes, proceed with self improving loop under new improved research principles … mikoshi and similar confirmation mandatory protocols".
+
+- Mac side checked: macOS firewall disabled, app listening on all interfaces, Wi-Fi address 192.168.5.25 unchanged. The app had no record of other devices, so the cause could not be seen.
+- Added `/reachable` (data-free page that tells a network problem from a link problem) and History lines for every other device that reaches the app (`src/visits.mjs`).
+- App restarted on the branch code.
+- The glamping research's tree failed the new structural audit (8 drivers, single-child splits) and the loop had stalled (0.366 to 0.38 over 73 trials). It was kept unchanged and its loop stopped. A v2 research with the same question, constraints and expected-result checks was built under the current principles (tree audit gate passed with 0 issues; STORM perspectives, diverse primary-first sources, chain-of-verification reply audit, gate-decided loop), then an 11 h self-improving loop starts when its first run is done.
+- The old research's link was turned off; a new link opens v2.
+
+Open: whether the PC reaches the app is unknown until it opens `/reachable`; History will show the attempt.
+
+## Session 2026-10-23 · lanes and teammates, grounded checks, product review
+
+Asked: make the Mac and the PC work as one team so the loop is faster; then "results in listing dont have to mention glamping … find the root cause … fix, merge, restart on both machines keeping the results"; then "review the entire logic … fix the flaws, produce the report with suggestions, clear inappropriate and useless processes".
+
+- Lanes for runs and loop trials, teammates join as lanes; grounded criteria with re-grounding of stored checks; verified pieces that cannot gain are no longer loop targets; router keeps credit/key/daily benches across restarts; review skipped on answers already failing; list summaries cached; favicon no longer logged as a refused device; `data/market/` removed.
+- Live: the old glamping research enforces 50 items and €0–20,000 only (re-scored to 0.398), and its loop resumed after the restart; the PC started a 24 h loop on v2 at 10:18, and v2's checks were re-grounded too.
+- Report: [REVIEW-2026-10-23.md](REVIEW-2026-10-23.md).
+
+Open: the PR still needs a merge by the user (the merge command was refused by the permission check); two loops share the same free quotas; data deletions listed in the report need the user's yes.
+
+## Session 2026-10-23 · one research, one loop, one team
+
+Asked: keep all insights and progress, restart with the improvements and the loop, one link, the PC working in the same team, "no different versions", push, merge, restart, instructions for the other machine.
+
+- One research kept as the current one: `find-appropriate-plots-to-buy-fo-b7772e` (21/25 pieces passing, best 0.409, 90 trials). v2 (`…3ed9dc`, 13/25, best 0.211) was stopped with a handoff and its link turned off; its data is kept.
+- Gemini quota window: the provider now appends `[quota window: per minute|per day]` or the `retryDelay` from the full error body, so a per-minute 429 is no longer benched until midnight; benches restored at start ignore the ambiguous "exceeded your current quota" alone.
+- App restarted on the current code with the one loop.
+
+## Session 2026-10-23 · llama.cpp on both machines, models, no-stop loop
+
+Asked: install llama (why it did not work), let it work on both machines; make models, research, loop, the PC link, llama and Ollama work; a real link for the next PC that uses its own llama; the loop must run with no stops and memory must be cleaned regularly.
+
+- Why llama did not work: llama.cpp was installed on 2026-10-19 but never started (no model, no server); after starting, its 4,096-token slots were smaller than the app's 7–8k-token prompts. Now: Qwen3-4B on this Mac, 16,384 tokens per request, q8_0 KV cache, background, restarted with the app (`data/llama/serve.json`); the router never sends a local server a prompt bigger than its context (`/props`).
+- Models: per-model daily limits (Gemini PerModel, Groq "limit reached for model … per day", Cerebras "per day limit exceeded") switch to the next model instead of benching the provider; Gemini and Groq preferences list the models these keys have today. Live: Gemini moved 3.8 → 3.7 → 3.6-flash, Cerebras to qwen-3.8-27b.
+- Other PC: one PowerShell line from the share panel (`/pc-setup.ps1`) installs llama.cpp and a model by graphics memory; `PeerWatcher` connects it within a minute of the PC opening the link; `node src/frl.mjs local pc <address>` does it by hand. Ollama on the PC works the same way through `OLLAMA_BASE_URL` (port 11434, `OLLAMA_HOST=0.0.0.0:11434`). Not run on the PC itself: it was not reachable from this Mac (no answer on 8090/11434).
+- No stops: loop resume checkpoints after every pass (crash or power cut resumes); always-on service relaunches the app; every in-memory list is capped; disk temp is swept every 6 h.
+- Ollama is not run on this Mac on purpose: with 8 GB and llama.cpp loaded, free memory was 14%.

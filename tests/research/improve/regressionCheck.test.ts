@@ -38,7 +38,7 @@ describe('removal trials', () => {
     const created = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
     const done = await engine.run(created.id);
     for (const n of done.nodes as Node[]) if (n.id.startsWith('D1')) n.status = 'weak';
-    addSpec(done, 'Q', normalizeSpec({ mustMention: ['never-present-word'] }, { request: 'r', desired: 'unreachable' }));
+    addSpec(done, 'Q', normalizeSpec({ mustMention: ['never-present-word'] }, { request: 'r', desired: 'must mention never-present-word' }));
     await engine.store.save(done);
     const originalRun = engine.run.bind(engine);
     engine.run = async (id: string) => {

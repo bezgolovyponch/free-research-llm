@@ -30,19 +30,20 @@ describe('improve helpers', () => {
   });
 
   it('targets the structure first, then the weakest, highest-priority leaves', () => {
-    expect(improvementTargets(tree())).toEqual(['Q', 'D2', 'D1.1', 'D1.2']);
+    expect(improvementTargets(tree())).toEqual(['Q', 'D2', 'D1.1']);
   });
 
   it('limits the loop to the focus of the ticked pieces minus what the user excluded, and scores only that', () => {
     const p = tree();
     expect([...inScope(p.nodes, ['D1'])]).toEqual(['D1', 'D2', 'D1.1', 'D1.2']);
-    expect(improvementTargets(p, ['D1'], ['Q'])).toEqual(['D2', 'D1.1', 'D1.2']);
+    expect(improvementTargets(p, ['D1'], ['Q'])).toEqual(['D2', 'D1.1']);
     expect(improvementTargets(p, ['D1'])[0]).toBe('Q');
     expect(improvementTargets(p, ['ghost'], ['Q'])).toEqual([]);
     const only = ['Q', 'D1', 'D2', 'D1.1'];
     expect(scopeScore(p, ['D1.2'], [], only)).toMatchObject({ score: 1, nodes: 1, specs: null });
     addSpec(p, 'D1.2', normalizeSpec({ mustMention: ['Brno'] }, { request: 'r', desired: 'price in Brno' }));
     expect(scopeScore(p, ['D1.2'], [], only)).toMatchObject({ grades: 1, specs: 0, score: 0.5 });
+    expect(improvementTargets(p, ['D1'], ['Q'])).toEqual(['D2', 'D1.1', 'D1.2']);
   });
 
   it('applies node edits and splits, and root adds/removes while keeping two top-level pieces', () => {
@@ -56,6 +57,16 @@ describe('improve helpers', () => {
   });
 });
 
+describe('improvementTargets', () => {
+  it('skips verified pieces that cannot gain, keeps verified pieces that deliver items while the expected result is unmet', () => {
+    const leaf = (id: string, status: string, items = 0) => ({ id, parentId: 'D1', status, impact: 3, uncertainty: 3, dependsOn: [], finding: { items: Array.from({ length: items }, (_, i) => ({ url: `https://x.example/${id}/${i}` })) } });
+    const project = { nodes: [{ id: 'D1', parentId: 'Q', status: 'supported', dependsOn: [] }, leaf('D1.1', 'weak'), leaf('D1.2', 'verified'), leaf('D1.3', 'verified', 4), leaf('D1.4', 'supported')], acceptanceResult: { score: 0.13 } };
+    expect(improvementTargets(project as never)).toEqual(['Q', 'D1.1', 'D1.4', 'D1.3']);
+    expect(improvementTargets({ ...project, acceptanceResult: { score: 1 } } as never)).toEqual(['Q', 'D1.1', 'D1.4']);
+    expect(improvementTargets({ ...project, acceptanceResult: null } as never)).toEqual(['Q', 'D1.1', 'D1.4']);
+  });
+});
+
 describe('ProjectImprover', () => {
   it('runs a baseline, tries variants, reverts non-improving ones and stops at the time limit', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-'));
@@ -64,6 +75,8 @@ describe('ProjectImprover', () => {
     const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
     let clock = 0;
     const improver = new ProjectImprover({ engine, now: () => (clock += 2000), sleep: async () => {} });
+    const checkpoints: Array<{ loopHoursLeft: number }> = [];
+    improver.checkpoint = async (_id: string, resume: { loopHoursLeft: number }) => { checkpoints.push(resume); };
     improver.start(project.id, { hours: 0.05 });
     expect(() => improver.start(project.id)).toThrow(/already running/);
     for (let i = 0; i < 500 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
@@ -75,6 +88,53 @@ describe('ProjectImprover', () => {
     expect(new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome))).toEqual(new Set(['no-change', 'reverted-whole']));
     expect(saved.improve.best).toBe(saved.improve.baseline);
     expect(saved.log.some((l: { type: string }) => l.type === 'improve-state')).toBe(true);
+    expect(checkpoints.length).toBeGreaterThan(1);
+    expect(checkpoints[0].loopHoursLeft).toBeGreaterThan(0);
+    expect(checkpoints[0].loopHoursLeft).toBeLessThanOrEqual(0.05);
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
+describe('ProjectImprover in parallel lanes', () => {
+  it('runs trials side by side, commits them one at a time, and adds a lane when a teammate joins', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-lanes-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    const done = await engine.run(project.id);
+    const nodeCount = done.nodes.length;
+    let proposing = 0;
+    let proposePeak = 0;
+    let runs = 0;
+    let runPeak = 0;
+    const originalRun = engine.run.bind(engine);
+    engine.run = async (id: string, options?: object) => {
+      runs += 1;
+      runPeak = Math.max(runPeak, runs);
+      try { return await originalRun(id, options as never); } finally { runs -= 1; }
+    };
+    let clock = 0;
+    const improver = new ProjectImprover({ engine, now: () => (clock += 200), sleep: async () => {} });
+    improver.propose = async (_p: unknown, nodeId: string) => {
+      proposing += 1;
+      proposePeak = Math.max(proposePeak, proposing);
+      await new Promise((r) => setTimeout(r, 15));
+      proposing -= 1;
+      return nodeId === 'Q' ? {} : { change: `sharper queries for ${nodeId}`, searchQueries: [`${nodeId} kiosk rent Brno 2026`] };
+    };
+    improver.start(project.id, { hours: 0.05 });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(improver.join(project.id)).toEqual({ joined: true, lanes: 3 });
+    for (let i = 0; i < 800 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    const saved = await engine.load(project.id);
+    expect(proposePeak).toBe(3);
+    expect(runPeak).toBe(1);
+    expect(saved.improve.active).toBe(false);
+    expect(saved.nodes.length).toBe(nodeCount);
+    const outcomes = new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome));
+    for (const o of outcomes) expect(['kept', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'conflict']).toContain(o);
+    expect(saved.improve.best).toBeGreaterThanOrEqual(saved.improve.baseline);
+    expect(engine.lanesFor(project.id)).toBe(2);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 });
@@ -191,5 +251,18 @@ describe('loop focus for selected pieces', () => {
     expect(improvementTargets(project, ['D1.2'])[0]).toBe('Q');
     expect(improvementTargets(project, ['D1.2'], ['Q', 'D3'])).not.toContain('Q');
     expect(improvementTargets(project, ['D1.2'], ['Q', 'D3']).sort()).toEqual(['D1.1', 'D1.2.1', 'D1.3']);
+  });
+});
+
+describe('tree gate in the loop', () => {
+  it('never keeps a new top-level driver that restates the question or duplicates a driver, and strips ids from titles', () => {
+    const p = { question: 'Find affordable coastal plots under 20000 EUR for a glamping business with a mild climate', nodes: [
+      { id: 'D1', parentId: 'Q', title: 'Land cost', question: 'Average land price per m² in Spain coastal zones?', dependsOn: [], status: 'weak' },
+      { id: 'D2', parentId: 'Q', title: 'Climate', question: 'Months per year with mild weather in each region?', dependsOn: [], status: 'weak' },
+    ] };
+    expect(applyVariant(p, 'Q', { add: [{ title: 'D3: Affordable coastal plots', question: 'Which affordable coastal plots under 20000 EUR suit a glamping business with a mild climate?' }] })).toEqual([]);
+    expect(applyVariant(p, 'Q', { add: [{ title: 'Land prices', question: 'Average land price per m² in Spain coastal zones 2026?' }] })).toEqual([]);
+    expect(applyVariant(p, 'Q', { add: [{ title: 'D3: Permits', question: 'Which permits does a glamping site need in Spain?' }] })).toEqual(['D3']);
+    expect(p.nodes.find((n) => n.id === 'D3')!.title).toBe('Permits');
   });
 });

@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
+    "fast-check": "^4.10.2",
     "vitest": "^5.0.5"
   },
   "dependencies": {

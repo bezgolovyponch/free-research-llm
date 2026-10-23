@@ -6,6 +6,7 @@ export class NoModelAvailableError extends Error {}
 
 const DEFAULT_COOLDOWN_MS = 60000;
 const BAD_KEY_MS = 6 * 3600 * 1000;
+const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
 
 export function nextUtcMidnight(now) {
@@ -56,8 +57,9 @@ export class ModelRouter {
   available({ avoid, tier = 'fast', purpose, tokens = 0 } = {}) {
     const time = this.now();
     const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
-    const fits = open.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
-    const usable = fits.length ? [...fits, ...open.filter((p) => !fits.includes(p))] : open;
+    const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
+    const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
+    const usable = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
     if (!avoid) return usable;
     const author = this.providers.find((p) => p.id === avoid);
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
@@ -75,6 +77,35 @@ export class ModelRouter {
     this.onLedger(row);
   }
 
+  switchModel(provider, model, error) {
+    if (!provider.retireModel || !model) return false;
+    const gone = error.status === 404 && /no longer available|not found|does not exist|unknown model/i.test(error.message);
+    const usedUp = /quota window: per day, per model/.test(error.message);
+    if (!gone && !usedUp) return false;
+    const switched = provider.retireModel(model, gone ? Infinity : nextUtcMidnight(this.now()));
+    if (switched) this.record({ purpose: 'router', tier: '', provider: provider.id, model, ok: false, ms: 0, error: `${model} ${gone ? 'is no longer available' : 'used its daily quota'}; switched to ${provider.selected.fast} / ${provider.selected.deep}` });
+    return switched;
+  }
+
+  restoreCooldowns(rows) {
+    const latest = new Map();
+    for (const row of rows) if (row?.provider) latest.set(row.provider, row);
+    const restored = [];
+    for (const [id, row] of latest) {
+      if (row.ok || !this.providers.some((p) => p.id === id)) continue;
+      const status = Number(/HTTP (\d{3})/.exec(String(row.error ?? ''))?.[1] ?? 0);
+      const at = Date.parse(row.ts);
+      const badKey = (status === 401 || status === 403) && this.now() - at < BAD_KEY_MS;
+      const text = String(row.error ?? '');
+      const noCredit = !SHORT_LIMIT.test(text) && (status === 402 || /balance_units|billing_portal|insufficient (?:credit|funds|balance)|out of credits?/i.test(text)) && !/exceeded your current quota|per day/i.test(text);
+      const daily = noCredit && nextUtcMidnight(at) > this.now();
+      if (!badKey && !daily) continue;
+      this.coolDown({ id }, { status, message: String(row.error ?? '') });
+      restored.push(id);
+    }
+    return restored;
+  }
+
   coolDown(provider, error) {
     const now = this.now();
     let until = now + (error.retryAfterMs || this.cooldownMs);
@@ -82,7 +113,7 @@ export class ModelRouter {
     if (error.status === 401 || error.status === 403) {
       until = now + BAD_KEY_MS;
       reason = 'key rejected; check it on Models & router';
-    } else if (error.status === 402 || DAILY.test(error.message)) {
+    } else if (!SHORT_LIMIT.test(error.message) && (error.status === 402 || DAILY.test(error.message))) {
       until = Math.max(until, nextUtcMidnight(now));
       reason = 'daily quota or credit used up; waits for the daily reset';
     }
@@ -109,6 +140,7 @@ export class ModelRouter {
       let attemptMessages = messages;
       for (let repair = 0; repair < 2; repair++) {
         const started = this.now();
+        const model = provider.selected?.[tier] ?? provider.selected?.fast;
         try {
           const reply = await provider.chat({ messages: attemptMessages, tier, json, temperature });
           this.calls++;
@@ -119,6 +151,7 @@ export class ModelRouter {
           this.record({ purpose, tier, provider: provider.id, ok: false, ms: this.now() - started, error: error.message.slice(0, 200) });
           errors.push(error.message);
           if (error instanceof ProviderError) {
+            if (this.switchModel(provider, model, error)) break;
             if (error.retryable || [401, 402, 403].includes(error.status)) this.coolDown(provider, error);
             break;
           }

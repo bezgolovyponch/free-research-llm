@@ -27,8 +27,19 @@ export function pickModel(models, preferences, freeOnly = false, { strict = fals
   return strict ? null : (usable[0] ?? null);
 }
 
+const LOCAL_OUTPUT_RESERVE = 3000;
+
+export function quotaWindow(body) {
+  const text = String(body);
+  if (/PerDay[A-Za-z]*PerModel/.test(text) || /limit reached for model[\s\S]*(?:per day|\bTPD\b|\bRPD\b)/i.test(text) || /(?:tokens|requests) per day limit exceeded/i.test(text)) return ' [quota window: per day, per model]';
+  if (/PerDay|per day|daily/i.test(text)) return ' [quota window: per day]';
+  if (/PerMinute|per minute/i.test(text)) return ' [quota window: per minute]';
+  const delay = text.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  return delay ? ` [retry after ${Math.ceil(Number(delay[1]))}s]` : '';
+}
+
 export function retryAfterFromText(body, floorMs = 0) {
-  const seconds = String(body).match(/retry after (\d+(?:\.\d+)?)\s*s/i);
+  const seconds = String(body).match(/retry after (\d+(?:\.\d+)?)\s*s/i) ?? String(body).match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
   const window = String(body).match(/every (\d+) seconds/i);
   const ms = Math.max(seconds ? Number(seconds[1]) * 1000 : 0, window ? Number(window[1]) * 1000 : 0, /limit/i.test(body) ? floorMs : 0);
   return ms;
@@ -52,6 +63,7 @@ export class OpenAICompatibleProvider {
     this.timeoutMs = timeoutMs;
     this.models = [];
     this.selected = { fast: modelOverrides.fast ?? null, deep: modelOverrides.deep ?? null, vision: null };
+    this.retired = new Map();
     this.state = 'unknown';
     this.detail = '';
     this.minIntervalMs = preset.minIntervalMs ?? 0;
@@ -89,7 +101,7 @@ export class OpenAICompatibleProvider {
       const res = await this.fetchImpl(`${this.baseURL}${path}`, { ...init, headers: this.headers(), signal: controller.signal });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        throw new ProviderError(`${this.id} HTTP ${res.status}: ${body.slice(0, 240)}`, { status: res.status, retryAfterMs: retryAfter(res) || retryAfterFromText(body, this.minIntervalMs), provider: this.id });
+        throw new ProviderError(`${this.id} HTTP ${res.status}${quotaWindow(body)}: ${body.slice(0, 240)}`, { status: res.status, retryAfterMs: retryAfter(res) || retryAfterFromText(body, this.minIntervalMs), provider: this.id });
       }
       return await res.json();
     } catch (error) {
@@ -123,6 +135,7 @@ export class OpenAICompatibleProvider {
       this.selected.vision = this.preset.prefer.vision ? pickModel(this.models, this.preset.prefer.vision, this.preset.freeOnly, { strict: true }) : null;
       this.state = this.selected.fast ? 'ready' : 'no-models';
       this.detail = this.selected.fast ? `fast=${this.selected.fast} deep=${this.selected.deep}` : 'no chat model available';
+      if (this.preset.local) await this.readContextSize();
     } catch (error) {
       const fallback = this.preset.fallbackModels;
       const authFailed = error.status === 401 || error.status === 403;
@@ -140,6 +153,29 @@ export class OpenAICompatibleProvider {
       }
     }
     return this;
+  }
+
+  async readContextSize() {
+    try {
+      const res = await this.fetchImpl(`${this.baseURL.replace(/\/v1\/?$/, '')}/props`, { signal: AbortSignal.timeout(4000) });
+      const props = res.ok ? await res.json() : null;
+      const slot = Number(props?.default_generation_settings?.n_ctx);
+      if (slot > 0) this.maxPromptTokens = Math.max(512, slot - LOCAL_OUTPUT_RESERVE);
+    } catch {
+      this.maxPromptTokens = this.maxPromptTokens ?? null;
+    }
+  }
+
+  retireModel(model, until) {
+    if (!model || !this.models?.length || this.modelOverrides.any || this.modelOverrides[Object.keys(this.selected).find((t) => this.selected[t] === model)]) return false;
+    this.retired.set(model, until);
+    const live = this.models.filter((m) => !((this.retired.get(m) ?? 0) > Date.now()));
+    const pick = (tier) => (this.preset.prefer[tier] ? pickModel(live, this.preset.prefer[tier], this.preset.freeOnly, { strict: true }) : null);
+    const next = { fast: pick('fast'), deep: pick('deep'), vision: pick('vision') };
+    if (!next.fast && !next.deep) return false;
+    for (const tier of Object.keys(this.selected)) if (this.selected[tier] === model) this.selected[tier] = next[tier] ?? (tier === 'vision' ? null : next.fast ?? next.deep);
+    this.detail = `fast=${this.selected.fast} deep=${this.selected.deep} · switched from ${model}`;
+    return true;
   }
 
   canServe(tier) {

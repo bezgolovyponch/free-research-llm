@@ -89,6 +89,18 @@ export const KEY_GUIDES = {
     card: false,
     source: 'https://github.com/ggml-org/llama.cpp/blob/master/tools/rpc/README.md',
   },
+  LLAMACPP_LAN_URL: {
+    url: 'https://github.com/ggml-org/llama.cpp/releases/tag/b11739',
+    steps: [
+      'On the other PC (Windows), open https://github.com/ggml-org/llama.cpp/releases/tag/b11739 and download, for an NVIDIA card: llama-b11739-bin-win-cuda-12.4-x64.zip and cudart-llama-bin-win-cuda-12.4-x64.zip; for AMD or Intel graphics: llama-b11739-bin-win-vulkan-x64.zip.',
+      'Unzip everything into one folder, e.g. C:\\llama.',
+      'In PowerShell there: cd C:\\llama, then .\\llama-server.exe -hf ggml-org/Qwen3-14B-GGUF:Q4_K_M -ngl 99 -c 16384 -np 2 --host 0.0.0.0 --port 8090 (with less than 11 GB of graphics memory use ggml-org/Qwen3-4B-GGUF:Q4_K_M). The model downloads once.',
+      'When Windows Firewall asks, allow llama-server on private networks.',
+      'On the computer that runs the app, in the Terminal: node src/frl.mjs keys set LLAMACPP_LAN_URL and enter http://<the other PC\'s Wi-Fi address>:8090/v1, then restart the app.',
+    ],
+    card: false,
+    source: 'https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md',
+  },
   OLLAMA_BASE_URL: {
     url: 'https://ollama.com/download',
     steps: ['Install Ollama from https://ollama.com/download.', 'In a terminal: ollama pull qwen2.5:7b', 'Leave Ollama running; the app finds it at http://localhost:11434/v1 without any field.'],

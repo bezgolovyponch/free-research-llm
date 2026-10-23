@@ -121,3 +121,90 @@ describe('ModelRouter route order', () => {
     expect(router.route().vision).toEqual(['gemini']);
   });
 });
+
+describe('ModelRouter.restoreCooldowns', () => {
+  it('keeps a provider benched after a restart only for lasting causes (no credit, bad key); a daily 429 is re-checked by the first live call', () => {
+    const now = Date.parse('2026-10-23T10:00:00Z');
+    const p = (id: string) => ({ id, ready: true, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('sambanova'), p('groq'), p('gemini'), p('cerebras'), p('old'), p('pollinations'), p('openrouter')], now: () => now });
+    const restored = router.restoreCooldowns([
+      { ts: '2026-10-23T09:00:00Z', provider: 'sambanova', ok: false, error: 'sambanova HTTP 402: {"error":{"balance_units":0}}' },
+      { ts: '2026-10-23T09:10:00Z', provider: 'groq', ok: false, error: 'groq HTTP 429: Rate limit reached for model' },
+      { ts: '2026-10-23T08:00:00Z', provider: 'gemini', ok: false, error: 'gemini HTTP 429: Requests per day limit exceeded' },
+      { ts: '2026-10-23T09:30:00Z', provider: 'gemini', ok: false, error: 'gemini HTTP 429: tokens per day exhausted' },
+      { ts: '2026-10-23T09:00:00Z', provider: 'cerebras', ok: false, error: 'cerebras HTTP 401: invalid key' },
+      { ts: '2026-10-23T09:50:00Z', provider: 'cerebras', ok: true },
+      { ts: '2026-10-22T09:00:00Z', provider: 'old', ok: false, error: 'old HTTP 402: balance' },
+      { ts: '2026-10-23T09:00:00Z', provider: 'unknown', ok: false, error: 'HTTP 402' },
+      { ts: '2026-10-23T09:55:00Z', provider: 'pollinations', ok: false, error: 'pollinations HTTP 402: {"error":{"code":"FREE_LIMIT","message":"Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s"}}' },
+      { ts: '2026-10-23T09:56:00Z', provider: 'openrouter', ok: false, error: 'openrouter HTTP 429: Rate limit exceeded: free-models-per-day. Add 10 credits' },
+      { ts: '2026-10-23T09:57:00Z', provider: 'groq', ok: false, error: 'groq HTTP 429: You exceeded your current quota, please check your plan' },
+    ]);
+    expect(restored.sort()).toEqual(['sambanova']);
+    expect(router.cooldownReason.get('sambanova')).toMatch(/daily quota or credit/);
+    expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
+    expect(router.cooldownUntil.has('groq')).toBe(false);
+  });
+});
+
+describe('ModelRouter.coolDown', () => {
+  it('treats a 402 that states a short retry as a short throttle, not a daily bench', () => {
+    const now = Date.parse('2026-10-23T10:00:00Z');
+    const router = new ModelRouter({ providers: [], now: () => now });
+    router.coolDown({ id: 'pollinations' }, new ProviderError('pollinations HTTP 402: Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s', { status: 402, retryAfterMs: 5000 }));
+    expect(router.cooldownUntil.get('pollinations')).toBe(now + 5000);
+    router.coolDown({ id: 'gemini-minute' }, new ProviderError('gemini HTTP 429: You exceeded your current quota [quota window: per minute]', { status: 429, retryAfterMs: 37000 }));
+    expect(router.cooldownUntil.get('gemini-minute')).toBe(now + 37000);
+    router.coolDown({ id: 'gemini-day' }, new ProviderError('gemini HTTP 429: You exceeded your current quota [quota window: per day]', { status: 429 }));
+    expect(router.cooldownUntil.get('gemini-day')).toBe(nextUtcMidnight(now));
+    router.coolDown({ id: 'sambanova' }, new ProviderError('sambanova HTTP 402: balance_units 0', { status: 402 }));
+    expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
+  });
+});
+
+describe('ModelRouter model switching', () => {
+  it('moves a provider to its next model when one model used its own daily quota or was withdrawn, and benches it only when none is left', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const preset = { id: 'gemini', label: 'g', baseURL: 'https://g.example/v1', keyEnv: 'K', prefer: { fast: ['m-lite', 'm-lite-2'], deep: ['m-big', 'm-mid'] } };
+    const calls: string[] = [];
+    const fetchImpl = async (url: string, init: { body?: string }) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'm-lite' }, { id: 'm-lite-2' }, { id: 'm-big' }, { id: 'm-mid' }] }));
+      const model = JSON.parse(init.body ?? '{}').model;
+      calls.push(model);
+      if (model === 'm-big') return new Response('{"error":{"code":429,"details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}', { status: 429 });
+      if (model === 'm-lite') return new Response('{"error":{"message":"This model models/m-lite is no longer available to new users."}}', { status: 404 });
+      if (model === 'm-mid') return new Response('{"error":{"code":429,"details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}', { status: 429 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], model }));
+    };
+    const provider = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: fetchImpl as never }).discover();
+    const router = new ModelRouter({ providers: [provider], sleep: async () => {} });
+    await expect(router.complete({ purpose: 'research', tier: 'deep', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
+    expect(provider.selected.deep).toBe('m-mid');
+    expect(router.cooldownUntil.has('gemini')).toBe(false);
+    await expect(router.complete({ purpose: 'research', tier: 'fast', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
+    expect(provider.selected.fast).toBe('m-lite-2');
+    const reply = await router.complete({ purpose: 'research', tier: 'fast', messages: [{ role: 'user', content: 'x' }] });
+    expect(reply.model).toBe('m-lite-2');
+    await expect(router.complete({ purpose: 'research', tier: 'deep', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
+    expect(provider.selected.deep).toBe('m-lite-2');
+    expect(calls.slice(0, 2)).toEqual(['m-big', 'm-lite']);
+  });
+});
+
+describe('ModelRouter local context size', () => {
+  it('never sends a local server a prompt bigger than its context, and reads that size from llama-server', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const preset = { id: 'llamacpp', label: 'l', baseURL: 'http://127.0.0.1:8090/v1', keyEnv: null, local: true, prefer: { fast: [], deep: [] } };
+    const fetchImpl = async (url: string) => {
+      if (url.endsWith('/v1/models')) return new Response(JSON.stringify({ data: [{ id: 'Qwen3-4B' }] }));
+      if (url.endsWith('/props')) return new Response(JSON.stringify({ default_generation_settings: { n_ctx: 4096 }, total_slots: 2 }));
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], model: 'Qwen3-4B' }));
+    };
+    const local = await new OpenAICompatibleProvider({ preset, fetchImpl: fetchImpl as never }).discover();
+    expect(local.maxPromptTokens).toBe(1096);
+    const router = new ModelRouter({ providers: [local] });
+    expect(router.available({ tier: 'fast', tokens: 1000 }).map((p: { id: string }) => p.id)).toEqual(['llamacpp']);
+    expect(router.available({ tier: 'fast', tokens: 7000 })).toEqual([]);
+  });
+});
+

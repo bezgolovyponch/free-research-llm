@@ -15,6 +15,10 @@ import { PROVIDER_PRESETS, SEARCH_KEYS } from './llm/presets.mjs';
 import { guideFor } from './llm/guides.mjs';
 import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helperArgs, parseHelpers, recommendModel, serverArgs, speedOf } from './local/llamacpp.mjs';
 import { CREDSTORE, KeychainSecrets, runCommand, secretNames } from './secrets.mjs';
+import { shareLinks } from './share.mjs';
+import { pcSetupCommand } from './local/pcsetup.mjs';
+import { probePeer } from './local/peer.mjs';
+import { rememberServe } from './local/autostart.mjs';
 import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, stableNodePath, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -310,6 +314,31 @@ const commands = {
     await printLinks();
   },
 
+  async share([projectId, flag]) {
+    let projects;
+    try {
+      projects = await local('/api/projects');
+    } catch {
+      return console.log(`The app is not answering on port ${PORT}: run "node src/frl.mjs start --remote" first.`);
+    }
+    if (!projectId) {
+      console.log('usage: node src/frl.mjs share <research id> [--off]\n\nResearches:');
+      for (const p of projects) console.log(`  ${p.id}  ${String(p.question).slice(0, 70)}`);
+      return;
+    }
+    const method = flag === '--off' ? 'DELETE' : 'POST';
+    const view = await local(`/api/projects/${encodeURIComponent(projectId)}/share`, { method });
+    if (view.error) return console.log(view.error);
+    if (!view.enabled) return console.log('Link turned off: whoever had it has lost access.');
+    if (!view.remote) console.log('Remote access is off, so other computers cannot reach the app: run "node src/frl.mjs install" (or "start --remote"), then share again.');
+    const bases = accessLinks({ port: PORT, lan: lanAddresses(os.networkInterfaces()), tailscale: await tailscaleName(), funnel: await funnelOn() }).filter((l) => !l.url.includes('127.0.0.1'));
+    console.log('Link for this one research (chat, run, add pieces; no other researches, keys or terminal):');
+    for (const l of shareLinks(bases, { projectId, token: view.token })) console.log(`  ${l.label.padEnd(30)} ${l.url}`);
+    if (bases[0]) console.log(`\n  Let that PC's graphics card research too: on the PC open PowerShell and run\n    ${pcSetupCommand(bases[0].url, view.token)}\n  The app connects its model within a minute of the PC opening the link.`);
+    if (!bases.some((l) => l.label.startsWith('anywhere'))) console.log('  anywhere: install Tailscale (https://tailscale.com/download) on both computers, sign in to both, then run this again');
+    console.log('\n  Keep the link private. Turn it off with: node src/frl.mjs share ' + projectId + ' --off');
+  },
+
   async token(args) {
     await accessToken({ rotate: args.includes('--rotate') });
     console.log(args.includes('--rotate') ? 'New token saved. Restart the app (node src/frl.mjs restart) and open the new links:' : 'Current links:');
@@ -418,11 +447,30 @@ const commands = {
       if (!current) return need();
       const helpers = parseHelpers(flag('helpers'));
       const port = Number(flag('port', SERVER_PORT));
-      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split') });
+      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split'), parallel: Number(flag('parallel', 1)), kv: flag('kv', '') });
       await secrets.write('LLAMACPP_BASE_URL', `http://127.0.0.1:${port}/v1`).catch(() => {});
+      await rememberServe(ROOT, { server: current.server, args, port });
+      if (args.includes('--background') || process.argv.includes('--background')) {
+        await fs.mkdir(path.join(ROOT, 'data', 'logs'), { recursive: true });
+        const out = await fs.open(path.join(ROOT, 'data', 'logs', 'llama.out'), 'a');
+        const child = spawn(current.server, args, { detached: true, stdio: ['ignore', out.fd, out.fd] });
+        child.unref();
+        await out.close();
+        console.log(`Local model starting in the background (pid ${child.pid}) on http://127.0.0.1:${port}/v1. Log: data/logs/llama.out. Stop it with: kill ${child.pid}`);
+        return void reloadApp();
+      }
       console.log(`Local model on http://127.0.0.1:${port}/v1${helpers.length ? ` with helpers ${helpers.join(', ')}` : ''}. The research app uses it as the "llamacpp" provider (Models & router). Press Ctrl+C to stop.\n`);
       void reloadApp();
       return run(current.server, args, { shell: false });
+    }
+    if (action === 'pc') {
+      const found = await probePeer(rest[0]);
+      for (const f of found) console.log(`  ${f.label.padEnd(10)} ${f.url}  ${f.ok ? 'OK' : 'missing'} · ${f.detail}`);
+      const ready = found.filter((f) => f.ok);
+      for (const f of ready) await secrets.write(f.env, f.url);
+      if (!ready.length) return console.log('\nNothing to connect yet. On the other PC start Ollama (with OLLAMA_HOST=0.0.0.0:11434) or llama-server (with --host 0.0.0.0 --port 8090), allow it in Windows Firewall on private networks, then run this again.');
+      console.log(`\nSaved ${ready.map((f) => f.env).join(' and ')}. The research app now uses the other PC's model(s) with no quota.`);
+      return void reloadApp();
     }
     if (action === 'status' || action === 'bench') {
       const port = Number(flag('port', SERVER_PORT));
@@ -439,7 +487,7 @@ const commands = {
       const speed = speedOf(reply);
       return console.log(speed ? `prefill (reading): ${speed.prefillPerSecond} tokens/s over ${speed.promptTokens} tokens · decode (writing): ${speed.decodePerSecond} tokens/s` : 'no timings in the reply');
     }
-    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N] [--split a,b] | helper --host LAN-IP [--port 50052] | status | bench');
+    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N per request] [--parallel N] [--kv q8_0] [--split a,b] [--background] | helper --host LAN-IP [--port 50052] | pc <other PC address> | status | bench');
   },
 
   async logs() {
@@ -460,6 +508,7 @@ if (!commands[command]) {
   node src/frl.mjs restart            save running work and restart (always-on service)
   node src/frl.mjs update             pull the newest version from GitHub and install it
   node src/frl.mjs token [--rotate]   show or replace the access token
+  node src/frl.mjs share [ID] [--off]  link that opens one research on another PC (no Docker), or turn it off
   node src/frl.mjs keys setup         paste free keys; each is tested and saved in the system key store
   node src/frl.mjs keys set NAME      save one key or setting (e.g. CUSTOM_LLM_BASE_URL, FRL_PROVIDER_ORDER)
   node src/frl.mjs keys check         test every saved key; repair keys cut off while pasting
@@ -469,6 +518,7 @@ if (!commands[command]) {
   node src/frl.mjs change C1 [--claude]  run an App chat change ticket with the free-model coder (or Claude Code), gated by quality
   node src/frl.mjs searxng           start the free, unlimited SearXNG search engine in Docker and save its address
   node src/frl.mjs local ...         run a model on this PC's GPU (llama.cpp), optionally with helper devices: install | models | start | helper | status | bench
+  node src/frl.mjs local pc ADDRESS  find Ollama / llama.cpp on another PC in your network and use them
   node src/frl.mjs logs               last lines of the app log`);
 } else {
   try {

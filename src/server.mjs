@@ -11,12 +11,17 @@ import { TEMPLATES } from './research/templates.mjs';
 import { itemsCsv, piecesCsv, resultsJson, toMarkdown } from './report.mjs';
 import { resultStatus } from './research/gaps.mjs';
 import { resultModel } from './research/result.mjs';
+import { auditTree, cleanTitle } from './research/treeaudit.mjs';
 import { knowledgeRecord } from './research/knowledge.mjs';
 import { ProposalError } from './appchat.mjs';
 import { UnsupportedFileError } from './chat/media.mjs';
 import { CONSOLE_COMMANDS } from './terminal/catalog.mjs';
 import { attachTerminalSockets } from './terminal/socket.mjs';
 import { accessLinks, lanAddresses } from './service.mjs';
+import { ShareBook, shareAllows, shareLinks } from './share.mjs';
+import { REACHABLE_PAGE, RemoteVisits } from './visits.mjs';
+import { pcSetupCommand, pcSetupScript } from './local/pcsetup.mjs';
+import { ensureLocalModel } from './local/autostart.mjs';
 import os from 'node:os';
 
 const MAX_BODY = 32 * 1024 * 1024;
@@ -52,8 +57,8 @@ async function readJson(req) {
 export function withResults(project) {
   if (!project || typeof project !== 'object' || !Array.isArray(project.nodes) || typeof project.question !== 'string') return project;
   const { plan, ...status } = resultStatus(project);
-  const results = { status, actions: plan.slice(0, 40), model: resultModel(project) };
-  return { ...project, results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
+  const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question) };
+  return { ...project, nodes: project.nodes.map((n) => (cleanTitle(n.title) !== n.title ? { ...n, title: cleanTitle(n.title) } : n)), results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
 }
 
 function send(res, status, body, type = 'application/json; charset=utf-8') {
@@ -70,14 +75,37 @@ function statusFor(error) {
   return 400;
 }
 
-function deny(res, reason) {
+function sharedStatus(status, projectId) {
+  return { ...status, ledger: [], calls: 0, improving: status.improving.filter((id) => id === projectId), improveAll: {}, coders: [] };
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
+
+function deny(res, reason, { address = '', research = false } = {}) {
   res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-  res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Access needed</title><body style="font:16px system-ui;padding:24px;max-width:560px"><h2>Free Research LLM</h2><p>${reason}.</p><p>On the Mac that runs the app, run <code>frl url</code> and open the link it prints.</p></body>`);
+  const next = research
+    ? 'Open the research link you were given again, copied in full: it must contain <code>?share=</code>. Close any older tab of this app first.'
+    : 'Open the research link you were given, copied in full: it must contain <code>?share=</code>. The owner gets it in the research under More → Share this research, or with <code>node src/frl.mjs share</code>.';
+  res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Access needed</title><body style="font:16px system-ui;padding:24px;max-width:560px"><h2>Free Research LLM</h2><p><b>Why:</b> ${escapeHtml(reason)}.</p><p><b>Next:</b> ${next}</p><p style="color:#666;font-size:14px">This device: ${escapeHtml(address || 'unknown')}. The owner sees this attempt in History.</p></body>`);
 }
 
 export function createServer(app, gate = new AccessGate()) {
   const routes = [
-    ['GET', /^\/api\/status$/, async () => app.status()],
+    ['GET', /^\/api\/status$/, async (req) => (req.access.share ? sharedStatus(app.status(), req.access.share) : app.status())],
+    ['GET', /^\/api\/whoami$/, async (req) => ({ share: req.access.share ?? null, canShare: Boolean(gate.shares?.available) })],
+    ['GET', /^\/api\/projects\/([\w-]+)\/share$/, async (req, [id]) => shareView(id)],
+    ['POST', /^\/api\/projects\/([\w-]+)\/share$/, async (req, [id]) => {
+      if (!gate.shares) throw new HttpError(409, 'sharing needs the app started by "node src/frl.mjs start --remote" or "node src/frl.mjs install"');
+      await app.engine.load(id);
+      await gate.shares.enable(id);
+      return shareView(id);
+    }],
+    ['DELETE', /^\/api\/projects\/([\w-]+)\/share$/, async (req, [id]) => {
+      if (gate.shares) await gate.shares.revoke(id);
+      return shareView(id);
+    }],
     ['POST', /^\/api\/providers\/refresh$/, async () => {
       await app.refreshProviders();
       return app.status();
@@ -135,7 +163,7 @@ export function createServer(app, gate = new AccessGate()) {
       }
     }],
     ['GET', /^\/api\/templates$/, async () => TEMPLATES],
-    ['GET', /^\/api\/projects$/, async () => app.store.list()],
+    ['GET', /^\/api\/projects$/, async (req) => (await app.store.list()).filter((p) => !req.access.share || p.id === req.access.share)],
     ['POST', /^\/api\/projects$/, async (req) => {
       const body = await readJson(req);
       if (!app.router.ready) throw new HttpError(409, 'no model provider is ready — open Setup and connect a free model (or start with: npm run demo)');
@@ -144,7 +172,7 @@ export function createServer(app, gate = new AccessGate()) {
       return project;
     }],
     ['GET', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
-      return withResults(await app.engine.load(id));
+      return { ...withResults(await app.engine.load(id)), lanes: app.engine.lanesFor(id) };
     }],
     ['DELETE', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
       if (app.engine.running.has(id) || app.improver.isActive(id)) throw new ProjectBusyError('stop it first: the research is running');
@@ -155,8 +183,8 @@ export function createServer(app, gate = new AccessGate()) {
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/run$/, async (req, [id]) => {
       await app.engine.load(id);
-      if (app.engine.running.has(id)) throw new ProjectBusyError('already running');
-      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      if (app.improver.isActive(id)) return app.improver.join(id);
+      if (app.engine.running.has(id)) return app.engine.join(id);
       app.engine.start(id);
       return { ok: true };
     }],
@@ -226,7 +254,7 @@ export function createServer(app, gate = new AccessGate()) {
     ['GET', /^\/api\/projects\/([\w-]+)\/knowledge$/, async (req, [id]) => knowledgeRecord(await app.engine.load(id))],
     ['POST', /^\/api\/projects\/([\w-]+)\/chat$/, async (req, [id]) => {
       const body = await readJson(req);
-      return app.chat.send(id, body.nodeId || 'Q', body.request ?? body.message, { files: body.files ?? [], desired: body.desired ?? '' });
+      return app.chat.send(id, body.nodeId || 'Q', body.request ?? body.message, { files: body.files ?? [], desired: body.desired ?? '', appRedirect: !req.access.share });
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/chat\/decide$/, async (req, [id]) => {
       const body = await readJson(req);
@@ -242,7 +270,8 @@ export function createServer(app, gate = new AccessGate()) {
     ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/suggest$/, async (req, [id, nodeId]) => app.suggester.suggest(id, nodeId)],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve$/, async (req, [id]) => {
       await app.engine.load(id);
-      if (app.engine.running.has(id)) throw new ProjectBusyError('stop the run first');
+      if (app.improver.isActive(id)) return app.improver.join(id);
+      if (app.engine.running.has(id)) return app.engine.join(id);
       return app.improver.start(id, await readJson(req));
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve\/stop$/, async (req, [id]) => app.improver.stop(id)],
@@ -274,10 +303,16 @@ export function createServer(app, gate = new AccessGate()) {
     ['DELETE', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)$/, async (req, [id, nodeId]) => app.engine.removeNode(id, nodeId)],
   ];
 
+  function shareView(id) {
+    const status = gate.shares?.status(id) ?? { enabled: false, since: null, token: null };
+    const bases = app.remote ? accessLinks({ port: app.port, lan: lanAddresses(os.networkInterfaces()) }).filter((l) => !l.url.includes('127.0.0.1')) : [];
+    return { projectId: id, ...status, remote: app.remote, links: status.token ? shareLinks(bases, { projectId: id, token: status.token }) : [], pcSetup: status.token && bases[0] ? pcSetupCommand(bases[0].url, status.token) : null };
+  }
+
   async function serveEvents(req, res, id) {
     const project = await app.engine.load(id);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: withResults(current) })}\n\n`);
+    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: { ...withResults(current), lanes: app.engine.lanesFor(id) } })}\n\n`);
     push({ type: 'hello', message: 'connected' }, project);
     const unsubscribe = app.engine.subscribe(id, push);
     const ping = setInterval(() => res.write(': ping\n\n'), 20000);
@@ -287,14 +322,28 @@ export function createServer(app, gate = new AccessGate()) {
     });
   }
 
+  const visits = new RemoteVisits({ note: (message) => void app.logs.append('history', { type: 'access', message }) });
+
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    if (req.method === 'GET' && url.pathname === '/reachable') return send(res, 200, REACHABLE_PAGE, 'text/html; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/favicon.ico') {
+      res.writeHead(204, { 'cache-control': 'max-age=86400' });
+      return res.end();
+    }
     const access = gate.decide(req, url);
-    if (!access.allowed) return deny(res, access.reason);
-    if (access.setCookie) {
+    if (!gate.isLoopback(req)) visits.record(req, url.pathname, access);
+    if (!access.allowed) return deny(res, access.reason, { address: String(req.socket?.remoteAddress ?? '').replace(/^::ffff:/, ''), research: /share|research link/.test(access.reason) });
+    if (access.share && !shareAllows({ method: req.method, pathname: url.pathname, projectId: access.share })) return send(res, 403, { error: 'this link opens one research only' });
+    req.access = access;
+    if (!gate.isLoopback(req) && access.allowed) app.peers?.note(req.socket?.remoteAddress);
+    const page = url.pathname === '/' || url.pathname === '/index.html';
+    if (access.setCookie && page) {
       res.writeHead(302, { 'set-cookie': access.setCookie, location: url.pathname + url.hash });
       return res.end();
     }
+    if (access.setCookie) res.setHeader('set-cookie', access.setCookie);
+    if (req.method === 'GET' && url.pathname === '/pc-setup.ps1') return send(res, 200, pcSetupScript(), 'text/plain; charset=utf-8');
     try {
       if (req.method === 'GET' && VENDOR[url.pathname]) {
         const [file, type] = VENDOR[url.pathname];
@@ -335,7 +384,8 @@ export function createServer(app, gate = new AccessGate()) {
 
 export async function startServer({ app = new App(), port = Number(process.env.PORT || 4600), host = process.env.HOST || '127.0.0.1', token = '', behindProxy = process.env.FRL_BEHIND_PROXY === '1' } = {}) {
   await app.refreshProviders();
-  const gate = new AccessGate({ token, behindProxy });
+  const shares = await new ShareBook({ file: path.join(app.dataDir, 'shares.json'), secret: token }).load();
+  const gate = new AccessGate({ token, behindProxy, shares });
   const server = createServer(app, gate);
   attachTerminalSockets(server, { hub: app.terminal, gate });
   await new Promise((resolve) => server.listen(port, host, resolve));
@@ -345,6 +395,8 @@ export async function startServer({ app = new App(), port = Number(process.env.P
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const local = process.env.FRL_LOCAL_AUTOSTART === '0' ? { started: false } : await ensureLocalModel({ root: ROOT_DIR }).catch(() => ({ started: false }));
+  if (local.started) console.log(`  local model restarted on port ${local.port} (pid ${local.pid}); it is ready once loaded`);
   const secrets = new KeychainSecrets();
   const fromKeychain = process.env.FRL_KEYCHAIN === '0' ? [] : await secrets.fillMissing(process.env);
   const remote = (Boolean(process.env.HOST) && process.env.HOST !== '127.0.0.1' && process.env.HOST !== 'localhost') || process.env.FRL_BEHIND_PROXY === '1';
@@ -378,6 +430,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   app.onRestart = () => void stop('restart requested');
   await app.seedLedger();
   setInterval(() => app.routerAdmin.apply(), 60000).unref();
+  app.startHousekeeping();
+  app.startPeerWatch();
   process.on('SIGTERM', () => void stop('SIGTERM'));
   process.on('SIGINT', () => void stop('SIGINT'));
   if (process.env.FRL_AUTO_RESUME !== '0') {

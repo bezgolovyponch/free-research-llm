@@ -23,7 +23,7 @@ describe('acceptsTrial', () => {
 async function removalLoop(verifyAfter: (nodes: Node[]) => void) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-delta-'));
   const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
-  const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }) });
+  const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), lanes: 1 });
   const created = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
   const done = await engine.run(created.id);
   for (const n of done.nodes as Node[]) if (n.id.startsWith('D1')) n.status = 'weak';

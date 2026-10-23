@@ -94,6 +94,16 @@ The **Terminal** button (sidebar, or the `>_` icon on a phone) opens a real shel
 3. Another computer with its own copy: **Export keys** here (choose a passphrase), **Import keys** there (paste the bundle, type the passphrase). The bundle is encrypted (AES-256-GCM, scrypt); send the passphrase separately.
 4. Anyone with a token link can use the app and its terminal. To cut off old links: `node src/frl.mjs token --rotate`, then restart.
 
+### One research on two computers (no Docker, no install on the second one)
+
+1. This computer runs the app with remote access on (**Install always-on**, or `node src/frl.mjs start --remote`).
+2. Open the research → **More → Share this research (link for another PC)… → Create link** → **Copy**. Or in a terminal: `node src/frl.mjs share` (lists research ids), then `node src/frl.mjs share <id>`, which also prints the Tailscale link.
+3. Open the link in a browser on the other PC. If it does not open, first open `http://<this computer's Wi-Fi address>:4600/reachable` on the PC (the address is in the link). If that page does not load either, the network blocks it: both devices must be on the same Wi-Fi (not a guest network, which isolates devices), and a VPN on the PC must be off. History shows every other device that reached the app and whether it was let in. The same Wi-Fi works as is; from anywhere, install Tailscale on both computers and use the Tailscale link.
+4. Both screens show the same research live. To work as a team on a running research or loop, press **⚡ Join** (the Run button while it works) or **Improve loop**: each press adds one lane (2 by default, up to 4), so more pieces are researched or tried at once. Lanes go back to 2 when it ends. Split the work: one runs or loops the research while the other chats with pieces, adds sub-issues, reads sources and downloads results. One run per research at a time; the other screen sees it as it happens.
+5. The link opens only that research: no other researches, keys, settings, App assistant or terminal. **Turn link off** (same panel) or `node src/frl.mjs share <id> --off` cuts it at once. Rotating the access token turns every research link off.
+6. **Let the other PC's graphics card research too (no Docker):** in the share panel copy the PowerShell line under "Let that PC's graphics card research too" and run it once in PowerShell on the PC. It downloads llama.cpp and a model that fits the PC's graphics memory and starts it; allow it when Windows Firewall asks. The app connects it within a minute of the PC opening the research link. By hand: `node src/frl.mjs local pc <PC address>`.
+7. Nothing to clean on the other PC: it keeps only one cookie. This computer clears its own temp files every 6 hours and keeps at most 8 researches in memory (the rest stay on disk), so a second screen does not grow its memory.
+
 ## G. Check and ship changes
 
 ```bash

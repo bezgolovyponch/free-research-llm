@@ -3,10 +3,12 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 4610;
-const dataDir = path.join(os.tmpdir(), `frl-e2e-${process.pid}`);
+const dataDir = process.env.FRL_E2E_DATA_DIR ?? path.join(os.tmpdir(), `frl-e2e-${process.pid}`);
+process.env.FRL_E2E_DATA_DIR = dataDir;
 
 export default defineConfig({
   testDir: 'e2e',
+  globalSetup: './e2e/setup.mjs',
   timeout: 60000,
   fullyParallel: false,
   workers: 1,

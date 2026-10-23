@@ -20,6 +20,21 @@ export class EventLog {
     return this.queue;
   }
 
+  compact({ maxBytes, keepLines }) {
+    const trimmed = [];
+    this.queue = this.queue.then(async () => {
+      for (const entry of await fs.readdir(this.dir).catch(() => [])) {
+        if (!entry.endsWith('.jsonl')) continue;
+        const file = path.join(this.dir, entry);
+        if ((await fs.stat(file)).size <= maxBytes) continue;
+        const lines = (await fs.readFile(file, 'utf8')).split('\n').filter(Boolean);
+        await fs.writeFile(file, `${lines.slice(-keepLines).join('\n')}\n`);
+        trimmed.push(entry);
+      }
+    }).catch(() => {});
+    return this.queue.then(() => trimmed);
+  }
+
   async read(name, limit = 500) {
     try {
       const lines = (await fs.readFile(this.file(name), 'utf8')).trim().split('\n').filter(Boolean);
