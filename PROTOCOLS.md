@@ -71,6 +71,16 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 
 - App changes are requested in the App chat and become tickets (`data/changes/C<n>.md`) only on the user's button (`ChangeBook`). The free-model coder (`FreeCoder`, `src/coder/`) implements a ticket in a sandbox copy, runs `npm run quality` there, retries with the failure up to 4 times, and copies the files into the app only on PASS, with a backup for Undo (`POST /api/changes/C<n>/run`, `/undo`). It cannot edit the gate, itself, auth, secrets, the terminal or `package.json`, and a change that lowers the test count fails before the gate runs. `--claude` hands a ticket to Claude Code instead. Tests: `tests/coder/*.test.ts`, `tests/changes.test.ts`.
 
+## 4d. Lanes and teammates
+
+- **Research runs** research every piece whose prerequisites (children, `dependsOn`) are finished side by side, in 2 lanes by default (`FRL_LANES`, 1–4; `runInLanes` in `src/research/lanes.mjs`). A failed piece counts as finished so the rest continue; a provider outage stops new work and is raised after running work ends.
+- **The self-improving loop** runs one trial per lane at once on different pieces. A trial's slow part (propose, research the piece on a copy, piece grade and regression gates) runs in parallel; keeping it is serialized under one lock (`Mutex`). At commit, `trialConflict` (`src/research/trialmerge.mjs`) refuses a trial whose piece another lane changed, removed or whose new id is taken (`conflict`, retried next pass); otherwise `mergeTrial` applies only that trial's pieces onto the latest research, the whole research is re-rolled, and the same gates as before decide: regression checks, every check passing for a removal, and the score gain (`acceptsTrial`). Basis: optimistic concurrency control (Kung & Robinson, ACM TODS 1981: read, validate, write), asynchronous parallel evaluation as in Population Based Training (Jaderberg et al., arXiv:1711.09846) and AlphaEvolve (arXiv:2506.13131).
+- **Teammates:** pressing **Run** (shown as **⚡ Join** while it works) or **Improve loop** on a research that is already running adds one lane for that run or loop, from this computer or a shared-link PC, up to 4. Lanes return to the default when the run or loop ends. All model calls still use this computer's free quotas; free tiers allow roughly 30 requests a minute per model on Groq (provider console → Limits), and the router falls back to the next provider on a 429.
+
+## 4e. Criteria grounding
+
+A model may propose expected-result checks (`mustMention`, item count, value range) and piece checks, but code keeps only what the user's own text states (`src/research/grounding.mjs`): a must-mention word only when it is quoted or follows "mention / contain / include / name"; a count or range only when the number appears in the expected result, question or constraints. Dropped criteria are logged as "not enforced (the model inferred it, your text does not ask for it)". Checks the user sets by hand (**Edit expected result**) are kept as written.
+
 ## 5. Logging and audit protocol
 
 | Record | Where |

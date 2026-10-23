@@ -79,6 +79,50 @@ describe('ProjectImprover', () => {
   });
 });
 
+describe('ProjectImprover in parallel lanes', () => {
+  it('runs trials side by side, commits them one at a time, and adds a lane when a teammate joins', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-lanes-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    const done = await engine.run(project.id);
+    const nodeCount = done.nodes.length;
+    let proposing = 0;
+    let proposePeak = 0;
+    let runs = 0;
+    let runPeak = 0;
+    const originalRun = engine.run.bind(engine);
+    engine.run = async (id: string, options?: object) => {
+      runs += 1;
+      runPeak = Math.max(runPeak, runs);
+      try { return await originalRun(id, options as never); } finally { runs -= 1; }
+    };
+    let clock = 0;
+    const improver = new ProjectImprover({ engine, now: () => (clock += 200), sleep: async () => {} });
+    improver.propose = async (_p: unknown, nodeId: string) => {
+      proposing += 1;
+      proposePeak = Math.max(proposePeak, proposing);
+      await new Promise((r) => setTimeout(r, 15));
+      proposing -= 1;
+      return nodeId === 'Q' ? {} : { change: `sharper queries for ${nodeId}`, searchQueries: [`${nodeId} kiosk rent Brno 2026`] };
+    };
+    improver.start(project.id, { hours: 0.05 });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(improver.join(project.id)).toEqual({ joined: true, lanes: 3 });
+    for (let i = 0; i < 800 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    const saved = await engine.load(project.id);
+    expect(proposePeak).toBe(3);
+    expect(runPeak).toBe(1);
+    expect(saved.improve.active).toBe(false);
+    expect(saved.nodes.length).toBe(nodeCount);
+    const outcomes = new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome));
+    for (const o of outcomes) expect(['kept', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'conflict']).toContain(o);
+    expect(saved.improve.best).toBeGreaterThanOrEqual(saved.improve.baseline);
+    expect(engine.lanesFor(project.id)).toBe(2);
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
 describe('distinctResearches', () => {
   it('keeps the newest non-demo project per question', () => {
     const list = [

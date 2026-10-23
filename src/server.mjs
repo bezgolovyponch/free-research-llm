@@ -163,7 +163,7 @@ export function createServer(app, gate = new AccessGate()) {
       return project;
     }],
     ['GET', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
-      return withResults(await app.engine.load(id));
+      return { ...withResults(await app.engine.load(id)), lanes: app.engine.lanesFor(id) };
     }],
     ['DELETE', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
       if (app.engine.running.has(id) || app.improver.isActive(id)) throw new ProjectBusyError('stop it first: the research is running');
@@ -174,8 +174,8 @@ export function createServer(app, gate = new AccessGate()) {
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/run$/, async (req, [id]) => {
       await app.engine.load(id);
-      if (app.engine.running.has(id)) throw new ProjectBusyError('already running');
-      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      if (app.improver.isActive(id)) return app.improver.join(id);
+      if (app.engine.running.has(id)) return app.engine.join(id);
       app.engine.start(id);
       return { ok: true };
     }],
@@ -261,7 +261,8 @@ export function createServer(app, gate = new AccessGate()) {
     ['POST', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)\/suggest$/, async (req, [id, nodeId]) => app.suggester.suggest(id, nodeId)],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve$/, async (req, [id]) => {
       await app.engine.load(id);
-      if (app.engine.running.has(id)) throw new ProjectBusyError('stop the run first');
+      if (app.improver.isActive(id)) return app.improver.join(id);
+      if (app.engine.running.has(id)) return app.engine.join(id);
       return app.improver.start(id, await readJson(req));
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/improve\/stop$/, async (req, [id]) => app.improver.stop(id)],
@@ -302,7 +303,7 @@ export function createServer(app, gate = new AccessGate()) {
   async function serveEvents(req, res, id) {
     const project = await app.engine.load(id);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: withResults(current) })}\n\n`);
+    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: { ...withResults(current), lanes: app.engine.lanesFor(id) } })}\n\n`);
     push({ type: 'hello', message: 'connected' }, project);
     const unsubscribe = app.engine.subscribe(id, push);
     const ping = setInterval(() => res.write(': ping\n\n'), 20000);

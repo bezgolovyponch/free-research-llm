@@ -5,10 +5,12 @@ import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
-import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, progress, researchOrder, urlList } from './tree.mjs';
+import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding } from './verify.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
+import { droppedNote, groundAcceptance } from './grounding.mjs';
+import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
 import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree } from './treeaudit.mjs';
 import { basisOf, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
@@ -83,8 +85,10 @@ export function normalizeEstimate(raw) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, onEvent = () => {}, onStop = async () => {} }) {
+  constructor({ router, search, store, demo = false, rates = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {} }) {
     this.onStop = onStop;
+    this.laneCount = Math.min(MAX_LANES, Math.max(1, lanes));
+    this.helpers = new Map();
     this.quiet = new Set();
     this.router = router;
     this.search = search;
@@ -207,7 +211,9 @@ export class ResearchEngine {
       if (second && second.tree.nodes.length >= 2 && second.issues.length < issues.length) ({ reply, tree, issues } = second);
     }
     if (tree.nodes.length < 2) throw new Error('the model returned an empty issue tree; try again or use a stronger model');
-    const acceptance = project.acceptance?.locked ? project.acceptance : normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected);
+    const proposed = project.acceptance?.locked ? { spec: project.acceptance, dropped: [] } : groundAcceptance(normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected), { expected: project.acceptance?.expected, question: project.question, constraints: project.constraints });
+    const acceptance = proposed.spec;
+    if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
     this.emit(project, 'tree', `issue tree ready: ${tree.nodes.length} nodes (${reply.provider}/${reply.model})`);
     await this.store.save(project);
@@ -406,26 +412,35 @@ export class ResearchEngine {
       this.emit(project, 'phase', 'researching sub-questions in dependency order');
       await this.store.save(project);
       const byId = new Map(project.nodes.map((n) => [n.id, n]));
-      for (const nodeId of researchOrder(project.nodes)) {
-        if (this.cancelled.has(id)) {
-          project.phase = 'cancelled';
-          this.running.delete(id);
-          this.emit(project, 'phase', 'stopped by user');
-          if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
-          return await this.store.save(project);
-        }
-        const node = byId.get(nodeId);
-        if (DONE.has(node.status)) continue;
-        try {
-          if (isLeaf(project.nodes, node)) await this.researchLeaf(project, node, hints[node.id]);
-          else await this.rollup(project, node);
-        } catch (error) {
-          node.status = 'failed';
-          node.error = error.message;
-          this.emit(project, 'error', `${node.id}: ${error.message}`, { nodeId: node.id });
-          if (/no model provider|cooling down/.test(error.message)) throw error;
-        }
-        await this.store.save(project);
+      const finished = (nodeId) => DONE.has(byId.get(nodeId)?.status) || byId.get(nodeId)?.status === 'failed';
+      await runInLanes({
+        order: researchOrder(project.nodes),
+        isFinished: finished,
+        prerequisites: (nodeId) => prerequisitesOf(project.nodes, byId.get(nodeId)),
+        known: (nodeId) => byId.has(nodeId),
+        lanes: () => this.lanesFor(id),
+        shouldStop: () => this.cancelled.has(id),
+        work: async (nodeId) => {
+          const node = byId.get(nodeId);
+          if (DONE.has(node.status)) return;
+          try {
+            if (isLeaf(project.nodes, node)) await this.researchLeaf(project, node, hints[node.id]);
+            else await this.rollup(project, node);
+          } catch (error) {
+            node.status = 'failed';
+            node.error = error.message;
+            this.emit(project, 'error', `${node.id}: ${error.message}`, { nodeId: node.id });
+            if (/no model provider|cooling down/.test(error.message)) throw error;
+          }
+          await this.store.save(project);
+        },
+      });
+      if (this.cancelled.has(id)) {
+        project.phase = 'cancelled';
+        this.running.delete(id);
+        this.emit(project, 'phase', 'stopped by user');
+        if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
+        return await this.store.save(project);
       }
       await this.synthesize(project);
       this.checkSpecs(project);
@@ -447,7 +462,25 @@ export class ResearchEngine {
       throw error;
     } finally {
       this.running.delete(id);
+      if (!this.quiet.has(id)) this.leave(id);
     }
+  }
+
+  lanesFor(id) {
+    return Math.min(MAX_LANES, this.laneCount + (this.helpers.get(id) ?? 0));
+  }
+
+  join(id) {
+    const before = this.lanesFor(id);
+    this.helpers.set(id, Math.min(MAX_LANES - this.laneCount, (this.helpers.get(id) ?? 0) + 1));
+    const after = this.lanesFor(id);
+    const project = this.store.cache.get(id);
+    if (project) this.emit(project, 'team', after > before ? `a teammate joined: now ${after} lanes work on this research at once` : `a teammate joined; already at the maximum of ${after} lanes`);
+    return { joined: true, lanes: after };
+  }
+
+  leave(id) {
+    this.helpers.delete(id);
   }
 
   start(id, options) {

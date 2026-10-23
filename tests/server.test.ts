@@ -146,6 +146,18 @@ describe('HTTP server', () => {
   });
 });
 
+describe('teammates', () => {
+  it('turns Run or Improve on a running research into one more lane instead of an error', async () => {
+    const created = await call('POST', '/api/projects', { question: 'Which Czech city suits a small specialty bakery best?' });
+    const join = await call('POST', `/api/projects/${created.body.id}/run`);
+    expect(join.status).toBe(200);
+    expect(join.body).toEqual({ joined: true, lanes: 3 });
+    expect((await call('POST', `/api/projects/${created.body.id}/improve`, { hours: 0.01 })).body).toEqual({ joined: true, lanes: 4 });
+    await waitFor(created.body.id, 'done');
+    expect((await call('GET', `/api/projects/${created.body.id}`)).body.lanes).toBe(2);
+  });
+});
+
 describe('research share links', () => {
   it('opens one research from another computer and nothing else, until the owner turns the link off', async () => {
     const shareDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-server-share-'));

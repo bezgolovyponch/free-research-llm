@@ -5,6 +5,7 @@ import { addSpec, evaluateAll, normalizeSpec } from './specs.mjs';
 import { ROOT_ID } from './tree.mjs';
 import { NotFoundError } from './engine.mjs';
 import { MAX_THREAD } from './notify.mjs';
+import { droppedNote, groundSpec } from './grounding.mjs';
 
 export const OWNER_ONLY_REPLY = 'That is a question about the app itself, not this research. Only the person who runs the app can ask its App assistant.';
 
@@ -150,7 +151,9 @@ export class NodeChat {
     const fresh = await this.engine.load(id);
     const at = new Date().toISOString();
     if (paused) results.push({ type: paused.looping ? 'loop paused and resumed' : 'run paused and resumed', nodeId: key, ok: true });
-    const spec = key !== RESULTS_KEY && want ? addSpec(fresh, key, normalizeSpec(answer.spec, { request: text, desired: want })) : null;
+    const grounded = key !== RESULTS_KEY && want ? groundSpec(normalizeSpec(answer.spec, { request: text, desired: want }), { desired: want, request: text }) : null;
+    const spec = grounded ? addSpec(fresh, key, grounded.spec) : null;
+    if (grounded?.dropped.length) results.push({ type: 'check', nodeId: key, ok: true, detail: droppedNote(grounded.dropped) });
     if (spec) {
       evaluateAll(fresh);
       results.push({ type: 'check', nodeId: key, ok: true, specId: spec.id });

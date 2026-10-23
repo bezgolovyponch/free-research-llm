@@ -771,7 +771,7 @@ function renderHead(){
   $("phasePill").innerHTML='<i class="'+(looping||running?"pulse":"")+'" style="background:'+color+'"></i>'+(looping?"improving":esc(p.phase))+(mq.phone.matches&&ns.length?" · "+fin+"/"+ns.length:"")+(p.demo?" · demo":"");
   $("progBar").style.width=(ns.length?Math.round(100*fin/ns.length):0)+"%";
   $("progText").textContent=fin+"/"+ns.length+" researched";
-  $("btnRun").disabled=running||looping;$("btnStop").disabled=!running&&!looping;
+  $("btnRun").disabled=false;$("btnRun").textContent=running||looping?"⚡ Join"+(p.lanes?" ("+p.lanes+" lanes)":""):"▶ Run";$("btnRun").title=running||looping?"Work on this research as a teammate: adds one more lane, so more pieces are researched or tried at once":"";$("btnStop").disabled=!running&&!looping;
   $("btnLoop").textContent=looping?"Loop running":"Improve loop";
   $("mReport").href="/api/projects/"+encodeURIComponent(p.id)+"/report.md";
   $("mHandoff").href="/api/projects/"+encodeURIComponent(p.id)+"/handoff.md";
@@ -802,7 +802,7 @@ document.addEventListener("click",e=>{if(!e.target.closest("#loopPop"))$("loopPo
 $("loopAll").addEventListener("click",()=>{$("loopPop").classList.remove("on");STATE.loopScope="all";renderLoopBox();$("loopBox").classList.add("on");});
 $("loopSel").addEventListener("click",()=>{$("loopPop").classList.remove("on");if(!STATE.checked.size){STATE.mapSelect=true;setPane("map");drawTree(true);toast("click pieces on the map to select them");return;}STATE.loopScope="sel";renderLoopBox();$("loopBox").classList.add("on");});
 $("mLoop").addEventListener("click",()=>$("loopBox").classList.add("on"));
-$("btnRun").addEventListener("click",async()=>{try{await api("/api/projects/"+STATE.project.id+"/run",{method:"POST"});toast("running");}catch(e){toast(e.message);}});
+$("btnRun").addEventListener("click",async()=>{try{const r=await api("/api/projects/"+STATE.project.id+"/run",{method:"POST"});if(r.joined){STATE.project.lanes=r.lanes;renderHead();toast("joined as a teammate: "+r.lanes+" lanes now work on this research at once");}else toast("running");}catch(e){toast(e.message);}});
 $("btnStop").addEventListener("click",async()=>{const p=STATE.project;try{if(isLooping(p))await api("/api/projects/"+p.id+"/improve/stop",{method:"POST"});else await api("/api/projects/"+p.id+"/cancel",{method:"POST"});toast("stopping after the current step");setTimeout(async()=>{await loadStatus();renderHead();},1500);}catch(e){toast(e.message);}});
 $("moreBtn").addEventListener("click",e=>{e.stopPropagation();$("morePop").classList.toggle("on");});
 document.addEventListener("click",()=>$("morePop").classList.remove("on"));

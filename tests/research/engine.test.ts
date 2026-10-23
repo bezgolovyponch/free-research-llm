@@ -29,9 +29,9 @@ afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-function engineWith(provider: ScriptedProvider | object, search: object = fakeSearch) {
+function engineWith(provider: ScriptedProvider | object, search: object = fakeSearch, lanes = 2) {
   const router = new ModelRouter({ providers: [provider] });
-  return { router, engine: new ResearchEngine({ router, search, store: new ProjectStore({ dir }) }) };
+  return { router, engine: new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes }) };
 }
 
 describe('ResearchEngine', () => {
@@ -105,7 +105,7 @@ describe('ResearchEngine', () => {
         return calls.length === 1 || !options.exclude ? fakeSearch.search(queries) : [{ kind: 'web', title: 'Gap', url: 'https://gap.example/p', domain: 'gap.example', snippet: 's', text: 'RAV4 median 21,500 EUR' }];
       },
     };
-    const { engine } = engineWith(provider, recordingSearch);
+    const { engine } = engineWith(provider, recordingSearch, 1);
     const project = await engine.createProject({ question: 'Is buying used RAV4 hybrids in Germany to resell in Poland profitable?' });
     const done = await engine.run(project.id);
     const retried = done.nodes.find((n: { attempts: number }) => n.attempts === 2);
@@ -137,6 +137,44 @@ describe('ResearchEngine', () => {
     await engine.resetResearch(project.id, { tree: true });
     const built = await engine.buildTree(project.id);
     expect(built.acceptance).toMatchObject({ expected: '5 links', itemCount: 5, urlsLive: true, locked: true });
+  });
+
+  it('researches independent pieces in parallel lanes, adds a lane when a teammate joins, and gives the same result as one lane', async () => {
+    const slow = new ScriptedProvider();
+    let live = 0;
+    let peak = 0;
+    const provider = { id: 'demo', ready: true, describe: () => slow.describe(), async chat(args: { messages: Array<{ content: string }> }) {
+      const research = args.messages.at(-1)!.content.includes(TASK_MARKERS.research);
+      if (research) { live += 1; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 20)); live -= 1; }
+      return slow.chat(args as never);
+    } };
+    const { engine } = engineWith(provider, fakeSearch, 2);
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    const parallel = await engine.run(project.id);
+    expect(peak).toBe(2);
+    const { engine: single } = engineWith(new ScriptedProvider(), fakeSearch, 1);
+    const p1 = await single.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    const sequential = await single.run(p1.id);
+    expect(parallel.nodes.map((n: { id: string; status: string }) => `${n.id}:${n.status}`).sort()).toEqual(sequential.nodes.map((n: { id: string; status: string }) => `${n.id}:${n.status}`).sort());
+    expect(engine.lanesFor(project.id)).toBe(2);
+    expect(engine.join(project.id)).toEqual({ joined: true, lanes: 3 });
+    engine.join(project.id); engine.join(project.id);
+    expect(engine.lanesFor(project.id)).toBe(4);
+    engine.leave(project.id);
+    expect(engine.lanesFor(project.id)).toBe(2);
+  });
+
+  it('does not enforce expected-result checks the model inferred but the user never asked for', async () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    const original = router.complete.bind(router);
+    router.complete = (async (request: { purpose: string }) => {
+      const reply = await original(request as never);
+      if (request.purpose === 'decompose') reply.data = { ...reply.data, acceptance: { itemCount: 50, valueRange: [0, 20000], unit: 'EUR', mustMention: ['plot', 'glamping'] } };
+      return reply;
+    }) as typeof router.complete;
+    const project = await engine.createProject({ question: 'Find plots to buy for a glamping business, 20000EUR max', constraints: { budget: '20000' }, expected: '50 plots strongly feasible for a glamping business' });
+    const built = await engine.buildTree(project.id);
+    expect(built.acceptance).toMatchObject({ itemCount: 50, valueRange: [0, 20000], mustMention: [] });
   });
 
   it('attaches files to one piece as cited data sources and removes them again', async () => {

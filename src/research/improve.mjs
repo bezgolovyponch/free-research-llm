@@ -4,6 +4,8 @@ import { variantPrompt } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
 import { cleanTitle, duplicateAmong, duplicateOf } from './treeaudit.mjs';
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
+import { Mutex } from './lanes.mjs';
+import { mergeTrial, trialConflict } from './trialmerge.mjs';
 
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, researching: 0 };
 const MAX_HOURS = 72;
@@ -304,31 +306,60 @@ export class ProjectImprover {
     const scope = state.scope ?? [];
     const exclude = state.exclude ?? [];
     state.pieces = new Set();
+    state.lock = new Mutex();
     state.measure = (p) => (scope.length ? scopeScore(p, scope, [...state.pieces], exclude) : projectScore(p, [...state.pieces]));
     await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, scope, exclude, error: null });
     if (project.phase !== 'done') project = await this.engine.run(id);
     state.pieces = new Set(scoredPieces(project, scope, exclude));
-    let best = state.measure(project);
-    await this.record(id, { baseline: best.score, best: best.score });
+    state.best = state.measure(project);
+    await this.record(id, { baseline: state.best.score, best: state.best.score });
     let quiet = 0;
     while (this.live(state)) {
-      let improved = false;
-      const tried = new Set();
+      const improved = await this.pass(id, state);
+      quiet = improved ? 0 : quiet + 1;
+      await state.lock.run(async () => this.record(id, { passes: ((await this.engine.load(id)).improve?.passes ?? 0) + 1, quietPasses: quiet }));
+    }
+    state.spawn = null;
+    this.engine.leave(id);
+    await this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
+  }
+
+  async pass(id, state) {
+    const tried = new Set();
+    const claimed = new Set();
+    let improved = false;
+    const lanes = new Set();
+    const lane = async () => {
       while (this.live(state)) {
         const current = await this.engine.load(id);
-        const nodeId = improvementTargets(current, scope, exclude).find((t) => !tried.has(t));
-        if (!nodeId) break;
+        const nodeId = improvementTargets(current, state.scope ?? [], state.exclude ?? []).find((t) => !tried.has(t) && !claimed.has(t));
+        if (!nodeId) return;
         tried.add(nodeId);
-        const outcome = await this.trial(id, nodeId, best, state);
-        if (outcome.kept) {
-          best = outcome.score;
-          improved = true;
+        claimed.add(nodeId);
+        try {
+          if ((await this.trial(id, nodeId, state)).kept) improved = true;
+        } finally {
+          claimed.delete(nodeId);
         }
       }
-      quiet = improved ? 0 : quiet + 1;
-      await this.record(id, { passes: ((await this.engine.load(id)).improve?.passes ?? 0) + 1, quietPasses: quiet });
-    }
-    await this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
+    };
+    const spawn = () => {
+      const running = lane().finally(() => lanes.delete(running));
+      lanes.add(running);
+    };
+    for (let i = 0; i < this.engine.lanesFor(id); i++) spawn();
+    state.spawn = () => {
+      if (lanes.size && lanes.size < this.engine.lanesFor(id)) spawn();
+    };
+    while (lanes.size) await Promise.race(lanes);
+    return improved;
+  }
+
+  join(id) {
+    const state = this.active.get(id);
+    const joined = this.engine.join(id);
+    state?.spawn?.();
+    return joined;
   }
 
   async propose(project, nodeId, best) {
@@ -338,82 +369,91 @@ export class ProjectImprover {
     return reply.data ?? {};
   }
 
-  async trial(id, nodeId, best, state) {
-    const before = await this.engine.load(id);
-    state.before = before;
-    const base = { at: new Date(this.now()).toISOString(), nodeId, before: best.score };
+  async trial(id, nodeId, state) {
+    const snapshot = structuredClone(await this.engine.load(id));
+    const base = { at: new Date(this.now()).toISOString(), nodeId, before: state.best.score };
+    const note = (trial) => state.lock.run(() => this.record(id, {}, trial));
     try {
-      const variant = await this.propose(before, nodeId, best);
+      const variant = await this.propose(snapshot, nodeId, state.best);
       const change = String(variant.change ?? 'variant').slice(0, 240);
-      const project = structuredClone(before);
+      const project = structuredClone(snapshot);
       if (this.stopped(state)) return { kept: false };
       const touched = applyVariant(project, nodeId, variant);
       const removed = touched.filter((t) => !project.nodes.some((n) => n.id === t));
       if (removed.length) base.removedPieceId = removed.join(', ');
       if (!touched.length) {
-        await this.record(id, {}, { ...base, change, outcome: 'no-change', score: best.score });
+        await note({ ...base, change, outcome: 'no-change', score: state.best.score });
         return { kept: false };
       }
-      const oldNode = before.nodes.find((n) => n.id === nodeId);
+      const oldNode = snapshot.nodes.find((n) => n.id === nodeId);
       for (const t of touched) if (project.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(project, t);
-      if (nodeId !== ROOT_ID && oldNode && isLeaf(project.nodes, project.nodes.find((n) => n.id === nodeId))) {
+      const researched = nodeId !== ROOT_ID && oldNode && isLeaf(project.nodes, project.nodes.find((n) => n.id === nodeId));
+      if (researched) {
         const node = project.nodes.find((n) => n.id === nodeId);
         await this.engine.researchLeaf(project, node);
         if (this.stopped(state)) {
-          await this.restore(id, before);
-          await this.record(id, {}, { ...base, change, outcome: 'reverted-stopped', score: best.score });
+          await note({ ...base, change, outcome: 'reverted-stopped', score: state.best.score });
           return { kept: false };
         }
         if ((GRADE_RANK[node.status] ?? 0) < (GRADE_RANK[oldNode.status] ?? 0)) {
-          await this.restore(id, before);
-          await this.record(id, {}, { ...base, change, outcome: 'reverted-piece', score: best.score, detail: `${nodeId} fell from ${oldNode.status} to ${node.status}` });
+          await note({ ...base, change, outcome: 'reverted-piece', score: state.best.score, detail: `${nodeId} fell from ${oldNode.status} to ${node.status}` });
           return { kept: false };
         }
-        const broken = regressions(before, project).filter((k) => k.startsWith(`${nodeId}/`));
+        const broken = regressions(snapshot, project).filter((k) => k.startsWith(`${nodeId}/`));
         if (broken.length) {
-          await this.restore(id, before);
-          await this.record(id, {}, { ...base, change, outcome: 'reverted-regression', score: best.score, detail: `breaks passing check(s): ${broken.join(', ')}` });
+          await note({ ...base, change, outcome: 'reverted-regression', score: state.best.score, detail: `breaks passing check(s): ${broken.join(', ')}` });
           return { kept: false };
         }
       }
-      if (this.stopped(state)) {
-        await this.restore(id, before);
-        await this.record(id, {}, { ...base, change, outcome: 'reverted-stopped', score: best.score });
-        return { kept: false };
-      }
-      const current = await this.engine.load(id);
-      await this.engine.store.save({ ...project, chats: current.chats });
+      return await state.lock.run(() => this.commit(id, { snapshot, project, touched, removed, researched, nodeId, base, change }, state));
+    } catch (error) {
+      await note({ ...base, change: 'trial failed', outcome: 'error', score: state.best.score, detail: error.message.slice(0, 200) });
+      if (QUOTA_ERROR.test(error.message) && this.live(state)) await this.sleep(Math.min(QUOTA_PAUSE_MS, Math.max(0, state.deadline - this.now())));
+      return { kept: false };
+    }
+  }
+
+  async commit(id, { snapshot, project, touched, removed, researched, nodeId, base, change }, state) {
+    const best = state.best;
+    const current = await this.engine.load(id);
+    const before = structuredClone(current);
+    const reject = async (outcome, detail, score = best.score) => {
+      await this.restore(id, before);
+      await this.record(id, {}, { ...base, before: best.score, change, outcome, score, ...(detail ? { detail } : {}) });
+      return { kept: false };
+    };
+    if (this.stopped(state)) {
+      await this.record(id, {}, { ...base, change, outcome: 'reverted-stopped', score: best.score });
+      return { kept: false };
+    }
+    const conflict = trialConflict(snapshot, current, project, touched);
+    if (conflict) {
+      await this.record(id, {}, { ...base, change, outcome: 'conflict', score: best.score, detail: `${conflict}; tried again in the next pass` });
+      return { kept: false };
+    }
+    state.before = before;
+    try {
+      const merged = mergeTrial(current, snapshot, project, touched);
+      for (const t of touched) if (merged.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(merged, t);
+      if (researched) merged.nodes[merged.nodes.findIndex((n) => n.id === nodeId)] = structuredClone(project.nodes.find((n) => n.id === nodeId));
+      await this.engine.store.save({ ...merged, chats: current.chats, log: current.log, improve: current.improve });
       const after = await this.engine.run(id);
-      if (this.stopped(state) || after.phase === 'cancelled') {
-        await this.restore(id, before);
-        await this.record(id, {}, { ...base, change, outcome: 'reverted-stopped', score: best.score });
-        return { kept: false };
-      }
+      if (this.stopped(state) || after.phase === 'cancelled') return await reject('reverted-stopped');
       const broken = regressions(before, after);
-      if (broken.length) {
-        await this.restore(id, before);
-        await this.record(id, {}, { ...base, change, outcome: 'reverted-regression', score: best.score, detail: `breaks passing check(s): ${broken.join(', ')}` });
-        return { kept: false };
-      }
-      if (removed.length && !allChecksPass(before, after)) {
-        await this.restore(id, before);
-        await this.record(id, {}, { ...base, change, outcome: 'reverted-regression', score: best.score, detail: `removing ${base.removedPieceId} needs every regression check to pass` });
-        return { kept: false };
-      }
+      if (broken.length) return await reject('reverted-regression', `breaks passing check(s): ${broken.join(', ')}`);
+      if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`);
       const score = (state.measure ?? projectScore)(after);
       if (acceptsTrial(best.score, score.score, removed)) {
         for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
-        await this.record(id, { best: score.score }, { ...base, change, outcome: 'kept', score: score.score });
+        state.best = score;
+        await this.record(id, { best: score.score }, { ...base, before: best.score, change, outcome: 'kept', score: score.score });
         return { kept: true, score };
       }
-      await this.restore(id, before);
-      await this.record(id, {}, { ...base, change, outcome: 'reverted-whole', score: score.score });
-      return { kept: false };
+      return await reject('reverted-whole', '', score.score);
     } catch (error) {
-      await this.restore(id, before);
-      await this.record(id, {}, { ...base, change: 'trial failed', outcome: 'error', score: best.score, detail: error.message.slice(0, 200) });
-      if (QUOTA_ERROR.test(error.message) && this.live(state)) await this.sleep(Math.min(QUOTA_PAUSE_MS, Math.max(0, state.deadline - this.now())));
-      return { kept: false };
+      return await reject('error', error.message.slice(0, 200));
+    } finally {
+      state.before = null;
     }
   }
 }
