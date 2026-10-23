@@ -202,9 +202,43 @@ describe('ModelRouter local context size', () => {
     };
     const local = await new OpenAICompatibleProvider({ preset, fetchImpl: fetchImpl as never }).discover();
     expect(local.maxPromptTokens).toBe(1096);
+    expect(local.maxConcurrent).toBe(2);
     const router = new ModelRouter({ providers: [local] });
     expect(router.available({ tier: 'fast', tokens: 1000 }).map((p: { id: string }) => p.id)).toEqual(['llamacpp']);
     expect(router.available({ tier: 'fast', tokens: 7000 })).toEqual([]);
+  });
+});
+
+describe('ModelRouter speed and capacity', () => {
+  const provider = (id: string, extra: object = {}) => ({ id, ready: true, describe: () => ({}), selected: { fast: `${id}-m` }, chat: async () => ({ content: '{"ok":true}', model: `${id}-m` }), ...extra });
+
+  it('puts a provider 4x slower than the fastest (and over 20 s) behind the faster ones', () => {
+    const router = new ModelRouter({ providers: [provider('pollinations'), provider('gemini'), provider('groq')] });
+    for (let i = 0; i < 3; i++) {
+      router.record({ provider: 'pollinations', tier: 'fast', ok: true, ms: 51000 });
+      router.record({ provider: 'gemini', tier: 'fast', ok: true, ms: 2000 });
+      router.record({ provider: 'groq', tier: 'fast', ok: true, ms: 15000 });
+    }
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['gemini', 'groq', 'pollinations']);
+  });
+
+  it('keeps the order while too few calls are timed', () => {
+    const router = new ModelRouter({ providers: [provider('pollinations'), provider('gemini')] });
+    router.record({ provider: 'pollinations', tier: 'fast', ok: true, ms: 90000 });
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['pollinations', 'gemini']);
+  });
+
+  it('sends work past a local server whose slots are all busy, and back once one frees up', async () => {
+    let release = () => {};
+    const busy = provider('llamacpp', { maxConcurrent: 1, chat: () => new Promise((r) => { release = () => r({ content: '{"ok":true}', model: 'q' }); }) });
+    const router = new ModelRouter({ providers: [busy, provider('cerebras')] });
+    const first = router.complete({ purpose: 'critique', tier: 'fast', messages: [{ role: 'user', content: 'x' }] });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['cerebras', 'llamacpp']);
+    expect((await router.complete({ purpose: 'critique', tier: 'fast', messages: [{ role: 'user', content: 'x' }] })).model).toBe('cerebras-m');
+    release();
+    await first;
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['llamacpp', 'cerebras']);
   });
 });
 

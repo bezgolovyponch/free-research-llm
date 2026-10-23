@@ -333,3 +333,10 @@ Asked: why the piece chat talks about a kiosk in Brno; e-bike lanes are not requ
 - Glamping template: cheap raw land that needs work is in scope; site preparation (clearing, levelling or terracing, access, water, power, drainage) is its own driver; plots are judged by all-in cost (purchase + preparation) and suitability after the work.
 - Research hints: a per-research soft-guidance field sent to every prompt, editable in the header while it runs.
 - The live research's tree is updated accordingly (see the next entry in the log of the research itself).
+
+## Session 2026-10-23 · productivity of the loop and router
+
+Asked: research how to make the engine produce valid results faster, apply only changes that surely help, and keep them for later researches.
+
+- Measured (since lanes, 2.8 h): 55 trials, 5 kept (1.8/h); 25 undone after a full re-roll; 3 pieces took 25 trials with 0 kept; reviews 164 of ~250 model-minutes, mostly Pollinations (51 s) and the 1-slot local llama.cpp (402 s average, queueing).
+- Shipped: `no-gain` early exit (exact: such a trial cannot raise the score), 6 h rest for pieces with 3 futile trials, slot-aware routing for local servers, slow-provider demotion. Rules and evidence: PROTOCOLS.md §4h.

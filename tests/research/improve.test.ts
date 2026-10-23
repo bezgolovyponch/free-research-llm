@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { ProjectImprover, applyVariant, distinctResearches, improvementTargets, inScope, projectScore, scopeScore } from '../../src/research/improve.mjs';
+import { ProjectImprover, REST_AFTER_FUTILE, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, projectScore, restingPieces, scopeScore } from '../../src/research/improve.mjs';
 import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -85,13 +85,49 @@ describe('ProjectImprover', () => {
     expect(saved.improve.stopReason).toBe('time limit reached');
     expect(saved.improve.baseline).toBeGreaterThan(0);
     expect(saved.improve.trials.length).toBeGreaterThan(0);
-    expect(new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome))).toEqual(new Set(['no-change', 'reverted-whole']));
+    expect(new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome))).toEqual(new Set(['no-change', 'no-gain']));
     expect(saved.improve.best).toBe(saved.improve.baseline);
     expect(saved.log.some((l: { type: string }) => l.type === 'improve-state')).toBe(true);
     expect(checkpoints.length).toBeGreaterThan(1);
     expect(checkpoints[0].loopHoursLeft).toBeGreaterThan(0);
     expect(checkpoints[0].loopHoursLeft).toBeLessThanOrEqual(0.05);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
+describe('cannotGain', () => {
+  const node = (status: string, items: Array<{ url: string; value?: number }> = [], specs: Array<{ last: { passed: boolean } | null }> = []) => ({ status, finding: { items }, specs });
+  it('is true only when the piece kept its grade, found no new link or value, and has no failing check', () => {
+    expect(cannotGain(node('supported', [{ url: 'a', value: 1 }]), node('supported', [{ url: 'a', value: 1 }]))).toBe(true);
+    expect(cannotGain(node('supported'), node('supported'))).toBe(true);
+    expect(cannotGain(node('supported'), node('verified'))).toBe(false);
+    expect(cannotGain(node('supported', [{ url: 'a' }]), node('supported', [{ url: 'a' }, { url: 'b' }]))).toBe(false);
+    expect(cannotGain(node('supported', [{ url: 'a', value: 30000 }]), node('supported', [{ url: 'a', value: 18000 }]))).toBe(false);
+    expect(cannotGain(node('supported', [], [{ last: { passed: false } }]), node('supported'))).toBe(false);
+    expect(cannotGain(node('weak'), node('unsupported'))).toBe(true);
+  });
+});
+
+describe('restingPieces', () => {
+  it('rests a piece after 3 futile trials in a row for 6 hours; a kept trial or time brings it back', () => {
+    const t0 = Date.parse('2026-10-23T10:00:00Z');
+    const at = (min: number) => new Date(t0 + min * 60000).toISOString();
+    const trials = [
+      { nodeId: 'D4.1', outcome: 'reverted-whole', at: at(0) },
+      { nodeId: 'D4.1', outcome: 'conflict', at: at(1) },
+      { nodeId: 'D4.1', outcome: 'reverted-piece', at: at(2) },
+      { nodeId: 'D4.1', outcome: 'no-gain', at: at(3) },
+      { nodeId: 'D8.1', outcome: 'reverted-whole', at: at(4) },
+      { nodeId: 'D8.1', outcome: 'reverted-whole', at: at(5) },
+      { nodeId: 'D8.1', outcome: 'kept', at: at(6) },
+      { nodeId: 'D8.1', outcome: 'reverted-whole', at: at(7) },
+      { nodeId: 'Q', outcome: 'error', at: at(8) },
+      { nodeId: 'Q', outcome: 'error', at: at(9) },
+      { nodeId: 'Q', outcome: 'error', at: at(10) },
+    ];
+    expect(REST_AFTER_FUTILE).toBe(3);
+    expect([...restingPieces(trials, t0 + 60 * 60000)]).toEqual(['D4.1']);
+    expect([...restingPieces(trials, t0 + (REST_HOURS * 60 + 4) * 60000)]).toEqual([]);
   });
 });
 
@@ -129,11 +165,11 @@ describe('ProjectImprover in parallel lanes', () => {
     const saved = await engine.load(project.id);
     expect(proposePeak).toBeGreaterThanOrEqual(2);
     expect(proposePeak).toBeLessThanOrEqual(3);
-    expect(runPeak).toBe(1);
+    expect(runPeak).toBeLessThanOrEqual(1);
     expect(saved.improve.active).toBe(false);
     expect(saved.nodes.length).toBe(nodeCount);
     const outcomes = new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome));
-    for (const o of outcomes) expect(['kept', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'conflict']).toContain(o);
+    for (const o of outcomes) expect(['kept', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'conflict']).toContain(o);
     expect(saved.improve.best).toBeGreaterThanOrEqual(saved.improve.baseline);
     expect(engine.lanesFor(project.id)).toBe(2);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });

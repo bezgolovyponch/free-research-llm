@@ -5,6 +5,9 @@ import { MAX_PROMPT_TOKENS, familyOf } from './ranking.mjs';
 export class NoModelAvailableError extends Error {}
 
 const DEFAULT_COOLDOWN_MS = 60000;
+export const SLOW_FACTOR = 4;
+export const SLOW_FLOOR_MS = 20000;
+const MIN_TIMED_CALLS = 3;
 const BAD_KEY_MS = 6 * 3600 * 1000;
 const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
@@ -30,6 +33,7 @@ export class ModelRouter {
     this.sleep = sleep;
     this.onLedger = onLedger;
     this.cooldownUntil = new Map();
+    this.inflight = new Map();
     this.cooldownReason = new Map();
     this.ledger = [];
     this.calls = 0;
@@ -59,15 +63,35 @@ export class ModelRouter {
     const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
     const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
-    const usable = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
+    const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
+    const usable = this.demoteSlow(this.demoteFull(sized), tier);
     if (!avoid) return usable;
     const author = this.providers.find((p) => p.id === avoid);
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
     const authorFamily = author ? family(author) : null;
     const other = usable.filter((p) => p.id !== avoid && family(p) !== authorFamily);
     const sameFamily = usable.filter((p) => p.id !== avoid && family(p) === authorFamily);
-    const preferred = [...other, ...sameFamily];
+    const preferred = [...this.demoteSlow(other, tier), ...this.demoteSlow(sameFamily, tier)];
     return preferred.length ? [...preferred, ...usable.filter((p) => p.id === avoid)] : usable;
+  }
+
+  demoteFull(providers) {
+    const full = (p) => p.maxConcurrent > 0 && (this.inflight.get(p.id) ?? 0) >= p.maxConcurrent;
+    return [...providers.filter((p) => !full(p)), ...providers.filter(full)];
+  }
+
+  medianMs(providerId, tier) {
+    const times = this.ledger.filter((r) => r.ok && r.provider === providerId && (!tier || r.tier === tier) && r.ms > 0).slice(-20).map((r) => r.ms).sort((a, b) => a - b);
+    return times.length >= MIN_TIMED_CALLS ? times[Math.floor(times.length / 2)] : null;
+  }
+
+  demoteSlow(providers, tier) {
+    const timed = providers.map((p) => [p, this.medianMs(p.id, tier)]);
+    const known = timed.map(([, ms]) => ms).filter((ms) => ms !== null);
+    if (!known.length) return providers;
+    const fastest = Math.min(...known);
+    const slow = (ms) => ms !== null && ms >= SLOW_FLOOR_MS && ms >= fastest * SLOW_FACTOR;
+    return [...timed.filter(([, ms]) => !slow(ms)), ...timed.filter(([, ms]) => slow(ms))].map(([p]) => p);
   }
 
   record(entry) {
@@ -141,6 +165,7 @@ export class ModelRouter {
       for (let repair = 0; repair < 2; repair++) {
         const started = this.now();
         const model = provider.selected?.[tier] ?? provider.selected?.fast;
+        this.inflight.set(provider.id, (this.inflight.get(provider.id) ?? 0) + 1);
         try {
           const reply = await provider.chat({ messages: attemptMessages, tier, json, temperature });
           this.calls++;
@@ -156,6 +181,8 @@ export class ModelRouter {
             break;
           }
           attemptMessages = [...messages, { role: 'user', content: REPAIR_INSTRUCTION }];
+        } finally {
+          this.inflight.set(provider.id, Math.max(0, (this.inflight.get(provider.id) ?? 1) - 1));
         }
       }
     }

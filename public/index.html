@@ -818,7 +818,7 @@ function timeLeft(ms){
   return h>=48?Math.floor(h/24)+" d "+(h%24)+" h":h?h+" h "+(m%60)+" min":m+" min";
 }
 function agoText(at){const m=Math.max(0,Math.round((Date.now()-new Date(at))/60000));return m<1?"just now":m<60?m+" min ago":Math.floor(m/60)+" h ago";}
-const OUTCOME_TEXT={kept:"kept","reverted-whole":"no gain, undone","reverted-piece":"piece got worse, undone","reverted-regression":"broke a check, undone","no-change":"no change",conflict:"collided, retried",error:"failed","reverted-stopped":"stopped"};
+const OUTCOME_TEXT={kept:"kept","reverted-whole":"no gain, undone","reverted-piece":"piece got worse, undone","reverted-regression":"broke a check, undone","no-change":"no change","no-gain":"nothing new, re-roll skipped",conflict:"collided, retried",error:"failed","reverted-stopped":"stopped"};
 function renderLoopStatus(){
   const p=STATE.project;const box=$("loopStatus");if(!p||!box)return;
   const looping=isLooping(p);const running=RUNNING_PHASES.includes(p.phase);

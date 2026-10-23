@@ -91,6 +91,15 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 - A local server never gets a prompt bigger than its context: the provider reads it from llama-server's `/props`.
 - The other PC joins with one PowerShell line from the share panel (`/pc-setup.ps1`, open to research-link holders): it downloads llama.cpp b11739 (CUDA 12.4 for NVIDIA, Vulkan otherwise), picks Qwen3-14B with 11 GB+ graphics memory or Qwen3-4B otherwise, and serves it on port 8090; the app connects it within a minute.
 
+## 4h. Productivity rules (measured 2026-10-23, 55 trials and 520 model calls over 2.8 h)
+
+| Rule | Why (measured) | Code |
+|---|---|---|
+| A trial whose piece kept its grade, found no new (link, value) pair and has no failing check ends as `no-gain` without re-rolling the whole research | the score depends only on grades, the verdict that follows from them, and the expected-result check on delivered items, so it cannot rise; 25 of 55 trials re-rolled the research (memo call ~35 s, up to 15 min) only to be undone | `cannotGain` |
+| A piece with 3 futile trials in a row rests for 6 h, unless no other piece is left | 3 pieces took 25 of 55 trials with 0 kept; early stopping of unpromising arms as in Successive Halving / Hyperband (Li et al., arXiv:1603.06560) | `restingPieces` |
+| A local server whose slots are all busy goes behind the free providers | requests queued on the 1-slot llama.cpp averaged 402 s (max 35 min) for reviews | `ModelRouter.demoteFull`, `maxConcurrent` from `/props` |
+| A provider at least 4× slower than the fastest option and over 20 s (median of its last 20 calls) goes behind faster ones, inside the different-family rule for reviews | reviews on Pollinations averaged 51 s against 1–4 s on Groq, Cerebras and Gemini; reviews were 164 of ~250 model-minutes | `ModelRouter.demoteSlow` |
+
 ## 4e. Criteria grounding
 
 A model may propose expected-result checks (`mustMention`, item count, value range) and piece checks, but code keeps only what the user's own text states (`src/research/grounding.mjs`): a must-mention word only when it is quoted or follows "mention / contain / include / name"; a count or range only when the number appears in the expected result, question or constraints. Dropped criteria are logged as "not enforced (the model inferred it, your text does not ask for it)". Piece checks are judged against the piece's desired output, where a word the user literally wrote counts as stated. Checks stored before this rule are re-grounded when a run starts and when a loop starts; a loop re-scores the research before measuring its baseline, so a dropped criterion is never counted as a loop gain. Checks the user sets by hand (**Edit expected result**) are kept as written.

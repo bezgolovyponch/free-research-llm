@@ -161,6 +161,8 @@ export class OpenAICompatibleProvider {
       const props = res.ok ? await res.json() : null;
       const slot = Number(props?.default_generation_settings?.n_ctx);
       if (slot > 0) this.maxPromptTokens = Math.max(512, slot - LOCAL_OUTPUT_RESERVE);
+      const slots = Number(props?.total_slots);
+      if (slots > 0) this.maxConcurrent = slots;
     } catch {
       this.maxPromptTokens = this.maxPromptTokens ?? null;
     }

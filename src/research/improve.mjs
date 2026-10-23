@@ -83,6 +83,33 @@ export function acceptsTrial(before, after, removed = []) {
   return after > before + (removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
 }
 
+const FUTILE = new Set(['reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain']);
+export const REST_AFTER_FUTILE = 3;
+export const REST_HOURS = 6;
+
+export function restingPieces(trials = [], now = Date.now()) {
+  const streak = new Map();
+  const lastAt = new Map();
+  for (const t of trials) {
+    if (t.outcome === 'kept') streak.set(t.nodeId, 0);
+    else if (FUTILE.has(t.outcome)) streak.set(t.nodeId, (streak.get(t.nodeId) ?? 0) + 1);
+    if (FUTILE.has(t.outcome) || t.outcome === 'kept') lastAt.set(t.nodeId, Date.parse(t.at));
+  }
+  return new Set([...streak].filter(([id, n]) => n >= REST_AFTER_FUTILE && now - (lastAt.get(id) ?? 0) < REST_HOURS * 3600000).map(([id]) => id));
+}
+
+function itemKeys(node) {
+  return new Set((node?.finding?.items ?? []).map((i) => `${i.url}|${i.value ?? ''}`));
+}
+
+export function cannotGain(oldNode, newNode) {
+  if (!oldNode || !newNode) return false;
+  if ((GRADE_RANK[newNode.status] ?? 0) > (GRADE_RANK[oldNode.status] ?? 0)) return false;
+  if ((oldNode.specs ?? []).some((spec) => !spec.last?.passed)) return false;
+  const before = itemKeys(oldNode);
+  return [...itemKeys(newNode)].every((k) => before.has(k));
+}
+
 function canGain(project, node) {
   if (node.status !== 'verified') return true;
   if ((node.specs ?? []).some((spec) => !spec.last?.passed)) return true;
@@ -351,7 +378,9 @@ export class ProjectImprover {
     const lane = async () => {
       while (this.live(state)) {
         const current = await this.engine.load(id);
-        const nodeId = improvementTargets(current, state.scope ?? [], state.exclude ?? []).find((t) => !tried.has(t) && !claimed.has(t));
+        const targets = improvementTargets(current, state.scope ?? [], state.exclude ?? []).filter((t) => !tried.has(t) && !claimed.has(t));
+        const resting = restingPieces(current.improve?.trials, this.now());
+        const nodeId = targets.find((t) => !resting.has(t)) ?? (tried.size ? undefined : targets[0]);
         if (!nodeId) return;
         tried.add(nodeId);
         claimed.add(nodeId);
@@ -421,6 +450,10 @@ export class ProjectImprover {
         const broken = regressions(snapshot, project).filter((k) => k.startsWith(`${nodeId}/`));
         if (broken.length) {
           await note({ ...base, change, outcome: 'reverted-regression', score: state.best.score, detail: `breaks passing check(s): ${broken.join(', ')}` });
+          return { kept: false };
+        }
+        if (touched.length === 1 && !removed.length && cannotGain(oldNode, node)) {
+          await note({ ...base, change, outcome: 'no-gain', score: state.best.score, detail: `${nodeId} kept its grade (${node.status}) and found nothing new, so the score could not rise; the whole research was not re-rolled` });
           return { kept: false };
         }
       }
