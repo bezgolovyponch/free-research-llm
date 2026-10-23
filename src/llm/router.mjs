@@ -8,6 +8,9 @@ const DEFAULT_COOLDOWN_MS = 60000;
 export const SLOW_FACTOR = 4;
 export const SLOW_FLOOR_MS = 20000;
 const MIN_TIMED_CALLS = 3;
+export const TIMEOUTS_BEFORE_BENCH = 2;
+export const TIMEOUT_BENCH_MS = 10 * 60 * 1000;
+const TIMED_OUT = /unreachable: timed out/;
 const BAD_KEY_MS = 6 * 3600 * 1000;
 const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
@@ -34,6 +37,7 @@ export class ModelRouter {
     this.onLedger = onLedger;
     this.cooldownUntil = new Map();
     this.inflight = new Map();
+    this.timeoutStreak = new Map();
     this.cooldownReason = new Map();
     this.ledger = [];
     this.calls = 0;
@@ -75,13 +79,27 @@ export class ModelRouter {
     return preferred.length ? [...preferred, ...usable.filter((p) => p.id === avoid)] : usable;
   }
 
+  benchSlow(provider, error) {
+    if (!TIMED_OUT.test(error.message)) {
+      this.timeoutStreak.delete(provider.id);
+      return false;
+    }
+    const streak = (this.timeoutStreak.get(provider.id) ?? 0) + 1;
+    this.timeoutStreak.set(provider.id, streak);
+    if (streak < TIMEOUTS_BEFORE_BENCH) return false;
+    this.cooldownUntil.set(provider.id, this.now() + TIMEOUT_BENCH_MS);
+    this.cooldownReason.set(provider.id, `too slow: ${streak} timeouts in a row; tried again in 10 min`);
+    this.timeoutStreak.set(provider.id, 0);
+    return true;
+  }
+
   demoteFull(providers) {
     const full = (p) => p.maxConcurrent > 0 && (this.inflight.get(p.id) ?? 0) >= p.maxConcurrent;
     return [...providers.filter((p) => !full(p)), ...providers.filter(full)];
   }
 
   medianMs(providerId, tier) {
-    const times = this.ledger.filter((r) => r.ok && r.provider === providerId && (!tier || r.tier === tier) && r.ms > 0).slice(-20).map((r) => r.ms).sort((a, b) => a - b);
+    const times = this.ledger.filter((r) => (r.ok || TIMED_OUT.test(r.error ?? '')) && r.provider === providerId && (!tier || r.tier === tier) && r.ms > 0).slice(-20).map((r) => r.ms).sort((a, b) => a - b);
     return times.length >= MIN_TIMED_CALLS ? times[Math.floor(times.length / 2)] : null;
   }
 
@@ -171,12 +189,14 @@ export class ModelRouter {
           this.calls++;
           const data = json ? extractJson(reply.content) : null;
           this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms: this.now() - started, tokens: reply.usage?.total_tokens ?? null });
+          this.timeoutStreak.delete(provider.id);
           return { ...reply, data };
         } catch (error) {
           this.record({ purpose, tier, provider: provider.id, ok: false, ms: this.now() - started, error: error.message.slice(0, 200) });
           errors.push(error.message);
           if (error instanceof ProviderError) {
             if (this.switchModel(provider, model, error)) break;
+            if (this.benchSlow(provider, error)) break;
             if (error.retryable || [401, 402, 403].includes(error.status)) this.coolDown(provider, error);
             break;
           }

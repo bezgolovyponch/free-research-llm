@@ -242,3 +242,26 @@ describe('ModelRouter speed and capacity', () => {
   });
 });
 
+describe('ModelRouter timeouts', () => {
+  it('benches a provider for 10 minutes after 2 timeouts in a row, and counts timeouts as slow', async () => {
+    const { ProviderError } = await import('../../src/llm/provider.mjs');
+    let now = 1000000;
+    const slow = { id: 'llamacpp-lan', ready: true, describe: () => ({}), selected: { fast: 'pc' }, chat: async () => { throw new ProviderError('llamacpp-lan unreachable: timed out', { status: 0, provider: 'llamacpp-lan' }); } };
+    const fast = { id: 'groq', ready: true, describe: () => ({}), selected: { fast: 'g' }, chat: async () => ({ content: '{"ok":true}', model: 'g' }) };
+    const router = new ModelRouter({ providers: [slow, fast], now: () => now });
+    for (let i = 0; i < 3; i++) router.record({ provider: 'groq', tier: 'fast', ok: true, ms: 1000 });
+    expect((await router.complete({ purpose: 'critique', tier: 'fast', messages: [{ role: 'user', content: 'x' }] })).model).toBe('g');
+    expect(router.cooldownReason.get('llamacpp-lan') ?? '').not.toMatch(/too slow/);
+    expect(router.timeoutStreak.get('llamacpp-lan')).toBe(1);
+    for (let i = 0; i < 3; i++) router.record({ provider: 'llamacpp-lan', tier: 'fast', ok: false, ms: 120000, error: 'llamacpp-lan unreachable: timed out' });
+    expect(router.medianMs('llamacpp-lan', 'fast')).toBe(120000);
+    expect(router.available({ tier: 'fast' })[0].id).toBe('groq');
+    expect(router.benchSlow(slow, new ProviderError('llamacpp-lan unreachable: timed out', { status: 0 }))).toBe(true);
+    expect(router.cooldownUntil.get('llamacpp-lan')).toBe(now + 10 * 60 * 1000);
+    expect(router.cooldownReason.get('llamacpp-lan')).toMatch(/too slow: 2 timeouts in a row/);
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['groq']);
+    now += 10 * 60 * 1000 + 1;
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toContain('llamacpp-lan');
+  });
+});
+
