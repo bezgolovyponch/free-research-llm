@@ -128,7 +128,8 @@ describe('quotaWindow', () => {
     const minute = `[{"error":{"code":429,"message":"You exceeded your current quota ${pad}","details":[{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier"},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"37s"}]}}]`;
     const day = `[{"error":{"code":429,"message":"You exceeded your current quota ${pad}","details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}]`;
     expect(quotaWindow(minute)).toBe(' [quota window: per minute]');
-    expect(quotaWindow(day)).toBe(' [quota window: per day]');
+    expect(quotaWindow(day)).toBe(' [quota window: per day, per model]');
+    expect(quotaWindow('{"quotaId":"GenerateRequestsPerDayPerProject-FreeTier"}')).toBe(' [quota window: per day]');
     expect(quotaWindow('{"retryDelay": "12.5s"}')).toBe(' [retry after 13s]');
     expect(quotaWindow('plain error')).toBe('');
     expect(retryAfterFromText(minute)).toBe(37000);

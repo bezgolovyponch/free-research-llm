@@ -9,7 +9,7 @@ describe('RemoteVisits', () => {
     const notes: string[] = [];
     const visits = new RemoteVisits({ note: (m: string) => notes.push(m), now: () => now, quietMs: 1000 });
     expect(visits.record(req('::ffff:192.168.5.30'), '/', { allowed: false, reason: 'missing or wrong access token' })).toBe(true);
-    expect(visits.record(req('::ffff:192.168.5.30'), '/api/status', { allowed: false, reason: 'missing or wrong access token' })).toBe(false);
+    expect(visits.record(req('::ffff:192.168.5.30'), '/', { allowed: false, reason: 'missing or wrong access token' })).toBe(false);
     expect(visits.record(req('192.168.5.30'), '/', { allowed: true, share: 'p1' })).toBe(true);
     expect(visits.record(req('192.168.5.31'), '/', { allowed: true })).toBe(true);
     now = 1500;
@@ -21,6 +21,19 @@ describe('RemoteVisits', () => {
       'other device 192.168.5.30 opened / · research link (p1)',
     ]);
     expect(visits.seen.size).toBe(1);
+  });
+
+  it('notes every refused page separately and again after 30 seconds, so a failing device is visible', () => {
+    let now = 0;
+    const notes: string[] = [];
+    const visits = new RemoteVisits({ note: (m: string) => notes.push(m), now: () => now, quietMs: 600000 });
+    const refused = { allowed: false, reason: 'this research link was turned off or replaced' };
+    expect(visits.record(req('192.168.5.26'), '/', refused)).toBe(true);
+    expect(visits.record(req('192.168.5.26'), '/api/status', refused)).toBe(true);
+    expect(visits.record(req('192.168.5.26'), '/', refused)).toBe(false);
+    now = 31000;
+    expect(visits.record(req('192.168.5.26'), '/', refused)).toBe(true);
+    expect(notes).toHaveLength(3);
   });
 
   it('has a reachability page that holds no app data', () => {

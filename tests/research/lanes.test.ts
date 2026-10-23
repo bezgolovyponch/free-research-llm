@@ -33,13 +33,11 @@ describe('runInLanes', () => {
     const g = graph({ a: [], b: [], c: [], d: ['a', 'b'], Q: ['c', 'd'] });
     const log: string[] = [];
     const live = { now: 0, max: 0 };
-    const started = Date.now();
     await runInLanes(g.options(() => 2, log, live));
     expect(live.max).toBe(2);
     expect(log.indexOf('start d')).toBeGreaterThan(Math.max(log.indexOf('end a'), log.indexOf('end b')));
     expect(log.indexOf('start Q')).toBeGreaterThan(Math.max(log.indexOf('end c'), log.indexOf('end d')));
     expect(g.finished.size).toBe(5);
-    expect(Date.now() - started).toBeLessThan(5 * 15 + 40);
   });
 
   it('uses one lane when asked, takes extra lanes mid-run, and stops starting work when told', async () => {

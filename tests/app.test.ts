@@ -23,6 +23,17 @@ describe('App composition', () => {
     expect(JSON.stringify(app.status())).not.toContain('session-key');
   });
 
+  it('uses a llama.cpp server on another PC when its address is saved, and leaves it off otherwise', async () => {
+    const fetchImpl = fakeFetch([[/192\.168\.5\.26:8090\/v1\/models$/, () => jsonResponse({ data: [{ id: 'qwen3-14b' }] })]]);
+    const on = new ProviderFactory({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', LLAMACPP_LAN_URL: 'http://192.168.5.26:8090/v1' }, fetchImpl });
+    const [lan] = await on.buildAll();
+    expect(lan.id).toBe('llamacpp-lan');
+    expect(lan.state).toBe('ready');
+    expect(lan.selected.fast).toBe('qwen3-14b');
+    const off = new ProviderFactory({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan' }, fetchImpl });
+    expect((await off.buildAll())[0].state).not.toBe('ready');
+  });
+
   it('enables search backends from the environment, Wikipedia by default', () => {
     expect(buildSearch({ env: {}, fetchImpl: fetch }).describe().backends).toEqual(['wikipedia']);
     expect(buildSearch({ env: { TAVILY_API_KEY: 't', BRAVE_API_KEY: 'b', FRL_WIKIPEDIA: '0' }, fetchImpl: fetch }).describe().backends).toEqual(['tavily', 'brave']);

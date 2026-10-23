@@ -77,9 +77,16 @@ function sharedStatus(status, projectId) {
   return { ...status, ledger: [], calls: 0, improving: status.improving.filter((id) => id === projectId), improveAll: {}, coders: [] };
 }
 
-function deny(res, reason) {
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
+
+function deny(res, reason, { address = '', research = false } = {}) {
   res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-  res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Access needed</title><body style="font:16px system-ui;padding:24px;max-width:560px"><h2>Free Research LLM</h2><p>${reason}.</p><p>On the Mac that runs the app, run <code>frl url</code> and open the link it prints.</p></body>`);
+  const next = research
+    ? 'Open the research link you were given again, copied in full: it must contain <code>?share=</code>. Close any older tab of this app first.'
+    : 'Open the research link you were given, copied in full: it must contain <code>?share=</code>. The owner gets it in the research under More → Share this research, or with <code>node src/frl.mjs share</code>.';
+  res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Access needed</title><body style="font:16px system-ui;padding:24px;max-width:560px"><h2>Free Research LLM</h2><p><b>Why:</b> ${escapeHtml(reason)}.</p><p><b>Next:</b> ${next}</p><p style="color:#666;font-size:14px">This device: ${escapeHtml(address || 'unknown')}. The owner sees this attempt in History.</p></body>`);
 }
 
 export function createServer(app, gate = new AccessGate()) {
@@ -324,7 +331,7 @@ export function createServer(app, gate = new AccessGate()) {
     }
     const access = gate.decide(req, url);
     if (!gate.isLoopback(req)) visits.record(req, url.pathname, access);
-    if (!access.allowed) return deny(res, access.reason);
+    if (!access.allowed) return deny(res, access.reason, { address: String(req.socket?.remoteAddress ?? '').replace(/^::ffff:/, ''), research: /share|research link/.test(access.reason) });
     if (access.share && !shareAllows({ method: req.method, pathname: url.pathname, projectId: access.share })) return send(res, 403, { error: 'this link opens one research only' });
     req.access = access;
     if (access.setCookie) {

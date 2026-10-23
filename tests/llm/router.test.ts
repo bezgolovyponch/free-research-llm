@@ -123,7 +123,7 @@ describe('ModelRouter route order', () => {
 });
 
 describe('ModelRouter.restoreCooldowns', () => {
-  it('keeps a provider benched after a restart when its last call ran out of credit, had a bad key or used the daily quota', () => {
+  it('keeps a provider benched after a restart only for lasting causes (no credit, bad key); a daily 429 is re-checked by the first live call', () => {
     const now = Date.parse('2026-10-23T10:00:00Z');
     const p = (id: string) => ({ id, ready: true, describe: () => ({}), chat: async () => ({}) });
     const router = new ModelRouter({ providers: [p('sambanova'), p('groq'), p('gemini'), p('cerebras'), p('old'), p('pollinations'), p('openrouter')], now: () => now });
@@ -140,7 +140,7 @@ describe('ModelRouter.restoreCooldowns', () => {
       { ts: '2026-10-23T09:56:00Z', provider: 'openrouter', ok: false, error: 'openrouter HTTP 429: Rate limit exceeded: free-models-per-day. Add 10 credits' },
       { ts: '2026-10-23T09:57:00Z', provider: 'groq', ok: false, error: 'groq HTTP 429: You exceeded your current quota, please check your plan' },
     ]);
-    expect(restored.sort()).toEqual(['gemini', 'openrouter', 'sambanova']);
+    expect(restored.sort()).toEqual(['sambanova']);
     expect(router.cooldownReason.get('sambanova')).toMatch(/daily quota or credit/);
     expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
     expect(router.cooldownUntil.has('groq')).toBe(false);
@@ -159,6 +159,35 @@ describe('ModelRouter.coolDown', () => {
     expect(router.cooldownUntil.get('gemini-day')).toBe(nextUtcMidnight(now));
     router.coolDown({ id: 'sambanova' }, new ProviderError('sambanova HTTP 402: balance_units 0', { status: 402 }));
     expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
+  });
+});
+
+describe('ModelRouter model switching', () => {
+  it('moves a provider to its next model when one model used its own daily quota or was withdrawn, and benches it only when none is left', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const preset = { id: 'gemini', label: 'g', baseURL: 'https://g.example/v1', keyEnv: 'K', prefer: { fast: ['m-lite', 'm-lite-2'], deep: ['m-big', 'm-mid'] } };
+    const calls: string[] = [];
+    const fetchImpl = async (url: string, init: { body?: string }) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'm-lite' }, { id: 'm-lite-2' }, { id: 'm-big' }, { id: 'm-mid' }] }));
+      const model = JSON.parse(init.body ?? '{}').model;
+      calls.push(model);
+      if (model === 'm-big') return new Response('{"error":{"code":429,"details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}', { status: 429 });
+      if (model === 'm-lite') return new Response('{"error":{"message":"This model models/m-lite is no longer available to new users."}}', { status: 404 });
+      if (model === 'm-mid') return new Response('{"error":{"code":429,"details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}', { status: 429 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], model }));
+    };
+    const provider = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: fetchImpl as never }).discover();
+    const router = new ModelRouter({ providers: [provider], sleep: async () => {} });
+    await expect(router.complete({ purpose: 'research', tier: 'deep', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
+    expect(provider.selected.deep).toBe('m-mid');
+    expect(router.cooldownUntil.has('gemini')).toBe(false);
+    await expect(router.complete({ purpose: 'research', tier: 'fast', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
+    expect(provider.selected.fast).toBe('m-lite-2');
+    const reply = await router.complete({ purpose: 'research', tier: 'fast', messages: [{ role: 'user', content: 'x' }] });
+    expect(reply.model).toBe('m-lite-2');
+    await expect(router.complete({ purpose: 'research', tier: 'deep', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
+    expect(provider.selected.deep).toBe('m-lite-2');
+    expect(calls.slice(0, 2)).toEqual(['m-big', 'm-lite']);
   });
 });
 

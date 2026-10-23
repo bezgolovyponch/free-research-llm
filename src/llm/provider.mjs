@@ -29,6 +29,7 @@ export function pickModel(models, preferences, freeOnly = false, { strict = fals
 
 export function quotaWindow(body) {
   const text = String(body);
+  if (/PerDay[A-Za-z]*PerModel/.test(text)) return ' [quota window: per day, per model]';
   if (/PerDay|per day|daily/i.test(text)) return ' [quota window: per day]';
   if (/PerMinute|per minute/i.test(text)) return ' [quota window: per minute]';
   const delay = text.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
@@ -60,6 +61,7 @@ export class OpenAICompatibleProvider {
     this.timeoutMs = timeoutMs;
     this.models = [];
     this.selected = { fast: modelOverrides.fast ?? null, deep: modelOverrides.deep ?? null, vision: null };
+    this.retired = new Map();
     this.state = 'unknown';
     this.detail = '';
     this.minIntervalMs = preset.minIntervalMs ?? 0;
@@ -148,6 +150,18 @@ export class OpenAICompatibleProvider {
       }
     }
     return this;
+  }
+
+  retireModel(model, until) {
+    if (!model || !this.models?.length || this.modelOverrides.any || this.modelOverrides[Object.keys(this.selected).find((t) => this.selected[t] === model)]) return false;
+    this.retired.set(model, until);
+    const live = this.models.filter((m) => !((this.retired.get(m) ?? 0) > Date.now()));
+    const pick = (tier) => (this.preset.prefer[tier] ? pickModel(live, this.preset.prefer[tier], this.preset.freeOnly, { strict: true }) : null);
+    const next = { fast: pick('fast'), deep: pick('deep'), vision: pick('vision') };
+    if (!next.fast && !next.deep) return false;
+    for (const tier of Object.keys(this.selected)) if (this.selected[tier] === model) this.selected[tier] = next[tier] ?? (tier === 'vision' ? null : next.fast ?? next.deep);
+    this.detail = `fast=${this.selected.fast} deep=${this.selected.deep} · switched from ${model}`;
+    return true;
   }
 
   canServe(tier) {
