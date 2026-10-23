@@ -307,8 +307,10 @@ export class ResearchEngine {
         messages: researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected }),
       });
       const finding = normalizeFinding(reply.data);
-      const critique = await this.critique(node, finding, node.sources, reply.provider);
-      const verification = verifyFinding({ finding, sources: node.sources, critique, node });
+      const mechanical = verifyFinding({ finding, sources: node.sources, node });
+      const retryAnyway = needsEscalation(mechanical) && attempt < MAX_ATTEMPTS;
+      const critique = retryAnyway ? null : await this.critique(node, finding, node.sources, reply.provider);
+      const verification = retryAnyway ? mechanical : verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
       this.emit(project, 'node', `${node.id}: ${verification.grade} (attempt ${attempt}, ${tier} tier, ${reply.provider})`, { nodeId: node.id });
       if (!needsEscalation(verification)) return;
