@@ -1,4 +1,4 @@
-const ASKS_FOR_ITEMS = /\b(?:listed|listings?|for sale|on sale|direct (?:urls?|links?)|links? to|urls? (?:of|to|for)|specific (?:land )?(?:parcels?|plots?|properties|listings?|offers?|units?|products?))\b/i;
+const ASKS_FOR_ITEMS = /\b(?:listed (?:for sale|on)|for sale|on sale|direct (?:urls?|links?)|(?:plot|land|property|parcel|real estate) listings?|specific (?:land |coastal |rural )?(?:parcels?|plots?|properties|listings?|offers?))\b/i;
 
 export const NO_ITEMS_DETAIL = 'asked for specific listings but returned none';
 

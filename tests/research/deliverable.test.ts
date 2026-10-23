@@ -9,6 +9,8 @@ describe('listing pieces', () => {
     expect(asksForItems(piece('Which coastal land parcels in Spain are listed for sale under 20,000 EUR?'))).toBe(true);
     expect(asksForItems(piece('Identify specific plots under 20 000 EUR with direct URLs'))).toBe(true);
     expect(asksForItems(piece('What is the average summer temperature in Algarve?'))).toBe(false);
+    expect(asksForItems(piece('What is the average nightly rate (EUR) for glamping listings located within 5 km of the sea?'))).toBe(false);
+    expect(asksForItems(piece('Affordable coastal plot listings for glamping'))).toBe(true);
     expect(asksForItems({ ...piece('average price'), deliverable: true })).toBe(true);
   });
 

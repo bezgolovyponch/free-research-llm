@@ -132,7 +132,9 @@ export function groupCandidateDrivers(nodes) {
   const drivers = nodes.filter((n) => n.parentId === ROOT_ID);
   if (drivers.length <= MAX_DRIVERS) return [];
   const kids = (id) => nodes.filter((n) => n.parentId === id);
-  const host = drivers.find((d) => kids(d.id).some(asksForItems)) ?? drivers.find(asksForItems);
+  const identifies = (d) => asksForItems(d) || /\b(?:identify|candidates?|find)\b/i.test(`${d.title ?? ''} ${d.question ?? ''}`);
+  const listingKids = (d) => kids(d.id).filter(asksForItems).length;
+  const host = drivers.filter(identifies).sort((a, b) => listingKids(b) - listingKids(a) || drivers.indexOf(a) - drivers.indexOf(b))[0];
   if (!host) return [];
   const moving = drivers.filter((d) => d.id !== host.id && asksForItems(d));
   if (!moving.length) return [];
