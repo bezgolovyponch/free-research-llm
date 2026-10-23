@@ -164,6 +164,21 @@ describe('ResearchEngine', () => {
     expect(engine.lanesFor(project.id)).toBe(2);
   });
 
+  it('re-grounds checks stored before the fix, keeps hand-set ones, and re-scores before a loop baseline', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find plots for a glamping business, 20000EUR max', expected: '50 plots feasible for glamping' });
+    const done = await engine.run(project.id);
+    done.acceptance = { ...done.acceptance, itemCount: 50, mustMention: ['plot', 'glamping'] };
+    done.nodes[0].specs = [{ id: 'R1', desired: 'a list of plots', request: 'more', mustMention: ['glamping'], needsNumber: false, valueRange: null, unit: '', itemCount: null, minGrade: 'supported', everPassed: false, last: null }];
+    await engine.store.save(done);
+    const fixed = await engine.regroundAndRescore(project.id);
+    expect(fixed.acceptance).toMatchObject({ itemCount: 50, mustMention: [] });
+    expect(fixed.nodes[0].specs[0].mustMention).toEqual([]);
+    expect(fixed.log.some((l: { message: string }) => /stored checks not enforced/.test(l.message))).toBe(true);
+    await engine.updateProject(project.id, { acceptance: { itemCount: 50, mustMention: ['glamping'] } });
+    expect((await engine.regroundAndRescore(project.id)).acceptance.mustMention).toEqual(['glamping']);
+  });
+
   it('does not enforce expected-result checks the model inferred but the user never asked for', async () => {
     const { engine, router } = engineWith(new ScriptedProvider());
     const original = router.complete.bind(router);

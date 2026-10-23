@@ -28,7 +28,11 @@ describe('groundAcceptance', () => {
 });
 
 describe('groundSpec', () => {
-  it('applies the same rule to a piece check, against the desired output', () => {
+  it('keeps words the user literally wrote in the desired output of a piece', () => {
+    expect(groundSpec({ mustMention: ['Brno', 'DEMO answer'], itemCount: null, valueRange: null }, { desired: 'the demo answer with the price in Brno' }).spec.mustMention).toEqual(['Brno', 'DEMO answer']);
+  });
+
+  it('drops words the user never wrote, against the desired output', () => {
     expect(groundSpec({ mustMention: ['glamping'], itemCount: 5, valueRange: null }, { desired: '5 links to plots with prices' }).spec).toMatchObject({ mustMention: [], itemCount: 5 });
   });
 });

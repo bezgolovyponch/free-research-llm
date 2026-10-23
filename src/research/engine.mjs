@@ -9,7 +9,7 @@ import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf,
 import { needsEscalation, verifyFinding } from './verify.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
-import { droppedNote, groundAcceptance } from './grounding.mjs';
+import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
 import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree } from './treeaudit.mjs';
 import { basisOf, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
@@ -378,6 +378,35 @@ export class ResearchEngine {
     return status;
   }
 
+  reground(project) {
+    const dropped = [];
+    if (project.acceptance && !project.acceptance.locked) {
+      const grounded = groundAcceptance(project.acceptance, { expected: project.acceptance.expected, question: project.question, constraints: project.constraints });
+      if (grounded.dropped.length) {
+        project.acceptance = grounded.spec;
+        dropped.push(...grounded.dropped);
+      }
+    }
+    for (const holder of [project, ...project.nodes]) {
+      if (!holder.specs?.length) continue;
+      holder.specs = holder.specs.map((spec) => {
+        const grounded = groundSpec(spec, { desired: spec.desired, request: spec.request });
+        if (!grounded.dropped.length) return spec;
+        dropped.push(...grounded.dropped.map((d) => `${holder.id ?? 'Q'}/${spec.id} ${d}`));
+        return grounded.spec;
+      });
+    }
+    if (dropped.length) this.emit(project, 'acceptance', `stored checks ${droppedNote(dropped)}`);
+    return dropped.length > 0;
+  }
+
+  async regroundAndRescore(id) {
+    const project = await this.load(id);
+    if (!this.reground(project)) return project;
+    if (project.report) await this.checkAcceptance(project);
+    return this.store.save(project);
+  }
+
   async checkAcceptance(project) {
     const deliverables = collectDeliverables(project.nodes);
     project.report.deliverables = deliverables;
@@ -403,6 +432,7 @@ export class ResearchEngine {
     try {
       project = await this.load(id);
       if (!project.nodes.length) await this.decompose(project);
+      this.reground(project);
       project.phase = 'researching';
       project.error = null;
       for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';

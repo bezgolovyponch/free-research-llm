@@ -309,7 +309,7 @@ export class ProjectImprover {
     state.lock = new Mutex();
     state.measure = (p) => (scope.length ? scopeScore(p, scope, [...state.pieces], exclude) : projectScore(p, [...state.pieces]));
     await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, scope, exclude, error: null });
-    if (project.phase !== 'done') project = await this.engine.run(id);
+    project = project.phase !== 'done' ? await this.engine.run(id) : await this.engine.regroundAndRescore(id);
     state.pieces = new Set(scoredPieces(project, scope, exclude));
     state.best = state.measure(project);
     await this.record(id, { baseline: state.best.score, best: state.best.score });

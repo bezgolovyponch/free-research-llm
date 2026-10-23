@@ -22,7 +22,7 @@ export function explicitTerms(text) {
 
 function demanded(term, demands) {
   const t = lower(term).trim();
-  return demands.some((d) => d === t || d.split(/\s+/).includes(t) || (t.includes(' ') && d.includes(t)));
+  return demands.some((d) => d === t || d.split(/[^\p{L}\p{N}-]+/u).includes(t) || (t.includes(' ') && d.includes(t)));
 }
 
 export function statedNumbers(text) {
@@ -46,9 +46,9 @@ function constraintText(constraints) {
   return Object.values(constraints ?? {}).map(String).join(' ');
 }
 
-export function groundCriteria(spec, { demandText = '', numberText = '' } = {}) {
+export function groundCriteria(spec, { demandText = '', numberText = '', literal = false } = {}) {
   const dropped = [];
-  const demands = explicitTerms(demandText);
+  const demands = literal ? [...explicitTerms(demandText), lower(demandText)] : explicitTerms(demandText);
   const numbers = statedNumbers(numberText);
   const mustMention = (spec.mustMention ?? []).filter((term) => {
     const keep = demanded(term, demands);
@@ -73,7 +73,7 @@ export function groundAcceptance(spec, { expected = '', question = '', constrain
 }
 
 export function groundSpec(spec, { desired = '', request = '' } = {}) {
-  return groundCriteria(spec, { demandText: desired, numberText: `${desired} ${request}` });
+  return groundCriteria(spec, { demandText: desired, numberText: `${desired} ${request}`, literal: true });
 }
 
 export function droppedNote(dropped) {
