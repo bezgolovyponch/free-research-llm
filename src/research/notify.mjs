@@ -34,6 +34,6 @@ export function runSummary(project) {
 export function loopSummary(improve, ended) {
   const trials = improve.trials ?? [];
   const kept = trials.filter((t) => t.outcome === 'kept');
-  if (!ended) return `Self-improving loop started for ${improve.hours} h (until ${String(improve.deadline ?? '').slice(0, 16).replace('T', ' ')}). I will post here every change that raises the score.`;
+  if (!ended) return `Self-improving loop started for ${Math.round(improve.hours * 10) / 10} h (until ${String(improve.deadline ?? '').slice(0, 16).replace('T', ' ')}). I will post here every change that raises the score.`;
   return `Self-improving loop ended (${improve.stopReason ?? improve.error ?? 'stopped'}). Score ${improve.baseline} → ${improve.best}; ${kept.length} of ${trials.length} changes kept.${kept.length ? `\nKept:\n${kept.slice(-10).map((t) => `- ${t.nodeId}: ${t.change} (${t.before} → ${t.score})`).join('\n')}` : ''}`;
 }

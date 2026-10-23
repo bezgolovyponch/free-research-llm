@@ -3,6 +3,26 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-20 · session 16 — tree audit (structural gate), diverse piece chat
+
+- **Asked:** the tree levels are wrong (screenshot). Audit the decomposition engine and use verification harnesses on it. Make the piece chat more diverse and fix its UI.
+- **Audit of the glamping-plot tree:**
+  - every leaf depended on its own parent (`D1.1 → D1` …), which drew the dashed lines over the tree lines;
+  - the loop added three near-copies of the whole question as drivers (D6–D8) and kept them;
+  - titles carried ids ("D7: …", hence "D7 D7:" in the chat);
+  - D1–D5 had one sub-question each, while other pieces went a level deeper;
+  - "Parcel identification" sat under bike infrastructure.
+  - The same check over all 9 distinct trees found the same defects in older ones too.
+- **Built: a structural gate** (`src/research/treeaudit.mjs`), the same principle as the quality gate (mikoshi-construct: the gate decides, not the author).
+  - Checks: duplicate or overlapping siblings (Dice overlap on stemmed words; pieces naming different places or entities are never duplicates), a driver restating the question, single-child splits, depth > 3, more than 7 drivers, misplaced pieces, ids in titles, dependencies on the own branch.
+  - Auto-repair (`repairTree`) for ids in titles and own-branch dependencies, at tree build and at the start of every run.
+  - Building the tree is verified and revised: on failure the model gets the failures and is asked once more, and the tree with fewer issues is kept.
+  - The loop's added drivers and splits, chat-added pieces, splits and researched suggestions are refused when they duplicate an existing piece.
+  - The audit is sent with every project; **Gates & logs** shows a Tree checks card (problem plus fix), the map shows a ⚠ button, and own-branch dependency lines are no longer drawn.
+  - Tests include a fast-check property test: for any random tree, repair leaves no own-branch dependency or id prefix, and never adds or loses a node.
+- **Piece chat:** it must be specific to the piece (entities, evidence, concrete next searches) and never propose a duplicate. Suggestions use the diverse source selection and drop duplicates. While a loop is running, the waiting bubble says it is pausing the loop. The desired-output field has a label and no browser autofill (the empty white box over Send). Titles are shown without ids.
+- **Demo:** the demo split now returns two different sub-questions (the old A/B pair was correctly flagged as a duplicate).
+
 ## 2026-10-20 · session 15 — maximum-capability routing; the app is no longer car-specific
 
 - **Routing** (more free keys): the new default strategy **Maximum capability** routes by purpose, combining FrugalGPT's cascade (Chen et al. 2023) with LiteLLM-style quota-aware routing and fallbacks for prompts too big for a model.

@@ -255,4 +255,30 @@ describe('ResearchEngine', () => {
     await engine.researchLeaf(p, rival);
     expect(asked[0][0]).toBe('site:boltz.com boltz pricing');
   });
+
+  it('re-asks for the tree once when the structural checks fail, keeps the better tree, and refuses a duplicate piece added later', async () => {
+    const bad = { decision: 'd', successCriteria: 's', nodes: [
+      { id: 'D1', parentId: null, title: 'D1: Prices', question: 'What do e-bikes cost in Germany?' },
+      { id: 'D1.1', parentId: 'D1', title: 'Price list', question: 'List prices of e-bikes in Germany?', dependsOn: ['D1'] },
+      { id: 'D2', parentId: null, title: 'Prices again', question: 'What do e-bikes cost in Germany today?' },
+    ] };
+    const good = { decision: 'd', successCriteria: 's', nodes: [
+      { id: 'D1', parentId: null, title: 'Prices', question: 'What do e-bikes cost in Germany?' },
+      { id: 'D1.1', parentId: 'D1', title: 'Shop prices', question: 'Shop prices of e-bikes in Berlin?' },
+      { id: 'D1.2', parentId: 'D1', title: 'Used prices', question: 'Used e-bike prices on resale sites?' },
+      { id: 'D2', parentId: null, title: 'Import duty', question: 'Which duties apply when importing to Czechia?' },
+      { id: 'D2.1', parentId: 'D2', title: 'Customs', question: 'Customs duty rate for e-bikes?' },
+      { id: 'D2.2', parentId: 'D2', title: 'VAT', question: 'Czech VAT on imported e-bikes?' },
+    ] };
+    const asked: string[] = [];
+    const replies = [bad, good];
+    const router = { complete: async ({ messages, purpose }: { messages: Array<{ content: string }>; purpose: string }) => { if (purpose === 'decompose') asked.push(messages[1].content); return { data: purpose === 'decompose' ? replies.shift() : {}, provider: 'p', model: 'm' }; } };
+    const engine = new ResearchEngine({ router: router as never, search: fakeSearch, store: new ProjectStore({ dir }) });
+    const project = await engine.createProject({ question: 'Should I import e-bikes from Germany to Czechia?' });
+    const built = await engine.buildTree(project.id);
+    expect(asked).toHaveLength(2);
+    expect(asked[1]).toContain('The tree failed these structural checks');
+    expect(built.nodes.map((n: { id: string }) => n.id)).toEqual(['D1', 'D1.1', 'D1.2', 'D2', 'D2.1', 'D2.2']);
+    await expect(engine.addNode(project.id, 'Q', { question: 'What do e-bikes cost in Germany?', title: 'Prices' })).rejects.toThrow(/duplicates D1/);
+  });
 });

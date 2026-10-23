@@ -2,6 +2,7 @@ import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
+import { cleanTitle, duplicateAmong, duplicateOf } from './treeaudit.mjs';
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
 
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, researching: 0 };
@@ -94,7 +95,7 @@ function nodeFields(raw, id, parentId) {
   return blankNode({
     id,
     parentId,
-    title: String(raw?.title || question).slice(0, 90),
+    title: cleanTitle(String(raw?.title || question)).slice(0, 90),
     question,
     method: METHODS.includes(raw?.method) ? raw.method : 'lookup',
     searchQueries: strings(raw?.searchQueries, 3),
@@ -107,7 +108,7 @@ export function applyVariant(project, nodeId, variant) {
   if (nodeId === ROOT_ID) {
     for (const raw of (Array.isArray(variant?.add) ? variant.add : []).slice(0, 2)) {
       const node = nodeFields(raw, nextNodeId(project.nodes, ROOT_ID), ROOT_ID);
-      if (node) {
+      if (node && !duplicateOf(node, project.nodes, project.question)) {
         project.nodes.push(node);
         touched.push(node.id);
       }
@@ -136,7 +137,7 @@ export function applyVariant(project, nodeId, variant) {
   touched.push(node.id);
   for (const raw of (Array.isArray(variant?.split) ? variant.split : []).slice(0, 3)) {
     const child = nodeFields(raw, nextNodeId(project.nodes, node.id), node.id);
-    if (child) {
+    if (child && !duplicateAmong(child, [node, ...project.nodes.filter((n) => n.parentId === node.id)])) {
       project.nodes.push(child);
       touched.push(child.id);
     }

@@ -193,3 +193,16 @@ describe('loop focus for selected pieces', () => {
     expect(improvementTargets(project, ['D1.2'], ['Q', 'D3']).sort()).toEqual(['D1.1', 'D1.2.1', 'D1.3']);
   });
 });
+
+describe('tree gate in the loop', () => {
+  it('never keeps a new top-level driver that restates the question or duplicates a driver, and strips ids from titles', () => {
+    const p = { question: 'Find affordable coastal plots under 20000 EUR for a glamping business with a mild climate', nodes: [
+      { id: 'D1', parentId: 'Q', title: 'Land cost', question: 'Average land price per m² in Spain coastal zones?', dependsOn: [], status: 'weak' },
+      { id: 'D2', parentId: 'Q', title: 'Climate', question: 'Months per year with mild weather in each region?', dependsOn: [], status: 'weak' },
+    ] };
+    expect(applyVariant(p, 'Q', { add: [{ title: 'D3: Affordable coastal plots', question: 'Which affordable coastal plots under 20000 EUR suit a glamping business with a mild climate?' }] })).toEqual([]);
+    expect(applyVariant(p, 'Q', { add: [{ title: 'Land prices', question: 'Average land price per m² in Spain coastal zones 2026?' }] })).toEqual([]);
+    expect(applyVariant(p, 'Q', { add: [{ title: 'D3: Permits', question: 'Which permits does a glamping site need in Spain?' }] })).toEqual(['D3']);
+    expect(p.nodes.find((n) => n.id === 'D3')!.title).toBe('Permits');
+  });
+});

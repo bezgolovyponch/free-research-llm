@@ -9,6 +9,7 @@ import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, progress, resear
 import { needsEscalation, verifyFinding } from './verify.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
+import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree } from './treeaudit.mjs';
 import { basisOf, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
@@ -189,12 +190,22 @@ export class ResearchEngine {
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
     await this.store.save(project);
     const template = templateById(project.templateId);
-    const reply = await this.router.complete({
-      purpose: 'decompose',
-      tier: 'deep',
-      messages: decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected }),
-    });
-    const tree = normalizeTree(reply.data, project.question);
+    const ask = async (feedback) => {
+      const reply = await this.router.complete({
+        purpose: 'decompose',
+        tier: 'deep',
+        messages: decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, feedback }),
+      });
+      const tree = normalizeTree(reply.data, project.question);
+      repairTree(tree.nodes);
+      return { reply, tree, issues: auditTree(tree.nodes, project.question) };
+    };
+    let { reply, tree, issues } = await ask('');
+    if (issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced')) {
+      this.emit(project, 'tree', `tree checks failed (${issues.map((i) => i.code).join(', ')}); asking for a corrected tree`);
+      const second = await ask(auditFeedback(issues)).catch(() => null);
+      if (second && second.tree.nodes.length >= 2 && second.issues.length < issues.length) ({ reply, tree, issues } = second);
+    }
     if (tree.nodes.length < 2) throw new Error('the model returned an empty issue tree; try again or use a stronger model');
     const acceptance = project.acceptance?.locked ? project.acceptance : normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
@@ -389,6 +400,8 @@ export class ResearchEngine {
       project.phase = 'researching';
       project.error = null;
       for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';
+      const fixes = repairTree(project.nodes);
+      if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       this.regrade(project);
       this.emit(project, 'phase', 'researching sub-questions in dependency order');
       await this.store.save(project);
@@ -528,7 +541,9 @@ export class ResearchEngine {
     const question = String(fields.question ?? '').trim();
     if (!question) throw new Error('a sub-question needs text');
     const queries = strings(fields.searchQueries, 3);
-    const node = blankNode({ id: `${base}${i}`, parentId, title: String(fields.title || question).slice(0, 60), question, why: String(fields.why ?? '').slice(0, 300), searchQueries: queries.length ? queries : [question], sourceUrls: urlList(fields.sourceUrls), method: ['lookup', 'calculation', 'comparison', 'estimate', 'data'].includes(fields.method) ? fields.method : 'lookup' });
+    const dup = duplicateOf({ id: `${base}${i}`, parentId, title: fields.title || question, question }, project.nodes, project.question);
+    if (dup) throw new Error(dup === ROOT_ID ? 'that restates the whole question; add one driver of it instead' : `that duplicates ${dup}; edit ${dup} instead`);
+    const node = blankNode({ id: `${base}${i}`, parentId, title: cleanTitle(String(fields.title || question)).slice(0, 60), question, why: String(fields.why ?? '').slice(0, 300), searchQueries: queries.length ? queries : [question], sourceUrls: urlList(fields.sourceUrls), method: ['lookup', 'calculation', 'comparison', 'estimate', 'data'].includes(fields.method) ? fields.method : 'lookup' });
     project.nodes.push(node);
     if (parent) this.resetWithAncestors(project, parent.id);
     project.report = null;
@@ -588,7 +603,9 @@ export class ResearchEngine {
     const reply = await this.router.complete({ purpose: 'expand', tier: 'deep', messages: expandPrompt({ question: project.question, node, hint }) });
     const fresh = normalizeTree(reply.data, project.question).nodes;
     const taken = new Set(project.nodes.map((n) => n.id));
-    fresh.forEach((child, i) => {
+    const kept = [];
+    for (const child of fresh) if (!duplicateAmong(child, [node, ...project.nodes.filter((n) => n.parentId === node.id), ...kept])) kept.push(child);
+    kept.forEach((child, i) => {
       let childId = `${node.id}.${String.fromCharCode(97 + i)}`;
       while (taken.has(childId)) childId = `${childId}x`;
       taken.add(childId);
@@ -596,7 +613,7 @@ export class ResearchEngine {
       project.nodes.push(child);
     });
     this.resetWithAncestors(project, node.id);
-    this.emit(project, 'tree', `${node.id}: broken into ${fresh.length} sub-questions`, { nodeId: node.id });
+    this.emit(project, 'tree', `${node.id}: broken into ${kept.length} sub-questions${kept.length < fresh.length ? ` (${fresh.length - kept.length} duplicate(s) dropped)` : ''}`, { nodeId: node.id });
     return this.store.save(project);
   }
 }

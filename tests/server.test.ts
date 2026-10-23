@@ -140,6 +140,7 @@ describe('HTTP server', () => {
     expect((await fetch(`${base}/api/projects/${created.id}/items.csv`)).status).toBe(200);
     expect(done.results.model).toMatchObject({ kind: 'decision', probability: expect.any(Number), changedSince: [] });
     expect(typeof done.report.model).toBe('string');
+    expect(Array.isArray(done.results.treeAudit)).toBe(true);
     const rewritten = (await call('POST', `/api/projects/${created.id}/synthesize`)).body;
     expect(rewritten.report.basis).toBeTruthy();
   });

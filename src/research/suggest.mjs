@@ -1,4 +1,6 @@
 import { suggestPrompt } from './prompts.mjs';
+import { duplicateAmong } from './treeaudit.mjs';
+import { entityDomains, terms } from '../search/selection.mjs';
 import { METHODS, ROOT_ID } from './tree.mjs';
 import { NotFoundError } from './engine.mjs';
 
@@ -36,13 +38,14 @@ export class SubIssueSuggester {
     if (nodeId !== ROOT_ID && !node) throw new NotFoundError(`node ${nodeId} not found`);
     const search = this.engine.search;
     const queries = node ? [...node.searchQueries, node.question] : [project.question];
-    const found = search?.enabled ? await search.search(queries, { maxSources: 5 }) : [];
+    const found = search?.enabled ? await search.search(queries, { maxSources: 6, wanted: terms(node ? `${node.title} ${node.question}` : project.question), entities: entityDomains(project.question) }) : [];
     const sources = found.map((s, i) => ({ ...s, id: `S${i + 1}` }));
     const reply = await this.engine.router.complete({ purpose: 'suggest', tier: 'deep', messages: suggestPrompt({ project, node, sources }) });
     const rank = { quoted: 0, cited: 1, ungrounded: 2 };
     const items = (Array.isArray(reply.data?.suggestions) ? reply.data.suggestions : [])
       .map((raw) => gradeSuggestion(raw, sources))
       .filter((s) => s.question)
+      .filter((s, i, all) => !duplicateAmong({ id: `new${i}`, title: s.title, question: s.question }, [...(node ? [node] : []), ...project.nodes.filter((n) => n.parentId === nodeId), ...all.slice(0, i).map((x, k) => ({ id: `new${k}`, title: x.title, question: x.question }))]))
       .sort((a, b) => rank[a.grounded] - rank[b.grounded])
       .slice(0, MAX_SUGGESTIONS);
     const result = { at: new Date().toISOString(), model: `${reply.provider}/${reply.model}`, sources: sources.map((s) => ({ id: s.id, title: s.title, url: s.url })), items };
