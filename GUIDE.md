@@ -94,6 +94,15 @@ The **Terminal** button (sidebar, or the `>_` icon on a phone) opens a real shel
 3. Another computer with its own copy: **Export keys** here (choose a passphrase), **Import keys** there (paste the bundle, type the passphrase). The bundle is encrypted (AES-256-GCM, scrypt); send the passphrase separately.
 4. Anyone with a token link can use the app and its terminal. To cut off old links: `node src/frl.mjs token --rotate`, then restart.
 
+### One research on two computers (no Docker, no install on the second one)
+
+1. This computer runs the app with remote access on (**Install always-on**, or `node src/frl.mjs start --remote`).
+2. Open the research → **More → Share this research (link for another PC)… → Create link** → **Copy**. Or in a terminal: `node src/frl.mjs share` (lists research ids), then `node src/frl.mjs share <id>`, which also prints the Tailscale link.
+3. Open the link in a browser on the other PC. The same Wi-Fi works as is; from anywhere, install Tailscale on both computers and use the Tailscale link.
+4. Both screens show the same research live. Split the work: one runs or loops the research while the other chats with pieces, adds sub-issues, reads sources and downloads results. One run per research at a time; the other screen sees it as it happens.
+5. The link opens only that research: no other researches, keys, settings, App assistant or terminal. **Turn link off** (same panel) or `node src/frl.mjs share <id> --off` cuts it at once. Rotating the access token turns every research link off.
+6. Nothing to clean on the other PC: it keeps only one cookie. This computer clears its own temp files every 6 hours and keeps at most 8 researches in memory (the rest stay on disk), so a second screen does not grow its memory.
+
 ## G. Check and ship changes
 
 ```bash

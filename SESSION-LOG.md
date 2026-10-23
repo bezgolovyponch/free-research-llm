@@ -247,3 +247,29 @@ Run-time history of your own researches is in the app (**History** tab) and in `
 1. Add Tavily as a second search key (LangSearch and Gemini work as of 2026-10-19).
 2. SearXNG needs Docker Desktop restarted (it hung on 2026-10-18).
 3. Many marketplaces block readers; CSV upload is the reliable path for listing data.
+
+## Session 2026-10-23 · temp and cache rules
+
+Asked: "clear cache and set the rules for llm research or any research to clear temp regularly".
+
+Changed:
+- `src/housekeeping.mjs` `TempSweeper`: runs on app start, then every 6 h (`FRL_SWEEP_HOURS`, `0` = off). Removes `data/work/` entries untouched 7 days, `*.tmp` under `data/` older than 1 day (not `data/llama/`), logs of deleted research untouched 7 days; trims `*.jsonl` over 5 MB to 20,000 lines and `server.out` over 1 MB to 2,000 lines. History gets one `temp sweep: …` line when something is removed.
+- `EventLog.compact` trims through the append queue, so it cannot race writes.
+- Test temp leaks fixed: 177 `frl-*` folders had piled up in the OS temp dir. Vitest global setup now removes the ones its run created; Playwright global setup removes earlier e2e data folders.
+- Rules: PROTOCOLS.md §5b, repo CLAUDE.md, global `~/.claude/rules/research-temp.md`.
+- Cleared now: `test-results/`, 177 temp folders, npm cache (`npm cache clean --force`), Homebrew cache (`brew cleanup -s`, 60.4 MB).
+
+Open: the app on port 4600 is still the old process; it picks up the sweep at its next restart (not restarted without asking). Playwright browsers (871 MB) kept, e2e needs them.
+
+## Session 2026-10-23 · one research on two computers
+
+Asked: "i need to access the app and the particular research from another PC without docker just by the link to use it as a helper for the same research … commit and push merge"; then "make possible to open same research and use two machines to increase the productivity, machines have to clear yourself and dont overload the memory … commit, create an account token, merge".
+
+Changed:
+- Research share links (`src/share.mjs`, `AccessGate` share scope): More → Share this research, or `node src/frl.mjs share <id> [--off]`. The link opens one research only: its page, API and live events. Owner-only routes answer 403; the terminal WebSocket refuses share sessions; project chat questions about the app are refused instead of being forwarded to the App assistant. Tokens are HMACs of the access token, so `data/shares.json` holds no secret.
+- Shared mode UI: banner, one research in the list, no New/terminal/settings/App tab.
+- Memory: `ProjectStore` keeps at most 8 researches in memory (LRU, running/looping never evicted); the research list no longer loads every research into memory.
+- Tests: share, auth, server (share flow over a non-loopback request), terminal socket, chat, store; e2e Share panel.
+- Real use: a second instance on port 4620 with a copy of the research data, reached at the Wi-Fi address in headless Chromium: the link opened only the shared research, terminal and another research returned 403, the App tab was hidden, and a piece added on the owner screen appeared on the shared screen through the live stream. The instance and its data were deleted afterwards.
+
+Open: compute and model quotas stay on the computer that runs the app; the second computer adds a second person working on the research, not a second quota pool.

@@ -145,3 +145,47 @@ describe('HTTP server', () => {
     expect(rewritten.report.basis).toBeTruthy();
   });
 });
+
+describe('research share links', () => {
+  it('opens one research from another computer and nothing else, until the owner turns the link off', async () => {
+    const shareDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-server-share-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ enabled: false, backends: [], lastErrors: [] }) };
+    const shareApp = new App({ env: {}, dataDir: shareDir, providers: [new ScriptedProvider()], search });
+    const started = await startServer({ app: shareApp, port: 0, token: 'owner-token' });
+    const remote = { 'x-forwarded-for': '203.0.113.9' };
+    const owner = async (method: string, url: string, body?: unknown) => (await fetch(started.url + url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json();
+    try {
+      const shared = await owner('POST', '/api/projects', { question: 'Which Czech city is best for a small bakery?' });
+      const other = await owner('POST', '/api/projects', { question: 'Where should I open a coffee kiosk in Brno?' });
+      expect(await owner('GET', `/api/projects/${shared.id}/share`)).toMatchObject({ enabled: false, links: [] });
+      const view = await owner('POST', `/api/projects/${shared.id}/share`);
+      expect(view).toMatchObject({ projectId: shared.id, enabled: true, remote: true });
+      for (const link of view.links) expect(link.url).toMatch(new RegExp(`/\\?share=${view.token}#p=${shared.id}$`));
+
+      const entry = await fetch(`${started.url}/?share=${view.token}`, { headers: remote, redirect: 'manual' });
+      expect(entry.status).toBe(302);
+      const cookie = String(entry.headers.get('set-cookie')).split(';')[0];
+      expect(cookie).toBe(`frl_share=${view.token}`);
+      const helper = async (method: string, url: string) => {
+        const res = await fetch(started.url + url, { method, headers: { ...remote, cookie, 'content-type': 'application/json' } });
+        return { status: res.status, body: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() };
+      };
+      expect((await helper('GET', '/')).status).toBe(200);
+      expect((await helper('GET', '/api/whoami')).body).toEqual({ share: shared.id, canShare: true });
+      expect((await helper('GET', '/api/projects')).body.map((p: { id: string }) => p.id)).toEqual([shared.id]);
+      expect((await helper('GET', `/api/projects/${shared.id}`)).body.question).toMatch(/bakery/);
+      expect((await helper('GET', '/api/status')).body).toMatchObject({ ledger: [], coders: [] });
+      for (const [m, u] of [['GET', `/api/projects/${other.id}`], ['DELETE', `/api/projects/${shared.id}`], ['POST', `/api/projects/${shared.id}/share`], ['POST', '/api/projects'], ['GET', '/api/terminal'], ['GET', '/api/router'], ['GET', '/api/chat'], ['GET', '/api/access']]) expect((await helper(m, u)).status, `${m} ${u}`).toBe(403);
+      expect((await fetch(`${started.url}/api/projects`, { headers: remote })).status).toBe(401);
+
+      expect(await owner('DELETE', `/api/projects/${shared.id}/share`)).toMatchObject({ enabled: false, token: null });
+      const after = await helper('GET', `/api/projects/${shared.id}`);
+      expect(after.status).toBe(401);
+      expect(after.body).toMatch(/turned off or replaced/);
+    } finally {
+      started.server.close();
+      await shareApp.logs.queue;
+      await fs.rm(shareDir, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+});

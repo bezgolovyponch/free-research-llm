@@ -191,3 +191,22 @@ test('the + next to the models indicator opens the router page: strategy, ranked
   await page.waitForTimeout(8500);
   await expect(body.locator('[data-rrow="groq"] input[type="password"]')).toHaveValue('gsk_typed_but_not_saved');
 });
+
+test('share: More → Share explains the one-research link and says when remote access is off', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#inQuestion').fill('Which Czech city is best for a small bakery?');
+  await page.locator('#inExpected').fill('one city with three reasons');
+  await page.getByRole('button', { name: 'Build the tree →' }).click();
+  await expect(page.locator('#outline .orow').first()).toBeVisible({ timeout: 30000 });
+  await page.locator('#moreBtn').click();
+  await page.locator('#mShare').click();
+  const box = page.locator('#shareBox');
+  await expect(box).toBeVisible();
+  await expect(box).toContainText('They cannot see your other researches, keys, settings or the terminal');
+  await expect(box).toContainText('Remote access is off');
+  await expect(page.locator('#shareOn')).toBeDisabled();
+  await expect(page.locator('#sharedBanner')).toBeHidden();
+  await expect(page.locator('#chatScopes [data-scope="app"]')).toHaveCount(1);
+  await page.locator('#shareClose').click();
+  await expect(box).toBeHidden();
+});

@@ -26,7 +26,8 @@ export function attachTerminalSockets(server, { hub, gate }) {
     const url = new URL(req.url, 'http://localhost');
     const match = url.pathname.match(PATH);
     if (!match) return reject(socket, 404, 'Not Found');
-    if (!gate.decide(req, url).allowed) return reject(socket, 401, 'Unauthorized');
+    const access = gate.decide(req, url);
+    if (!access.allowed || access.share) return reject(socket, 401, 'Unauthorized');
     if (!sameOrigin(req)) return reject(socket, 403, 'Forbidden');
     const session = hub.get(match[1]);
     if (!session) return reject(socket, 404, 'Not Found');

@@ -18,3 +18,17 @@ describe('EventLog', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
+
+describe('EventLog.compact', () => {
+  it('keeps only the newest lines of logs over the size limit and leaves small ones alone', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-logs-'));
+    const log = new EventLog({ dir });
+    for (let i = 0; i < 20; i++) void log.append('big', { i, pad: 'x'.repeat(50) });
+    void log.append('small', { i: 0 });
+    const trimmed = await log.compact({ maxBytes: 200, keepLines: 2 });
+    expect(trimmed).toEqual(['big.jsonl']);
+    expect((await log.read('big')).map((r) => r.i)).toEqual([18, 19]);
+    expect(await log.read('small')).toHaveLength(1);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});

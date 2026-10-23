@@ -15,6 +15,7 @@ import { PROVIDER_PRESETS, SEARCH_KEYS } from './llm/presets.mjs';
 import { guideFor } from './llm/guides.mjs';
 import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helperArgs, parseHelpers, recommendModel, serverArgs, speedOf } from './local/llamacpp.mjs';
 import { CREDSTORE, KeychainSecrets, runCommand, secretNames } from './secrets.mjs';
+import { shareLinks } from './share.mjs';
 import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, stableNodePath, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -310,6 +311,30 @@ const commands = {
     await printLinks();
   },
 
+  async share([projectId, flag]) {
+    let projects;
+    try {
+      projects = await local('/api/projects');
+    } catch {
+      return console.log(`The app is not answering on port ${PORT}: run "node src/frl.mjs start --remote" first.`);
+    }
+    if (!projectId) {
+      console.log('usage: node src/frl.mjs share <research id> [--off]\n\nResearches:');
+      for (const p of projects) console.log(`  ${p.id}  ${String(p.question).slice(0, 70)}`);
+      return;
+    }
+    const method = flag === '--off' ? 'DELETE' : 'POST';
+    const view = await local(`/api/projects/${encodeURIComponent(projectId)}/share`, { method });
+    if (view.error) return console.log(view.error);
+    if (!view.enabled) return console.log('Link turned off: whoever had it has lost access.');
+    if (!view.remote) console.log('Remote access is off, so other computers cannot reach the app: run "node src/frl.mjs install" (or "start --remote"), then share again.');
+    const bases = accessLinks({ port: PORT, lan: lanAddresses(os.networkInterfaces()), tailscale: await tailscaleName(), funnel: await funnelOn() }).filter((l) => !l.url.includes('127.0.0.1'));
+    console.log('Link for this one research (chat, run, add pieces; no other researches, keys or terminal):');
+    for (const l of shareLinks(bases, { projectId, token: view.token })) console.log(`  ${l.label.padEnd(30)} ${l.url}`);
+    if (!bases.some((l) => l.label.startsWith('anywhere'))) console.log('  anywhere: install Tailscale (https://tailscale.com/download) on both computers, sign in to both, then run this again');
+    console.log('\n  Keep the link private. Turn it off with: node src/frl.mjs share ' + projectId + ' --off');
+  },
+
   async token(args) {
     await accessToken({ rotate: args.includes('--rotate') });
     console.log(args.includes('--rotate') ? 'New token saved. Restart the app (node src/frl.mjs restart) and open the new links:' : 'Current links:');
@@ -460,6 +485,7 @@ if (!commands[command]) {
   node src/frl.mjs restart            save running work and restart (always-on service)
   node src/frl.mjs update             pull the newest version from GitHub and install it
   node src/frl.mjs token [--rotate]   show or replace the access token
+  node src/frl.mjs share [ID] [--off]  link that opens one research on another PC (no Docker), or turn it off
   node src/frl.mjs keys setup         paste free keys; each is tested and saved in the system key store
   node src/frl.mjs keys set NAME      save one key or setting (e.g. CUSTOM_LLM_BASE_URL, FRL_PROVIDER_ORDER)
   node src/frl.mjs keys check         test every saved key; repair keys cut off while pasting

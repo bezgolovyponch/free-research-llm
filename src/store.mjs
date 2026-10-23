@@ -3,12 +3,35 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const ID_PATTERN = /^[a-z0-9-]{6,64}$/;
+const DEFAULT_MAX_CACHED = 8;
 
 export class ProjectStore {
-  constructor({ dir }) {
+  constructor({ dir, maxCached = DEFAULT_MAX_CACHED, isBusy = () => false }) {
     this.dir = dir;
+    this.maxCached = maxCached;
+    this.isBusy = isBusy;
     this.cache = new Map();
     this.writes = new Map();
+  }
+
+  remember(project) {
+    this.cache.delete(project.id);
+    this.cache.set(project.id, project);
+    for (const id of this.cache.keys()) {
+      if (this.cache.size <= this.maxCached) break;
+      if (id === project.id || this.writes.has(id) || this.isBusy(id)) continue;
+      this.cache.delete(id);
+    }
+    return project;
+  }
+
+  async readFile(id) {
+    try {
+      return JSON.parse(await fs.readFile(this.file(id), 'utf8'));
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
   }
 
   file(id) {
@@ -23,7 +46,7 @@ export class ProjectStore {
 
   async save(project) {
     project.updatedAt = new Date().toISOString();
-    this.cache.set(project.id, project);
+    this.remember(project);
     const target = this.file(project.id);
     const previous = this.writes.get(project.id) ?? Promise.resolve();
     const write = previous.catch(() => {}).then(async () => {
@@ -39,21 +62,15 @@ export class ProjectStore {
   }
 
   async get(id) {
-    if (this.cache.has(id)) return this.cache.get(id);
-    try {
-      const project = JSON.parse(await fs.readFile(this.file(id), 'utf8'));
-      this.cache.set(id, project);
-      return project;
-    } catch (error) {
-      if (error.code === 'ENOENT') return null;
-      throw error;
-    }
+    if (this.cache.has(id)) return this.remember(this.cache.get(id));
+    const project = await this.readFile(id);
+    return project ? this.remember(project) : null;
   }
 
   async list() {
     await fs.mkdir(this.dir, { recursive: true });
     const files = (await fs.readdir(this.dir)).filter((f) => f.endsWith('.json'));
-    const projects = await Promise.all(files.map((f) => this.get(f.slice(0, -5)).catch(() => null)));
+    const projects = await Promise.all(files.map((f) => { const id = f.slice(0, -5); return this.cache.get(id) ?? this.readFile(id).catch(() => null); }));
     return projects
       .filter((p) => p && typeof p.id === 'string' && typeof p.question === 'string')
       .map((p) => ({

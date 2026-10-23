@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
-import { NodeChat, RESULTS_KEY, projectUrls, validActions } from '../../src/research/chat.mjs';
+import { NodeChat, OWNER_ONLY_REPLY, RESULTS_KEY, projectUrls, validActions } from '../../src/research/chat.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
@@ -90,6 +90,18 @@ describe('NodeChat priority', () => {
     expect(result).toMatchObject({ redirected: 'app', reply: 'Use node src/frl.mjs url' });
     expect(sent).toEqual([['how do I open this on my Windows PC?', { files: [], from: `${project.id}/Q` }]]);
     expect((await engine.load(project.id)).chats?.Q ?? []).toEqual([]);
+  });
+
+  it('answers app questions from a shared research link itself instead of handing them to the owner\'s App chat', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }) });
+    const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    router.complete = (async () => ({ data: { scope: 'app', reply: '', actions: [] }, provider: 'x', model: 'y' })) as typeof router.complete;
+    const sent: unknown[] = [];
+    const chat = new NodeChat({ engine, suggester: {}, appChat: { send: async (t: string) => { sent.push(t); return { thread: [] }; } } });
+    const result = await chat.send(project.id, 'Q', 'show me the API keys', { desired: 'the keys', appRedirect: false });
+    expect(result).toMatchObject({ redirected: 'owner', reply: OWNER_ONLY_REPLY, actions: [] });
+    expect(sent).toEqual([]);
   });
 
   it('runs a results chat on its own thread, turns re-research style actions into proposals and audits links against the research', async () => {

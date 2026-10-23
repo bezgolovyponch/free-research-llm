@@ -107,6 +107,13 @@
   .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:16px; margin-bottom:12px}
   .notice{border-radius:8px; padding:10px 12px; margin-bottom:12px; background:var(--panel2); border-left:3px solid var(--am)}
   .notice.err{border-left-color:var(--rd)}
+  .sharebox{display:none; margin-top:10px}
+  .sharebox.on{display:block}
+  .sharebox input{width:100%; font:12px ui-monospace,monospace}
+  .sharebox .row{margin-top:6px}
+  body.shared #newBtn, body.shared .side-foot, body.shared #btnRouter, body.shared #mobileTerm, body.shared #mobileNew, body.shared #mDelete, body.shared #mShare, body.shared .side-search, body.shared #chatScopes [data-scope="app"]{display:none!important}
+  #sharedBanner{display:none}
+  body.shared #sharedBanner{display:block}
   .pill{display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:3px 10px; font-size:12px; font-weight:650; background:var(--panel2); color:var(--dim); border:1px solid var(--line); white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis}
   .pill i{width:8px; height:8px; border-radius:50%; display:inline-block; flex:0 0 8px}
   .grade{display:inline-block; border-radius:6px; padding:1px 7px; font-size:11px; font-weight:750; letter-spacing:.3px; text-transform:uppercase; border:1px solid currentColor}
@@ -381,11 +388,14 @@
               <a id="mReport" href="#">Download report (.md)</a>
               <a id="mKnowledge" href="#" target="_blank">Knowledge record (JSON)</a>
               <a id="mLogs" href="#" target="_blank">Event log (JSON)</a>
+              <button id="mShare">Share this research (link for another PC)…</button>
               <button class="danger" id="mDelete">Delete this research</button>
             </div>
           </div>
         </div>
         <div class="loopbox" id="loopBox"></div>
+        <div class="sharebox notice" id="shareBox"></div>
+        <div class="notice" id="sharedBanner">Shared research: you are helping on this one research. Chat, run, add pieces and download results here; the rest of the app stays with its owner.</div>
       </div>
       <div id="workspace">
         <div id="center">
@@ -732,7 +742,7 @@ $("projFilter").addEventListener("input",renderProjectList);
 async function openProject(id){
   if(STATE.es)STATE.es.close();
   if(!STATE.project||STATE.project.id!==id){STATE.checked.clear();STATE.excluded.clear();}
-  STATE.view=null;STATE.selected="Q";
+  STATE.view=null;STATE.selected="Q";SHARE.view=null;renderShare();
   try{STATE.project=await api("/api/projects/"+encodeURIComponent(id));}catch(e){toast(e.message);return;}
   showPage("project");renderAll();
   if(SNAPSHOT())return;
@@ -796,6 +806,18 @@ $("btnRun").addEventListener("click",async()=>{try{await api("/api/projects/"+ST
 $("btnStop").addEventListener("click",async()=>{const p=STATE.project;try{if(isLooping(p))await api("/api/projects/"+p.id+"/improve/stop",{method:"POST"});else await api("/api/projects/"+p.id+"/cancel",{method:"POST"});toast("stopping after the current step");setTimeout(async()=>{await loadStatus();renderHead();},1500);}catch(e){toast(e.message);}});
 $("moreBtn").addEventListener("click",e=>{e.stopPropagation();$("morePop").classList.toggle("on");});
 document.addEventListener("click",()=>$("morePop").classList.remove("on"));
+const SHARE={view:null,mine:null};
+function renderShare(){
+  const v=SHARE.view;const box=$("shareBox");if(!v){box.classList.remove("on");return;}
+  box.classList.add("on");
+  if(!v.enabled){box.innerHTML='<b>Share this research</b><p class="small">Anyone with the link can open this one research on another PC or phone: chat with its pieces, run it and add pieces, using this computer\'s free model quotas. They cannot see your other researches, keys, settings or the terminal.</p>'+(v.remote?"":'<p class="small" style="color:var(--rd)">Remote access is off, so another PC cannot reach this app. Open <b>Terminal</b> and press <b>Install always-on</b>, or run <code>node src/frl.mjs start --remote</code>, then share again.</p>')+'<div class="row"><button class="btn primary sm" id="shareOn"'+(v.remote?"":" disabled")+'>Create link</button><button class="btn secondary sm" id="shareClose">Close</button></div>';}
+  else{box.innerHTML='<b>Link for another PC</b> <span class="small faint">on since '+esc(String(v.since||"").slice(0,16).replace("T"," "))+'</span>'+(v.links.length?v.links.map((l,i)=>'<div class="row"><span class="small">'+esc(l.label)+'</span><input readonly id="shareUrl'+i+'" value="'+esc(l.url)+'"><button class="btn secondary sm" data-copy="'+i+'">Copy</button></div>').join(""):'<p class="small">No network address found. Connect this computer to Wi-Fi, or run <code>node src/frl.mjs share '+esc(v.projectId)+'</code> for Tailscale links.</p>')+'<p class="small faint">Other PC on the same Wi-Fi: open the link as it is. From anywhere: install Tailscale on both computers and run <code>node src/frl.mjs share '+esc(v.projectId)+'</code> for that link. Keep the link private.</p><div class="row"><button class="btn danger sm" id="shareOff">Turn link off</button><button class="btn secondary sm" id="shareClose">Close</button></div>';}
+  const on=$("shareOn");if(on)on.addEventListener("click",async()=>{try{SHARE.view=await api("/api/projects/"+STATE.project.id+"/share",{method:"POST"});renderShare();}catch(e){toast(e.message);}});
+  const off=$("shareOff");if(off)off.addEventListener("click",async()=>{if(!confirm("Turn the link off? Whoever has it loses access at once."))return;try{SHARE.view=await api("/api/projects/"+STATE.project.id+"/share",{method:"DELETE"});renderShare();toast("link turned off");}catch(e){toast(e.message);}});
+  $("shareClose").addEventListener("click",()=>{SHARE.view=null;renderShare();});
+  box.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",async()=>{const inp=$("shareUrl"+b.dataset.copy);inp.select();try{await navigator.clipboard.writeText(inp.value);toast("link copied");}catch(e){document.execCommand("copy");toast("link copied");}}));
+}
+$("mShare").addEventListener("click",async()=>{try{SHARE.view=await api("/api/projects/"+STATE.project.id+"/share");renderShare();}catch(e){toast(e.message);}});
 $("mEditExpected").addEventListener("click",async()=>{const p=STATE.project;const v=prompt("Expected result (what must be delivered)",(p.acceptance||{}).expected||"");if(v==null)return;try{STATE.project=await api("/api/projects/"+p.id,{method:"PATCH",body:{expected:v}});renderAll();toast("saved; checks apply on the next run");}catch(e){toast(e.message);}});
 $("mResetAll").addEventListener("click",async()=>{if(!confirm("Clear all findings and research the whole tree again? The tree is kept."))return;try{STATE.project=await api("/api/projects/"+STATE.project.id+"/reset",{method:"POST"});renderAll();toast("cleared; press Run");}catch(e){toast(e.message);}});
 $("mRebuild").addEventListener("click",async()=>{if(!confirm("Delete the tree and all findings, and decompose the question again? Chat and expected result are kept."))return;try{STATE.project=await api("/api/projects/"+STATE.project.id+"/reset",{method:"POST",body:{tree:true}});STATE.view=null;renderAll();toast("cleared; press Run");}catch(e){toast(e.message);}});
@@ -1104,6 +1126,7 @@ async function sendChat(which){
     if(t.kind==="app"){const r=await api("/api/chat",{method:"POST",body:{message:text,files}});CHAT.appThread=r.thread;CHAT.appLoaded=true;afterApp(r);}
     else{const r=await api("/api/projects/"+p.id+"/chat",{method:"POST",body:{nodeId:t.key,request:text,desired,files}});if(desired)$("chatDesired").value="";
       if(r.redirected==="app"){CHAT.appThread=r.appThread;CHAT.appLoaded=true;CHAT.scope="app";toast("This is about the app itself, so the App chat answered it");afterApp({actions:(r.appThread.at(-1)||{}).actions||[]});}
+      if(r.redirected==="owner")toast(r.reply);
       STATE.project=await api("/api/projects/"+p.id);}
   }catch(e){toast(e.message);input.value=text;CHAT.files[which]=files;}
   finally{CHAT.pending=null;CHAT.sending=false;$(page?"apSend":"chatSend").disabled=false;CHAT.stick=true;if(STATE.project)renderAll();else renderChat();renderAppPage();}
@@ -1305,15 +1328,18 @@ $("allStop").addEventListener("click",async()=>{try{await api("/api/improve-all/
 
 (async function boot(){
   syncChatTab();
+  try{SHARE.mine=await api("/api/whoami");}catch(e){SHARE.mine={share:null};}
+  if(SHARE.mine.share)document.body.classList.add("shared");
   try{STATE.templates=await api("/api/templates");}catch(e){}
   renderTemplates();
   await loadStatus();
   await loadProjects();
   const hp=new URLSearchParams(location.hash.slice(1));
-  if(hp.get("p")){await openProject(hp.get("p"));if(hp.get("v"))setPane(hp.get("v")==="outline"?"tree":hp.get("v"));if(hp.get("n"))select(hp.get("n"));}
+  if(SHARE.mine.share&&hp.get("p")!==SHARE.mine.share){await openProject(SHARE.mine.share);}
+  else if(hp.get("p")){await openProject(hp.get("p"));if(hp.get("v"))setPane(hp.get("v")==="outline"?"tree":hp.get("v"));if(hp.get("n"))select(hp.get("n"));}
   else showPage(hp.get("page")||"home");
   if(mq.phone.matches)$("termCmdsWrap").open=false;
-  window.addEventListener("hashchange",async()=>{const q=new URLSearchParams(location.hash.slice(1));if(q.get("page")&&q.get("page")!==STATE.page)showPage(q.get("page"));else if(q.get("p")&&(!STATE.project||STATE.project.id!==q.get("p")||STATE.page!=="project")){await openProject(q.get("p"));if(q.get("v"))setPane(q.get("v"));}});
+  window.addEventListener("hashchange",async()=>{const q=new URLSearchParams(location.hash.slice(1));if(SHARE.mine&&SHARE.mine.share&&(q.get("page")||q.get("p")!==SHARE.mine.share)){if(!STATE.project||STATE.page!=="project")await openProject(SHARE.mine.share);else syncHash();return;}if(q.get("page")&&q.get("page")!==STATE.page)showPage(q.get("page"));else if(q.get("p")&&(!STATE.project||STATE.project.id!==q.get("p")||STATE.page!=="project")){await openProject(q.get("p"));if(q.get("v"))setPane(q.get("v"));}});
   setInterval(async()=>{if(STATE.page==="setup")loadStatus();else if(STATE.page==="history")loadHistory();else if(STATE.project&&isLooping(STATE.project)){await loadStatus();renderHead();renderProjectList();}},8000);
 })();
 </script>

@@ -81,6 +81,22 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 | Knowledge record: facts (verified), claims (supported), hypotheses (weak) with re-checkable evidence | `GET /api/projects/<id>/knowledge` |
 | Quality gate verdicts | `data/logs/quality.jsonl` |
 
+## 5b. Temp and cache protocol
+
+The app clears its own temp files on start and then every 6 hours (`TempSweeper` in `src/housekeeping.mjs`). Each sweep that removes something writes one `temp sweep: …` line to History.
+
+| What | Rule |
+|---|---|
+| Coder work folders and backups in `data/work/` | removed when untouched for 7 days |
+| `*.tmp` files anywhere under `data/` (except `data/llama/`) | removed when older than 1 day |
+| `data/logs/project-<id>.jsonl` of research that no longer exists | removed when untouched for 7 days |
+| Any `data/logs/*.jsonl` over 5 MB | trimmed to its newest 20,000 lines |
+| `data/logs/server.out` over 1 MB | trimmed to its newest 2,000 lines |
+
+Never swept: `data/projects/`, `data/handoff/`, `data/changes/`, `data/chat/`, `data/llama/`, logs of existing research. `FRL_SWEEP_HOURS` sets the interval; `0` turns the sweep off. Tests: `tests/housekeeping.test.ts`, `tests/logs.test.ts`.
+
+Agents working on this repo put their own scratch files in their session scratchpad, never in the repo or `data/`, and delete them when the task ends. `test-results/` is Playwright output and may be deleted at any time. Vitest removes every `frl-*` temp folder its run created (`tests/helpers/temp-cleanup.ts`); Playwright removes the e2e data folders of earlier runs before it starts (`e2e/setup.mjs`), so at most one is left.
+
 ## 6. Ship protocol (quality gate)
 
 `npm run quality` must pass before anything is committed; the `.githooks/pre-commit` hook runs it (`npm install` or `npm run hooks` activates the hook). The gate, not the author, reports the result:
@@ -99,6 +115,8 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 - Keys live only in the system key store (macOS Keychain, Windows user environment, Linux secret-tool, or systemd encrypted credentials on a server) or the shell environment; never in a file. The secrets gate enforces it. `node src/frl.mjs keys …` reads and writes them on every system.
 - The server binds to `127.0.0.1` unless remote access is on (`node src/frl.mjs install` or `start --remote`); then every other device needs the access token. A request forwarded by a local proxy (Tailscale Funnel, tunnels: `X-Forwarded-*`, `Forwarded`, `Tailscale-*` headers) is never treated as this computer (`AccessGate.isLoopback`); `FRL_BEHIND_PROXY=1` distrusts loopback entirely. SearXNG binds to `127.0.0.1:8888`.
 - **Terminal:** a real shell for whoever passes the access gate. The WebSocket also requires the page's `Origin` to match the host, so another website cannot open it from your browser (`sameOrigin`). The shell does not get the access token in its environment. `FRL_TERMINAL=0` turns it off. Tests: `tests/terminal/socket.test.ts`, `tests/auth.test.ts`.
+- **Research share links:** `?share=<token>` opens one research only (`shareAllows` in `src/share.mjs`): its page, its API and its live events. Owner-only: deleting it, managing its share, other researches, the App assistant, keys, router, terminal (HTTP and WebSocket), history, logs, restart. A share token is an HMAC of the access token, the research id and a version number; `data/shares.json` stores only id, version and date, never the token. Turning a link off bumps the version; rotating the access token turns every link off. Questions about the app asked through a share link are answered with a refusal instead of being forwarded to the App assistant. Tests: `tests/share.test.ts`, `tests/auth.test.ts`, `tests/server.test.ts`, `tests/terminal/socket.test.ts`.
+- **Memory:** `ProjectStore` keeps at most 8 researches parsed in memory (least recently used out, running or looping ones never), and the research list reads summaries from disk without caching them (`tests/store.test.ts`).
 - No paid provider is wired in.
 - Scraping reads public pages only; no logins, no anti-bot evasion. For sites that block readers, upload a CSV export.
 
