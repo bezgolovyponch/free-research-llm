@@ -155,8 +155,9 @@ export function applyVariant(project, nodeId, variant) {
 }
 
 export class ProjectImprover {
-  constructor({ engine, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+  constructor({ engine, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), checkpoint = async () => {} }) {
     this.engine = engine;
+    this.checkpoint = checkpoint;
     this.now = now;
     this.sleep = sleep;
     this.active = new Map();
@@ -321,14 +322,25 @@ export class ProjectImprover {
     state.best = state.measure(project);
     await this.record(id, { baseline: state.best.score, best: state.best.score });
     let quiet = 0;
+    await this.saveCheckpoint(id, state);
     while (this.live(state)) {
       const improved = await this.pass(id, state);
+      await this.saveCheckpoint(id, state);
       quiet = improved ? 0 : quiet + 1;
       await state.lock.run(async () => this.record(id, { passes: ((await this.engine.load(id)).improve?.passes ?? 0) + 1, quietPasses: quiet }));
     }
     state.spawn = null;
     this.engine.leave(id);
     await this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
+  }
+
+  async saveCheckpoint(id, state) {
+    if (!state.hours || state === this.all) return;
+    try {
+      await this.checkpoint(id, { loopHoursLeft: Math.max(0, (state.deadline - this.now()) / 3600000), loopScope: state.scope ?? [], loopExclude: state.exclude ?? [] });
+    } catch {
+      return;
+    }
   }
 
   async pass(id, state) {

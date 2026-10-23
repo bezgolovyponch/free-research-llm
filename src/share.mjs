@@ -5,7 +5,7 @@ import path from 'node:path';
 const SHARE_TOKEN_LENGTH = 32;
 const SHARED_API = /^\/api\/projects\/([\w-]+)(\/.*)?$/;
 const OWNER_ONLY_SUBPATHS = new Set(['/share']);
-const SHARED_PAGES = new Set(['/', '/index.html']);
+const SHARED_PAGES = new Set(['/', '/index.html', '/pc-setup.ps1']);
 const SHARED_READS = new Set(['/api/status', '/api/templates', '/api/whoami', '/api/projects']);
 
 function sameSecret(a, b) {

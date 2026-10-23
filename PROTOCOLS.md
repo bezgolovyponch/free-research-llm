@@ -84,6 +84,13 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 - After a restart only lasting benches are restored from the ledger: no credit (402, `balance_units`) until the UTC reset, a rejected key (401/403) for 6 h. A daily 429 is re-checked by the first live call.
 - **Local models:** `llamacpp` is llama.cpp on this computer (`node src/frl.mjs local start --model …`); `llamacpp-lan` is llama.cpp on another computer in the same network, reached at `LLAMACPP_LAN_URL` (steps: Models & router → How to get it, or `src/llm/guides.mjs`). Both are unlimited and cost no quota.
 
+## 4g. Running without stops
+
+- The app runs as an always-on service that restarts it if it stops (`KeepAlive`, `RunAtLoad`). The loop writes a quiet resume checkpoint when it starts and after every pass, so a crash or power cut resumes it like a normal restart.
+- A local model started with `node src/frl.mjs local start … --background` is remembered (`data/llama/serve.json`) and restarted when the app starts (`ensureLocalModel`; `FRL_LOCAL_AUTOSTART=0` turns it off). Every 30 s the app re-checks local providers that were not answering and checks the devices that opened a research link for a model to connect (`PeerWatcher`).
+- A local server never gets a prompt bigger than its context: the provider reads it from llama-server's `/props`.
+- The other PC joins with one PowerShell line from the share panel (`/pc-setup.ps1`, open to research-link holders): it downloads llama.cpp b11739 (CUDA 12.4 for NVIDIA, Vulkan otherwise), picks Qwen3-14B with 11 GB+ graphics memory or Qwen3-4B otherwise, and serves it on port 8090; the app connects it within a minute.
+
 ## 4e. Criteria grounding
 
 A model may propose expected-result checks (`mustMention`, item count, value range) and piece checks, but code keeps only what the user's own text states (`src/research/grounding.mjs`): a must-mention word only when it is quoted or follows "mention / contain / include / name"; a count or range only when the number appears in the expected result, question or constraints. Dropped criteria are logged as "not enforced (the model inferred it, your text does not ask for it)". Piece checks are judged against the piece's desired output, where a word the user literally wrote counts as stated. Checks stored before this rule are re-grounded when a run starts and when a loop starts; a loop re-scores the research before measuring its baseline, so a dropped criterion is never counted as a loop gain. Checks the user sets by hand (**Edit expected result**) are kept as written.

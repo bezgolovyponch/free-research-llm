@@ -57,8 +57,9 @@ export class ModelRouter {
   available({ avoid, tier = 'fast', purpose, tokens = 0 } = {}) {
     const time = this.now();
     const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
-    const fits = open.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
-    const usable = fits.length ? [...fits, ...open.filter((p) => !fits.includes(p))] : open;
+    const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
+    const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
+    const usable = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
     if (!avoid) return usable;
     const author = this.providers.find((p) => p.id === avoid);
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);

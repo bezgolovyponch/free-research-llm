@@ -20,6 +20,8 @@ import { attachTerminalSockets } from './terminal/socket.mjs';
 import { accessLinks, lanAddresses } from './service.mjs';
 import { ShareBook, shareAllows, shareLinks } from './share.mjs';
 import { REACHABLE_PAGE, RemoteVisits } from './visits.mjs';
+import { pcSetupCommand, pcSetupScript } from './local/pcsetup.mjs';
+import { ensureLocalModel } from './local/autostart.mjs';
 import os from 'node:os';
 
 const MAX_BODY = 32 * 1024 * 1024;
@@ -304,7 +306,7 @@ export function createServer(app, gate = new AccessGate()) {
   function shareView(id) {
     const status = gate.shares?.status(id) ?? { enabled: false, since: null, token: null };
     const bases = app.remote ? accessLinks({ port: app.port, lan: lanAddresses(os.networkInterfaces()) }).filter((l) => !l.url.includes('127.0.0.1')) : [];
-    return { projectId: id, ...status, remote: app.remote, links: status.token ? shareLinks(bases, { projectId: id, token: status.token }) : [] };
+    return { projectId: id, ...status, remote: app.remote, links: status.token ? shareLinks(bases, { projectId: id, token: status.token }) : [], pcSetup: status.token && bases[0] ? pcSetupCommand(bases[0].url, status.token) : null };
   }
 
   async function serveEvents(req, res, id) {
@@ -334,10 +336,14 @@ export function createServer(app, gate = new AccessGate()) {
     if (!access.allowed) return deny(res, access.reason, { address: String(req.socket?.remoteAddress ?? '').replace(/^::ffff:/, ''), research: /share|research link/.test(access.reason) });
     if (access.share && !shareAllows({ method: req.method, pathname: url.pathname, projectId: access.share })) return send(res, 403, { error: 'this link opens one research only' });
     req.access = access;
-    if (access.setCookie) {
+    if (!gate.isLoopback(req) && access.allowed) app.peers?.note(req.socket?.remoteAddress);
+    const page = url.pathname === '/' || url.pathname === '/index.html';
+    if (access.setCookie && page) {
       res.writeHead(302, { 'set-cookie': access.setCookie, location: url.pathname + url.hash });
       return res.end();
     }
+    if (access.setCookie) res.setHeader('set-cookie', access.setCookie);
+    if (req.method === 'GET' && url.pathname === '/pc-setup.ps1') return send(res, 200, pcSetupScript(), 'text/plain; charset=utf-8');
     try {
       if (req.method === 'GET' && VENDOR[url.pathname]) {
         const [file, type] = VENDOR[url.pathname];
@@ -389,6 +395,8 @@ export async function startServer({ app = new App(), port = Number(process.env.P
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const local = process.env.FRL_LOCAL_AUTOSTART === '0' ? { started: false } : await ensureLocalModel({ root: ROOT_DIR }).catch(() => ({ started: false }));
+  if (local.started) console.log(`  local model restarted on port ${local.port} (pid ${local.pid}); it is ready once loaded`);
   const secrets = new KeychainSecrets();
   const fromKeychain = process.env.FRL_KEYCHAIN === '0' ? [] : await secrets.fillMissing(process.env);
   const remote = (Boolean(process.env.HOST) && process.env.HOST !== '127.0.0.1' && process.env.HOST !== 'localhost') || process.env.FRL_BEHIND_PROXY === '1';
@@ -423,6 +431,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   await app.seedLedger();
   setInterval(() => app.routerAdmin.apply(), 60000).unref();
   app.startHousekeeping();
+  app.startPeerWatch();
   process.on('SIGTERM', () => void stop('SIGTERM'));
   process.on('SIGINT', () => void stop('SIGINT'));
   if (process.env.FRL_AUTO_RESUME !== '0') {

@@ -14,6 +14,8 @@ import { SubIssueSuggester } from './research/suggest.mjs';
 import { ExchangeRates } from './research/rates.mjs';
 import { EventLog } from './logs.mjs';
 import { TempSweeper, describeSweep, sweepHoursFrom } from './housekeeping.mjs';
+import { PeerWatcher } from './local/peerwatch.mjs';
+import { probePeer } from './local/peer.mjs';
 import { AppChat } from './appchat.mjs';
 import { HandoffWriter } from './research/handoff.mjs';
 import { appendAppMessage } from './research/notify.mjs';
@@ -127,7 +129,7 @@ export class App {
     this.handoffs = new HandoffWriter({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'handoff') });
     const rates = new ExchangeRates({ fetchImpl });
     this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
-    this.improver = new ProjectImprover({ engine: this.engine });
+    this.improver = new ProjectImprover({ engine: this.engine, checkpoint: async (id, resume) => this.handoffs.write(await this.engine.load(id), { reason: 'loop running (checkpoint for a crash or power cut)', resume }) });
     this.suggester = new SubIssueSuggester({ engine: this.engine });
     this.port = Number(env.PORT || 4600);
     this.remote = false;
@@ -168,11 +170,20 @@ export class App {
     });
     this.chat = new NodeChat({ engine: this.engine, suggester: this.suggester, improver: this.improver, appChat: this.appChat, media: this.media });
     this.fixedProviders = Boolean(providers);
+    this.peers = new PeerWatcher({ probe: (host) => probePeer(host, { fetchImpl: this.fetchImpl }), onFound: (endpoint) => this.connectPeer(endpoint) });
     this.sweeper = new TempSweeper({
       dataDir: this.dataDir,
       logs: this.logs,
       projectExists: (id) => this.projectFileExists(id),
     });
+  }
+
+  async connectPeer(endpoint) {
+    this.env[endpoint.env] = endpoint.url;
+    await this.secrets?.write(endpoint.env, endpoint.url).catch(() => {});
+    await this.refreshProviders();
+    void this.logs.append('history', { type: 'session', message: `connected the other PC's ${endpoint.label} at ${endpoint.url} (${(endpoint.models ?? []).join(', ')}); it now takes research calls with no quota` });
+    this.noteApp(`Connected the other PC's ${endpoint.label} (${(endpoint.models ?? []).join(', ')}): its graphics card now works on the research too.`);
   }
 
   async projectFileExists(id) {
@@ -182,6 +193,26 @@ export class App {
     } catch (error) {
       return /invalid project id/.test(error.message);
     }
+  }
+
+  async rediscoverLocal() {
+    const waiting = this.router.providers.filter((p) => p.preset?.local && p.state !== 'ready' && p.baseURL);
+    for (const provider of waiting) await provider.discover().catch(() => {});
+    const back = waiting.filter((p) => p.state === 'ready');
+    for (const p of back) void this.logs.append('history', { type: 'session', message: `${p.preset.label} is answering again (${p.selected.fast})` });
+    return back.map((p) => p.id);
+  }
+
+  startPeerWatch(everyMs = 30000) {
+    this.peerTimer = setInterval(() => void (async () => {
+      try {
+        await this.peers.check();
+        await this.rediscoverLocal();
+      } catch {
+        return;
+      }
+    })(), everyMs);
+    this.peerTimer.unref?.();
   }
 
   startHousekeeping() {
@@ -200,6 +231,7 @@ export class App {
 
   async shutdown() {
     this.sweeper.stop();
+    if (this.peerTimer) clearInterval(this.peerTimer);
     this.terminal.closeAll();
     await this.improver.shutdown();
     for (const id of [...this.engine.running]) {

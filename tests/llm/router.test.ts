@@ -191,3 +191,20 @@ describe('ModelRouter model switching', () => {
   });
 });
 
+describe('ModelRouter local context size', () => {
+  it('never sends a local server a prompt bigger than its context, and reads that size from llama-server', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const preset = { id: 'llamacpp', label: 'l', baseURL: 'http://127.0.0.1:8090/v1', keyEnv: null, local: true, prefer: { fast: [], deep: [] } };
+    const fetchImpl = async (url: string) => {
+      if (url.endsWith('/v1/models')) return new Response(JSON.stringify({ data: [{ id: 'Qwen3-4B' }] }));
+      if (url.endsWith('/props')) return new Response(JSON.stringify({ default_generation_settings: { n_ctx: 4096 }, total_slots: 2 }));
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], model: 'Qwen3-4B' }));
+    };
+    const local = await new OpenAICompatibleProvider({ preset, fetchImpl: fetchImpl as never }).discover();
+    expect(local.maxPromptTokens).toBe(1096);
+    const router = new ModelRouter({ providers: [local] });
+    expect(router.available({ tier: 'fast', tokens: 1000 }).map((p: { id: string }) => p.id)).toEqual(['llamacpp']);
+    expect(router.available({ tier: 'fast', tokens: 7000 })).toEqual([]);
+  });
+});
+

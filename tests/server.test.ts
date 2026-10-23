@@ -190,6 +190,11 @@ describe('research share links', () => {
       for (const [m, u] of [['GET', `/api/projects/${other.id}`], ['DELETE', `/api/projects/${shared.id}`], ['POST', `/api/projects/${shared.id}/share`], ['POST', '/api/projects'], ['GET', '/api/terminal'], ['GET', '/api/router'], ['GET', '/api/chat'], ['GET', '/api/access']]) expect((await helper(m, u)).status, `${m} ${u}`).toBe(403);
       expect((await fetch(`${started.url}/api/projects`, { headers: remote })).status).toBe(401);
       expect((await fetch(`${started.url}/favicon.ico`, { headers: remote })).status).toBe(204);
+      const script = await fetch(`${started.url}/pc-setup.ps1?share=${view.token}`, { headers: remote, redirect: 'manual' });
+      expect(script.status).toBe(200);
+      expect(await script.text()).toContain('llama-server.exe');
+      expect((await fetch(`${started.url}/pc-setup.ps1`, { headers: remote })).status).toBe(401);
+      expect(view.pcSetup === null || view.pcSetup.includes(`/pc-setup.ps1?share=${view.token}`)).toBe(true);
       const reachable = await fetch(`${started.url}/reachable`, { headers: remote });
       expect(reachable.status).toBe(200);
       expect(await reachable.text()).toContain('is reachable');

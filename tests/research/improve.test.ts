@@ -75,6 +75,8 @@ describe('ProjectImprover', () => {
     const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
     let clock = 0;
     const improver = new ProjectImprover({ engine, now: () => (clock += 2000), sleep: async () => {} });
+    const checkpoints: Array<{ loopHoursLeft: number }> = [];
+    improver.checkpoint = async (_id: string, resume: { loopHoursLeft: number }) => { checkpoints.push(resume); };
     improver.start(project.id, { hours: 0.05 });
     expect(() => improver.start(project.id)).toThrow(/already running/);
     for (let i = 0; i < 500 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
@@ -86,6 +88,9 @@ describe('ProjectImprover', () => {
     expect(new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome))).toEqual(new Set(['no-change', 'reverted-whole']));
     expect(saved.improve.best).toBe(saved.improve.baseline);
     expect(saved.log.some((l: { type: string }) => l.type === 'improve-state')).toBe(true);
+    expect(checkpoints.length).toBeGreaterThan(1);
+    expect(checkpoints[0].loopHoursLeft).toBeGreaterThan(0);
+    expect(checkpoints[0].loopHoursLeft).toBeLessThanOrEqual(0.05);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 });

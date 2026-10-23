@@ -71,10 +71,14 @@ export function aliasFor(model) {
   return base || 'local';
 }
 
-export function serverArgs({ model, helpers = [], port = SERVER_PORT, ctx = 16384, split = '', parallel = 2 }) {
+const KV_TYPES = new Set(['f16', 'q8_0', 'q4_0']);
+
+export function serverArgs({ model, helpers = [], port = SERVER_PORT, ctx = 16384, split = '', parallel = 2, kv = '' }) {
   if (!model) throw new Error('choose a model, e.g. --model ggml-org/gpt-oss-20b-GGUF');
+  if (kv && !KV_TYPES.has(kv)) throw new Error(`--kv takes one of ${[...KV_TYPES].join(', ')}`);
   const source = /\.gguf$/i.test(model) ? ['-m', model] : ['-hf', model];
-  return [...source, '-ngl', '99', '-c', String(ctx), '-np', String(parallel), '--host', '127.0.0.1', '--port', String(port), '-a', aliasFor(model), ...(helpers.length ? ['--rpc', helpers.join(',')] : []), ...(split ? ['-ts', split] : [])];
+  const slots = Math.max(1, Math.floor(Number(parallel) || 1));
+  return [...source, '-ngl', '99', '-c', String(ctx * slots), '-np', String(slots), ...(kv ? ['-fa', 'on', '-ctk', kv, '-ctv', kv] : []), '--host', '127.0.0.1', '--port', String(port), '-a', aliasFor(model), ...(helpers.length ? ['--rpc', helpers.join(',')] : []), ...(split ? ['-ts', split] : [])];
 }
 
 export function helperArgs({ host, port = HELPER_PORT, cache = true }) {

@@ -27,6 +27,8 @@ export function pickModel(models, preferences, freeOnly = false, { strict = fals
   return strict ? null : (usable[0] ?? null);
 }
 
+const LOCAL_OUTPUT_RESERVE = 3000;
+
 export function quotaWindow(body) {
   const text = String(body);
   if (/PerDay[A-Za-z]*PerModel/.test(text) || /limit reached for model[\s\S]*(?:per day|\bTPD\b|\bRPD\b)/i.test(text) || /(?:tokens|requests) per day limit exceeded/i.test(text)) return ' [quota window: per day, per model]';
@@ -133,6 +135,7 @@ export class OpenAICompatibleProvider {
       this.selected.vision = this.preset.prefer.vision ? pickModel(this.models, this.preset.prefer.vision, this.preset.freeOnly, { strict: true }) : null;
       this.state = this.selected.fast ? 'ready' : 'no-models';
       this.detail = this.selected.fast ? `fast=${this.selected.fast} deep=${this.selected.deep}` : 'no chat model available';
+      if (this.preset.local) await this.readContextSize();
     } catch (error) {
       const fallback = this.preset.fallbackModels;
       const authFailed = error.status === 401 || error.status === 403;
@@ -150,6 +153,17 @@ export class OpenAICompatibleProvider {
       }
     }
     return this;
+  }
+
+  async readContextSize() {
+    try {
+      const res = await this.fetchImpl(`${this.baseURL.replace(/\/v1\/?$/, '')}/props`, { signal: AbortSignal.timeout(4000) });
+      const props = res.ok ? await res.json() : null;
+      const slot = Number(props?.default_generation_settings?.n_ctx);
+      if (slot > 0) this.maxPromptTokens = Math.max(512, slot - LOCAL_OUTPUT_RESERVE);
+    } catch {
+      this.maxPromptTokens = this.maxPromptTokens ?? null;
+    }
   }
 
   retireModel(model, until) {

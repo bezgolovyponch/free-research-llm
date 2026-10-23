@@ -16,7 +16,9 @@ import { guideFor } from './llm/guides.mjs';
 import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helperArgs, parseHelpers, recommendModel, serverArgs, speedOf } from './local/llamacpp.mjs';
 import { CREDSTORE, KeychainSecrets, runCommand, secretNames } from './secrets.mjs';
 import { shareLinks } from './share.mjs';
+import { pcSetupCommand } from './local/pcsetup.mjs';
 import { probePeer } from './local/peer.mjs';
+import { rememberServe } from './local/autostart.mjs';
 import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, stableNodePath, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -332,6 +334,7 @@ const commands = {
     const bases = accessLinks({ port: PORT, lan: lanAddresses(os.networkInterfaces()), tailscale: await tailscaleName(), funnel: await funnelOn() }).filter((l) => !l.url.includes('127.0.0.1'));
     console.log('Link for this one research (chat, run, add pieces; no other researches, keys or terminal):');
     for (const l of shareLinks(bases, { projectId, token: view.token })) console.log(`  ${l.label.padEnd(30)} ${l.url}`);
+    if (bases[0]) console.log(`\n  Let that PC's graphics card research too: on the PC open PowerShell and run\n    ${pcSetupCommand(bases[0].url, view.token)}\n  The app connects its model within a minute of the PC opening the link.`);
     if (!bases.some((l) => l.label.startsWith('anywhere'))) console.log('  anywhere: install Tailscale (https://tailscale.com/download) on both computers, sign in to both, then run this again');
     console.log('\n  Keep the link private. Turn it off with: node src/frl.mjs share ' + projectId + ' --off');
   },
@@ -444,8 +447,18 @@ const commands = {
       if (!current) return need();
       const helpers = parseHelpers(flag('helpers'));
       const port = Number(flag('port', SERVER_PORT));
-      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split') });
+      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split'), parallel: Number(flag('parallel', 1)), kv: flag('kv', '') });
       await secrets.write('LLAMACPP_BASE_URL', `http://127.0.0.1:${port}/v1`).catch(() => {});
+      await rememberServe(ROOT, { server: current.server, args, port });
+      if (args.includes('--background') || process.argv.includes('--background')) {
+        await fs.mkdir(path.join(ROOT, 'data', 'logs'), { recursive: true });
+        const out = await fs.open(path.join(ROOT, 'data', 'logs', 'llama.out'), 'a');
+        const child = spawn(current.server, args, { detached: true, stdio: ['ignore', out.fd, out.fd] });
+        child.unref();
+        await out.close();
+        console.log(`Local model starting in the background (pid ${child.pid}) on http://127.0.0.1:${port}/v1. Log: data/logs/llama.out. Stop it with: kill ${child.pid}`);
+        return void reloadApp();
+      }
       console.log(`Local model on http://127.0.0.1:${port}/v1${helpers.length ? ` with helpers ${helpers.join(', ')}` : ''}. The research app uses it as the "llamacpp" provider (Models & router). Press Ctrl+C to stop.\n`);
       void reloadApp();
       return run(current.server, args, { shell: false });
@@ -474,7 +487,7 @@ const commands = {
       const speed = speedOf(reply);
       return console.log(speed ? `prefill (reading): ${speed.prefillPerSecond} tokens/s over ${speed.promptTokens} tokens · decode (writing): ${speed.decodePerSecond} tokens/s` : 'no timings in the reply');
     }
-    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N] [--split a,b] | helper --host LAN-IP [--port 50052] | pc <other PC address> | status | bench');
+    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N per request] [--parallel N] [--kv q8_0] [--split a,b] [--background] | helper --host LAN-IP [--port 50052] | pc <other PC address> | status | bench');
   },
 
   async logs() {

@@ -303,3 +303,13 @@ Asked: keep all insights and progress, restart with the improvements and the loo
 - One research kept as the current one: `find-appropriate-plots-to-buy-fo-b7772e` (21/25 pieces passing, best 0.409, 90 trials). v2 (`…3ed9dc`, 13/25, best 0.211) was stopped with a handoff and its link turned off; its data is kept.
 - Gemini quota window: the provider now appends `[quota window: per minute|per day]` or the `retryDelay` from the full error body, so a per-minute 429 is no longer benched until midnight; benches restored at start ignore the ambiguous "exceeded your current quota" alone.
 - App restarted on the current code with the one loop.
+
+## Session 2026-10-23 · llama.cpp on both machines, models, no-stop loop
+
+Asked: install llama (why it did not work), let it work on both machines; make models, research, loop, the PC link, llama and Ollama work; a real link for the next PC that uses its own llama; the loop must run with no stops and memory must be cleaned regularly.
+
+- Why llama did not work: llama.cpp was installed on 2026-10-19 but never started (no model, no server); after starting, its 4,096-token slots were smaller than the app's 7–8k-token prompts. Now: Qwen3-4B on this Mac, 16,384 tokens per request, q8_0 KV cache, background, restarted with the app (`data/llama/serve.json`); the router never sends a local server a prompt bigger than its context (`/props`).
+- Models: per-model daily limits (Gemini PerModel, Groq "limit reached for model … per day", Cerebras "per day limit exceeded") switch to the next model instead of benching the provider; Gemini and Groq preferences list the models these keys have today. Live: Gemini moved 3.8 → 3.7 → 3.6-flash, Cerebras to qwen-3.8-27b.
+- Other PC: one PowerShell line from the share panel (`/pc-setup.ps1`) installs llama.cpp and a model by graphics memory; `PeerWatcher` connects it within a minute of the PC opening the link; `node src/frl.mjs local pc <address>` does it by hand. Ollama on the PC works the same way through `OLLAMA_BASE_URL` (port 11434, `OLLAMA_HOST=0.0.0.0:11434`). Not run on the PC itself: it was not reachable from this Mac (no answer on 8090/11434).
+- No stops: loop resume checkpoints after every pass (crash or power cut resumes); always-on service relaunches the app; every in-memory list is capped; disk temp is swept every 6 h.
+- Ollama is not run on this Mac on purpose: with 8 GB and llama.cpp loaded, free memory was 14%.
