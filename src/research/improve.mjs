@@ -83,10 +83,17 @@ export function acceptsTrial(before, after, removed = []) {
   return after > before + (removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
 }
 
+function canGain(project, node) {
+  if (node.status !== 'verified') return true;
+  if ((node.specs ?? []).some((spec) => !spec.last?.passed)) return true;
+  const expectedUnmet = Boolean(project.acceptanceResult) && project.acceptanceResult.score < 0.999;
+  return expectedUnmet && (node.finding?.items ?? []).length > 0;
+}
+
 export function improvementTargets(project, scope = [], exclude = []) {
   const ids = inScope(project.nodes, scope, exclude);
   const leaves = project.nodes
-    .filter((n) => ids.has(n.id) && isLeaf(project.nodes, n))
+    .filter((n) => ids.has(n.id) && isLeaf(project.nodes, n) && canGain(project, n))
     .sort((a, b) => (GRADE_RANK[a.status] ?? 0) - (GRADE_RANK[b.status] ?? 0) || b.impact * b.uncertainty - a.impact * a.uncertainty);
   return [...(exclude.includes(ROOT_ID) ? [] : [ROOT_ID]), ...leaves.map((n) => n.id)];
 }

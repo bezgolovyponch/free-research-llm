@@ -285,3 +285,13 @@ Asked: "provide a new link, same wifi but PC has no access to the research, also
 - The old research's link was turned off; a new link opens v2.
 
 Open: whether the PC reaches the app is unknown until it opens `/reachable`; History will show the attempt.
+
+## Session 2026-10-23 · lanes and teammates, grounded checks, product review
+
+Asked: make the Mac and the PC work as one team so the loop is faster; then "results in listing dont have to mention glamping … find the root cause … fix, merge, restart on both machines keeping the results"; then "review the entire logic … fix the flaws, produce the report with suggestions, clear inappropriate and useless processes".
+
+- Lanes for runs and loop trials, teammates join as lanes; grounded criteria with re-grounding of stored checks; verified pieces that cannot gain are no longer loop targets; router keeps credit/key/daily benches across restarts; review skipped on answers already failing; list summaries cached; favicon no longer logged as a refused device; `data/market/` removed.
+- Live: the old glamping research enforces 50 items and €0–20,000 only (re-scored to 0.398), and its loop resumed after the restart; the PC started a 24 h loop on v2 at 10:18, and v2's checks were re-grounded too.
+- Report: [REVIEW-2026-10-23.md](REVIEW-2026-10-23.md).
+
+Open: the PR still needs a merge by the user (the merge command was refused by the permission check); two loops share the same free quotas; data deletions listed in the report need the user's yes.

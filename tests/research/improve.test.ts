@@ -30,19 +30,20 @@ describe('improve helpers', () => {
   });
 
   it('targets the structure first, then the weakest, highest-priority leaves', () => {
-    expect(improvementTargets(tree())).toEqual(['Q', 'D2', 'D1.1', 'D1.2']);
+    expect(improvementTargets(tree())).toEqual(['Q', 'D2', 'D1.1']);
   });
 
   it('limits the loop to the focus of the ticked pieces minus what the user excluded, and scores only that', () => {
     const p = tree();
     expect([...inScope(p.nodes, ['D1'])]).toEqual(['D1', 'D2', 'D1.1', 'D1.2']);
-    expect(improvementTargets(p, ['D1'], ['Q'])).toEqual(['D2', 'D1.1', 'D1.2']);
+    expect(improvementTargets(p, ['D1'], ['Q'])).toEqual(['D2', 'D1.1']);
     expect(improvementTargets(p, ['D1'])[0]).toBe('Q');
     expect(improvementTargets(p, ['ghost'], ['Q'])).toEqual([]);
     const only = ['Q', 'D1', 'D2', 'D1.1'];
     expect(scopeScore(p, ['D1.2'], [], only)).toMatchObject({ score: 1, nodes: 1, specs: null });
     addSpec(p, 'D1.2', normalizeSpec({ mustMention: ['Brno'] }, { request: 'r', desired: 'price in Brno' }));
     expect(scopeScore(p, ['D1.2'], [], only)).toMatchObject({ grades: 1, specs: 0, score: 0.5 });
+    expect(improvementTargets(p, ['D1'], ['Q'])).toEqual(['D2', 'D1.1', 'D1.2']);
   });
 
   it('applies node edits and splits, and root adds/removes while keeping two top-level pieces', () => {
@@ -53,6 +54,16 @@ describe('improve helpers', () => {
     expect(applyVariant(p, 'Q', { add: [{ question: 'competition?' }], remove: ['D2'] })).toEqual(['D3', 'D2']);
     expect(p.nodes.map((n) => n.id)).not.toContain('D2');
     expect(applyVariant(p, 'Q', { remove: ['D1', 'D3'] })).toEqual([]);
+  });
+});
+
+describe('improvementTargets', () => {
+  it('skips verified pieces that cannot gain, keeps verified pieces that deliver items while the expected result is unmet', () => {
+    const leaf = (id: string, status: string, items = 0) => ({ id, parentId: 'D1', status, impact: 3, uncertainty: 3, dependsOn: [], finding: { items: Array.from({ length: items }, (_, i) => ({ url: `https://x.example/${id}/${i}` })) } });
+    const project = { nodes: [{ id: 'D1', parentId: 'Q', status: 'supported', dependsOn: [] }, leaf('D1.1', 'weak'), leaf('D1.2', 'verified'), leaf('D1.3', 'verified', 4), leaf('D1.4', 'supported')], acceptanceResult: { score: 0.13 } };
+    expect(improvementTargets(project as never)).toEqual(['Q', 'D1.1', 'D1.4', 'D1.3']);
+    expect(improvementTargets({ ...project, acceptanceResult: { score: 1 } } as never)).toEqual(['Q', 'D1.1', 'D1.4']);
+    expect(improvementTargets({ ...project, acceptanceResult: null } as never)).toEqual(['Q', 'D1.1', 'D1.4']);
   });
 });
 

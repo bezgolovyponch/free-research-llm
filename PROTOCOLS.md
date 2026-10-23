@@ -11,8 +11,8 @@ Each row names the code that enforces it and the test that proves it.
 | 2 Search | Search engines take turns per query; an engine out of quota (401/402/403/429/432) is benched for 1 h; off-topic Wikipedia hits are dropped | `SearchService.rotation`, `isRelevant` |
 | 3 Scrape | Top 5 pages are fetched; thin pages are re-read through the Jina reader; links on every page are kept, listing-like links first | `SearchService.readPage`, `extractLinks` |
 | 4 Answer | Fast model answers from the evidence only, following the node's instructions | `researchPrompt` |
-| 5 Review | A different provider critiques the answer | `ResearchEngine.critique` (`avoid`) |
-| 6 Gate | Mechanical checks (section 2) grade the answer | `verifyFinding` |
+| 5 Gate | Mechanical checks (section 2) grade the answer first | `verifyFinding` |
+| 6 Review | A different provider critiques the answer, then the gate runs again with the review; skipped when the mechanical checks already failed and another attempt follows (the retry would discard it) | `ResearchEngine.critique` (`avoid`) |
 | 7 Retry | On weak/unsupported: the answer's gaps become new searches, then the deep model retries; max 3 attempts | `searchGaps`, `MAX_ATTEMPTS` |
 | 8 Roll up | A parent takes its weakest child's grade | `ResearchEngine.rollup` |
 | 9 Deliver | Only items from verified/supported nodes are collected; the expected-result checks run on them | `collectDeliverables`, `AcceptanceChecker` |

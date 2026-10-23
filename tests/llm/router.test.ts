@@ -121,3 +121,25 @@ describe('ModelRouter route order', () => {
     expect(router.route().vision).toEqual(['gemini']);
   });
 });
+
+describe('ModelRouter.restoreCooldowns', () => {
+  it('keeps a provider benched after a restart when its last call ran out of credit, had a bad key or used the daily quota', () => {
+    const now = Date.parse('2026-10-23T10:00:00Z');
+    const p = (id: string) => ({ id, ready: true, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('sambanova'), p('groq'), p('gemini'), p('cerebras'), p('old')], now: () => now });
+    const restored = router.restoreCooldowns([
+      { ts: '2026-10-23T09:00:00Z', provider: 'sambanova', ok: false, error: 'sambanova HTTP 402: {"error":{"balance_units":0}}' },
+      { ts: '2026-10-23T09:10:00Z', provider: 'groq', ok: false, error: 'groq HTTP 429: Rate limit reached for model' },
+      { ts: '2026-10-23T08:00:00Z', provider: 'gemini', ok: false, error: 'gemini HTTP 429: Requests per day limit exceeded' },
+      { ts: '2026-10-23T09:30:00Z', provider: 'gemini', ok: false, error: 'gemini HTTP 429: tokens per day exhausted' },
+      { ts: '2026-10-23T09:00:00Z', provider: 'cerebras', ok: false, error: 'cerebras HTTP 401: invalid key' },
+      { ts: '2026-10-23T09:50:00Z', provider: 'cerebras', ok: true },
+      { ts: '2026-10-22T09:00:00Z', provider: 'old', ok: false, error: 'old HTTP 402: balance' },
+      { ts: '2026-10-23T09:00:00Z', provider: 'unknown', ok: false, error: 'HTTP 402' },
+    ]);
+    expect(restored.sort()).toEqual(['gemini', 'sambanova']);
+    expect(router.cooldownReason.get('sambanova')).toMatch(/daily quota or credit/);
+    expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
+    expect(router.cooldownUntil.has('groq')).toBe(false);
+  });
+});

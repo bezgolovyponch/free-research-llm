@@ -59,6 +59,7 @@ describe('ResearchEngine', () => {
   it('escalates a leaf to the deep tier when its first answer fails the checks', async () => {
     const scripted = new ScriptedProvider();
     let poisoned = false;
+    let critiques = 0;
     const provider = {
       id: 'demo',
       ready: true,
@@ -82,6 +83,7 @@ describe('ResearchEngine', () => {
   });
 
   it('searches the gaps of a failed answer before the deep-tier retry', async () => {
+    let critiques = 0;
     const scripted = new ScriptedProvider();
     let poisoned = false;
     const provider = {
@@ -106,9 +108,14 @@ describe('ResearchEngine', () => {
       },
     };
     const { engine } = engineWith(provider, recordingSearch, 1);
+    const review = engine.critique.bind(engine);
+    engine.critique = (async (...args: Parameters<typeof engine.critique>) => { critiques += 1; return review(...args); }) as typeof engine.critique;
     const project = await engine.createProject({ question: 'Is buying used RAV4 hybrids in Germany to resell in Poland profitable?' });
     const done = await engine.run(project.id);
     const retried = done.nodes.find((n: { attempts: number }) => n.attempts === 2);
+    expect(retried.critique).toBeTruthy();
+    const leaves = done.nodes.filter((n: { id: string }) => done.nodes.every((m: { parentId: string }) => m.parentId !== n.id));
+    expect(critiques).toBe(leaves.length);
     const gapCall = calls.find((c) => c.exclude.length);
     expect(gapCall?.queries[0]).toBe('median 2026 asking price RAV4 hybrid Germany');
     expect(gapCall?.exclude).toEqual(['https://one.example/a', 'https://two.example/b']);

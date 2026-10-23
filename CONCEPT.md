@@ -10,7 +10,8 @@ Free Research LLM answers **one decision question** with a researched, machine-c
 |---|---|---|---|
 | Ask | Write a question and an expected result, then press **Build the tree** or **Research now** | Splits the question into a tree of pieces (sub-questions) | You review the tree before anything runs |
 | Research | Press **▶ Run** | Searches, reads pages, answers each piece, reviews it with a second model | Gates: citations exist, links were seen on fetched pages, numbers are sourced, formulas are recomputed |
-| Improve | Press **Improve loop** and set the hours | Changes one piece at a time, re-researches it, scores the whole tree | A change is kept only if the measured score rises |
+| Improve | Press **Improve loop** and set the hours | Tries changes on several pieces at once (one per lane), re-researches each on a copy, then keeps them one at a time | A change is kept only if its piece does not get worse, no regression check breaks, and the measured score of the whole research rises |
+| Team | Open the research's share link on another computer and press **⚡ Join** or **Improve loop** while it runs | Adds one lane, so more pieces are researched or tried at once (2 by default, up to 4) | The same gates; a change that collides with another lane's change is refused and retried |
 | Results | Open the **Results** tab | Always shows a computed result: the verdict and a best estimate with a range, even when evidence is thin, marked **PROVISIONAL** with a confidence from the checks. Below it, every unsettled piece by name, tagged **Fix**, **Research further** or **Clarify**, with why and the next step. **Export:** report (.md), pieces & actions (.csv), delivered items (.csv), everything (.json), print/PDF | The checks decide the confidence and the action list (`src/research/gaps.mjs`), not the model |
 | Talk | Use the chat in the side panel | Answers and proposes changes | Each chat has its own scope (below); every reply passes the reply audit |
 | Operate | Press **Terminal**, or a command button | A real shell on the computer that runs the app, plus one-click commands for keys, links, always-on, updates and the quality gate | You type or press every command yourself |
@@ -22,6 +23,10 @@ Free Research LLM answers **one decision question** with a researched, machine-c
 | All researches; pick one | **Decomposition map** (dependency graph) · **Tree & pieces** (tree with checkboxes on the left; table of every piece and the selected piece's report on the right) · **Sources** (pick a piece, see the sources it used) · **Results** · **Report** (memo) · **Gates & logs** (every gate per piece, regression checks, loop trials, event log) | Everything you do: actions on the selected piece (re-research, split, suggest, add, edit, remove, files, instructions) and the chats |
 
 Pieces keep the names of the first version: **Q** is the question, **D1, D2…** are drivers, **D1.1, D1.2…** are sub-questions, shown as `D1.1 · Model price scan` with the role. Each piece's report follows its role: a sub-question shows its research process (method, queries, pages, sources, answer, gates, reviewer, timeline); a driver shows what it rolls up; Q shows the decision, expected result, memo and drivers.
+
+## Checks come from your words, not the model's
+
+The model may propose checks for the expected result and for each piece, but code keeps only what your text states: a word that pages must contain only when you ask for it ("must mention X", a quoted word), and counts or price ranges only when you wrote the numbers. "Feasible for a glamping business" describes the purpose; it is not a word every listing must contain. Dropped checks are listed in the research log as "not enforced".
 
 ## Request, desired output and regression checks
 

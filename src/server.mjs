@@ -318,6 +318,10 @@ export function createServer(app, gate = new AccessGate()) {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/reachable') return send(res, 200, REACHABLE_PAGE, 'text/html; charset=utf-8');
+    if (req.method === 'GET' && url.pathname === '/favicon.ico') {
+      res.writeHead(204, { 'cache-control': 'max-age=86400' });
+      return res.end();
+    }
     const access = gate.decide(req, url);
     if (!gate.isLoopback(req)) visits.record(req, url.pathname, access);
     if (!access.allowed) return deny(res, access.reason);

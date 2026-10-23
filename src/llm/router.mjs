@@ -75,6 +75,23 @@ export class ModelRouter {
     this.onLedger(row);
   }
 
+  restoreCooldowns(rows) {
+    const latest = new Map();
+    for (const row of rows) if (row?.provider) latest.set(row.provider, row);
+    const restored = [];
+    for (const [id, row] of latest) {
+      if (row.ok || !this.providers.some((p) => p.id === id)) continue;
+      const status = Number(/HTTP (\d{3})/.exec(String(row.error ?? ''))?.[1] ?? 0);
+      const at = Date.parse(row.ts);
+      const badKey = (status === 401 || status === 403) && this.now() - at < BAD_KEY_MS;
+      const daily = (status === 402 || DAILY.test(String(row.error ?? ''))) && nextUtcMidnight(at) > this.now();
+      if (!badKey && !daily) continue;
+      this.coolDown({ id }, { status, message: String(row.error ?? '') });
+      restored.push(id);
+    }
+    return restored;
+  }
+
   coolDown(provider, error) {
     const now = this.now();
     let until = now + (error.retryAfterMs || this.cooldownMs);
