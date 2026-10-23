@@ -6,6 +6,7 @@ export class NoModelAvailableError extends Error {}
 
 const DEFAULT_COOLDOWN_MS = 60000;
 const BAD_KEY_MS = 6 * 3600 * 1000;
+const SHORT_LIMIT = /retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
 
 export function nextUtcMidnight(now) {
@@ -84,7 +85,8 @@ export class ModelRouter {
       const status = Number(/HTTP (\d{3})/.exec(String(row.error ?? ''))?.[1] ?? 0);
       const at = Date.parse(row.ts);
       const badKey = (status === 401 || status === 403) && this.now() - at < BAD_KEY_MS;
-      const daily = (status === 402 || DAILY.test(String(row.error ?? ''))) && nextUtcMidnight(at) > this.now();
+      const text = String(row.error ?? '');
+      const daily = !SHORT_LIMIT.test(text) && (status === 402 || DAILY.test(text)) && nextUtcMidnight(at) > this.now();
       if (!badKey && !daily) continue;
       this.coolDown({ id }, { status, message: String(row.error ?? '') });
       restored.push(id);
@@ -99,7 +101,7 @@ export class ModelRouter {
     if (error.status === 401 || error.status === 403) {
       until = now + BAD_KEY_MS;
       reason = 'key rejected; check it on Models & router';
-    } else if (error.status === 402 || DAILY.test(error.message)) {
+    } else if (!SHORT_LIMIT.test(error.message) && (error.status === 402 || DAILY.test(error.message))) {
       until = Math.max(until, nextUtcMidnight(now));
       reason = 'daily quota or credit used up; waits for the daily reset';
     }

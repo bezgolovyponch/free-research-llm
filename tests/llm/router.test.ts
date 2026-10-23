@@ -126,7 +126,7 @@ describe('ModelRouter.restoreCooldowns', () => {
   it('keeps a provider benched after a restart when its last call ran out of credit, had a bad key or used the daily quota', () => {
     const now = Date.parse('2026-10-23T10:00:00Z');
     const p = (id: string) => ({ id, ready: true, describe: () => ({}), chat: async () => ({}) });
-    const router = new ModelRouter({ providers: [p('sambanova'), p('groq'), p('gemini'), p('cerebras'), p('old')], now: () => now });
+    const router = new ModelRouter({ providers: [p('sambanova'), p('groq'), p('gemini'), p('cerebras'), p('old'), p('pollinations'), p('openrouter')], now: () => now });
     const restored = router.restoreCooldowns([
       { ts: '2026-10-23T09:00:00Z', provider: 'sambanova', ok: false, error: 'sambanova HTTP 402: {"error":{"balance_units":0}}' },
       { ts: '2026-10-23T09:10:00Z', provider: 'groq', ok: false, error: 'groq HTTP 429: Rate limit reached for model' },
@@ -136,10 +136,24 @@ describe('ModelRouter.restoreCooldowns', () => {
       { ts: '2026-10-23T09:50:00Z', provider: 'cerebras', ok: true },
       { ts: '2026-10-22T09:00:00Z', provider: 'old', ok: false, error: 'old HTTP 402: balance' },
       { ts: '2026-10-23T09:00:00Z', provider: 'unknown', ok: false, error: 'HTTP 402' },
+      { ts: '2026-10-23T09:55:00Z', provider: 'pollinations', ok: false, error: 'pollinations HTTP 402: {"error":{"code":"FREE_LIMIT","message":"Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s"}}' },
+      { ts: '2026-10-23T09:56:00Z', provider: 'openrouter', ok: false, error: 'openrouter HTTP 429: Rate limit exceeded: free-models-per-day. Add 10 credits' },
     ]);
-    expect(restored.sort()).toEqual(['gemini', 'sambanova']);
+    expect(restored.sort()).toEqual(['gemini', 'openrouter', 'sambanova']);
     expect(router.cooldownReason.get('sambanova')).toMatch(/daily quota or credit/);
     expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
     expect(router.cooldownUntil.has('groq')).toBe(false);
   });
 });
+
+describe('ModelRouter.coolDown', () => {
+  it('treats a 402 that states a short retry as a short throttle, not a daily bench', () => {
+    const now = Date.parse('2026-10-23T10:00:00Z');
+    const router = new ModelRouter({ providers: [], now: () => now });
+    router.coolDown({ id: 'pollinations' }, new ProviderError('pollinations HTTP 402: Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s', { status: 402, retryAfterMs: 5000 }));
+    expect(router.cooldownUntil.get('pollinations')).toBe(now + 5000);
+    router.coolDown({ id: 'sambanova' }, new ProviderError('sambanova HTTP 402: balance_units 0', { status: 402 }));
+    expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
+  });
+});
+
