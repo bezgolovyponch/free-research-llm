@@ -273,3 +273,15 @@ Changed:
 - Real use: a second instance on port 4620 with a copy of the research data, reached at the Wi-Fi address in headless Chromium: the link opened only the shared research, terminal and another research returned 403, the App tab was hidden, and a piece added on the owner screen appeared on the shared screen through the live stream. The instance and its data were deleted afterwards.
 
 Open: compute and model quotas stay on the computer that runs the app; the second computer adds a second person working on the research, not a second quota pool.
+
+## Session 2026-10-23 · PC could not open the link; research v2
+
+Asked: "provide a new link, same wifi but PC has no access to the research, also, restart the app here with all new changes, proceed with self improving loop under new improved research principles … mikoshi and similar confirmation mandatory protocols".
+
+- Mac side checked: macOS firewall disabled, app listening on all interfaces, Wi-Fi address 192.168.5.25 unchanged. The app had no record of other devices, so the cause could not be seen.
+- Added `/reachable` (data-free page that tells a network problem from a link problem) and History lines for every other device that reaches the app (`src/visits.mjs`).
+- App restarted on the branch code.
+- The glamping research's tree failed the new structural audit (8 drivers, single-child splits) and the loop had stalled (0.366 to 0.38 over 73 trials). It was kept unchanged and its loop stopped. A v2 research with the same question, constraints and expected-result checks was built under the current principles (tree audit gate passed with 0 issues; STORM perspectives, diverse primary-first sources, chain-of-verification reply audit, gate-decided loop), then an 11 h self-improving loop starts when its first run is done.
+- The old research's link was turned off; a new link opens v2.
+
+Open: whether the PC reaches the app is unknown until it opens `/reachable`; History will show the attempt.
