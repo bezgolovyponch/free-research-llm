@@ -138,7 +138,20 @@
   .compose-actions{display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap}
 
   #projHead{padding:14px 20px 10px; border-bottom:1px solid var(--line); background:var(--panel)}
-  #projTitle{font-size:17px; font-weight:750; line-height:1.35; overflow-wrap:anywhere}
+  #projTitle{font-size:17px; font-weight:750; line-height:1.35; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; cursor:pointer}
+  #projTitle.open{display:block; -webkit-line-clamp:unset}
+  .loopstatus{display:none; margin-top:10px; padding:8px 12px; border-radius:10px; border:1px solid color-mix(in srgb, var(--bl) 35%, var(--line)); background:color-mix(in srgb, var(--bl) 7%, var(--panel)); align-items:center; gap:6px 14px; flex-wrap:wrap; font-size:13px}
+  .loopstatus.on{display:flex}
+  .loopstatus .ttl{font-weight:750; display:flex; align-items:center; gap:6px}
+  .loopstatus .ttl i{width:8px; height:8px; border-radius:50%; background:var(--bl); display:inline-block}
+  .loopstatus .stat{color:var(--dim); white-space:nowrap}
+  .loopstatus .stat b{color:var(--txt)}
+  .loopstatus .last{color:var(--dim); flex:1 1 220px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  details.msg.app > summary{cursor:pointer; list-style:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  details.msg.app > summary::-webkit-details-marker{display:none}
+  details.msg.app > summary::before{content:"▸ "; color:var(--faint)}
+  details.msg.app[open] > summary::before{content:"▾ "}
+  details.msg.app[open] > summary{white-space:normal}
   #projExpected{color:var(--dim); font-size:13px; margin-top:2px; overflow-wrap:anywhere}
   .head-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px}
   .progress{flex:1 1 120px; height:6px; background:var(--panel2); border-radius:3px; overflow:hidden; min-width:80px; max-width:260px}
@@ -211,6 +224,10 @@
   #chatDock{flex:1 1 auto; display:flex; flex-direction:column; border-top:1px solid var(--line); min-height:220px; background:var(--panel2)}
   #chatHead{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 10px; font-size:12px; font-weight:700; color:var(--dim); border-bottom:1px solid var(--line)}
   #chatScopes button{padding:5px 12px; font-size:12px}
+  #chatTitle{padding:7px 14px; border-bottom:1px solid var(--line); background:var(--panel); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  details.updates{margin:6px 0; font-size:12px; color:var(--dim)}
+  details.updates > summary{cursor:pointer; padding:4px 2px}
+  details.updates[open] > summary{margin-bottom:4px}
   #chatScopes button:disabled{opacity:.4; cursor:not-allowed}
   .files{display:grid; gap:6px; margin-top:6px}
   .file{display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel2); font-size:13px}
@@ -271,15 +288,18 @@
   #pieceTable tr.on td{background:var(--acc-soft)}
   .rep h3{font-size:14px; margin:14px 0 4px}
   .timeline div{font-size:12px; margin:2px 0}
-  .desired-row{padding:8px 10px 0; background:var(--panel); display:flex; align-items:center; gap:8px}
+  .desired-row{padding:0 10px 10px; background:var(--panel); display:flex; align-items:center; gap:8px}
   .desired-label{font-size:12px; font-weight:700; color:var(--dim); white-space:nowrap}
   .desired-row input{flex:1 1 auto; min-width:0}
   .desired-row input{font-size:13px}
   .msg .want{font-size:11px; margin-top:4px; opacity:.9}
   .gm td,.gm th{text-align:center; padding:6px 4px}
   .gm td:first-child,.gm th:first-child{text-align:left}
-  #inspBody{flex:0 1 auto; max-height:42%}
-  #chatDock{flex:1 1 auto}
+  #inspHead{display:flex}
+  #inspector[data-mode="details"] #chatDock{display:none}
+  #inspector[data-mode="chat"] #inspBody{display:none}
+  #inspector[data-mode="chat"] #chatDock{flex:1 1 auto; border-top:0}
+  @media (min-width:1181px){ #inspClose{display:none} }
   @media (max-width:820px){ .treegrid{grid-template-columns:1fr; grid-template-rows:auto 1fr} .treecol{border-right:0; border-bottom:1px solid var(--line); max-height:38vh} #inspBody{max-height:none} }
   @media (max-width:1180px){
     #inspector{position:fixed; top:0; right:0; bottom:0; width:min(var(--insp),100vw); z-index:35; transform:translateX(100%); transition:transform .2s ease; box-shadow:var(--shadow)}
@@ -307,7 +327,7 @@
     .compose-actions .spacer{display:none}
     #projTitle{font-size:16px}
   }
-  @media (min-width:821px){ #inspTabs{display:none} .phone-only{display:none!important} }
+  @media (min-width:821px){ .phone-only{display:none!important} }
   .is-idle #btnStop{display:none}
   @media print{ #sidebar,#inspector,.head-row,.tabs,#mobilebar,.loopbox{display:none!important} body{overflow:visible} .shell{display:block; height:auto} .pane{display:none} #pane-report{display:block} }
 </style>
@@ -393,6 +413,7 @@
             </div>
           </div>
         </div>
+        <div class="loopstatus" id="loopStatus" role="status" aria-live="polite"></div>
         <div class="loopbox" id="loopBox"></div>
         <div class="sharebox notice" id="shareBox"></div>
         <div class="notice" id="sharedBanner">Shared research: you are helping on this one research. Chat, run, add pieces and download results here; the rest of the app stays with its owner.</div>
@@ -418,18 +439,18 @@
         </div>
         <aside id="inspector" data-mode="details" aria-label="Selected piece">
           <div id="inspHead">
-            <div class="seg" id="inspTabs"><button data-mode="details" class="on">Details</button><button data-mode="chat">Chat</button></div>
+            <div class="seg" id="inspTabs"><button data-mode="details" class="on">Piece details</button><button data-mode="chat">Chat</button></div>
             <span class="spacer"></span>
             <button class="icon-btn" id="inspClose" aria-label="Close panel"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           </div>
           <div id="inspBody"></div>
           <div id="chatDock">
-            <div id="chatHead"><div class="seg" id="chatScopes"><button data-scope="node" id="scopeNode">Piece</button><button data-scope="research" class="on">Research</button><button data-scope="results">Results</button><button data-scope="app">App</button></div><span id="chatState" class="faint"></span></div>
-            <div id="chatTitle" class="small faint" style="padding:6px 14px 0"></div>
+            <div id="chatHead"><div class="seg" id="chatScopes"><button data-scope="node" id="scopeNode">Piece</button><button data-scope="research" class="on">Research</button><button data-scope="results">Results</button><button data-scope="app">App</button></div></div>
+            <div id="chatTitle" class="small faint"></div>
             <div id="chatMsgs"></div>
             <div class="attach-row" id="chatFiles"></div>
-            <div class="desired-row" id="desiredRow"><label for="chatDesired" class="desired-label">Desired output</label><input id="chatDesired" autocomplete="off" spellcheck="true" placeholder="the result you want; kept as a regression check" aria-label="Desired output"></div>
             <form id="chatForm" class="chat-form" autocomplete="off"><button type="button" class="icon-btn" id="chatAttach" aria-label="Attach files" title="Attach photos, screenshots, PDFs, audio or data files"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 11.5l-8.5 8.5a5 5 0 01-7-7L14 4.5a3.5 3.5 0 015 5L10.5 18a2 2 0 01-3-3L15 7.5"/></svg></button><input type="file" id="chatFile" multiple hidden accept="image/*,.pdf,.csv,.tsv,.txt,.md,.json,.html,.htm,.xml,.log,.mp3,.wav"><textarea id="chatIn" rows="1" placeholder="Request: what you want… Enter sends" aria-label="Chat message" title="Your message takes priority: a running loop or run pauses, your change is applied, then it resumes."></textarea><button class="btn primary" id="chatSend" type="submit">Send</button></form>
+            <div class="desired-row" id="desiredRow"><label for="chatDesired" class="desired-label">Done when</label><input id="chatDesired" autocomplete="off" spellcheck="true" placeholder="the result you expect, e.g. 10 listings under 20 000 EUR (checked after every run)" aria-label="Done when: the result you expect"></div>
           </div>
         </aside>
       </div>
@@ -755,7 +776,7 @@ function nodesOf(){return STATE.project?STATE.project.nodes:[];}
 function byId(id){return nodesOf().find(n=>n.id===id);}
 function kids(id){return nodesOf().filter(n=>n.parentId===id).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));}
 function prio(n){return n.impact*n.uncertainty;}
-function select(id,mode){STATE.selected=byId(id)?id:"Q";CHAT.scope=STATE.selected==="Q"?(["app","results"].includes(CHAT.scope)?CHAT.scope:"research"):"node";renderOutline();renderPieces();drawTree(false);renderInspector();renderChat();renderSources();renderGates();syncHash();if(mode&&mq.narrow.matches&&STATE.pane!=="tree")openInspector(mode);}
+function select(id,mode){if(mode&&!mq.narrow.matches)setInspMode(mode==="chat"?"chat":"details");STATE.selected=byId(id)?id:"Q";CHAT.scope=STATE.selected==="Q"?(["app","results"].includes(CHAT.scope)?CHAT.scope:"research"):"node";renderOutline();renderPieces();drawTree(false);renderInspector();renderChat();renderSources();renderGates();syncHash();if(mode&&mq.narrow.matches&&STATE.pane!=="tree")openInspector(mode);}
 function roleOf(n){return !n?"Question":n.parentId==="Q"?"Driver":"Sub-question";}
 function cleanTitle(t){return String(t||"").replace(/^\s*(?:Q|D\d+(?:\.\d+)*)\s*[:·.\-–—]\s*/i,"");}
 function pieceName(n){return n?n.id+" · "+(cleanTitle(n.title)||trunc(n.question,60)):"Q · Whole research";}
@@ -771,8 +792,11 @@ function renderHead(){
   $("phasePill").innerHTML='<i class="'+(looping||running?"pulse":"")+'" style="background:'+color+'"></i>'+(looping?"improving":esc(p.phase))+(mq.phone.matches&&ns.length?" · "+fin+"/"+ns.length:"")+(p.demo?" · demo":"");
   $("progBar").style.width=(ns.length?Math.round(100*fin/ns.length):0)+"%";
   $("progText").textContent=fin+"/"+ns.length+" researched";
-  $("btnRun").disabled=false;$("btnRun").textContent=running||looping?"⚡ Join"+(p.lanes?" ("+p.lanes+" lanes)":""):"▶ Run";$("btnRun").title=running||looping?"Work on this research as a teammate: adds one more lane, so more pieces are researched or tried at once":"";$("btnStop").disabled=!running&&!looping;
-  $("btnLoop").textContent=looping?"Loop running":"Improve loop";
+  $("btnRun").disabled=false;$("btnRun").textContent=running||looping?"⚡ Join"+(p.lanes?" ("+p.lanes+" lanes)":""):"▶ Run";$("btnRun").title=running||looping?"Adds one lane: more pieces at once":"Research every piece that is not done yet";
+  $("btnStop").disabled=!running&&!looping;$("btnStop").textContent=looping?"■ Stop loop":running?"■ Stop run":"■ Stop";
+  $("btnLoop").parentElement.style.display=looping?"none":"";$("btnLoop").textContent="Improve loop ▾";
+  $("projTitle").title=p.question;
+  renderLoopStatus();
   $("mReport").href="/api/projects/"+encodeURIComponent(p.id)+"/report.md";
   $("mHandoff").href="/api/projects/"+encodeURIComponent(p.id)+"/handoff.md";
   $("mKnowledge").href="/api/projects/"+encodeURIComponent(p.id)+"/knowledge";
@@ -780,11 +804,41 @@ function renderHead(){
   renderLoopBox();
   $("projHead").classList.toggle("is-idle",!running&&!looping);
 }
+function timeLeft(ms){
+  if(!(ms>0))return "ending";
+  const m=Math.round(ms/60000),h=Math.floor(m/60);
+  return h>=48?Math.floor(h/24)+" d "+(h%24)+" h":h?h+" h "+(m%60)+" min":m+" min";
+}
+function agoText(at){const m=Math.max(0,Math.round((Date.now()-new Date(at))/60000));return m<1?"just now":m<60?m+" min ago":Math.floor(m/60)+" h ago";}
+const OUTCOME_TEXT={kept:"kept","reverted-whole":"no gain, undone","reverted-piece":"piece got worse, undone","reverted-regression":"broke a check, undone","no-change":"no change",conflict:"collided, retried",error:"failed","reverted-stopped":"stopped"};
+function renderLoopStatus(){
+  const p=STATE.project;const box=$("loopStatus");if(!p||!box)return;
+  const looping=isLooping(p);const running=RUNNING_PHASES.includes(p.phase);
+  box.classList.toggle("on",looping||running);
+  if(!looping&&!running){box.innerHTML="";return;}
+  const i=p.improve||{};const trials=i.trials||[];const kept=trials.filter(t=>t.outcome==="kept").length;
+  const lanes=p.lanes?'<span class="stat"><b>'+p.lanes+"</b> lanes</span>":"";
+  if(!looping){
+    const done=p.nodes.filter(n=>!["pending","researching"].includes(n.status)).length;
+    box.innerHTML='<span class="ttl"><i class="pulse"></i>Research run</span><span class="stat"><b>'+done+"/"+p.nodes.length+"</b> pieces done</span>"+lanes+'<span class="last">'+esc(((p.log||[]).filter(e=>e.type==="node").at(-1)||{}).message||"")+"</span>";
+    return;
+  }
+  const end=i.deadline?new Date(i.deadline):null;
+  const endText=end?end.toLocaleString([], {weekday:"short",hour:"2-digit",minute:"2-digit"}):"";
+  const last=trials.at(-1);
+  box.innerHTML='<span class="ttl"><i class="pulse"></i>Self-improving loop</span>'
+    +(end?'<span class="stat"><b>'+timeLeft(end-Date.now())+"</b> left · ends "+esc(endText)+"</span>":"")
+    +lanes
+    +'<span class="stat"><b>'+kept+"</b> kept of "+trials.length+" tried</span>"
+    +(i.baseline!=null?'<span class="stat">score <b>'+i.baseline+" → "+(i.best??i.baseline)+"</b></span>":"")
+    +(last?'<span class="last" title="'+esc(last.change||"")+'">last: '+esc(last.nodeId)+" "+esc(OUTCOME_TEXT[last.outcome]||last.outcome)+" · "+agoText(last.at)+"</span>":'<span class="last">first trial is being prepared…</span>');
+}
+setInterval(()=>{if(STATE.page==="project")renderLoopStatus();},30000);
 function renderTreeBar(){
   const n=STATE.checked.size;
-  $("treeBar").innerHTML='<span>'+(n?"<b>"+n+"</b> selected: "+esc([...STATE.checked].join(", ")):"Tick pieces to improve only them")+'</span><span class="spacer"></span><button class="btn secondary sm" id="tbLoopSel"'+(n?"":" disabled")+'>Improve selected…</button><button class="btn ghost sm" id="tbLoopAll">Improve whole research…</button>'+(n?'<button class="btn ghost sm" id="tbClear">Clear</button>':"");
-  $("tbLoopSel").addEventListener("click",()=>{STATE.loopScope="sel";renderLoopBox();$("loopBox").classList.add("on");});
-  $("tbLoopAll").addEventListener("click",()=>{STATE.loopScope="all";renderLoopBox();$("loopBox").classList.add("on");});
+  const looping=STATE.project&&isLooping(STATE.project);
+  $("treeBar").innerHTML='<span>'+(n?"<b>"+n+"</b> selected: "+esc([...STATE.checked].join(", ")):"Tick pieces to focus the improve loop on them")+'</span><span class="spacer"></span>'+(n&&!looping?'<button class="btn secondary sm" id="tbLoopSel">Improve selected…</button>':"")+(n?'<button class="btn ghost sm" id="tbClear">Clear</button>':"");
+  if($("tbLoopSel"))$("tbLoopSel").addEventListener("click",()=>{STATE.loopScope="sel";renderLoopBox();$("loopBox").classList.add("on");});
   if(n)$("tbClear").addEventListener("click",()=>{STATE.checked.clear();STATE.excluded.clear();renderOutline();renderLoopBox();});
 }
 function renderLoopBox(){
@@ -793,10 +847,11 @@ function renderLoopBox(){
   const kept=(i.trials||[]).filter(t=>t.outcome==="kept").length;
   const typed=$("impHours")?$("impHours").value:"";
   const scopeLine=looping?'<div class="small" style="margin-top:6px">Scope: <b>'+esc((i.scope&&i.scope.length)?"selected pieces "+i.scope.join(", ")+((i.exclude&&i.exclude.length)?" (excluded: "+i.exclude.join(", ")+")":""):"whole research")+"</b></div>":'<div class="row small" style="margin-top:8px"><label><input type="radio" name="lscope" value="all"'+(scope==="all"?" checked":"")+'> Whole research</label><label><input type="radio" name="lscope" value="sel"'+(scope==="sel"?" checked":"")+(sel.length?"":" disabled")+'> Selected pieces'+(sel.length?" ("+esc(sel.join(", "))+" · "+focusIds().size+" pieces in focus"+(STATE.excluded.size?", excluded "+esc([...STATE.excluded].join(", ")):"")+")":" (select them on the map or tick them in Tree &amp; pieces)")+"</label></div>";
-  box.innerHTML='<div class="row"><b>Self-improving loop</b><span class="small muted">changes one piece at a time; keeps it only if the measured score rises and no passing regression check breaks</span><span class="spacer"></span>'+(looping?'<span class="pill"><i class="pulse" style="background:var(--bl)"></i>until '+esc((i.deadline||"").slice(11,16))+" · "+kept+" kept</span>":'<label class="small muted">Hours</label><input id="impHours" value="'+esc(typed||i.hours||2)+'" style="width:64px"><button class="btn primary sm" id="impStart">Start</button>')+"</div>"+scopeLine+(i.trials&&i.trials.length?'<div class="loglist" style="margin-top:8px">'+i.trials.slice(-12).reverse().map(t=>'<div title="'+esc(t.change+(t.detail?" — "+t.detail:""))+'"><span class="mono">'+esc(t.nodeId)+'</span> <b style="color:'+(t.outcome==="kept"?"var(--gr)":t.outcome==="reverted-regression"?"var(--rd)":"var(--faint)")+'">'+esc(t.outcome)+"</b> "+esc(t.score)+" · "+esc(t.change)+"</div>").join("")+"</div>":"");
+  box.innerHTML='<div class="row"><b>Self-improving loop</b><span class="small muted">tries changes on several pieces at once and keeps one only if its piece does not get worse, no check breaks and the score rises</span><span class="spacer"></span>'+(looping?'<span class="pill"><i class="pulse" style="background:var(--bl)"></i>until '+esc((i.deadline||"").slice(11,16))+" · "+kept+" kept</span>":'<label class="small muted">Hours</label><input id="impHours" value="'+esc(typed||i.hours||2)+'" style="width:64px"><button class="btn primary sm" id="impStart">Start</button>')+"</div>"+scopeLine+(i.trials&&i.trials.length?'<div class="loglist" style="margin-top:8px">'+i.trials.slice(-12).reverse().map(t=>'<div title="'+esc(t.change+(t.detail?" — "+t.detail:""))+'"><span class="mono">'+esc(t.nodeId)+'</span> <b style="color:'+(t.outcome==="kept"?"var(--gr)":t.outcome==="reverted-regression"?"var(--rd)":"var(--faint)")+'">'+esc(t.outcome)+"</b> "+esc(t.score)+" · "+esc(t.change)+"</div>").join("")+"</div>":"");
   box.querySelectorAll('input[name="lscope"]').forEach(r=>r.addEventListener("change",()=>{STATE.loopScope=r.value;}));
   const st=$("impStart");if(st)st.addEventListener("click",async()=>{const s=(box.querySelector('input[name="lscope"]:checked')||{}).value;try{await api("/api/projects/"+p.id+"/improve",{method:"POST",body:{hours:Number($("impHours").value)||2,nodes:s==="sel"?[...STATE.checked]:[],exclude:s==="sel"?[...STATE.excluded]:[]}});toast(s==="sel"?"loop started on "+STATE.checked.size+" selected piece(s)":"loop started on the whole research");await loadStatus();renderHead();}catch(e){toast(e.message);}});
 }
+$("projTitle").addEventListener("click",()=>$("projTitle").classList.toggle("open"));
 $("btnLoop").addEventListener("click",e=>{e.stopPropagation();$("loopSel").disabled=!STATE.checked.size;$("loopSel").textContent=STATE.checked.size?"Selected pieces ("+STATE.checked.size+")…":"Selected pieces (select them on the map)";$("loopPop").classList.toggle("on");});
 document.addEventListener("click",e=>{if(!e.target.closest("#loopPop"))$("loopPop").classList.remove("on");});
 $("loopAll").addEventListener("click",()=>{$("loopPop").classList.remove("on");STATE.loopScope="all";renderLoopBox();$("loopBox").classList.add("on");});
@@ -1013,6 +1068,7 @@ function msgHtml(m){
   const open=(m.actions||[]).filter(a=>a.ok&&a.projectId&&a.type==="open").map(a=>'<button class="btn secondary sm" style="margin-top:6px" data-open-project="'+esc(a.projectId)+'">Open research</button>').join(" ")+(m.projectId?'<button class="btn secondary sm" style="margin-top:6px" data-open-project="'+esc(m.projectId)+'">Open research</button>':"");
   const links=(m.actions||[]).some(a=>a.ok&&a.type==="links")?'<div class="linkcard" data-links="1">'+linksHtml()+"</div>":"";
   const want=m.desired?'<div class="want"><b>Desired output:</b> '+esc(m.desired)+(m.specId?" · check "+esc(m.specId):"")+"</div>":"";
+  if(cls==="app"){const text=String(m.content||"");const first=text.split("\n")[0];return '<details class="msg app"><summary>'+esc(trunc(first,140))+'</summary><div style="margin-top:6px">'+richText(text)+"</div>"+(meta?'<div class="meta">'+meta+"</div>":"")+open+"</details>";}
   return '<div class="msg '+cls+'">'+(cls==="user"?(m.desired?"<b>Request:</b> ":"")+esc(m.content):richText(m.content))+want+files+(meta?'<div class="meta">'+meta+"</div>":"")+auditHtml(m)+open+links+(m.proposals||[]).map(p=>proposalHtml(m,p)).join("")+"</div>";
 }
 function richText(s){return esc(s).replace(/```[\w-]*\n?([\s\S]*?)```/g,(x,c)=>'<code style="display:block;white-space:pre-wrap;background:var(--panel2);padding:6px 8px;border-radius:6px;margin:4px 0">'+c.trim()+"</code>").replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>");}
@@ -1043,7 +1099,7 @@ function onMsgClick(e){
 }
 $("chatMsgs").addEventListener("click",onMsgClick);
 $("apMsgs").addEventListener("click",onMsgClick);
-function setScope(scope){CHAT.scope=scope;CHAT.stick=true;if(scope==="app"&&!CHAT.appLoaded)loadAppChat();if(scope==="results"&&STATE.pane!=="results"&&!mq.narrow.matches)setPane("results");renderChat();}
+function setScope(scope){CHAT.scope=scope;CHAT.stick=true;setInspMode("chat");if(scope==="app"&&!CHAT.appLoaded)loadAppChat();if(scope==="results"&&STATE.pane!=="results"&&!mq.narrow.matches)setPane("results");renderChat();}
 document.querySelectorAll("#chatScopes button").forEach(b=>b.addEventListener("click",()=>{if(!b.disabled)setScope(b.dataset.scope);}));
 async function loadAppChat(){try{CHAT.appThread=await api("/api/chat");CHAT.appLoaded=true;renderChat();renderAppPage();}catch(e){toast(e.message);}}
 function chatTarget(){
@@ -1063,6 +1119,14 @@ function withPending(t,thread){
   }
   return th;
 }
+function threadHtml(th,t){
+  const out=[];let run=[];
+  const flush=()=>{if(!run.length)return;if(run.length===1){out.push(msgHtml(run[0]));}else{const last=run.at(-1);out.push('<details class="updates"><summary>'+run.length+" app updates · latest: "+esc(trunc(String(last.content||"").split("\n")[0],90))+"</summary>"+run.map(m=>msgHtml(m)).join("")+"</details>");}run=[];};
+  for(const raw of th){const m=t.kind==="app"?raw:Object.assign({},raw,{_key:t.key});if(m.role==="app"&&t.kind!=="app"){run.push(m);continue;}flush();out.push(msgHtml(m));}
+  flush();
+  if(t.kind!=="app"&&!th.some(m=>m.role==="user"))out.push('<div class="small faint" style="padding:10px 2px">'+HINTS[t.kind]+"</div>");
+  return out.join("");
+}
 function renderChat(){
   const p=STATE.project;const key=chatKey();
   $("scopeNode").textContent=key==="Q"?"Piece":"Piece "+key;
@@ -1070,13 +1134,12 @@ function renderChat(){
   if(CHAT.scope==="node"&&key==="Q")CHAT.scope="research";
   document.querySelectorAll("#chatScopes button").forEach(b=>b.classList.toggle("on",b.dataset.scope===CHAT.scope));
   const t=chatTarget();
-  $("chatTitle").textContent=t.title;
+  $("chatTitle").innerHTML="Talking about: <b>"+esc(t.title)+"</b>";
   const two=t.kind==="node"||t.kind==="research";
   $("desiredRow").style.display=two?"":"none";
   $("chatIn").placeholder=two?"Request: what do you want…":t.kind==="results"?"Ask about the results…":"Ask about the app, or describe a change (Claude Code or free models)…";
-  $("chatState").textContent=p&&isLooping(p)?"loop running":p&&RUNNING_PHASES.includes(p.phase)?"research running":"";
   const th=withPending(t,t.thread);
-  $("chatMsgs").innerHTML=th.length?th.map(m=>msgHtml(t.kind==="app"?m:Object.assign({},m,{_key:t.key}))).join(""):'<div class="small faint" style="padding:6px 2px">'+HINTS[t.kind]+"</div>";
+  $("chatMsgs").innerHTML=th.length?threadHtml(th,t):'<div class="small faint" style="padding:6px 2px">'+HINTS[t.kind]+"</div>";
   renderFiles("dock");
   scrollChat(false);
 }
@@ -1176,7 +1239,7 @@ function reportHtml(id){
 function renderPieces(){
   const p=STATE.project;if(!p)return;
   const rows=[];const walk=(id)=>kids(id).forEach(n=>{rows.push(n);walk(n.id);});walk("Q");
-  $("pieceTable").innerHTML='<tr><th>ID</th><th>Name</th><th>Role</th><th>Grade</th><th>Sources</th><th>Checks</th></tr><tr class="click'+(STATE.selected==="Q"?" on":"")+'" data-row="Q"><td class="mono">Q</td><td>Whole research</td><td class="small">Question</td><td>'+(p.report?'<span class="small">'+esc(trunc(p.report.verdict,30))+"</span>":"—")+"</td><td>—</td><td>"+specCell(p.specs)+"</td></tr>"+rows.map(n=>'<tr class="click'+(STATE.selected===n.id?" on":"")+'" data-row="'+esc(n.id)+'"><td class="mono">'+esc(n.id)+"</td><td>"+esc(trunc(n.title||n.question,48))+'</td><td class="small">'+roleOf(n)+"</td><td>"+grade(n.status)+"</td><td>"+(n.sources||[]).length+"</td><td>"+specCell(n.specs)+"</td></tr>").join("");
+  $("pieceTable").innerHTML='<tr><th>ID</th><th>Name</th><th>Role</th><th>Grade</th><th>Sources</th><th>Checks</th></tr><tr class="click'+(STATE.selected==="Q"?" on":"")+'" data-row="Q"><td class="mono">Q</td><td>Whole research</td><td class="small">Question</td><td>'+(p.report?'<span class="grade" style="color:'+(/^PROVISIONAL/i.test(p.report.verdict)?"var(--am)":"var(--gr)")+'" title="'+esc(p.report.verdict)+'">'+esc(/^PROVISIONAL/i.test(p.report.verdict)?"provisional":"final")+"</span>":"—")+"</td><td>—</td><td>"+specCell(p.specs)+"</td></tr>"+rows.map(n=>'<tr class="click'+(STATE.selected===n.id?" on":"")+'" data-row="'+esc(n.id)+'"><td class="mono">'+esc(n.id)+"</td><td>"+esc(trunc(n.title||n.question,48))+'</td><td class="small">'+roleOf(n)+"</td><td>"+grade(n.status)+"</td><td>"+(n.sources||[]).length+"</td><td>"+specCell(n.specs)+"</td></tr>").join("");
   $("pieceTable").querySelectorAll("[data-row]").forEach(r=>r.addEventListener("click",()=>select(r.dataset.row)));
   const box=$("pieceReport");
   box.innerHTML='<div class="card" style="margin-top:12px">'+reportHtml(STATE.selected)+"</div>";

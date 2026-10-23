@@ -313,3 +313,14 @@ Asked: install llama (why it did not work), let it work on both machines; make m
 - Other PC: one PowerShell line from the share panel (`/pc-setup.ps1`) installs llama.cpp and a model by graphics memory; `PeerWatcher` connects it within a minute of the PC opening the link; `node src/frl.mjs local pc <address>` does it by hand. Ollama on the PC works the same way through `OLLAMA_BASE_URL` (port 11434, `OLLAMA_HOST=0.0.0.0:11434`). Not run on the PC itself: it was not reachable from this Mac (no answer on 8090/11434).
 - No stops: loop resume checkpoints after every pass (crash or power cut resumes); always-on service relaunches the app; every in-memory list is capped; disk temp is swept every 6 h.
 - Ollama is not run on this Mac on purpose: with 8 GB and llama.cpp loaded, free memory was 14%.
+
+## Session 2026-10-23 · research page UX
+
+Asked: components collide, design inconsistent, no loop indicator, no remaining hours, research and piece conversations not thought through.
+
+- Loop status bar under the header whenever the loop or a run works: time left and end time, lanes, kept of tried, score baseline → best, last trial with plain-language outcome; refreshed every 30 s. Run status bar shows pieces done and lanes.
+- Header: question clamped to 2 lines (click to expand); Stop says "Stop loop" / "Stop run"; the Improve loop menu hides while the loop runs; Join tooltip shortened.
+- Side panel: Piece details | Chat tabs on every screen size, so one area scrolls at a time (the stacked, partly scrolled details block was the overlap in the screenshot).
+- Chat: one-line "Talking about: …" context; app reports grouped into one collapsible "N app updates" row and each one collapsible; how-to hint shown until the first message; request first, "Done when" under it; the stray "loop running" label removed.
+- Tree bar: the duplicate "Improve whole research…" removed; "Improve selected…" appears only when pieces are ticked; Q's grade uses the same badge as other pieces.
+- Checked at 1440×900 and 390×844: no sideways scroll, no script errors; e2e asserts the loop bar and the Stop label.

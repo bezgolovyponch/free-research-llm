@@ -114,6 +114,10 @@ test('tree tab: tick pieces, run the loop only on them; gates, sources and regre
   await page.locator('#impHours').fill('0.01');
   await page.locator('#impStart').click();
   await expect(page.locator('#loopBox')).toContainText('Scope: selected pieces D1.1, D2.1', { timeout: 20000 });
+  await expect(page.locator('#loopStatus')).toBeVisible();
+  await expect(page.locator('#loopStatus')).toContainText('Self-improving loop');
+  await expect(page.locator('#loopStatus')).toContainText(/left · ends/);
+  await expect(page.locator('#btnStop')).toHaveText('■ Stop loop');
   await noSideScroll(page);
 });
 
