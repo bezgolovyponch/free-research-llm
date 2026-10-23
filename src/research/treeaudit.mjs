@@ -1,4 +1,7 @@
 import { ROOT_ID } from './tree.mjs';
+import { asksForItems } from './deliverable.mjs';
+
+export const CANDIDATES_TITLE = 'Candidate listings (identification)';
 
 export const SIMILAR = 0.6;
 export const MIN_CHILDREN = 2;
@@ -125,9 +128,23 @@ export function mergeDuplicateDrivers(nodes, question = '') {
   return fixes;
 }
 
+export function groupCandidateDrivers(nodes) {
+  const drivers = nodes.filter((n) => n.parentId === ROOT_ID);
+  if (drivers.length <= MAX_DRIVERS) return [];
+  const kids = (id) => nodes.filter((n) => n.parentId === id);
+  const host = drivers.find((d) => kids(d.id).some(asksForItems)) ?? drivers.find(asksForItems);
+  if (!host) return [];
+  const moving = drivers.filter((d) => d.id !== host.id && asksForItems(d));
+  if (!moving.length) return [];
+  for (const d of moving) d.parentId = host.id;
+  Object.assign(host, { title: CANDIDATES_TITLE, status: 'pending', finding: null, verification: null, critique: null, error: null });
+  return [{ code: 'grouped-candidates', nodeId: host.id, detail: `${moving.map((d) => d.id).join(', ')} search for listings; moved under ${host.id} "${CANDIDATES_TITLE}" (funnel: identify → screen → include)` }];
+}
+
 export function repairTree(nodes, question = '') {
   const fixes = [];
   fixes.push(...mergeDuplicateDrivers(nodes, question));
+  fixes.push(...groupCandidateDrivers(nodes));
   const { up } = ancestry(nodes);
   const ids = new Set(nodes.map((n) => n.id));
   for (const n of nodes) {

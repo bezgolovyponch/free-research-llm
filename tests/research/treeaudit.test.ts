@@ -100,3 +100,22 @@ describe('tree repairs for loop-grown trees', () => {
     expect(auditTree(nodes, q).filter((i: { code: string; nodeId: string }) => i.code === 'duplicate' && drivers.has(i.nodeId))).toEqual([]);
   });
 });
+
+describe('funnel grouping', () => {
+  it('moves listing-search drivers under one candidates driver when there are more than 7 drivers', async () => {
+    const { CANDIDATES_TITLE, groupCandidateDrivers } = await import('../../src/research/treeaudit.mjs');
+    const d = (id: string, parentId: string, question: string) => ({ id, parentId, title: question, question, status: 'verified', dependsOn: [] });
+    const nodes = [
+      d('D1', 'Q', 'What does land preparation cost per m2?'), d('D2', 'Q', 'How many mild months per year?'), d('D3', 'Q', 'Road distance to the beach?'), d('D4', 'Q', 'Which permits are needed?'), d('D5', 'Q', 'What nightly rates do glampings get?'),
+      d('D6', 'Q', 'Identify affordable coastal plots'), d('D7', 'D6', 'Which coastal parcels are listed for sale in Spain?'),
+      d('D9', 'Q', 'Specific land parcels in coastal Turkey under 20,000 EUR'), d('D10', 'Q', 'Specific land parcels in coastal Vietnam under 20,000 EUR'),
+    ];
+    const fixes = groupCandidateDrivers(nodes);
+    expect(fixes).toHaveLength(1);
+    expect(nodes.filter((n) => n.parentId === 'Q').map((n) => n.id)).toEqual(['D1', 'D2', 'D3', 'D4', 'D5', 'D6']);
+    expect(nodes.filter((n) => n.parentId === 'D6').map((n) => n.id)).toEqual(['D7', 'D9', 'D10']);
+    expect(nodes.find((n) => n.id === 'D6')).toMatchObject({ title: CANDIDATES_TITLE, status: 'pending' });
+    expect(groupCandidateDrivers(nodes)).toEqual([]);
+  });
+});
+

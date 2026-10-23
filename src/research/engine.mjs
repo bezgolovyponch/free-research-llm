@@ -409,7 +409,7 @@ export class ResearchEngine {
     if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
     const regrounded = this.reground(project);
     const regraded = this.regrade(project);
-    if (fixes.some((f) => f.code === 'merged-duplicate') || regraded.length) {
+    if (fixes.some((f) => ['merged-duplicate', 'grouped-candidates'].includes(f.code)) || regraded.length) {
       await this.store.save(project);
       return this.run(id);
     }
