@@ -134,7 +134,7 @@ export class OpenAICompatibleProvider {
       this.selected.fast ??= this.selected.deep;
       this.selected.vision = this.preset.prefer.vision ? pickModel(this.models, this.preset.prefer.vision, this.preset.freeOnly, { strict: true }) : null;
       this.state = this.selected.fast ? 'ready' : 'no-models';
-      this.detail = this.selected.fast ? `fast=${this.selected.fast} deep=${this.selected.deep}` : 'no chat model available';
+      this.detail = this.selected.fast ? `fast=${this.selected.fast} deep=${this.selected.deep}` : this.preset.id === 'ollama' ? 'running, but no model is pulled yet: in a terminal run ollama pull qwen3:4b (about 2.6 GB)' : 'no chat model available';
       if (this.preset.local) await this.readContextSize();
     } catch (error) {
       const fallback = this.preset.fallbackModels;

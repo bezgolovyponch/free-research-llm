@@ -138,3 +138,14 @@ describe('quotaWindow', () => {
   });
 });
 
+describe('Ollama with no model', () => {
+  it('says which command pulls a model', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const preset = { id: 'ollama', label: 'Ollama', baseURL: 'http://localhost:11434/v1', keyEnv: null, local: true, prefer: { fast: [], deep: [] } };
+    const fetchImpl = (async (url: string) => (url.endsWith('/v1/models') ? new Response(JSON.stringify({ object: 'list', data: null })) : new Response('{}', { status: 404 }))) as never;
+    const provider = await new OpenAICompatibleProvider({ preset, fetchImpl }).discover();
+    expect(provider.state).toBe('no-models');
+    expect(provider.detail).toMatch(/ollama pull qwen3:4b/);
+  });
+});
+

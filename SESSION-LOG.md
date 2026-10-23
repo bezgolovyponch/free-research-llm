@@ -347,3 +347,12 @@ Asked: research how to make the engine produce valid results faster, apply only 
 Asked: an accidental double click on Join added two lanes; remove one and make it hard to misclick.
 
 - One lane per browser: Join carries a per-browser id, so a second click on the same browser changes nothing; once joined the button reads "✓ Joined · Leave (N lanes)" and asks before giving the lane back (`POST /api/projects/<id>/leave`); every click locks the button for 2 s. The extra lane was removed by the restart (lanes are kept in memory).
+
+## Session 2026-10-23 · lanes explained; idle components fixed
+
+Asked: why 3 lanes for 2 machines, and what can be improved for each component that is not engaged.
+
+- Lanes are parallel trials run by the app on the Mac (2 by default, +1 per joined browser), not machines; the loop bar now says so on hover and shows how many are joined.
+- Other PC's llama.cpp: measured 12 tok/s reading, 2.1 writing (CPU, no usable graphics card found): 774 s per typical call, 19/19 failed today. Now measured on connect and every 30 min and kept out of research as "too slow"; the PC setup script lists the devices llama.cpp can use and warns when there is no graphics card.
+- Ollama on this Mac: running, but saved as `http://localhost:11434/` (no `/v1`, so every call was a 404) and no model pulled. Local addresses now get `/v1`; the status says `ollama pull qwen3:4b`. No model was pulled: with llama.cpp loaded only 14% of the 8 GB was free.
+- Not configured (need the user's free sign-up): Mistral, NVIDIA, Cloudflare, Cohere, Puter — steps under Models & router → How to get it. SambaNova has no credit. Cerebras and OpenRouter reset at 00:00 UTC.

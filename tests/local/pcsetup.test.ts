@@ -11,6 +11,8 @@ describe('pcSetupScript', () => {
     expect(script).toContain(`$vramMB -ge ${PC_BIG_MODEL_MIN_MB}`);
     expect(script).toContain("'--host', '0.0.0.0', '--port', '8090'");
     expect(script).toContain("$tag = 'b11739'");
+    expect(script).toContain('--list-devices');
+    expect(script).toMatch(/found no usable graphics card/);
     expect(script.split('\r\n').length).toBeGreaterThan(15);
     expect(script).not.toMatch(/share=|token/i);
   });

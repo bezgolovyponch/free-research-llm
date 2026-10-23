@@ -831,7 +831,7 @@ function renderLoopStatus(){
   box.classList.toggle("on",looping||running);
   if(!looping&&!running){box.innerHTML="";return;}
   const i=p.improve||{};const trials=i.trials||[];const kept=trials.filter(t=>t.outcome==="kept").length;
-  const lanes=p.lanes?'<span class="stat"><b>'+p.lanes+"</b> lanes</span>":"";
+  const lanes=p.lanes?'<span class="stat" title="A lane is one piece or trial worked on at the same time, not a machine: '+Math.max(0,p.lanes-(p.helpers||[]).length)+' from the computer that runs the app, plus 1 per joined browser. Every lane calls whichever models are free: cloud models, and local models that are fast enough."><b>'+p.lanes+"</b> lanes"+((p.helpers||[]).length?" ("+(p.helpers||[]).length+" joined)":"")+"</span>":"";
   if(!looping){
     const done=p.nodes.filter(n=>!["pending","researching"].includes(n.status)).length;
     box.innerHTML='<span class="ttl"><i class="pulse"></i>Research run</span><span class="stat"><b>'+done+"/"+p.nodes.length+"</b> pieces done</span>"+lanes+'<span class="last">'+esc(((p.log||[]).filter(e=>e.type==="node").at(-1)||{}).message||"")+"</span>";

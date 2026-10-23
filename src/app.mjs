@@ -16,6 +16,9 @@ import { EventLog } from './logs.mjs';
 import { TempSweeper, describeSweep, sweepHoursFrom } from './housekeeping.mjs';
 import { PeerWatcher } from './local/peerwatch.mjs';
 import { probePeer } from './local/peer.mjs';
+import { measureSpeed, speedVerdict } from './local/speed.mjs';
+
+const SPEED_RECHECK_MS = 30 * 60 * 1000;
 import { AppChat } from './appchat.mjs';
 import { HandoffWriter } from './research/handoff.mjs';
 import { appendAppMessage } from './research/notify.mjs';
@@ -55,6 +58,12 @@ function modelOverrides(env, preset) {
   };
 }
 
+export function localBase(url) {
+  const text = String(url ?? '').trim();
+  if (!/^https?:\/\/[^/]+\/?$/.test(text)) return text.replace(/\/+$/, '');
+  return `${text.replace(/\/+$/, '')}/v1`;
+}
+
 export class ProviderFactory {
   constructor({ env, fetchImpl }) {
     this.env = env;
@@ -72,7 +81,8 @@ export class ProviderFactory {
     const apiKey = this.sessionKeys.get(preset.id) || (preset.keyEnv ? this.env[preset.keyEnv] : '') || (preset.optionalKeyEnv ? this.env[preset.optionalKeyEnv] : '') || '';
     const account = this.sessionKeys.get(`${preset.id}:account`) || (preset.accountEnv ? this.env[preset.accountEnv] : '') || '';
     const template = (preset.baseEnv && this.env[preset.baseEnv]) || this.sessionKeys.get(`${preset.id}:url`) || preset.baseURL;
-    const baseURL = account ? template.replace('{account}', encodeURIComponent(account)) : template;
+    const filled = account ? template.replace('{account}', encodeURIComponent(account)) : template;
+    const baseURL = preset.local ? localBase(filled) : filled;
     const disabled = Boolean(preset.disableEnv) && this.env[preset.disableEnv] === '0';
     return new OpenAICompatibleProvider({ preset, apiKey, baseURL, disabled, modelOverrides: modelOverrides(this.env, preset), fetchImpl: this.fetchImpl });
   }
@@ -182,8 +192,53 @@ export class App {
     this.env[endpoint.env] = endpoint.url;
     await this.secrets?.write(endpoint.env, endpoint.url).catch(() => {});
     await this.refreshProviders();
-    void this.logs.append('history', { type: 'session', message: `connected the other PC's ${endpoint.label} at ${endpoint.url} (${(endpoint.models ?? []).join(', ')}); it now takes research calls with no quota` });
+    const [verdict] = await this.checkLocalSpeed({ only: endpoint.id, force: true });
+    if (verdict && !verdict.usable) {
+      void this.logs.append('history', { type: 'session', message: `found the other PC's ${endpoint.label} at ${endpoint.url}, but it is ${verdict.text}; not used for research` });
+      this.noteApp(`Found the other PC's ${endpoint.label}, but it is ${verdict.text}. The app does not send it research calls; it re-checks every 30 minutes.`);
+      return;
+    }
+    void this.logs.append('history', { type: 'session', message: `connected the other PC's ${endpoint.label} at ${endpoint.url} (${(endpoint.models ?? []).join(', ')}); ${verdict ? verdict.text : 'speed not measured yet'}; it takes research calls with no quota` });
     this.noteApp(`Connected the other PC's ${endpoint.label} (${(endpoint.models ?? []).join(', ')}): its graphics card now works on the research too.`);
+  }
+
+  applyLocalSpeed() {
+    for (const provider of this.router.providers) {
+      const known = provider.preset?.local && this.localSpeed?.get(provider.baseURL);
+      if (!known) continue;
+      if (!known.usable && provider.state === 'ready') {
+        provider.state = 'too-slow';
+        provider.detail = known.text;
+      } else if (known.usable && provider.state === 'too-slow') {
+        provider.state = 'ready';
+        provider.detail = `fast=${provider.selected.fast} · ${known.text}`;
+      }
+    }
+  }
+
+  async checkLocalSpeed({ only = '', force = false } = {}) {
+    this.localSpeed ??= new Map();
+    const verdicts = [];
+    const locals = this.router.providers.filter((p) => p.preset?.local && p.baseURL && ['ready', 'too-slow'].includes(p.state) && (!only || p.id === only));
+    for (const provider of locals) {
+      const known = this.localSpeed.get(provider.baseURL);
+      if (!force && known && Date.now() - known.at < SPEED_RECHECK_MS) {
+        verdicts.push(known);
+        continue;
+      }
+      try {
+        const verdict = { ...speedVerdict(await measureSpeed(provider.baseURL, { fetchImpl: this.fetchImpl, model: provider.selected.fast ?? 'local', apiKey: provider.apiKey })), at: Date.now() };
+        if (known && known.usable !== verdict.usable) void this.logs.append('history', { type: 'session', message: `${provider.preset.label}: ${verdict.usable ? 'fast enough again' : 'now'} ${verdict.text}` });
+        this.localSpeed.set(provider.baseURL, verdict);
+        verdicts.push(verdict);
+      } catch (error) {
+        const verdict = { usable: false, seconds: Infinity, text: `too slow for research (no answer to a 1,500-token test within 150 s: ${error.message})`, at: Date.now() };
+        this.localSpeed.set(provider.baseURL, verdict);
+        verdicts.push(verdict);
+      }
+    }
+    this.applyLocalSpeed();
+    return verdicts;
   }
 
   async projectFileExists(id) {
@@ -196,7 +251,7 @@ export class App {
   }
 
   async rediscoverLocal() {
-    const waiting = this.router.providers.filter((p) => p.preset?.local && p.state !== 'ready' && p.baseURL);
+    const waiting = this.router.providers.filter((p) => p.preset?.local && !['ready', 'too-slow'].includes(p.state) && p.baseURL);
     for (const provider of waiting) await provider.discover().catch(() => {});
     const back = waiting.filter((p) => p.state === 'ready');
     for (const p of back) void this.logs.append('history', { type: 'session', message: `${p.preset.label} is answering again (${p.selected.fast})` });
@@ -208,6 +263,7 @@ export class App {
       try {
         await this.peers.check();
         await this.rediscoverLocal();
+        await this.checkLocalSpeed();
       } catch {
         return;
       }
@@ -332,6 +388,7 @@ export class App {
     if (this.demo && !live.length) providers.push(new ScriptedProvider());
     this.engine.demo = this.demo && !live.length;
     this.router.setProviders(providers);
+    this.applyLocalSpeed();
     this.routerAdmin?.apply();
     return this.router.status();
   }

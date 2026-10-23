@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { App, ProviderFactory, appNoteFor, buildSearch, routeOrderFrom } from '../src/app.mjs';
+import { App, ProviderFactory, appNoteFor, buildSearch, localBase, routeOrderFrom } from '../src/app.mjs';
 import { fakeFetch, jsonResponse } from './helpers/fake-fetch';
 
 describe('App composition', () => {
@@ -35,7 +35,7 @@ describe('App composition', () => {
   });
 
   it('connects a model found on the other PC and routes to it', async () => {
-    const fetchImpl = fakeFetch([[/192\.168\.5\.26:8090\/v1\/models$/, () => jsonResponse({ data: [{ id: 'pc-model' }] })], [/192\.168\.5\.26:8090\/props$/, () => jsonResponse({ default_generation_settings: { n_ctx: 16384 } })]]);
+    const fetchImpl = fakeFetch([[/192\.168\.5\.26:8090\/v1\/models$/, () => jsonResponse({ data: [{ id: 'pc-model' }] })], [/192\.168\.5\.26:8090\/props$/, () => jsonResponse({ default_generation_settings: { n_ctx: 16384 } })], [/192\.168\.5\.26:8090\/v1\/chat\/completions$/, () => jsonResponse({ choices: [{ message: { content: 'x' } }], timings: { prompt_per_second: 400, predicted_per_second: 45 } })]]);
     const app = new App({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', FRL_WIKIPEDIA: '0' }, fetchImpl, dataDir: '/tmp/frl-unused-peer' });
     await app.refreshProviders();
     expect(app.status().providers[0].state).not.toBe('ready');
@@ -58,6 +58,35 @@ describe('App composition', () => {
     up = true;
     expect(await app.rediscoverLocal()).toEqual(['llamacpp']);
     expect(app.status().providers[0]).toMatchObject({ state: 'ready', fast: 'Qwen3-4B' });
+  });
+
+  it('adds /v1 to a bare local address, as saved for Ollama', () => {
+    expect(localBase('http://localhost:11434/')).toBe('http://localhost:11434/v1');
+    expect(localBase('http://192.168.5.26:8090')).toBe('http://192.168.5.26:8090/v1');
+    expect(localBase('http://127.0.0.1:8090/v1')).toBe('http://127.0.0.1:8090/v1');
+    expect(localBase('http://127.0.0.1:8090/v1/')).toBe('http://127.0.0.1:8090/v1');
+  });
+
+  it('measures a local model and keeps a too-slow one out of research until it gets fast enough', async () => {
+    let speed = { prompt_per_second: 12, predicted_per_second: 2.1 };
+    const fetchImpl = (async (url: string) => {
+      if (url.endsWith('/v1/models')) return jsonResponse({ data: [{ id: 'pc-model' }] });
+      if (url.endsWith('/props')) return jsonResponse({ default_generation_settings: { n_ctx: 16384 }, total_slots: 1 });
+      return jsonResponse({ choices: [{ message: { content: 'x' } }], timings: speed });
+    }) as never;
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', LLAMACPP_LAN_URL: 'http://192.168.5.26:8090/v1', FRL_WIKIPEDIA: '0' }, fetchImpl, dataDir: '/tmp/frl-unused-speed' });
+    await app.refreshProviders();
+    const [slow] = await app.checkLocalSpeed();
+    expect(slow.usable).toBe(false);
+    expect(app.status().providers[0]).toMatchObject({ state: 'too-slow' });
+    expect(app.router.available({ tier: 'fast' })).toEqual([]);
+    expect(await app.rediscoverLocal()).toEqual([]);
+    await app.refreshProviders();
+    expect(app.status().providers[0].state).toBe('too-slow');
+    speed = { prompt_per_second: 300, predicted_per_second: 40 };
+    const [fast] = await app.checkLocalSpeed({ force: true });
+    expect(fast.usable).toBe(true);
+    expect(app.status().providers[0].state).toBe('ready');
   });
 
   it('enables search backends from the environment, Wikipedia by default', () => {
