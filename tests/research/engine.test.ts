@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
-import { TASK_MARKERS, withGuidance } from '../../src/research/prompts.mjs';
+import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
@@ -211,6 +211,20 @@ describe('ResearchEngine', () => {
     expect(research.length).toBeGreaterThan(0);
     expect(research.every((p) => p.includes('USER HINTS') && p.includes('purchase plus preparation'))).toBe(true);
     expect(prompts.some((p) => p.includes(TASK_MARKERS.decompose) && p.includes('USER HINTS'))).toBe(true);
+  });
+
+  it('asks for a funnel tree when a list is expected, and has the memo screen every delivered item', () => {
+    const tree = decomposePrompt({ question: 'Find plots', template: { label: 't', drivers: 'd', metrics: 'm', sources: 's', decisionRule: 'r' }, constraints: {}, expected: '50 plots' })[1].content;
+    expect(tree).toMatch(/FUNNEL, as systematic reviews do \(PRISMA: identify → screen → include\)/);
+    const nodes = [
+      { id: 'D1', parentId: 'Q', status: 'verified', question: 'Which plots are listed?', finding: { answer: 'two', items: [{ url: 'https://a.example/1', title: 'Plot near Lagos', value: 18000, unit: 'EUR' }] } },
+      { id: 'D2', parentId: 'Q', status: 'weak', question: 'Beach within 20 km?', finding: { answer: 'unclear', items: [{ url: 'https://b.example/2' }] } },
+    ];
+    const memo = synthesizePrompt({ question: 'q', decision: 'd', successCriteria: '', template: { decisionRule: 'r' }, constraints: {}, nodes, expected: '50 plots' })[1].content;
+    expect(memo).toMatch(/CANDIDATE ITEMS FOUND \(1; from passing pieces\)/);
+    expect(memo).toContain('[D1] Plot near Lagos · 18000 EUR · https://a.example/1');
+    expect(memo).not.toContain('https://b.example/2');
+    expect(memo).toMatch(/identified, screened out \(main reasons\), included/);
   });
 
   it('does not enforce expected-result checks the model inferred but the user never asked for', async () => {

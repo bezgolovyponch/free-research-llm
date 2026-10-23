@@ -356,3 +356,10 @@ Asked: why 3 lanes for 2 machines, and what can be improved for each component t
 - Other PC's llama.cpp: measured 12 tok/s reading, 2.1 writing (CPU, no usable graphics card found): 774 s per typical call, 19/19 failed today. Now measured on connect and every 30 min and kept out of research as "too slow"; the PC setup script lists the devices llama.cpp can use and warns when there is no graphics card.
 - Ollama on this Mac: running, but saved as `http://localhost:11434/` (no `/v1`, so every call was a 404) and no model pulled. Local addresses now get `/v1`; the status says `ollama pull qwen3:4b`. No model was pulled: with llama.cpp loaded only 14% of the 8 GB was free.
 - Not configured (need the user's free sign-up): Mistral, NVIDIA, Cloudflare, Cohere, Puter — steps under Models & router → How to get it. SambaNova has no credit. Cerebras and OpenRouter reset at 00:00 UTC.
+
+## Session 2026-10-23 · tree and research logic review
+
+Asked: review how the tree is formed and the research logic against real research techniques; fix, merge, restart both machines.
+
+- Found in the live research: 18 top-level drivers (max 7) grown by loop trials, D6–D18 mostly the same "find affordable coastal plots" question, titles "D9"/"A"/"B"/"C", listing pieces answering "none found" graded verified, and criteria answered as averages so no plot was ever screened.
+- Fixed: structural gate on loop trials, driver cap, duplicate drivers moved under the first one (findings kept), placeholder titles named from the question, listing pieces must deliver listings, funnel tree for list results and item screening in the memo (PROTOCOLS.md §4i, CONCEPT.md).

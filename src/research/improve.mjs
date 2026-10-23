@@ -2,7 +2,7 @@ import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt, withGuidance } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
-import { cleanTitle, duplicateAmong, duplicateOf } from './treeaudit.mjs';
+import { BLOCKING, MAX_DRIVERS, auditTree, cleanTitle, duplicateAmong, duplicateOf } from './treeaudit.mjs';
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
 import { Mutex } from './lanes.mjs';
 import { mergeTrial, trialConflict } from './trialmerge.mjs';
@@ -83,7 +83,7 @@ export function acceptsTrial(before, after, removed = []) {
   return after > before + (removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
 }
 
-const FUTILE = new Set(['reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain']);
+const FUTILE = new Set(['reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'reverted-structure']);
 export const REST_AFTER_FUTILE = 3;
 export const REST_HOURS = 6;
 
@@ -100,6 +100,10 @@ export function restingPieces(trials = [], now = Date.now()) {
 
 function itemKeys(node) {
   return new Set((node?.finding?.items ?? []).map((i) => `${i.url}|${i.value ?? ''}`));
+}
+
+export function structuralIssues(project) {
+  return auditTree(project.nodes, project.question).filter((i) => BLOCKING.has(i.code)).map((i) => `${i.code}:${i.nodeId}`);
 }
 
 export function cannotGain(oldNode, newNode) {
@@ -143,6 +147,7 @@ export function applyVariant(project, nodeId, variant) {
   const touched = [];
   if (nodeId === ROOT_ID) {
     for (const raw of (Array.isArray(variant?.add) ? variant.add : []).slice(0, 2)) {
+      if (project.nodes.filter((n) => n.parentId === ROOT_ID).length >= MAX_DRIVERS) break;
       const node = nodeFields(raw, nextNodeId(project.nodes, ROOT_ID), ROOT_ID);
       if (node && !duplicateOf(node, project.nodes, project.question)) {
         project.nodes.push(node);
@@ -431,6 +436,12 @@ export class ProjectImprover {
       if (removed.length) base.removedPieceId = removed.join(', ');
       if (!touched.length) {
         await note({ ...base, change, outcome: 'no-change', score: state.best.score });
+        return { kept: false };
+      }
+      const before = new Set(structuralIssues(snapshot));
+      const added = structuralIssues(project).filter((i) => !before.has(i));
+      if (added.length) {
+        await note({ ...base, change, outcome: 'reverted-structure', score: state.best.score, detail: `would add tree problems: ${added.join(', ')}` });
         return { kept: false };
       }
       const oldNode = snapshot.nodes.find((n) => n.id === nodeId);

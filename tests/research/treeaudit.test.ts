@@ -67,3 +67,36 @@ describe('tree audit (structural gate for the decomposition)', () => {
     }), { numRuns: 300 });
   });
 });
+
+describe('tree repairs for loop-grown trees', () => {
+  const node = (id: string, parentId: string, title: string, question: string, extra: object = {}) => ({ id, parentId, title, question, status: 'verified', dependsOn: [], ...extra });
+
+  it('names placeholder titles from the question', async () => {
+    const { repairTree, titleFromQuestion } = await import('../../src/research/treeaudit.mjs');
+    expect(titleFromQuestion('Which coastal land parcels in Turkey are listed for sale under 20,000 EUR?')).toBe('Coastal land parcels in Turkey are listed for');
+    const nodes = [node('D9', 'Q', 'D9', 'Which coastal land parcels in Turkey are listed for sale?'), node('D7.1.1.1', 'D7.1.1', 'A', 'Identify listed parcels in EU coastal regions'), node('D2', 'Q', 'Climate suitability', 'What is the climate?')];
+    const fixes = repairTree(nodes, 'Find plots');
+    expect(fixes.filter((f: { code: string }) => f.code === 'placeholder-title').map((f: { nodeId: string }) => f.nodeId)).toEqual(['D9', 'D7.1.1.1']);
+    expect(nodes[2].title).toBe('Climate suitability');
+  });
+
+  it('moves drivers that repeat another driver under it, keeping their findings and every node', async () => {
+    const { auditTree, mergeDuplicateDrivers } = await import('../../src/research/treeaudit.mjs');
+    const q = 'Find appropriate plots to buy for a glamping business near the sea';
+    const nodes = [
+      node('D1', 'Q', 'Climate suitability', 'How many months per year are mild enough for glamping in Algarve?'),
+      node('D6', 'Q', 'Identify affordable coastal plots', 'Which affordable coastal land parcels in Spain and Portugal are listed for sale under 20,000 EUR?'),
+      node('D7', 'Q', 'Affordable coastal plot listings', 'Which affordable coastal land parcels in Spain and Portugal are listed for sale under 20,000 EUR now?', { finding: { answer: 'two plots', items: [{ url: 'https://a.example/1' }] } }),
+      node('D8', 'Q', 'Affordable coastal land parcels', 'List affordable coastal land parcels in Spain and Portugal for sale under 20,000 EUR'),
+    ];
+    const before = auditTree(nodes, q).filter((i: { code: string }) => i.code === 'duplicate').length;
+    const fixes = mergeDuplicateDrivers(nodes, q);
+    expect(before).toBeGreaterThan(0);
+    expect(fixes.map((f: { nodeId: string }) => f.nodeId)).toEqual(['D7', 'D8']);
+    expect(nodes.map((n) => [n.id, n.parentId])).toEqual([['D1', 'Q'], ['D6', 'Q'], ['D7', 'D6'], ['D8', 'D6']]);
+    expect(nodes[2].finding?.items).toHaveLength(1);
+    expect(nodes[1].status).toBe('pending');
+    const drivers = new Set(nodes.filter((n) => n.parentId === 'Q').map((n) => n.id));
+    expect(auditTree(nodes, q).filter((i: { code: string; nodeId: string }) => i.code === 'duplicate' && drivers.has(i.nodeId))).toEqual([]);
+  });
+});

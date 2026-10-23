@@ -102,6 +102,16 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 | A local model (this computer, the other PC, Ollama) is used only if a typical 7,000-token call fits in 100 s; it is measured on connect and every 30 min, and shown as "too slow" otherwise | the other PC's llama.cpp measured 12 tokens/s reading and 2.1 writing (CPU): 774 s per call, 19 of 19 calls failed; this Mac's llama.cpp measured 102 / 19 (90 s) | `src/local/speed.mjs`, `App.checkLocalSpeed` |
 | A provider at least 4× slower than the fastest option and over 20 s (median of its last 20 calls) goes behind faster ones, inside the different-family rule for reviews | reviews on Pollinations averaged 51 s against 1–4 s on Groq, Cerebras and Gemini; reviews were 164 of ~250 model-minutes | `ModelRouter.demoteSlow` |
 
+## 4i. Tree and research logic (reviewed 2026-10-23 against systematic-review and issue-tree practice)
+
+| Flaw found in the live glamping research | Rule now | Code |
+|---|---|---|
+| The loop's whole-research trials added drivers until there were 18 (max 7), most repeating "find affordable coastal plots" | A trial that adds a blocking tree problem (duplicate, restates the question, too many drivers) is refused before any research (`reverted-structure`); no driver is added beyond 7; the loop prompt asks to remove or merge duplicates first | `structuralIssues`, `applyVariant` |
+| Duplicate drivers already in the tree | Drivers that repeat an earlier driver are moved under it with their findings and listings (never deleted), when a run or loop starts | `mergeDuplicateDrivers` |
+| Titles "D9", "A", "B", "C" | Placeholder titles are named from the piece's question | `repairTree`, `titleFromQuestion` |
+| Pieces that asked for specific listings and answered "none found" were graded verified | A piece that asks for listings must deliver at least one listing with a link to be supported or verified; existing ones are re-graded | `src/research/deliverable.mjs`, `checkDelivers`, `effectiveGrade` |
+| Criteria were answered as regional averages, so no plot was ever checked against them | List-type expected results get a funnel tree (PRISMA: identify → screen → include): candidates per region or source, then screening rules per item; the memo screens every delivered item and reports identified / screened out / included | `decomposePrompt` rule 2a, `synthesizePrompt` |
+
 ## 4e. Criteria grounding
 
 A model may propose expected-result checks (`mustMention`, item count, value range) and piece checks, but code keeps only what the user's own text states (`src/research/grounding.mjs`): a must-mention word only when it is quoted or follows "mention / contain / include / name"; a count or range only when the number appears in the expected result, question or constraints. Dropped criteria are logged as "not enforced (the model inferred it, your text does not ask for it)". Piece checks are judged against the piece's desired output, where a word the user literally wrote counts as stated. Checks stored before this rule are re-grounded when a run starts and when a loop starts; a loop re-scores the research before measuring its baseline, so a dropped criterion is never counted as a loop gain. Checks the user sets by hand (**Edit expected result**) are kept as written.

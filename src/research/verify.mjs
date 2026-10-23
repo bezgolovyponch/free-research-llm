@@ -1,3 +1,4 @@
+import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { evaluate, sameNumber, toNumber } from './calc.mjs';
 
 export const GRADES = ['verified', 'supported', 'weak', 'unsupported'];
@@ -72,6 +73,12 @@ function checkConcrete(finding, node) {
   return check('concrete', 'Gives a concrete answer, not "unknown"', numeric, numeric ? `numeric answer for ${node.metric || 'the metric'}` : `no number given for ${node.metric || 'the metric'} (${node.unit || node.method})`);
 }
 
+function checkDelivers(finding, node) {
+  if (!asksForItems(node)) return null;
+  const count = (finding?.items ?? []).filter((i) => i && i.url).length;
+  return check('delivers', 'Delivers the listings it asks for', count > 0, count ? `${count} listing(s) with links` : NO_ITEMS_DETAIL);
+}
+
 function checkCalculation(finding) {
   const calc = finding?.calculation;
   if (!calc || !calc.formula) return null;
@@ -130,6 +137,7 @@ export function verifyFinding({ finding, sources = [], critique = null, node = n
   const checks = [
     checkAnswer(finding),
     checkConcrete(finding, node),
+    checkDelivers(finding, node),
     checkCitations(finding, sourceIds),
     checkNumbersSourced(finding),
     checkCalculation(finding),

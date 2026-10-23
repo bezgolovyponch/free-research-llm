@@ -1,3 +1,4 @@
+import { collectDeliverables } from './acceptance.mjs';
 import { MAX_NODES, METHODS } from './tree.mjs';
 import { resultModel } from './result.mjs';
 
@@ -65,6 +66,7 @@ Build an issue tree that answers the QUESTION:
 1. "decision": restate the decision in one sentence; "successCriteria": the measurable threshold that answers it.
 1b. First think of 4-5 different PERSPECTIVES on the question (e.g. a customer who buys it, a competitor's product lead, an investor, a regulator, a domain scientist), as in Stanford's STORM. The drivers must cover different perspectives, not one checklist.
 2. 3-6 top-level DRIVERS (parentId null): mutually exclusive, together exhaustive for the decision.
+2a. If the EXPECTED RESULT asks for a number of items (listings, plots, products, links), build the tree as a FUNNEL, as systematic reviews do (PRISMA: identify → screen → include): D1 "Candidates" = identification, one leaf per region or source, each returning the items themselves (url, price, size, location); the other drivers = SCREENING criteria, each leaf giving a pass/fail rule per region or per item (e.g. "beach within 20 km by road", "preparation cost per m²"), never only an average. Do not make several drivers that all ask to find the same items.
 2b. Every leaf names concrete entities from the question (companies, products, places, models) and asks what public evidence can show: their own pages, papers, code, pricing pages, press releases, partnerships, job posts, customer case studies. Never make a leaf that asks for a private company's internal figures (revenue, cash burn, customer count, market share, break-even): put those in "assumptionsToConfirm" for the user.
 3. Under each driver 2-4 LEAF sub-questions (parentId = driver id; never only one), each answerable by one lookup, calculation, comparison, estimate or data analysis. Max ${MAX_NODES} nodes total. Sibling drivers must not overlap, and no driver may restate the whole question. Titles never start with an id. dependsOn never names the node's own parent or children.
 4. Every node: id (drivers "D1".."D6", leaves "D1.1" etc.), title (<=8 words), question (specific, with geography/time/units), why (how the answer moves the decision), hypothesis (your prior guess; research will not see it), metric, unit, method (one of ${METHODS.join('|')}), searchQueries (2-3 precise web queries that name the entities, never generic how-to queries; include country language terms when useful), dependsOn (ids of OTHER nodes whose answer this needs, e.g. a margin calculation depends on price leaves), impact 1-5 (effect on the decision), uncertainty 1-5 (how unknown it is today).
@@ -190,6 +192,14 @@ const KIND_RULE = {
   list: 'This question asks for a LIST. The verdict says how many items were found and verified; the item list is attached by machine.',
 };
 
+const SCREEN_ITEMS_MAX = 40;
+
+function itemsBlock(nodes) {
+  const items = collectDeliverables(nodes).slice(0, SCREEN_ITEMS_MAX);
+  if (!items.length) return '';
+  return `\nCANDIDATE ITEMS FOUND (${items.length}; from passing pieces):\n${items.map((i) => `- [${i.nodeId}] ${String(i.title ?? i.name ?? '').slice(0, 80)} · ${i.value ?? '?'} ${i.unit ?? ''} · ${i.url}`).join('\n')}\nSCREEN them like a systematic review (identify → screen → include): check each item against the screening findings above (price incl. preparation, climate, distance, permits, demand), and state in the verdict the counts: identified, screened out (main reasons), included. An item with unknown facts is "to check", not included.\n`;
+}
+
 export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision' }) {
   const drivers = nodes.filter((n) => n.parentId === 'Q');
   const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}`);
@@ -208,7 +218,7 @@ DECISION RULE: ${template.decisionRule}
 
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
 ${lines.join('\n')}
-
+${itemsBlock(nodes)}
 ${KIND_RULE[kind] ?? KIND_RULE.decision}
 Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a result of the type asked above and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:
@@ -250,7 +260,7 @@ CURRENT SCORE: ${score.score} (share of verified/supported nodes${score.acceptan
 EXPECTED-RESULT CHECKS:
 ${acceptanceBlock(project.acceptanceResult)}
 
-${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change: add a missing top-level piece ("add") and/or remove a useless one ("remove").` : `PIECE ${node.id} [${node.status}]: ${node.question}
+${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change. First remove ("remove") a top-level piece that duplicates another or asks for the same items again; add ("add") only a piece for a missing criterion or a missing region, never another piece that finds the same items. At most 7 top-level pieces (now ${project.nodes.filter((n) => n.parentId === 'Q').length}); a change that adds duplicates or restates the question is refused by code.` : `PIECE ${node.id} [${node.status}]: ${node.question}
 method: ${node.method} · metric: ${node.metric} ${node.unit} · queries: ${node.searchQueries.join(' | ')} · direct pages: ${(node.sourceUrls ?? []).join(' ') || 'none'}
 instructions: ${node.instructions || 'none'}
 answer: ${node.finding?.answer ?? 'none'}

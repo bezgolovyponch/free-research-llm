@@ -24,6 +24,10 @@ Free Research LLM answers **one decision question** with a researched, machine-c
 
 Pieces keep the names of the first version: **Q** is the question, **D1, D2…** are drivers, **D1.1, D1.2…** are sub-questions, shown as `D1.1 · Model price scan` with the role. Each piece's report follows its role: a sub-question shows its research process (method, queries, pages, sources, answer, gates, reviewer, timeline); a driver shows what it rolls up; Q shows the decision, expected result, memo and drivers.
 
+## Lists are researched like a systematic review
+
+When the expected result is a list (50 plots, 10 suppliers), the tree is a funnel: one driver finds candidates per region or source, the others are screening rules applied to each candidate (not averages), and the memo reports how many were identified, screened out (and why) and included. A piece that is asked for listings and returns none is weak, however good its citations.
+
 ## Checks come from your words, not the model's
 
 The model may propose checks for the expected result and for each piece, but code keeps only what your text states: a word that pages must contain only when you ask for it ("must mention X", a quoted word), and counts or price ranges only when you wrote the numbers. "Feasible for a glamping business" describes the purpose; it is not a word every listing must contain. Dropped checks are listed in the research log as "not enforced".

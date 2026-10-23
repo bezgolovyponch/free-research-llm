@@ -10,9 +10,10 @@ import { needsEscalation, verifyFinding } from './verify.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
+import { NO_ITEMS_DETAIL } from './deliverable.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
 import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree } from './treeaudit.mjs';
-import { basisOf, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
+import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
@@ -201,7 +202,7 @@ export class ResearchEngine {
         messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, feedback }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
-      repairTree(tree.nodes);
+      repairTree(tree.nodes, project.question);
       return { reply, tree, issues: auditTree(tree.nodes, project.question) };
     };
     let { reply, tree, issues } = await ask('');
@@ -404,8 +405,16 @@ export class ResearchEngine {
 
   async regroundAndRescore(id) {
     const project = await this.load(id);
-    if (!this.reground(project)) return project;
-    if (project.report) await this.checkAcceptance(project);
+    const fixes = repairTree(project.nodes, project.question);
+    if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
+    const regrounded = this.reground(project);
+    const regraded = this.regrade(project);
+    if (fixes.some((f) => f.code === 'merged-duplicate') || regraded.length) {
+      await this.store.save(project);
+      return this.run(id);
+    }
+    if (!regrounded && !fixes.length) return project;
+    if (regrounded && project.report) await this.checkAcceptance(project);
     return this.store.save(project);
   }
 
@@ -438,7 +447,7 @@ export class ResearchEngine {
       project.phase = 'researching';
       project.error = null;
       for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';
-      const fixes = repairTree(project.nodes);
+      const fixes = repairTree(project.nodes, project.question);
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       this.regrade(project);
       this.emit(project, 'phase', 'researching sub-questions in dependency order');
@@ -562,12 +571,12 @@ export class ResearchEngine {
     const changed = [];
     for (const node of project.nodes) {
       if (!isLeaf(project.nodes, node) || effectiveGrade(node) === node.status) continue;
+      const detail = weakReason(node);
       node.status = effectiveGrade(node);
-      const detail = 'the answer says the evidence does not settle it';
       if (node.verification) {
         node.verification.grade = node.status;
         node.verification.failures = [...new Set([...(node.verification.failures ?? []), detail])];
-        node.verification.checks = [...(node.verification.checks ?? []).filter((c) => c.id !== 'concrete'), { id: 'concrete', label: 'Gives a concrete answer, not "unknown"', passed: false, detail }];
+        node.verification.checks = [...(node.verification.checks ?? []).filter((c) => c.id !== 'concrete'), { id: 'concrete', label: detail === NO_ITEMS_DETAIL ? 'Delivers the listings it asks for' : 'Gives a concrete answer, not "unknown"', passed: false, detail }];
       }
       changed.push(node.id);
       for (let up = byId.get(node.parentId); up; up = byId.get(up.parentId)) Object.assign(up, { status: 'pending', finding: null, verification: null, critique: null, error: null });

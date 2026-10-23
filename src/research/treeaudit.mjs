@@ -95,8 +95,39 @@ export function duplicateAmong(candidate, peers) {
   return peers.find((n) => n.id !== candidate.id && alike(textOf(candidate), textOf(n)))?.id ?? null;
 }
 
-export function repairTree(nodes) {
+const PLACEHOLDER_TITLE = /^(?:Q|D\d+(?:\.\d+)*|[A-Z]|\d+[a-z]?|[-–—\s]*)$/i;
+const TITLE_WORDS = 8;
+
+export function titleFromQuestion(question) {
+  const plain = String(question ?? '').replace(/[?.!]+$/, '').replace(/^(?:what|which|how many|how much|how|where|when|is|are|do|does|can)\s+(?:is|are|the|do|does)?\s*/i, '');
+  const text = plain.split(/\s+/).filter(Boolean).slice(0, TITLE_WORDS).join(' ');
+  return text ? text[0].toUpperCase() + text.slice(1) : '';
+}
+
+export function mergeDuplicateDrivers(nodes, question = '') {
   const fixes = [];
+  const drivers = nodes.filter((n) => n.parentId === ROOT_ID);
+  const hasKids = (id) => nodes.some((m) => m.parentId === id);
+  const canonical = new Map();
+  for (const d of drivers) {
+    const twin = duplicateOf(d, drivers.filter((m) => m.id !== d.id && !canonical.has(m.id) && drivers.indexOf(m) < drivers.indexOf(d)), question);
+    if (!twin || twin === ROOT_ID) continue;
+    canonical.set(d.id, canonical.get(twin) ?? twin);
+  }
+  for (const [id, target] of canonical) {
+    const host = nodes.find((n) => n.id === target);
+    if (!host || (!hasKids(host.id) && (host.finding?.items ?? []).length)) continue;
+    const node = nodes.find((n) => n.id === id);
+    node.parentId = host.id;
+    if (!hasKids(host.id) || host.status !== 'pending') Object.assign(host, { status: 'pending', finding: null, verification: null, critique: null, error: null });
+    fixes.push({ code: 'merged-duplicate', nodeId: id, detail: `${id} duplicated ${host.id}; moved under it with its findings` });
+  }
+  return fixes;
+}
+
+export function repairTree(nodes, question = '') {
+  const fixes = [];
+  fixes.push(...mergeDuplicateDrivers(nodes, question));
   const { up } = ancestry(nodes);
   const ids = new Set(nodes.map((n) => n.id));
   for (const n of nodes) {
@@ -104,6 +135,13 @@ export function repairTree(nodes) {
     if (title && title !== n.title) {
       fixes.push({ code: 'id-in-title', nodeId: n.id, detail: `"${n.title}" → "${title}"` });
       n.title = title;
+    }
+    if (PLACEHOLDER_TITLE.test(cleanTitle(n.title)) && n.id !== ROOT_ID) {
+      const named = titleFromQuestion(n.question);
+      if (named) {
+        fixes.push({ code: 'placeholder-title', nodeId: n.id, detail: `"${n.title ?? ''}" → "${named}"` });
+        n.title = named;
+      }
     }
     const ancestors = up(n.id);
     const below = new Set(nodes.filter((m) => up(m.id).has(n.id)).map((m) => m.id));

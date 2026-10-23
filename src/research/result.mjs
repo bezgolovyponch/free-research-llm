@@ -1,3 +1,4 @@
+import { NO_ITEMS_DETAIL, missingItems } from './deliverable.mjs';
 import { createHash } from 'node:crypto';
 import { isEvidenceGap } from './verify.mjs';
 import { ROOT_ID } from './tree.mjs';
@@ -21,8 +22,12 @@ export function aggregate(items, a = EXTREMIZE) {
 }
 
 export function effectiveGrade(node) {
-  if (['verified', 'supported'].includes(node.status) && isEvidenceGap(node.finding?.answer)) return 'weak';
+  if (['verified', 'supported'].includes(node.status) && (isEvidenceGap(node.finding?.answer) || missingItems(node))) return 'weak';
   return node.status;
+}
+
+export function weakReason(node) {
+  return missingItems(node) ? NO_ITEMS_DETAIL : 'the answer says the evidence does not settle it';
 }
 
 export function nodeProbabilities(nodes) {

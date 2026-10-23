@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { ProjectImprover, REST_AFTER_FUTILE, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, projectScore, restingPieces, scopeScore } from '../../src/research/improve.mjs';
+import { ProjectImprover, REST_AFTER_FUTILE, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, projectScore, restingPieces, scopeScore } from '../../src/research/improve.mjs';
 import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -92,6 +92,23 @@ describe('ProjectImprover', () => {
     expect(checkpoints[0].loopHoursLeft).toBeGreaterThan(0);
     expect(checkpoints[0].loopHoursLeft).toBeLessThanOrEqual(0.05);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
+describe('structural gate', () => {
+  it('lists blocking tree problems so a trial that adds one is refused, and caps top-level pieces at 7', () => {
+    const d = (id: string, q: string) => ({ id, parentId: 'Q', title: q, question: q, status: 'verified', dependsOn: [], searchQueries: [], sourceUrls: [] });
+    const base = { question: 'Find plots for glamping', nodes: [d('D1', 'How many months are mild enough for glamping in Algarve?'), d('D2', 'Which coastal parcels in Portugal are listed for sale under 20,000 EUR?')] };
+    expect(structuralIssues(base)).toEqual([]);
+    const trial = structuredClone(base);
+    applyVariant(trial, 'Q', { add: [{ question: 'Which coastal parcels in Portugal are listed for sale under 20,000 EUR now?' }] });
+    expect(structuralIssues(trial)).toEqual([]);
+    const forced = structuredClone(base);
+    forced.nodes.push(d('D3', 'Which coastal parcels in Portugal are listed for sale under 20,000 EUR today?'));
+    expect(structuralIssues(forced).some((i: string) => i.startsWith('duplicate:'))).toBe(true);
+    const full = { question: 'q', nodes: Array.from({ length: 7 }, (_, i) => d(`D${i + 1}`, `Distinct driver number ${i + 1} about topic ${'abcdefg'[i]}`)) };
+    expect(applyVariant(full, 'Q', { add: [{ question: 'A brand new eighth topic' }] })).toEqual([]);
+    expect(full.nodes.filter((n) => n.parentId === 'Q')).toHaveLength(7);
   });
 });
 

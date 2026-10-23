@@ -116,3 +116,16 @@ describe('verify: code-read data', () => {
     for (const ok of ['The median Golf price in Germany is 3,400 EUR, from 12 listings.', 'Registration is not available online in Brno; it is done in person for 800 CZK.', 'Transport costs 350–450 EUR. Data for Slovakia is not available.']) expect(isEvidenceGap(ok)).toBe(false);
   });
 });
+
+describe('listing delivery check', () => {
+  it('fails a listing piece that returns no listings, and passes one that does', async () => {
+    const { verifyFinding } = await import('../../src/research/verify.mjs');
+    const node = { id: 'D9', question: 'Which coastal land parcels in Turkey are listed for sale under 20,000 EUR?', method: 'lookup', metric: '', unit: '' };
+    const sources = [{ id: 'S1', url: 'https://a.example/x', domain: 'a.example', kind: 'web', text: 'land for sale 18,000 EUR https://a.example/ilan/1', links: [{ url: 'https://a.example/ilan/1' }] }, { id: 'S2', url: 'https://b.example/y', domain: 'b.example', kind: 'web', text: 'more land' }];
+    const empty = verifyFinding({ finding: { answer: 'No parcels are listed under the budget.', claims: [{ text: 'none found', sourceIds: ['S1', 'S2'] }], confidence: 'medium', items: [] }, sources, node });
+    expect(empty.checks.find((c: { id: string }) => c.id === 'delivers')).toMatchObject({ passed: false });
+    expect(empty.grade).not.toMatch(/verified|supported/);
+    const full = verifyFinding({ finding: { answer: 'One parcel at 18,000 EUR.', claims: [{ text: 'parcel 18,000 EUR', sourceIds: ['S1', 'S2'] }], confidence: 'medium', items: [{ url: 'https://a.example/ilan/1', value: 18000 }] }, sources, node });
+    expect(full.checks.find((c: { id: string }) => c.id === 'delivers')).toMatchObject({ passed: true });
+  });
+});
