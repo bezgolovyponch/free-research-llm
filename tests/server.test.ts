@@ -177,6 +177,13 @@ describe('research share links', () => {
       expect((await helper('GET', '/api/status')).body).toMatchObject({ ledger: [], coders: [] });
       for (const [m, u] of [['GET', `/api/projects/${other.id}`], ['DELETE', `/api/projects/${shared.id}`], ['POST', `/api/projects/${shared.id}/share`], ['POST', '/api/projects'], ['GET', '/api/terminal'], ['GET', '/api/router'], ['GET', '/api/chat'], ['GET', '/api/access']]) expect((await helper(m, u)).status, `${m} ${u}`).toBe(403);
       expect((await fetch(`${started.url}/api/projects`, { headers: remote })).status).toBe(401);
+      const reachable = await fetch(`${started.url}/reachable`, { headers: remote });
+      expect(reachable.status).toBe(200);
+      expect(await reachable.text()).toContain('is reachable');
+      await shareApp.logs.queue;
+      const access = (await shareApp.logs.read('history')).filter((e: { type: string }) => e.type === 'access').map((e: { message: string }) => e.message);
+      expect(access).toContain('other device 127.0.0.1 opened / · research link (' + shared.id + ')');
+      expect(access.some((m: string) => /refused: missing or wrong access token/.test(m))).toBe(true);
 
       expect(await owner('DELETE', `/api/projects/${shared.id}/share`)).toMatchObject({ enabled: false, token: null });
       const after = await helper('GET', `/api/projects/${shared.id}`);

@@ -19,6 +19,7 @@ import { CONSOLE_COMMANDS } from './terminal/catalog.mjs';
 import { attachTerminalSockets } from './terminal/socket.mjs';
 import { accessLinks, lanAddresses } from './service.mjs';
 import { ShareBook, shareAllows, shareLinks } from './share.mjs';
+import { REACHABLE_PAGE, RemoteVisits } from './visits.mjs';
 import os from 'node:os';
 
 const MAX_BODY = 32 * 1024 * 1024;
@@ -311,9 +312,13 @@ export function createServer(app, gate = new AccessGate()) {
     });
   }
 
+  const visits = new RemoteVisits({ note: (message) => void app.logs.append('history', { type: 'access', message }) });
+
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    if (req.method === 'GET' && url.pathname === '/reachable') return send(res, 200, REACHABLE_PAGE, 'text/html; charset=utf-8');
     const access = gate.decide(req, url);
+    if (!gate.isLoopback(req)) visits.record(req, url.pathname, access);
     if (!access.allowed) return deny(res, access.reason);
     if (access.share && !shareAllows({ method: req.method, pathname: url.pathname, projectId: access.share })) return send(res, 403, { error: 'this link opens one research only' });
     req.access = access;
