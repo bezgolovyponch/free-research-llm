@@ -1,6 +1,6 @@
 import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
-import { variantPrompt } from './prompts.mjs';
+import { variantPrompt, withGuidance } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
 import { cleanTitle, duplicateAmong, duplicateOf } from './treeaudit.mjs';
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
@@ -201,7 +201,7 @@ export class ProjectImprover {
 
   async restore(id, before) {
     const current = await this.engine.load(id);
-    await this.engine.store.save({ ...before, chats: current.chats, log: current.log, improve: current.improve });
+    await this.engine.store.save({ ...before, chats: current.chats, log: current.log, improve: current.improve, guidance: current.guidance });
   }
 
   stopped(state) {
@@ -384,7 +384,7 @@ export class ProjectImprover {
   async propose(project, nodeId, best) {
     const node = nodeId === ROOT_ID ? { id: ROOT_ID } : project.nodes.find((n) => n.id === nodeId);
     const trials = (project.improve?.trials ?? []).filter((t) => t.nodeId === nodeId);
-    const reply = await this.engine.router.complete({ purpose: 'improve', tier: 'deep', messages: variantPrompt({ project, node, score: best, trials }) });
+    const reply = await this.engine.router.complete({ purpose: 'improve', tier: 'deep', messages: withGuidance(variantPrompt({ project, node, score: best, trials }), project.guidance) });
     return reply.data ?? {};
   }
 

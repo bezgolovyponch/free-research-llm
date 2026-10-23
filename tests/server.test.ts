@@ -149,11 +149,17 @@ describe('HTTP server', () => {
 describe('teammates', () => {
   it('turns Run or Improve on a running research into one more lane instead of an error', async () => {
     const created = await call('POST', '/api/projects', { question: 'Which Czech city suits a small specialty bakery best?' });
-    const join = await call('POST', `/api/projects/${created.body.id}/run`);
-    expect(join.status).toBe(200);
-    expect(join.body).toEqual({ joined: true, lanes: 3 });
-    expect((await call('POST', `/api/projects/${created.body.id}/improve`, { hours: 0.01 })).body).toEqual({ joined: true, lanes: 4 });
     await waitFor(created.body.id, 'done');
+    app.engine.running.add(created.body.id);
+    try {
+      const join = await call('POST', `/api/projects/${created.body.id}/run`);
+      expect(join.status).toBe(200);
+      expect(join.body).toEqual({ joined: true, lanes: 3 });
+      expect((await call('POST', `/api/projects/${created.body.id}/improve`, { hours: 0.01 })).body).toEqual({ joined: true, lanes: 4 });
+    } finally {
+      app.engine.running.delete(created.body.id);
+      app.engine.leave(created.body.id);
+    }
     expect((await call('GET', `/api/projects/${created.body.id}`)).body.lanes).toBe(2);
   });
 });

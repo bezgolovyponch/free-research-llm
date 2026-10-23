@@ -95,6 +95,8 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 
 A model may propose expected-result checks (`mustMention`, item count, value range) and piece checks, but code keeps only what the user's own text states (`src/research/grounding.mjs`): a must-mention word only when it is quoted or follows "mention / contain / include / name"; a count or range only when the number appears in the expected result, question or constraints. Dropped criteria are logged as "not enforced (the model inferred it, your text does not ask for it)". Piece checks are judged against the piece's desired output, where a word the user literally wrote counts as stated. Checks stored before this rule are re-grounded when a run starts and when a loop starts; a loop re-scores the research before measuring its baseline, so a dropped criterion is never counted as a loop gain. Checks the user sets by hand (**Edit expected result**) are kept as written.
 
+**Hints** (header → **+ Add hints**, or More → Edit hints) are the user's soft guidance for one research: what a phrase means, what counts as in scope. Code appends them to every decompose, research, roll-up, memo, loop, suggestion and chat prompt as "USER HINTS (soft guidance …)" (`withGuidance`). They are never grounded into checks and can be edited while the research or loop runs; a loop that undoes a trial keeps the latest hints.
+
 ## 5. Logging and audit protocol
 
 | Record | Where |

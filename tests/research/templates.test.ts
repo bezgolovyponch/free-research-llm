@@ -21,3 +21,14 @@ describe('templates', () => {
     }
   });
 });
+
+describe('glamping template investment logic', () => {
+  it('keeps cheap raw land in scope and judges plots by purchase plus preparation cost', () => {
+    const t = templateById('glamping-location');
+    expect(t.drivers).toMatch(/cheap raw land that needs work \(it is in scope/);
+    expect(t.drivers).toMatch(/site preparation .*clearing, levelling/);
+    expect(t.metrics).toMatch(/all-in cost \(purchase \+ preparation\)/);
+    expect(t.decisionRule).toMatch(/all-in cost .* suitability after that work/);
+  });
+});
+

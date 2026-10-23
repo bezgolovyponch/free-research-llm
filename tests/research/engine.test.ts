@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
-import { TASK_MARKERS } from '../../src/research/prompts.mjs';
+import { TASK_MARKERS, withGuidance } from '../../src/research/prompts.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
@@ -184,6 +184,26 @@ describe('ResearchEngine', () => {
     expect(fixed.log.some((l: { message: string }) => /stored checks not enforced/.test(l.message))).toBe(true);
     await engine.updateProject(project.id, { acceptance: { itemCount: 50, mustMention: ['glamping'] } });
     expect((await engine.regroundAndRescore(project.id)).acceptance.mustMention).toEqual(['glamping']);
+  });
+
+  it('sends the research hints to every research step as soft guidance and lets the user change them while it runs', async () => {
+    expect(withGuidance([{ role: 'system', content: 's' }, { role: 'user', content: 'u' }], '')).toEqual([{ role: 'system', content: 's' }, { role: 'user', content: 'u' }]);
+    expect(withGuidance([{ role: 'system', content: 's' }, { role: 'user', content: 'u' }], 'cheap raw land is in scope')[1].content).toMatch(/^u\n\nUSER HINTS \(soft guidance[^)]*\):\ncheap raw land is in scope$/);
+    const scripted = new ScriptedProvider();
+    const prompts: string[] = [];
+    const provider = { id: 'demo', ready: true, describe: () => scripted.describe(), async chat(args: { messages: Array<{ content: string }> }) { prompts.push(args.messages.at(-1)!.content); return scripted.chat(args as never); } };
+    const { engine } = engineWith(provider, fakeSearch, 1);
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    engine.running.add(project.id);
+    const hinted = await engine.updateProject(project.id, { guidance: 'Land that needs work is in scope; judge purchase plus preparation cost.' });
+    engine.running.delete(project.id);
+    expect(hinted.guidance).toMatch(/purchase plus preparation/);
+    await expect((async () => { engine.running.add(project.id); try { await engine.updateProject(project.id, { expected: 'x' }); } finally { engine.running.delete(project.id); } })()).rejects.toThrow(/stop the run/);
+    await engine.run(project.id);
+    const research = prompts.filter((p) => p.includes(TASK_MARKERS.research));
+    expect(research.length).toBeGreaterThan(0);
+    expect(research.every((p) => p.includes('USER HINTS') && p.includes('purchase plus preparation'))).toBe(true);
+    expect(prompts.some((p) => p.includes(TASK_MARKERS.decompose) && p.includes('USER HINTS'))).toBe(true);
   });
 
   it('does not enforce expected-result checks the model inferred but the user never asked for', async () => {

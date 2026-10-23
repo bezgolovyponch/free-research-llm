@@ -324,3 +324,12 @@ Asked: components collide, design inconsistent, no loop indicator, no remaining 
 - Chat: one-line "Talking about: …" context; app reports grouped into one collapsible "N app updates" row and each one collapsible; how-to hint shown until the first message; request first, "Done when" under it; the stray "loop running" label removed.
 - Tree bar: the duplicate "Improve whole research…" removed; "Improve selected…" appears only when pieces are ticked; Q's grade uses the same badge as other pieces.
 - Checked at 1440×900 and 390×844: no sideways scroll, no script errors; e2e asserts the loop bar and the Stop label.
+
+## Session 2026-10-23 · investment logic, hints, contextual chat examples
+
+Asked: why the piece chat talks about a kiosk in Brno; e-bike lanes are not required; affordable land includes land that needs work, and that is the investment logic, not a hint; merge and run everything; continue the research with a desktop-friendly UI.
+
+- The Brno kiosk was a fixed example in the chat hint; examples are now built from the selected piece or the weakest piece.
+- Glamping template: cheap raw land that needs work is in scope; site preparation (clearing, levelling or terracing, access, water, power, drainage) is its own driver; plots are judged by all-in cost (purchase + preparation) and suitability after the work.
+- Research hints: a per-research soft-guidance field sent to every prompt, editable in the header while it runs.
+- The live research's tree is updated accordingly (see the next entry in the log of the research itself).

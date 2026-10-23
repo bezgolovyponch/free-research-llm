@@ -3,7 +3,7 @@ import { htmlToText } from '../search/search.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
-import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt } from './prompts.mjs';
+import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding } from './verify.mjs';
@@ -198,7 +198,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({
         purpose: 'decompose',
         tier: 'deep',
-        messages: decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, feedback }),
+        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, feedback }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
       repairTree(tree.nodes);
@@ -304,7 +304,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
-        messages: researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected }),
+        messages: withGuidance(researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected }), project.guidance),
       });
       const finding = normalizeFinding(reply.data);
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
@@ -323,7 +323,7 @@ export class ResearchEngine {
     node.status = 'researching';
     const children = childrenOf(project.nodes, node.id);
     this.emit(project, 'node', `${node.id}: combining ${children.length} sub-findings`, { nodeId: node.id });
-    const reply = await this.router.complete({ purpose: 'rollup', tier: 'fast', messages: rollupPrompt({ question: project.question, node, children }) });
+    const reply = await this.router.complete({ purpose: 'rollup', tier: 'fast', messages: withGuidance(rollupPrompt({ question: project.question, node, children }), project.guidance) });
     const finding = normalizeFinding(reply.data);
     node.sources = children.map((c) => ({ id: c.id, kind: 'node', title: c.title, url: '', domain: `node:${c.id}`, text: c.finding?.answer ?? '' }));
     const verification = verifyFinding({ finding, sources: node.sources, node: { method: 'rollup' } });
@@ -343,7 +343,7 @@ export class ResearchEngine {
     const reply = await this.router.complete({
       purpose: 'synthesize',
       tier: 'deep',
-      messages: synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project) }),
+      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project) }), project.guidance),
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
@@ -571,13 +571,22 @@ export class ResearchEngine {
     return this.store.save(project);
   }
 
-  async updateProject(id, { expected, acceptance } = {}) {
+  async updateProject(id, { expected, acceptance, guidance } = {}) {
+    if (typeof guidance === 'string' && expected === undefined && acceptance === undefined) return this.setGuidance(id, guidance);
     if (this.running.has(id)) throw new ProjectBusyError('stop the run before editing');
     const project = await this.load(id);
+    if (typeof guidance === 'string') project.guidance = guidance.trim().slice(0, GUIDANCE_LIMIT);
     const nextExpected = typeof expected === 'string' ? expected : project.acceptance?.expected;
     project.acceptance = { ...normalizeAcceptance(acceptance ?? project.acceptance ?? {}, nextExpected), locked: Boolean(acceptance) || Boolean(project.acceptance?.locked) };
     project.acceptanceResult = null;
     this.emit(project, 'edit', `expected result updated: ${project.acceptance.expected || 'none'}`);
+    return this.store.save(project);
+  }
+
+  async setGuidance(id, guidance) {
+    const project = await this.load(id);
+    project.guidance = String(guidance).trim().slice(0, GUIDANCE_LIMIT);
+    this.emit(project, 'edit', project.guidance ? `hints updated: ${project.guidance.slice(0, 160)}` : 'hints cleared');
     return this.store.save(project);
   }
 
@@ -665,7 +674,7 @@ export class ResearchEngine {
     const project = await this.load(id);
     const node = project.nodes.find((n) => n.id === nodeId);
     if (!node) throw new NotFoundError(`node ${nodeId} not found`);
-    const reply = await this.router.complete({ purpose: 'expand', tier: 'deep', messages: expandPrompt({ question: project.question, node, hint }) });
+    const reply = await this.router.complete({ purpose: 'expand', tier: 'deep', messages: withGuidance(expandPrompt({ question: project.question, node, hint }), project.guidance) });
     const fresh = normalizeTree(reply.data, project.question).nodes;
     const taken = new Set(project.nodes.map((n) => n.id));
     const kept = [];

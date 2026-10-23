@@ -1,4 +1,4 @@
-import { chatPrompt, resultsChatPrompt } from './prompts.mjs';
+import { chatPrompt, resultsChatPrompt, withGuidance } from './prompts.mjs';
 import { ReplyAudit, auditFeedback } from '../chat/reply-audit.mjs';
 import { filesBlock } from '../chat/media.mjs';
 import { addSpec, evaluateAll, normalizeSpec } from './specs.mjs';
@@ -85,7 +85,7 @@ export class NodeChat {
 
   async ask({ project, focus, key, thread, text, desired = '', files, feedback = '' }) {
     const block = filesBlock(files);
-    const messages = key === RESULTS_KEY ? resultsChatPrompt({ project, thread, message: text, files: block, feedback }) : chatPrompt({ project, node: focus, thread, message: text, desired, files: block, feedback });
+    const messages = withGuidance(key === RESULTS_KEY ? resultsChatPrompt({ project, thread, message: text, files: block, feedback }) : chatPrompt({ project, node: focus, thread, message: text, desired, files: block, feedback }), project.guidance);
     const reply = await this.engine.router.complete({ purpose: key === RESULTS_KEY ? 'results-chat' : 'chat', tier: 'fast', messages });
     const actions = validActions(reply.data?.actions, project, key === RESULTS_KEY ? ROOT_ID : key).filter((a) => key !== RESULTS_KEY || RESULTS_ACTIONS.has(a.type));
     return { reply, actions, spec: reply.data?.spec ?? null, scope: reply.data?.scope === 'app' ? 'app' : '', text: String(reply.data?.reply ?? reply.data?.answer ?? '').slice(0, 4000) || '(no reply text)' };

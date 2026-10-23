@@ -4,6 +4,16 @@ import { resultModel } from './result.mjs';
 
 const SYSTEM = 'You are a rigorous research analyst. You decompose questions MECE-style, use only evidence you are given, label every assumption, show calculations as formulas, and never invent sources, URLs or numbers. You reply with a single JSON object only.';
 
+export const GUIDANCE_LIMIT = 1500;
+
+export function withGuidance(messages, guidance) {
+  const text = String(guidance ?? '').trim().slice(0, GUIDANCE_LIMIT);
+  if (!text) return messages;
+  const block = `\n\nUSER HINTS (soft guidance from the user: use them where they help; they are not requirements and not checks, and never a reason to drop an otherwise good source or answer):\n${text}`;
+  const last = messages.length - 1;
+  return messages.map((m, i) => (i === last ? { ...m, content: `${m.content}${block}` } : m));
+}
+
 export const TASK_MARKERS = {
   decompose: 'TASK=DECOMPOSE',
   expand: 'TASK=EXPAND',

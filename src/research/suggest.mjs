@@ -1,4 +1,4 @@
-import { suggestPrompt } from './prompts.mjs';
+import { suggestPrompt, withGuidance } from './prompts.mjs';
 import { duplicateAmong } from './treeaudit.mjs';
 import { entityDomains, terms } from '../search/selection.mjs';
 import { METHODS, ROOT_ID } from './tree.mjs';
@@ -40,7 +40,7 @@ export class SubIssueSuggester {
     const queries = node ? [...node.searchQueries, node.question] : [project.question];
     const found = search?.enabled ? await search.search(queries, { maxSources: 6, wanted: terms(node ? `${node.title} ${node.question}` : project.question), entities: entityDomains(project.question) }) : [];
     const sources = found.map((s, i) => ({ ...s, id: `S${i + 1}` }));
-    const reply = await this.engine.router.complete({ purpose: 'suggest', tier: 'deep', messages: suggestPrompt({ project, node, sources }) });
+    const reply = await this.engine.router.complete({ purpose: 'suggest', tier: 'deep', messages: withGuidance(suggestPrompt({ project, node, sources }), project.guidance) });
     const rank = { quoted: 0, cited: 1, ungrounded: 2 };
     const items = (Array.isArray(reply.data?.suggestions) ? reply.data.suggestions : [])
       .map((raw) => gradeSuggestion(raw, sources))

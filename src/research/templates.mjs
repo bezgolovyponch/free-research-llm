@@ -39,10 +39,10 @@ export const TEMPLATES = [
       { key: 'budget', label: 'Capex budget', placeholder: 'e.g. €250,000' },
       { key: 'success', label: 'Target', placeholder: 'e.g. 60% occupancy, payback 4 years' },
     ],
-    drivers: 'Demand (tourist nights, drive-time from big cities, seasonality, events); competition & achievable ADR (nightly rate) from comparable listings; land availability & price / lease; zoning, building permits, protected-area rules; access & utilities (water, power, road, internet); capex per unit and opex; climate & season length; payback and sensitivity to occupancy.',
-    metrics: 'tourist overnight stays per region, ADR, occupancy %, RevPAR, land price per m², capex per unit, annual opex, payback years, IRR',
+    drivers: 'Demand (tourist nights, drive-time from big cities, seasonality, events); competition & achievable ADR (nightly rate) from comparable listings; land availability & purchase price / lease, including cheap raw land that needs work (it is in scope, not a reason to exclude a plot); site preparation to make the land usable (clearing, levelling or terracing, access track, water or well, power or off-grid solar, drainage) with its cost and time; zoning, building permits, protected-area rules; capex per unit and opex; climate & season length; payback and sensitivity to occupancy.',
+    metrics: 'tourist overnight stays per region, ADR, occupancy %, RevPAR, land purchase price, site preparation cost, all-in cost (purchase + preparation), capex per unit, annual opex, payback years, IRR',
     sources: 'national statistics (tourism overnight stays), booking/Airbnb comparable listings, land listings, municipal zoning plans, protected-area authorities, weather normals',
-    decisionRule: 'Rank candidate locations by risk-adjusted payback; GO for top location only if base case beats the target and the permit path is realistic.',
+    decisionRule: 'Judge each plot by its all-in cost (purchase price + preparation to glamping-ready) and its suitability after that work, not by its raw state; rank by risk-adjusted payback; GO only if the base case beats the target and the permit path for both the works and the units is realistic.',
   },
   {
     id: 'taxes',

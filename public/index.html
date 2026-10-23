@@ -153,6 +153,9 @@
   details.msg.app[open] > summary::before{content:"▾ "}
   details.msg.app[open] > summary{white-space:normal}
   #projExpected{color:var(--dim); font-size:13px; margin-top:2px; overflow-wrap:anywhere}
+  #projHints{color:var(--dim); margin-top:2px; overflow-wrap:anywhere}
+  #projHints a{color:var(--acc); cursor:pointer}
+  #hintsBox textarea{width:100%; min-height:90px; font:13px/1.45 inherit; margin-top:6px}
   .head-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px}
   .progress{flex:1 1 120px; height:6px; background:var(--panel2); border-radius:3px; overflow:hidden; min-width:80px; max-width:260px}
   .progress i{display:block; height:100%; background:var(--acc); transition:width .3s}
@@ -390,6 +393,7 @@
       <div id="projHead">
         <div id="projTitle"></div>
         <div id="projExpected"></div>
+        <div id="projHints" class="small"></div>
         <div class="head-row">
           <span class="pill" id="phasePill"><i></i>…</span>
           <div class="progress"><i id="progBar" style="width:0%"></i></div>
@@ -402,6 +406,7 @@
             <div class="menu-pop" id="morePop">
               <button id="mLoop" class="phone-only">Improve loop…</button>
               <button id="mEditExpected">Edit expected result</button>
+              <button id="mHints">Edit hints for the research…</button>
               <button id="mResetAll">Re-research everything (keep tree)</button>
               <button id="mRebuild">Rebuild the tree</button>
               <a id="mHandoff" href="#" target="_blank">Handoff notes (.md)</a>
@@ -415,6 +420,7 @@
         </div>
         <div class="loopstatus" id="loopStatus" role="status" aria-live="polite"></div>
         <div class="loopbox" id="loopBox"></div>
+        <div class="sharebox notice" id="hintsBox"></div>
         <div class="sharebox notice" id="shareBox"></div>
         <div class="notice" id="sharedBanner">Shared research: you are helping on this one research. Chat, run, add pieces and download results here; the rest of the app stays with its owner.</div>
       </div>
@@ -796,6 +802,8 @@ function renderHead(){
   $("btnStop").disabled=!running&&!looping;$("btnStop").textContent=looping?"■ Stop loop":running?"■ Stop run":"■ Stop";
   $("btnLoop").parentElement.style.display=looping?"none":"";$("btnLoop").textContent="Improve loop ▾";
   $("projTitle").title=p.question;
+  $("projHints").innerHTML=p.guidance?'Hints: '+esc(trunc(p.guidance,220))+' · <a id="hintsEdit">edit</a>':'<a id="hintsEdit">+ Add hints</a> <span class="faint">(soft guidance for the research, never a requirement)</span>';
+  $("hintsEdit").addEventListener("click",openHints);
   renderLoopStatus();
   $("mReport").href="/api/projects/"+encodeURIComponent(p.id)+"/report.md";
   $("mHandoff").href="/api/projects/"+encodeURIComponent(p.id)+"/handoff.md";
@@ -873,6 +881,14 @@ function renderShare(){
   const pc=box.querySelector("[data-copy-pc]");if(pc)pc.addEventListener("click",async()=>{const inp=$("sharePc");inp.select();try{await navigator.clipboard.writeText(inp.value);toast("command copied");}catch(e){document.execCommand("copy");toast("command copied");}});
   box.querySelectorAll("[data-copy]").forEach(b=>b.addEventListener("click",async()=>{const inp=$("shareUrl"+b.dataset.copy);inp.select();try{await navigator.clipboard.writeText(inp.value);toast("link copied");}catch(e){document.execCommand("copy");toast("link copied");}}));
 }
+function openHints(){
+  const p=STATE.project;const box=$("hintsBox");box.classList.add("on");
+  box.innerHTML='<b>Hints for this research</b><p class="small">Soft guidance the research, the loop and the chats take into account, e.g. what counts as affordable or what a phrase in the question means. Hints are never turned into checks and never a reason to drop a good source.</p><textarea id="hintsText" placeholder="e.g. Land that needs work (clearing, flattening, access road) still counts as affordable; estimate that cost.">'+esc(p.guidance||"")+'</textarea><div class="row"><button class="btn primary sm" id="hintsSave">Save hints</button><button class="btn secondary sm" id="hintsCancel">Cancel</button></div>';
+  $("hintsText").focus();
+  $("hintsCancel").addEventListener("click",()=>box.classList.remove("on"));
+  $("hintsSave").addEventListener("click",async()=>{try{STATE.project=await api("/api/projects/"+p.id,{method:"PATCH",body:{guidance:$("hintsText").value}});box.classList.remove("on");renderAll();toast("hints saved: the next research steps and loop trials use them");}catch(e){toast(e.message);}});
+}
+$("mHints").addEventListener("click",()=>{$("morePop").classList.remove("on");openHints();});
 $("mShare").addEventListener("click",async()=>{try{SHARE.view=await api("/api/projects/"+STATE.project.id+"/share");renderShare();}catch(e){toast(e.message);}});
 $("mEditExpected").addEventListener("click",async()=>{const p=STATE.project;const v=prompt("Expected result (what must be delivered)",(p.acceptance||{}).expected||"");if(v==null)return;try{STATE.project=await api("/api/projects/"+p.id,{method:"PATCH",body:{expected:v}});renderAll();toast("saved; checks apply on the next run");}catch(e){toast(e.message);}});
 $("mResetAll").addEventListener("click",async()=>{if(!confirm("Clear all findings and research the whole tree again? The tree is kept."))return;try{STATE.project=await api("/api/projects/"+STATE.project.id+"/reset",{method:"POST"});renderAll();toast("cleared; press Run");}catch(e){toast(e.message);}});
@@ -1109,6 +1125,12 @@ function chatTarget(){
   if(CHAT.scope==="node"&&key!=="Q")return{kind:"node",key,title:"This piece · "+key+" "+trunc((byId(key)||{}).title,40),thread:((p&&p.chats)||{})[key]||[]};
   return{kind:"research",key:"Q",title:"Whole research · "+trunc(p?p.question:"",50),thread:((p&&p.chats)||{}).Q||[]};
 }
+function hintFor(t){
+  const p=STATE.project;
+  if(t.kind==="node"&&p){const n=byId(t.key)||{};const name=cleanTitle(n.title)||trunc(n.question,60);const done=n.unit?"a number in "+n.unit+" with 2 source links":"an answer with 2 source links from 2025–2026";return 'Ask about or change this piece ('+esc(t.key+" · "+name)+'). For example — Request: "re-check '+esc(name)+' with newer, primary sources" · Done when: "'+esc(done)+'". "Done when" is kept as a check on this piece and re-tested after every run.';}
+  if(t.kind==="research"&&p){const weak=(p.nodes||[]).filter(n=>["weak","unsupported"].includes(n.status));const w=weak[0];const name=w?(cleanTitle(w.title)||trunc(w.question,50)):"the weakest piece";return 'Ask about or change the whole research. For example — Request: "'+(w?"fix "+esc(w.id)+" · "+esc(name):"add a piece on what is still missing")+'" · Done when: "it reaches supported with 3 sources". To steer the research without a check, use + Add hints in the header.';}
+  return HINTS[t.kind];
+}
 const HINTS={app:'Ask about the app itself ("how do I open this on my Windows PC?"), or describe a change to the app ("add a CSV export to Results, with a test", "make the Run button green"): it becomes a change ticket and you pick the implementer — Claude Code (uses your Claude plan) or the free models. Either works in a sandbox copy and the app changes only when the quality gate passes. Follow-ups like "make it smaller" or "try again" continue from the current app.',node:'Request + desired output, e.g. Request: "find the monthly rent of a 20 m² kiosk in Brno city centre" · Desired output: "rent in EUR per month, with 3 source links". The desired output is kept as a regression check on this piece.',results:'Ask about the results: "which finding is the weakest, and why?", "what would change the verdict?", "re-research D2.2 with official statistics".',research:'Request + desired output for the whole research, e.g. Request: "add a driver for permits and licences" · Desired output: "net margin per month after permit costs, in EUR". Kept as a regression check. Questions about the app go to the App chat.'};
 function withPending(t,thread){
   const th=thread.slice();const pend=CHAT.pending;const p=STATE.project;
@@ -1124,7 +1146,7 @@ function threadHtml(th,t){
   const flush=()=>{if(!run.length)return;if(run.length===1){out.push(msgHtml(run[0]));}else{const last=run.at(-1);out.push('<details class="updates"><summary>'+run.length+" app updates · latest: "+esc(trunc(String(last.content||"").split("\n")[0],90))+"</summary>"+run.map(m=>msgHtml(m)).join("")+"</details>");}run=[];};
   for(const raw of th){const m=t.kind==="app"?raw:Object.assign({},raw,{_key:t.key});if(m.role==="app"&&t.kind!=="app"){run.push(m);continue;}flush();out.push(msgHtml(m));}
   flush();
-  if(t.kind!=="app"&&!th.some(m=>m.role==="user"))out.push('<div class="small faint" style="padding:10px 2px">'+HINTS[t.kind]+"</div>");
+  if(t.kind!=="app"&&!th.some(m=>m.role==="user"))out.push('<div class="small faint" style="padding:10px 2px">'+hintFor(t)+"</div>");
   return out.join("");
 }
 function renderChat(){
@@ -1139,7 +1161,7 @@ function renderChat(){
   $("desiredRow").style.display=two?"":"none";
   $("chatIn").placeholder=two?"Request: what do you want…":t.kind==="results"?"Ask about the results…":"Ask about the app, or describe a change (Claude Code or free models)…";
   const th=withPending(t,t.thread);
-  $("chatMsgs").innerHTML=th.length?threadHtml(th,t):'<div class="small faint" style="padding:6px 2px">'+HINTS[t.kind]+"</div>";
+  $("chatMsgs").innerHTML=th.length?threadHtml(th,t):'<div class="small faint" style="padding:6px 2px">'+hintFor(t)+"</div>";
   renderFiles("dock");
   scrollChat(false);
 }
