@@ -16,6 +16,7 @@ import { guideFor } from './llm/guides.mjs';
 import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helperArgs, parseHelpers, recommendModel, serverArgs, speedOf } from './local/llamacpp.mjs';
 import { CREDSTORE, KeychainSecrets, runCommand, secretNames } from './secrets.mjs';
 import { shareLinks } from './share.mjs';
+import { probePeer } from './local/peer.mjs';
 import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, stableNodePath, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -449,6 +450,15 @@ const commands = {
       void reloadApp();
       return run(current.server, args, { shell: false });
     }
+    if (action === 'pc') {
+      const found = await probePeer(rest[0]);
+      for (const f of found) console.log(`  ${f.label.padEnd(10)} ${f.url}  ${f.ok ? 'OK' : 'missing'} · ${f.detail}`);
+      const ready = found.filter((f) => f.ok);
+      for (const f of ready) await secrets.write(f.env, f.url);
+      if (!ready.length) return console.log('\nNothing to connect yet. On the other PC start Ollama (with OLLAMA_HOST=0.0.0.0:11434) or llama-server (with --host 0.0.0.0 --port 8090), allow it in Windows Firewall on private networks, then run this again.');
+      console.log(`\nSaved ${ready.map((f) => f.env).join(' and ')}. The research app now uses the other PC's model(s) with no quota.`);
+      return void reloadApp();
+    }
     if (action === 'status' || action === 'bench') {
       const port = Number(flag('port', SERVER_PORT));
       console.log(current ? `llama.cpp ${current.tag} (${current.gpu}) at ${path.dirname(current.server)}` : 'llama.cpp: not installed');
@@ -464,7 +474,7 @@ const commands = {
       const speed = speedOf(reply);
       return console.log(speed ? `prefill (reading): ${speed.prefillPerSecond} tokens/s over ${speed.promptTokens} tokens · decode (writing): ${speed.decodePerSecond} tokens/s` : 'no timings in the reply');
     }
-    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N] [--split a,b] | helper --host LAN-IP [--port 50052] | status | bench');
+    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N] [--split a,b] | helper --host LAN-IP [--port 50052] | pc <other PC address> | status | bench');
   },
 
   async logs() {
@@ -495,6 +505,7 @@ if (!commands[command]) {
   node src/frl.mjs change C1 [--claude]  run an App chat change ticket with the free-model coder (or Claude Code), gated by quality
   node src/frl.mjs searxng           start the free, unlimited SearXNG search engine in Docker and save its address
   node src/frl.mjs local ...         run a model on this PC's GPU (llama.cpp), optionally with helper devices: install | models | start | helper | status | bench
+  node src/frl.mjs local pc ADDRESS  find Ollama / llama.cpp on another PC in your network and use them
   node src/frl.mjs logs               last lines of the app log`);
 } else {
   try {

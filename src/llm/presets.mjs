@@ -18,8 +18,8 @@ export const PROVIDER_PRESETS = [
     keyEnv: 'GROQ_API_KEY',
     signup: 'https://console.groq.com/keys',
     prefer: {
-      fast: ['openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'],
-      deep: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'qwen/qwen3-32b'],
+      fast: ['openai/gpt-oss-20b', 'llama-3.1-8b-instant', 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'],
+      deep: ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'llama-3.3-70b-versatile', 'qwen/qwen3-32b', 'openai/gpt-oss-20b'],
     },
   },
   {

@@ -132,6 +132,8 @@ describe('quotaWindow', () => {
     expect(quotaWindow('{"quotaId":"GenerateRequestsPerDayPerProject-FreeTier"}')).toBe(' [quota window: per day]');
     expect(quotaWindow('{"retryDelay": "12.5s"}')).toBe(' [retry after 13s]');
     expect(quotaWindow('plain error')).toBe('');
+    expect(quotaWindow('{"message":"Tokens per day limit exceeded - too many tokens processed."}')).toBe(' [quota window: per day, per model]');
+    expect(quotaWindow('{"error":{"message":"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_x` service tier `on_demand` on tokens per day (TPD): Limit 200000"}}')).toBe(' [quota window: per day, per model]');
     expect(retryAfterFromText(minute)).toBe(37000);
   });
 });

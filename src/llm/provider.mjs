@@ -29,7 +29,7 @@ export function pickModel(models, preferences, freeOnly = false, { strict = fals
 
 export function quotaWindow(body) {
   const text = String(body);
-  if (/PerDay[A-Za-z]*PerModel/.test(text)) return ' [quota window: per day, per model]';
+  if (/PerDay[A-Za-z]*PerModel/.test(text) || /limit reached for model[\s\S]*(?:per day|\bTPD\b|\bRPD\b)/i.test(text) || /(?:tokens|requests) per day limit exceeded/i.test(text)) return ' [quota window: per day, per model]';
   if (/PerDay|per day|daily/i.test(text)) return ' [quota window: per day]';
   if (/PerMinute|per minute/i.test(text)) return ' [quota window: per minute]';
   const delay = text.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
