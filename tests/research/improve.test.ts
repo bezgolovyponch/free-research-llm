@@ -406,4 +406,27 @@ describe('a loop that cannot get stuck', () => {
     expect(runs).toBe(0);
     expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'repeat', removedPieceId: 'D2' });
   });
+
+  it('does not blame a change when the re-roll hits a provider outage, and pauses before the next trial', async () => {
+    const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [] } };
+    let saved = structuredClone(project);
+    const sleeps: number[] = [];
+    const engine = {
+      load: async () => structuredClone(saved),
+      store: { save: async (p: typeof project) => { saved = structuredClone(p); } },
+      emit: () => {},
+      resetWithAncestors: () => {},
+      run: async () => ({ ...structuredClone(saved), phase: 'done', nodes: saved.nodes.map((n) => (n.id === 'D3' ? { ...n, status: 'failed', error: 'every provider failed for research: sambanova HTTP 402' } : n)) }),
+    };
+    const improver = new ProjectImprover({ engine: engine as never, sleep: async (ms: number) => { sleeps.push(ms); } });
+    const trialProject = structuredClone(project);
+    trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
+    const state = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() } };
+    const base = { at: at(0), nodeId: 'D3', before: 0.3 };
+    expect(await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toEqual({ kept: false });
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'provider-outage', detail: expect.stringMatching(/^D3: every provider failed.*not counted against the change$/) });
+    expect(saved.nodes.find((n) => n.id === 'D3')!.question).toBe('permits?');
+    expect(sleeps).toEqual([300000]);
+    expect(restingPieces([1, 2, 3].map((i) => ({ nodeId: 'D3', outcome: 'provider-outage', at: at(i) })), t0 + 10 * 60000).size).toBe(0);
+  });
 });
