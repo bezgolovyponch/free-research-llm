@@ -83,11 +83,11 @@ export function acceptsTrial(before, after, removed = []) {
   return after > before + (removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
 }
 
-const FUTILE = new Set(['reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'reverted-structure']);
+const FUTILE = new Set(['repeat', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'reverted-structure']);
 export const REST_AFTER_FUTILE = 3;
 export const REST_HOURS = 6;
 
-export function restingPieces(trials = [], now = Date.now()) {
+export function restEnds(trials = []) {
   const streak = new Map();
   const lastAt = new Map();
   for (const t of trials) {
@@ -95,7 +95,57 @@ export function restingPieces(trials = [], now = Date.now()) {
     else if (FUTILE.has(t.outcome)) streak.set(t.nodeId, (streak.get(t.nodeId) ?? 0) + 1);
     if (FUTILE.has(t.outcome) || t.outcome === 'kept') lastAt.set(t.nodeId, Date.parse(t.at));
   }
-  return new Set([...streak].filter(([id, n]) => n >= REST_AFTER_FUTILE && now - (lastAt.get(id) ?? 0) < REST_HOURS * 3600000).map(([id]) => id));
+  return new Map([...streak].filter(([, n]) => n >= REST_AFTER_FUTILE).map(([id]) => [id, (lastAt.get(id) ?? 0) + REST_HOURS * 3600000]));
+}
+
+export function restingPieces(trials = [], now = Date.now()) {
+  return new Set([...restEnds(trials)].filter(([, until]) => until > now).map(([id]) => id));
+}
+
+export function restRotation(targets, trials = []) {
+  const ends = restEnds(trials);
+  return [...targets].sort((a, b) => (ends.get(a) ?? 0) - (ends.get(b) ?? 0))[0];
+}
+
+export const STALL_TRIALS = 20;
+
+export function stallCheck(project, now = Date.now()) {
+  const trials = project.improve?.trials ?? [];
+  const lastKept = trials.map((t) => t.outcome).lastIndexOf('kept');
+  const since = trials.slice(lastKept + 1);
+  const firstSeen = Math.min(...[since[0]?.at, project.improve?.startedAt].filter(Boolean).map(Date.parse), now);
+  const from = lastKept >= 0 ? Date.parse(trials[lastKept].at) : firstSeen;
+  const weakest = [...(project.acceptanceResult?.checks ?? [])].sort((a, b) => a.value - b.value)[0] ?? null;
+  const refusedRemovals = [...new Set(since.filter((t) => t.removedPieceId && FUTILE.has(t.outcome)).flatMap((t) => t.removedPieceId.split(', ')))];
+  return {
+    stalled: since.length >= STALL_TRIALS,
+    trialsSinceKept: since.length,
+    hoursSinceKept: Math.round(((now - from) / 3600000) * 10) / 10,
+    weakest: weakest ? { label: weakest.label, value: weakest.value } : null,
+    refusedRemovals,
+  };
+}
+
+export function stallMessage(stall) {
+  return `The self-improving loop is stalled: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h without a kept change${stall.weakest ? `; the weakest expected-result check is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%` : ''}. It now steers every proposal toward new evidence for that check and refuses repeats${stall.refusedRemovals.length ? ` (removals already refused: ${stall.refusedRemovals.join(', ')})` : ''}.`;
+}
+
+export const REPEAT_SIMILARITY = 0.85;
+
+function changeWords(text) {
+  return new Set(String(text ?? '').toLowerCase().normalize('NFD').replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter((w) => w.length > 2 && !/^[a-z]\d[\d.]*$/.test(w)));
+}
+
+export function similarChange(a, b) {
+  const x = changeWords(a);
+  const y = changeWords(b);
+  if (!x.size || !y.size) return 0;
+  const shared = [...x].filter((w) => y.has(w)).length;
+  return shared / (x.size + y.size - shared);
+}
+
+export function repeatOf(trials = [], { nodeId, change, removedPieceId }) {
+  return trials.find((t) => t.nodeId === nodeId && FUTILE.has(t.outcome) && t.outcome !== 'repeat' && ((removedPieceId && t.removedPieceId === removedPieceId) || similarChange(t.change, change) >= REPEAT_SIMILARITY)) ?? null;
 }
 
 function itemKeys(node) {
@@ -325,11 +375,16 @@ export class ProjectImprover {
 
   async record(id, patch, trial) {
     const project = await this.engine.load(id);
+    const wasStalled = Boolean(project.improve?.stall?.stalled);
     const improve = { trials: [], ...(project.improve ?? {}), ...patch };
     if (trial) trial = { ...trial, scoreDelta: round(trial.score - trial.before) };
     if (trial) improve.trials = [...improve.trials, trial].slice(-MAX_TRIALS_KEPT);
     project.improve = improve;
     if ('active' in patch) appendAppMessage(project, loopSummary(improve, !patch.active));
+    if (patch.stall?.stalled && !wasStalled) {
+      appendAppMessage(project, stallMessage(patch.stall));
+      this.engine.emit(project, 'improve-state', stallMessage(patch.stall));
+    }
     if (trial?.outcome === 'kept') appendAppMessage(project, `Kept a change on ${trial.nodeId}: ${trial.change}. Score ${trial.before} → ${trial.score}.`);
     if ('active' in patch) this.engine.emit(project, 'improve-state', patch.active ? `self-improving loop started for ${improve.hours} h` : `self-improving loop ended: ${patch.stopReason ?? patch.error ?? 'stopped'} · baseline ${improve.baseline} → best ${improve.best}`);
     if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}`, { nodeId: trial.nodeId });
@@ -360,7 +415,10 @@ export class ProjectImprover {
       const improved = await this.whenModelsAnswer(id, state, () => this.pass(id, state));
       await this.saveCheckpoint(id, state);
       quiet = improved ? 0 : quiet + 1;
-      await state.lock.run(async () => this.record(id, { passes: ((await this.engine.load(id)).improve?.passes ?? 0) + 1, quietPasses: quiet }));
+      await state.lock.run(async () => {
+        const current = await this.engine.load(id);
+        await this.record(id, { passes: (current.improve?.passes ?? 0) + 1, quietPasses: quiet, stall: stallCheck(current, this.now()) });
+      });
     }
     state.spawn = null;
     this.engine.leave(id);
@@ -400,7 +458,7 @@ export class ProjectImprover {
         const current = await this.engine.load(id);
         const targets = improvementTargets(current, state.scope ?? [], state.exclude ?? []).filter((t) => !tried.has(t) && !claimed.has(t));
         const resting = restingPieces(current.improve?.trials, this.now());
-        const nodeId = targets.find((t) => !resting.has(t)) ?? (tried.size ? undefined : targets[0]);
+        const nodeId = targets.find((t) => !resting.has(t)) ?? (tried.size ? undefined : restRotation(targets, current.improve?.trials));
         if (!nodeId) return;
         tried.add(nodeId);
         claimed.add(nodeId);
@@ -433,7 +491,7 @@ export class ProjectImprover {
   async propose(project, nodeId, best) {
     const node = nodeId === ROOT_ID ? { id: ROOT_ID } : project.nodes.find((n) => n.id === nodeId);
     const trials = (project.improve?.trials ?? []).filter((t) => t.nodeId === nodeId);
-    const reply = await this.engine.router.complete({ purpose: 'improve', tier: 'deep', messages: withGuidance(variantPrompt({ project, node, score: best, trials }), project.guidance) });
+    const reply = await this.engine.router.complete({ purpose: 'improve', tier: 'deep', messages: withGuidance(variantPrompt({ project, node, score: best, trials, stall: stallCheck(project, this.now()) }), project.guidance) });
     return reply.data ?? {};
   }
 
@@ -449,6 +507,11 @@ export class ProjectImprover {
       const touched = applyVariant(project, nodeId, variant);
       const removed = touched.filter((t) => !project.nodes.some((n) => n.id === t));
       if (removed.length) base.removedPieceId = removed.join(', ');
+      const earlier = repeatOf(snapshot.improve?.trials, { nodeId, change, removedPieceId: base.removedPieceId });
+      if (earlier) {
+        await note({ ...base, change, outcome: 'repeat', score: state.best.score, detail: `same change as the ${earlier.outcome} trial at ${earlier.at}; not re-researched` });
+        return { kept: false };
+      }
       if (!touched.length) {
         await note({ ...base, change, outcome: 'no-change', score: state.best.score });
         return { kept: false };

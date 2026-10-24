@@ -404,3 +404,14 @@ Asked: every claim backed by a verified quote, answers grounded in claims, reaso
 - Gap fixed: an answer with no claims skipped the attribution check and could be graded supported; it now fails attribution ("the answer has no claims behind it").
 - Merge test: `tests/server.test.ts` "one more lane" failed 1 of 7 full runs. Cause in `ResearchEngine.run`: a finished run cleared its running flag, then awaited the handoff, then in `finally` removed all teammates and cleared the running flag again, wiping a teammate (or a new run's flag) that arrived in between. The flag and the lanes are now released together, once.
 - Open: the live app (started 07:29Z, PR #4) runs without PR #5 until it is merged and the service restarts; search quality on listing pieces (irrelevant sources) is the main reason pieces stay weak.
+
+## Session 2026-10-24 · why the self-improving loop made no progress
+
+Asked: why no progress in self improvement; remove the cause and similar probable causes; research must not get stuck, run checks in between to prevent it; push, merge.
+
+- Live glamping research, 2026-10-24 13:05Z–18:37Z (the 200 trials kept on file): 0 kept, score fixed at 0.28, expected result 10% (8 listings of 50). 140 of 200 trials were on Q; "remove D4" was proposed 72 times and refused every time; median 62 s per trial.
+- Cause 1: when every piece in focus rests (3 futile trials, 6 h), a pass fell back to the first target, which is always Q. All 21 targets were resting, so Q ran every pass. Now the pass takes the piece whose rest ends first (`restRotation`), so pieces take turns.
+- Cause 2: the model repeats changes despite the "already tried" list. Code now refuses a removal of the same piece or a change with ≥ 0.85 word overlap on the same piece that already failed (`repeat`, counted as futile), before any research or re-roll. Replayed on the 200 trials: 110 would have been refused; the weakest matches are true repeats ("Vietnamese" vs "Turkish" plots at 0.80 is not refused).
+- Cause 3: the Q proposal prompt said "First remove a top-level piece…", and removals almost never pass the removal gate. It now asks for a removal only for a duplicate and lists removals already refused.
+- Interim check: after every pass the loop records `improve.stall` (trials and hours since the last kept change, the weakest expected-result check, refused removals). From 20 trials without a kept change it posts once to the research chat and log, and every proposal is told to bring new evidence for the weakest check (direct pages, local-language queries, new source types or regions). On the live research: stalled, 200 trials in 11.2 h, weakest "At least 50 valid items" at 10%, refused removals D4, D5, D6, D18, D1.
+- Open: whether steering raises the listing count is not yet measured; check `improve.stall` and kept trials after a few hours of the restarted loop.

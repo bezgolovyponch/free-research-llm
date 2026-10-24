@@ -244,11 +244,13 @@ function specsText(specs = []) {
 
 const SPEC_RULE = `"spec": machine checks taken ONLY from the DESIRED OUTPUT: {"mustMention":[only words the DESIRED OUTPUT explicitly demands (\"must mention X\", quoted words); topic words are not must-mentions],"needsNumber":true|false,"valueRange":[min,max] or null,"unit":"","itemCount":number of linked items wanted or null,"minGrade":"supported"|"verified"}. Code stores it as a regression test for this piece and re-checks it after every run and every loop change.`;
 
-export function variantPrompt({ project, node, score, trials }) {
+export function variantPrompt({ project, node, score, trials, stall = null }) {
   const isRoot = node.id === 'Q';
   const drivers = project.nodes.filter((n) => n.parentId === 'Q').map((n) => `${n.id} [${n.status}] ${n.question}`).join('\n');
   const sources = (node.sources ?? []).filter((s) => s.url).slice(0, 8).map((s) => `${s.id} ${s.title} <${s.url}> (${(s.links ?? []).length} links)`).join('\n') || 'none';
   const tried = trials.slice(-6).map((t) => `- ${t.change} -> ${t.outcome} (${t.score})`).join('\n') || 'none';
+  const refused = stall?.refusedRemovals?.length ? `\nREMOVALS ALREADY TESTED AND REFUSED (never propose them again): ${stall.refusedRemovals.join(', ')}` : '';
+  const stalled = stall?.stalled ? `\nTHE LOOP IS STALLED: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h kept nothing.${stall.weakest ? ` The weakest expected-result check is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%.` : ''} Removing or re-wording pieces has not raised the score. Propose a change that brings NEW evidence for that check: exact public pages to read (sourceUrls), local-language queries, a source type not used yet, or a region not covered yet.` : '';
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -262,7 +264,7 @@ CURRENT SCORE: ${score.score} (share of verified/supported nodes${score.acceptan
 EXPECTED-RESULT CHECKS:
 ${acceptanceBlock(project.acceptanceResult)}
 
-${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change. First remove ("remove") a top-level piece that duplicates another or asks for the same items again; add ("add") only a piece for a missing criterion or a missing region, never another piece that finds the same items. At most 7 top-level pieces (now ${project.nodes.filter((n) => n.parentId === 'Q').length}); a change that adds duplicates or restates the question is refused by code.` : `PIECE ${node.id} [${node.status}]: ${node.question}
+${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change. Remove ("remove") a top-level piece only if it duplicates another or asks for the same items again; add ("add") only a piece for a missing criterion or a missing region, never another piece that finds the same items. At most 7 top-level pieces (now ${project.nodes.filter((n) => n.parentId === 'Q').length}); a change that adds duplicates or restates the question is refused by code.` : `PIECE ${node.id} [${node.status}]: ${node.question}
 method: ${node.method} · metric: ${node.metric} ${node.unit} · queries: ${node.searchQueries.join(' | ')} · direct pages: ${(node.sourceUrls ?? []).join(' ') || 'none'}
 instructions: ${node.instructions || 'none'}
 answer: ${node.finding?.answer ?? 'none'}
@@ -274,8 +276,8 @@ ${sources}
 
 Propose ONE change to this piece: a sharper question, better search queries (local language helps), exact public pages to read directly (sourceUrls), a different method, extra instructions, or a split into 2-3 smaller pieces ("split").`}
 
-ALREADY TRIED (do not repeat):
-${tried}
+ALREADY TRIED (do not repeat; code refuses a repeat without testing it):
+${tried}${refused}${stalled}
 
 Reply with only the fields you change. JSON shape:
 {"change":"one sentence: what and why","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup","instructions":"","split":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"add":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"remove":[""]}`,

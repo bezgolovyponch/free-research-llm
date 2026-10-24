@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { ProjectImprover, REST_AFTER_FUTILE, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, projectScore, restingPieces, scopeScore } from '../../src/research/improve.mjs';
+import { ProjectImprover, REPEAT_SIMILARITY, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage } from '../../src/research/improve.mjs';
 import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -85,7 +85,7 @@ describe('ProjectImprover', () => {
     expect(saved.improve.stopReason).toBe('time limit reached');
     expect(saved.improve.baseline).toBeGreaterThan(0);
     expect(saved.improve.trials.length).toBeGreaterThan(0);
-    expect(new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome))).toEqual(new Set(['no-change', 'no-gain']));
+    expect(new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome))).toEqual(new Set(['no-change', 'no-gain', 'repeat']));
     expect(saved.improve.best).toBe(saved.improve.baseline);
     expect(saved.log.some((l: { type: string }) => l.type === 'improve-state')).toBe(true);
     expect(checkpoints.length).toBeGreaterThan(1);
@@ -186,7 +186,7 @@ describe('ProjectImprover in parallel lanes', () => {
     expect(saved.improve.active).toBe(false);
     expect(saved.nodes.length).toBe(nodeCount);
     const outcomes = new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome));
-    for (const o of outcomes) expect(['kept', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'conflict']).toContain(o);
+    for (const o of outcomes) expect(['kept', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'repeat', 'conflict']).toContain(o);
     expect(saved.improve.best).toBeGreaterThanOrEqual(saved.improve.baseline);
     expect(engine.lanesFor(project.id)).toBe(2);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
@@ -347,5 +347,63 @@ describe('tree gate in the loop', () => {
     expect(applyVariant(p, 'Q', { add: [{ title: 'Land prices', question: 'Average land price per m² in Spain coastal zones 2026?' }] })).toEqual([]);
     expect(applyVariant(p, 'Q', { add: [{ title: 'D3: Permits', question: 'Which permits does a glamping site need in Spain?' }] })).toEqual(['D3']);
     expect(p.nodes.find((n) => n.id === 'D3')!.title).toBe('Permits');
+  });
+});
+
+describe('a loop that cannot get stuck', () => {
+  const t0 = Date.parse('2026-10-24T10:00:00Z');
+  const at = (min: number) => new Date(t0 + min * 60000).toISOString();
+
+  it('rotates to the piece whose rest ends first instead of always the question', () => {
+    const trials = ['D2', 'D2', 'D2', 'Q', 'Q', 'Q', 'D1.1', 'D1.1', 'D1.1'].map((nodeId, i) => ({ nodeId, outcome: 'reverted-whole', at: at(i) }));
+    expect(restRotation(['Q', 'D2', 'D1.1'], trials)).toBe('D2');
+    expect(restRotation(['Q', 'D2', 'D1.1'], [...trials, { nodeId: 'D2', outcome: 'reverted-whole', at: at(20) }])).toBe('Q');
+  });
+
+  it('treats the same removal or a near-identical change on the same piece as a repeat, but not a new region', () => {
+    const trials = [
+      { nodeId: 'Q', removedPieceId: 'D4', change: 'Remove duplicate zoning node D4', outcome: 'reverted-whole', at: at(0) },
+      { nodeId: 'D1.1', change: 'Split the task into two focused sub-tasks: one for Portuguese coastal plots under 20 000 EUR and another for Spain', outcome: 'reverted-whole', at: at(1) },
+      { nodeId: 'D1.2', change: 'Add a dedicated node to search for Vietnamese coastal plots under 20,000 EUR', outcome: 'reverted-whole', at: at(2) },
+      { nodeId: 'D3', change: 'Use local-language queries for Turkish parcels', outcome: 'kept', at: at(3) },
+    ];
+    expect(repeatOf(trials, { nodeId: 'Q', removedPieceId: 'D4', change: 'Merge D4 into D18 and drop D4' })).toMatchObject({ at: at(0) });
+    expect(repeatOf(trials, { nodeId: 'D1.1', change: 'Split the task into two focused sub‑tasks: one for Portuguese coastal plots under 20 000 EUR and another for Spain.' })).toMatchObject({ at: at(1) });
+    expect(repeatOf(trials, { nodeId: 'D1.2', change: 'Add a dedicated node to search for Turkish coastal plots under 20,000 EUR suitable for glamping' })).toBeNull();
+    expect(repeatOf(trials, { nodeId: 'D3', change: 'Use local-language queries for Turkish parcels' })).toBeNull();
+    expect(similarChange('Add node D7 to search coastal plots', 'Add node D6 to search coastal plots')).toBe(1);
+    expect(REPEAT_SIMILARITY).toBe(0.85);
+  });
+
+  it('reports a stall after 20 trials without a kept change, with the weakest check and the refused removals', () => {
+    const futile = Array.from({ length: STALL_TRIALS }, (_, i) => ({ nodeId: 'Q', removedPieceId: i % 2 ? 'D4' : 'D1, D18', change: `try ${i}`, outcome: 'reverted-whole', at: at(30 + i) }));
+    const project = { improve: { startedAt: at(0), trials: [{ nodeId: 'D2', outcome: 'kept', change: 'k', at: at(10) }, ...futile] }, acceptanceResult: { checks: [{ label: 'Value in range', value: 0.6 }, { label: 'At least 50 valid items', value: 0.1 }] } };
+    const stall = stallCheck(project, t0 + 130 * 60000);
+    expect(stall).toEqual({ stalled: true, trialsSinceKept: 20, hoursSinceKept: 2, weakest: { label: 'At least 50 valid items', value: 0.1 }, refusedRemovals: ['D1', 'D18', 'D4'] });
+    expect(stallMessage(stall)).toMatch(/stalled: 20 trials in 2 h .*"At least 50 valid items" at 10%.*D1, D18, D4/);
+    expect(stallCheck({ ...project, improve: { ...project.improve, trials: futile.slice(1) } }, t0 + 130 * 60000)).toMatchObject({ stalled: false, trialsSinceKept: 19, hoursSinceKept: 2.2 });
+  });
+
+  it('posts the stall to the research chat once, when it starts', async () => {
+    const saved: { improve?: { stall?: { stalled: boolean } }; chats?: unknown } = {};
+    const engine = { load: async () => structuredClone(saved), store: { save: async (p: object) => Object.assign(saved, p) }, emit: () => {} };
+    const improver = new ProjectImprover({ engine: engine as never });
+    const stall = { stalled: true, trialsSinceKept: 20, hoursSinceKept: 1, weakest: null, refusedRemovals: [] };
+    await improver.record('p', { stall });
+    await improver.record('p', { stall });
+    expect(JSON.stringify(saved.chats).match(/loop is stalled/g)).toHaveLength(1);
+  });
+
+  it('refuses a repeated change without re-researching or re-rolling the research', async () => {
+    const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [{ nodeId: 'Q', removedPieceId: 'D2', change: 'Remove D2', outcome: 'reverted-whole', at: at(0) }] } };
+    let runs = 0;
+    let saved = structuredClone(project);
+    const engine = { load: async () => structuredClone(saved), store: { save: async (p: typeof project) => { saved = p; } }, emit: () => {}, run: async () => { runs += 1; }, researchLeaf: async () => { runs += 1; }, resetWithAncestors: () => {} };
+    const improver = new ProjectImprover({ engine: engine as never });
+    improver.propose = async () => ({ change: 'Drop the costs driver D2 again', remove: ['D2'] });
+    const state = { best: { score: 0.3 }, deadline: Date.now() + 60000, lock: { run: (f: () => unknown) => f() } };
+    expect(await improver.trial('p', 'Q', state)).toEqual({ kept: false });
+    expect(runs).toBe(0);
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'repeat', removedPieceId: 'D2' });
   });
 });
