@@ -1,0 +1,10 @@
+#!/bin/sh
+while read local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ] && [ "$FRL_PUSH_MAIN" != "1" ]; then
+    echo "push refused: main changes only through a pull request whose CI passed."
+    echo "  git switch -c fix/<name> && git push -u origin fix/<name> && gh pr create --fill"
+    echo "  (to override once: FRL_PUSH_MAIN=1 git push)"
+    exit 1
+  fi
+done
+exit 0

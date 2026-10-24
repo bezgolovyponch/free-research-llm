@@ -94,14 +94,15 @@ function isDeepLink(url) {
   }
 }
 
-const LISTING_ID = /(?:^|[/_.=&-])(?:\d{5,}|ID[A-Za-z0-9]{4,}|[A-Za-z]{0,6}\d[A-Za-z0-9]{4,})(?=[/_.?&#-]|$)/;
-const NOT_A_LISTING = /\/(?:blog|news|noticias|search|busca|buscar|category|categoria|tag|guides?)(?:\/|$|-)/i;
+const PATH_ID = /(?:^|[/_.-])(?:\d{6,}|ID[A-Za-z0-9]{4,}|[A-Za-z]{0,6}\d[A-Za-z0-9]{5,})(?=[/_.?&#-]|$)|(?:property|listing|ad|item|ref)?id[-_=]*\d{3,}|-\d{5,}(?:\.html?)?\/?$/i;
+const QUERY_ID = /(?:^|[?&])(?:id|ref|ad|adid|listing|listingid|propertyid|itemid)=[A-Za-z0-9-]{3,}/i;
+const NOT_A_LISTING = /\/(?:blog|news|noticias|search|busca|buscar|cerca|category|categoria|tag|guides?|geo|list|s)(?:\/|$|-)/i;
+const SEARCH_QUERY = /(?:^|[?&])(?:max_?price|min_?price|price_?(?:max|min|from|to)|maximum-price|minimum-price|ordem|order|sort|ordenado-por|page|q)=/i;
 
 export function looksLikeListing(url) {
   try {
     const u = new URL(url);
-    const where = `${u.pathname}${u.search}`;
-    return LISTING_ID.test(where) && !NOT_A_LISTING.test(u.pathname);
+    return (PATH_ID.test(u.pathname) || QUERY_ID.test(u.search)) && !NOT_A_LISTING.test(u.pathname) && !SEARCH_QUERY.test(u.search);
   } catch {
     return false;
   }

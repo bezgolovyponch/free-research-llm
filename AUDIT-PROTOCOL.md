@@ -2,7 +2,7 @@
 
 App changes start in the App chat as tickets (`data/changes/C<n>.md`, see [CONCEPT.md](CONCEPT.md#changing-the-app-from-the-app-chat)); the ticket's request and desired output are the S2 checklist. Anyone who changes this app or reports on it (a person, Claude Code, any agent) runs this protocol twice: **when a task starts** and **before the result is reported**. Nothing is reported as done until every check has a recorded answer.
 
-It adapts three existing protocols instead of inventing a new one:
+It adapts three existing protocols instead of inventing a new one (and the mikoshi rule that the proof is chosen per change: a unit test for a pure function, a witness on real data for anything that acts on real data):
 
 - **mikoshi-construct 0.43.0** (the construct used across this workspace): a pass is reported by the gate, never by the author; security is checked as its own dimension; every changed logic module ships with its test.
 - **Chain-of-Verification** (Dhuliawala et al., 2023, arXiv:2309.11495): draft, list the verification questions, answer them independently, then revise. The app's own reply audit is built on it ([CONCEPT.md](CONCEPT.md#the-reply-audit-every-chat-every-reply)).
@@ -18,6 +18,8 @@ It adapts three existing protocols instead of inventing a new one:
 | S4 | **Facts that need a source.** Any price, limit, free tier, command, package name or API behaviour the result will state | Look each up in official docs (or test it live) now, and note the source and date |
 | S5 | **Risk.** Does the task touch keys, the access token, remote access, the terminal, deletion, or anything that spends money? | If yes: write down the safe default and what needs the user's explicit consent |
 | S6 | **Adjacent gaps.** What in the same flow would still be broken after the obvious fix? | Fix gaps in the same flow in the same pass; list the rest |
+| S7 | **Witness on live data.** Does the change act on existing researches (repairs, re-grading, gates, scoring, item screening, routing on measured data)? | Before deploying, run it on a copy of the live research (`node scripts/dryrun.mjs <research id>`, or the equivalent read-only check) and read every change it reports. A wrong change found there is fixed before anything ships (2026-10-23: the candidates repair renamed "Market demand"; the speed check read a cached prompt as 0 tokens/s) |
+| S8 | **Measurements.** Any before/after comparison | Times in one zone (UTC, with `Z`); windows and counts stated; too few samples are labelled as such |
 
 ## Part 2 · Before reporting the result
 
@@ -25,6 +27,7 @@ It adapts three existing protocols instead of inventing a new one:
 |---|---|---|
 | O1 | **Every request covered.** Walk the S2 checklist | Every item is done, or its blocker is stated in plain words |
 | O2 | **Gate.** `npm run quality` | It prints `quality gate: PASSED`. Quote its summary lines; never write "tests pass" without them |
+| O2b | **CI before merge.** | The change is on a branch with a pull request, CI passes on Node 22 and 24, then it is merged; `main` is never pushed directly (the pre-push hook refuses it). New or changed tests pass 3 times in a row (`flakes` gate) |
 | O3 | **Tests for changed logic.** Every new or changed module in `src/` | It has `tests/<same path>.test.ts` that fails without the change |
 | O4 | **Real use.** The change works in the running app, not only in tests | Exercised through the HTTP API, the browser (e2e) or the terminal. Say which, and what was seen |
 | O5 | **Every link in the report.** | Opened, or copied from a page that was fetched. No invented URLs, no `example.com` |
