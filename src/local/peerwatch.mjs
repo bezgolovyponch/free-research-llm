@@ -10,7 +10,12 @@ export class PeerWatcher {
     this.forgetAfterMs = forgetAfterMs;
     this.peers = new Map();
     this.connected = new Map();
+    this.results = new Map();
     this.checking = false;
+  }
+
+  report(address) {
+    return this.results.get(String(address ?? '').replace(/^::ffff:/, '')) ?? null;
   }
 
   note(address) {
@@ -23,7 +28,11 @@ export class PeerWatcher {
 
   due() {
     const time = this.now();
-    for (const [host, peer] of this.peers) if (time - peer.seenAt > this.forgetAfterMs) this.peers.delete(host);
+    for (const [host, peer] of this.peers) {
+      if (time - peer.seenAt <= this.forgetAfterMs) continue;
+      this.peers.delete(host);
+      this.results.delete(host);
+    }
     return [...this.peers].filter(([, peer]) => time - peer.checkedAt >= this.checkEveryMs).map(([host]) => host);
   }
 
@@ -34,7 +43,9 @@ export class PeerWatcher {
     try {
       for (const host of this.due()) {
         this.peers.get(host).checkedAt = this.now();
-        for (const endpoint of await this.probe(host)) {
+        const endpoints = await this.probe(host);
+        this.results.set(host, { checkedAt: this.now(), endpoints: endpoints.map(({ id, label, url, ok, detail }) => ({ id, label, url, ok, detail })) });
+        for (const endpoint of endpoints) {
           if (!endpoint.ok || this.connected.get(endpoint.id) === endpoint.url) continue;
           this.connected.set(endpoint.id, endpoint.url);
           found.push(endpoint);

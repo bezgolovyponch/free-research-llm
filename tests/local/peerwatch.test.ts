@@ -31,4 +31,22 @@ describe('PeerWatcher', () => {
     expect(watcher.due()).toEqual([]);
     expect(watcher.peers.size).toBe(0);
   });
+
+  it('keeps the last probe of each device so its own page can say why it is not helping', async () => {
+    let now = 0;
+    const watcher = new PeerWatcher({
+      now: () => now,
+      checkEveryMs: 1000,
+      forgetAfterMs: 5000,
+      probe: async (host: string) => [{ id: 'llamacpp-lan', label: 'llama.cpp', url: `http://${host}:8090/v1`, ok: false, detail: 'no answer (PC off or asleep, server not started, or blocked by Windows Firewall)', models: [] }],
+      onFound: async () => {},
+    });
+    expect(watcher.report('192.168.5.26')).toBeNull();
+    watcher.note('::ffff:192.168.5.26');
+    await watcher.check();
+    expect(watcher.report('::ffff:192.168.5.26')).toEqual({ checkedAt: 0, endpoints: [{ id: 'llamacpp-lan', label: 'llama.cpp', url: 'http://192.168.5.26:8090/v1', ok: false, detail: 'no answer (PC off or asleep, server not started, or blocked by Windows Firewall)' }] });
+    now = 9000;
+    watcher.due();
+    expect(watcher.report('192.168.5.26')).toBeNull();
+  });
 });

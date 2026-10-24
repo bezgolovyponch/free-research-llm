@@ -19,6 +19,7 @@ import { probePeer } from './local/peer.mjs';
 import { measureSpeed, speedVerdict } from './local/speed.mjs';
 
 const SPEED_RECHECK_MS = 30 * 60 * 1000;
+export const PC_LANE = 'pc-gpu';
 const SLOW_RECHECK_MS = 10 * 60 * 1000;
 import { AppChat } from './appchat.mjs';
 import { HandoffWriter } from './research/handoff.mjs';
@@ -275,12 +276,30 @@ export class App {
     return back.map((p) => p.id);
   }
 
+  syncPcLanes() {
+    const serving = this.router.providers.some((p) => p.id === 'llamacpp-lan' && p.ready);
+    const working = new Set([...this.engine.running, ...this.improver.active.keys()]);
+    const changed = [];
+    for (const id of working) {
+      const has = this.engine.teamOf(id).helpers.includes(PC_LANE);
+      if (serving && !has) {
+        this.improver.join(id, PC_LANE);
+        changed.push(`${id} +1`);
+      } else if (!serving && has) {
+        this.engine.leaveOne(id, PC_LANE);
+        changed.push(`${id} -1`);
+      }
+    }
+    return changed;
+  }
+
   startPeerWatch(everyMs = 30000) {
     this.peerTimer = setInterval(() => void (async () => {
       try {
         await this.peers.check();
         await this.rediscoverLocal();
         await this.checkLocalSpeed();
+        this.syncPcLanes();
       } catch {
         return;
       }

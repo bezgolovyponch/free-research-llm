@@ -96,7 +96,10 @@ function deny(res, reason, { address = '', research = false } = {}) {
 
 export function createServer(app, gate = new AccessGate()) {
   const routes = [
-    ['GET', /^\/api\/status$/, async (req) => (req.access.share ? sharedStatus(app.status(), req.access.share) : app.status())],
+    ['GET', /^\/api\/status$/, async (req) => {
+      const status = req.access.share ? sharedStatus(app.status(), req.access.share) : app.status();
+      return gate.isLoopback(req) ? status : { ...status, thisDevice: deviceView(req) };
+    }],
     ['GET', /^\/api\/whoami$/, async (req) => ({ share: req.access.share ?? null, canShare: Boolean(gate.shares?.available) })],
     ['GET', /^\/api\/projects\/([\w-]+)\/share$/, async (req, [id]) => shareView(id)],
     ['POST', /^\/api\/projects\/([\w-]+)\/share$/, async (req, [id]) => {
@@ -311,6 +314,14 @@ export function createServer(app, gate = new AccessGate()) {
     ['PATCH', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)$/, async (req, [id, nodeId]) => app.engine.editNode(id, nodeId, await readJson(req))],
     ['DELETE', /^\/api\/projects\/([\w-]+)\/nodes\/([\w.-]+)$/, async (req, [id, nodeId]) => app.engine.removeNode(id, nodeId)],
   ];
+
+  function deviceView(req) {
+    const host = String(req.socket?.remoteAddress ?? '').replace(/^::ffff:/, '');
+    const report = app.peers?.report(host) ?? null;
+    const helping = Boolean(report?.endpoints.some((e) => e.ok));
+    const setup = req.access.share ? shareView(req.access.share).pcSetup : null;
+    return { host, checkedAt: report ? new Date(report.checkedAt).toISOString() : null, helping, servers: report?.endpoints ?? null, setup };
+  }
 
   function shareView(id) {
     const status = gate.shares?.status(id) ?? { enabled: false, since: null, token: null };
