@@ -406,6 +406,7 @@ export class ResearchEngine {
 
   async regroundAndRescore(id) {
     const project = await this.load(id);
+    const compacted = compactProject(project);
     const fixes = repairTree(project.nodes, project.question);
     if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
     const regrounded = this.reground(project);
@@ -414,7 +415,7 @@ export class ResearchEngine {
       await this.store.save(project);
       return this.run(id);
     }
-    if (!regrounded && !fixes.length) return project;
+    if (!regrounded && !fixes.length && !compacted) return project;
     if (regrounded && project.report) await this.checkAcceptance(project);
     return this.store.save(project);
   }

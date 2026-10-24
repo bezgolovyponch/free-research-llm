@@ -13,8 +13,14 @@ describe('local model speed gate', () => {
   });
 
   it('reads llama.cpp timings, and falls back to token counts over wall time for servers without them', async () => {
-    const llama = (async () => new Response(JSON.stringify({ choices: [{ message: { content: 'x' } }], timings: { prompt_per_second: 80, predicted_per_second: 15 } }))) as never;
+    const bodies: string[] = [];
+    const llama = (async (_u: string, init: { body: string }) => { bodies.push(init.body); return new Response(JSON.stringify({ choices: [{ message: { content: 'x' } }], timings: { prompt_n: 1480, prompt_per_second: 80, predicted_per_second: 15 } })); }) as never;
     expect(await measureSpeed('http://pc:8090/v1', { fetchImpl: llama })).toEqual({ prefill: 80, decode: 15 });
+    await measureSpeed('http://pc:8090/v1', { fetchImpl: llama });
+    expect(JSON.parse(bodies[0]).cache_prompt).toBe(false);
+    expect(JSON.parse(bodies[0]).messages[0].content).not.toBe(JSON.parse(bodies[1]).messages[0].content);
+    const cached = (async () => new Response(JSON.stringify({ choices: [{ message: { content: 'x' } }], timings: { prompt_n: 3, prompt_per_second: 0.4, predicted_per_second: 22 }, usage: { prompt_tokens: 1500, completion_tokens: 24 } }))) as never;
+    expect((await measureSpeed('http://mac:8090/v1', { fetchImpl: cached })).prefill).toBeGreaterThan(100);
     const ollama = (async () => new Response(JSON.stringify({ choices: [{ message: { content: 'x' } }], usage: { prompt_tokens: 1500, completion_tokens: 24 } }))) as never;
     const speed = await measureSpeed('http://pc:11434/v1/', { fetchImpl: ollama });
     expect(speed.prefill).toBeGreaterThan(1000);

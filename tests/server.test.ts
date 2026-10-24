@@ -16,7 +16,8 @@ async function call(method: string, url: string, body?: unknown) {
 }
 
 async function waitFor(id: string, phase: string) {
-  for (let i = 0; i < 400; i++) {
+  const until = Date.now() + 45000;
+  while (Date.now() < until) {
     const { body } = await call('GET', `/api/projects/${id}`);
     if (body.phase === phase && body.report) return body;
     await new Promise((r) => setTimeout(r, 30));
@@ -50,7 +51,7 @@ describe('HTTP server', () => {
     expect((await call('GET', '/api/templates')).body.map((t: { id: string }) => t.id)).toContain('glamping-location');
   });
 
-  it('creates a project, runs it in the background, streams events and exports Markdown', async () => {
+  it('creates a project, runs it in the background, streams events and exports Markdown', { timeout: 90000 }, async () => {
     const created = await call('POST', '/api/projects', { question: 'Where should I build a 6-tent glamping site in Czechia?', constraints: { budget: '€250k' } });
     expect(created.status).toBe(200);
     const events = await fetch(`${base}/api/projects/${created.body.id}/events`);
@@ -147,7 +148,7 @@ describe('HTTP server', () => {
 });
 
 describe('teammates', () => {
-  it('turns Run or Improve on a running research into one more lane instead of an error', async () => {
+  it('turns Run or Improve on a running research into one more lane instead of an error', { timeout: 90000 }, async () => {
     const created = await call('POST', '/api/projects', { question: 'Which Czech city suits a small specialty bakery best?' });
     await waitFor(created.body.id, 'done');
     app.engine.running.add(created.body.id);

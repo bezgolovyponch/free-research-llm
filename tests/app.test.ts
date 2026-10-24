@@ -35,7 +35,7 @@ describe('App composition', () => {
   });
 
   it('connects a model found on the other PC and routes to it', async () => {
-    const fetchImpl = fakeFetch([[/192\.168\.5\.26:8090\/v1\/models$/, () => jsonResponse({ data: [{ id: 'pc-model' }] })], [/192\.168\.5\.26:8090\/props$/, () => jsonResponse({ default_generation_settings: { n_ctx: 16384 } })], [/192\.168\.5\.26:8090\/v1\/chat\/completions$/, () => jsonResponse({ choices: [{ message: { content: 'x' } }], timings: { prompt_per_second: 400, predicted_per_second: 45 } })]]);
+    const fetchImpl = fakeFetch([[/192\.168\.5\.26:8090\/v1\/models$/, () => jsonResponse({ data: [{ id: 'pc-model' }] })], [/192\.168\.5\.26:8090\/props$/, () => jsonResponse({ default_generation_settings: { n_ctx: 16384 } })], [/192\.168\.5\.26:8090\/v1\/chat\/completions$/, () => jsonResponse({ choices: [{ message: { content: 'x' } }], timings: { prompt_n: 1500, prompt_per_second: 400, predicted_per_second: 45 } })]]);
     const app = new App({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', FRL_WIKIPEDIA: '0' }, fetchImpl, dataDir: '/tmp/frl-unused-peer' });
     await app.refreshProviders();
     expect(app.status().providers[0].state).not.toBe('ready');
@@ -68,7 +68,7 @@ describe('App composition', () => {
   });
 
   it('measures a local model and keeps a too-slow one out of research until it gets fast enough', async () => {
-    let speed = { prompt_per_second: 12, predicted_per_second: 2.1 };
+    let speed = { prompt_n: 1500, prompt_per_second: 12, predicted_per_second: 2.1 };
     const fetchImpl = (async (url: string) => {
       if (url.endsWith('/v1/models')) return jsonResponse({ data: [{ id: 'pc-model' }] });
       if (url.endsWith('/props')) return jsonResponse({ default_generation_settings: { n_ctx: 16384 }, total_slots: 1 });
@@ -83,7 +83,7 @@ describe('App composition', () => {
     expect(await app.rediscoverLocal()).toEqual([]);
     await app.refreshProviders();
     expect(app.status().providers[0].state).toBe('too-slow');
-    speed = { prompt_per_second: 300, predicted_per_second: 40 };
+    speed = { prompt_n: 1500, prompt_per_second: 300, predicted_per_second: 40 };
     const [fast] = await app.checkLocalSpeed({ force: true });
     expect(fast.usable).toBe(true);
     expect(app.status().providers[0].state).toBe('ready');
