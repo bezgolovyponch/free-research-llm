@@ -132,6 +132,8 @@ ${sourcesBlock(sources)}
 ${previousFailures?.length ? `\nA PREVIOUS ATTEMPT FAILED THESE CHECKS — fix the cause:\n- ${previousFailures.join('\n- ')}\n` : ''}
 RULES:
 - Answer only from EVIDENCE and established answers. For legality or licensing queries, require official statutes or terms of service as sources. If evidence is missing, give your best estimate, set "assumption": true on that claim and say what data would settle it in "gaps".
+- Work like a researcher: first list ATOMIC claims (one fact each), each with "quote": the exact words, 5–30 of them, copied character for character from the cited source that state that fact (a number in the claim must appear in its quote). Code checks every quote against the source text; a claim whose quote is not found counts as unsupported.
+- Then write "reasoning": one or two lines that derive the answer from the claims (e.g. "C1 and C2 give 3 plots under 20,000 EUR; C3 rules out one inland, so 2 remain"). The "answer" may state only numbers that appear in your claims or calculation.
 - Every claim containing a number must list sourceIds from the EVIDENCE ids above, or be marked assumption.
 - "sourceIds" may only contain ids shown above (${sources.map((s) => s.id).join(', ') || 'none'}). Never invent ids or URLs.
 - If the method is calculation/comparison, provide "calculation": a formula using variable names (letters, digits, _), + - * / ^ ( ) and min/max/abs/round, the numeric value of each input, and the result. The result will be recomputed by machine.
@@ -141,7 +143,7 @@ RULES:
 - If the sub-question asks for concrete items (listings, offers, products, pages, links), return them in "items". An item "url" must be copied exactly from a LINKS list or a source URL above; any other URL is rejected by machine.
 
 JSON shape:
-{"answer":"one or two sentences that directly answer the sub-question, with the key number","claims":[{"text":"","value":null,"unit":"","sourceIds":["S1"],"assumption":false}],"calculation":{"formula":"","inputs":{"name":{"value":0,"unit":"","sourceId":"S1"}},"result":0,"unit":""},"items":[{"title":"","url":"","value":null,"unit":"","sourceId":"S1"}],"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}
+{"answer":"one or two sentences that directly answer the sub-question, with the key number","claims":[{"text":"","value":null,"unit":"","sourceIds":["S1"],"quote":"exact words from S1","assumption":false}],"reasoning":"C1 + C2 → answer","calculation":{"formula":"","inputs":{"name":{"value":0,"unit":"","sourceId":"S1"}},"result":0,"unit":""},"items":[{"title":"","url":"","value":null,"unit":"","sourceId":"S1"}],"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}
 Omit "calculation" if no arithmetic is involved; omit "items" if no concrete items are asked for.`,
     },
   ];
@@ -179,8 +181,8 @@ DRIVER ${node.id}: ${node.question}
 SUB-FINDINGS:
 ${children.map((c) => `${c.id} [${c.status}] ${c.question}\n  -> ${c.finding?.answer ?? 'no answer'}`).join('\n')}
 
-Combine the sub-findings into the driver's answer. Do not add new facts. Cite sub-finding ids in the text. If a sub-finding is weak or unsupported, say how that limits the conclusion.
-JSON shape: {"answer":"","claims":[{"text":"","sourceIds":[],"assumption":false}],"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}`,
+Combine the sub-findings into the driver's answer. Do not add new facts. Each claim cites the sub-finding id it rests on in "sourceIds" and copies the exact words from that sub-finding's answer in "quote"; code checks the quote. Then give "reasoning": how the claims lead to the driver's answer. If a sub-finding is weak or unsupported, say how that limits the conclusion.
+JSON shape: {"answer":"","claims":[{"text":"","sourceIds":["D1.1"],"quote":"exact words from D1.1's answer","assumption":false}],"reasoning":"","confidence":"low|medium|high","assumptions":[""],"gaps":[""]}`,
     },
   ];
 }

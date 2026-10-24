@@ -37,22 +37,36 @@ function sourceIds(prompt) {
   return [...new Set([...evidence.matchAll(/^\[([A-Z]\d+(?:\.\d+)?)\]/gm)].map((m) => m[1]))];
 }
 
+function evidenceLines(prompt) {
+  const evidence = between(prompt, 'EVIDENCE', 'RULES:');
+  return [...evidence.matchAll(/^\[([A-Z]\d+(?:\.\d+)?)\][^\n]*\n([^\n]+)/gm)].map((m) => ({ id: m[1], quote: m[2].trim().split(/\s+/).slice(0, 12).join(' ') })).filter((e) => e.quote.split(' ').length >= 3);
+}
+
 function research(prompt) {
-  const ids = sourceIds(prompt);
   const node = between(prompt, 'SUB-QUESTION ', ':');
   const isCalc = /method: calculation/.test(prompt);
-  const cite = ids.slice(0, 2);
+  const quoted = evidenceLines(prompt).slice(0, 2);
+  const claims = quoted.length
+    ? quoted.map((e) => ({ text: `The source states: ${e.quote}`, value: null, unit: '', sourceIds: [e.id], quote: e.quote, assumption: false }))
+    : [{ text: 'No evidence was retrieved for this piece', value: null, unit: '', sourceIds: [], quote: '', assumption: true }];
   return {
-    answer: `DEMO answer for ${node}: baseline 1200 EUR, margin 300 EUR.`,
-    claims: [
-      { text: 'Baseline value is 1200 EUR', value: 1200, unit: 'EUR', sourceIds: cite, assumption: cite.length === 0 },
-      { text: 'Costs are 900 EUR', value: 900, unit: 'EUR', sourceIds: cite, assumption: cite.length === 0 },
-    ],
+    answer: isCalc ? `DEMO answer for ${node}: margin 300 EUR from 1200 minus 900.` : `DEMO answer for ${node}: the cited sources state the baseline (see claims).`,
+    claims,
+    reasoning: 'C1 and C2 give the baseline; the calculation turns it into the margin.',
     ...(isCalc ? { calculation: { formula: 'price - cost', inputs: { price: { value: 1200, unit: 'EUR' }, cost: { value: 900, unit: 'EUR' } }, result: 300, unit: 'EUR' } } : {}),
-    confidence: cite.length >= 2 ? 'medium' : 'low',
+    confidence: quoted.length >= 2 ? 'medium' : 'low',
     assumptions: ['DEMO data'],
     gaps: ['connect a real model'],
   };
+}
+
+function rollup(prompt) {
+  const children = [...between(prompt, 'SUB-FINDINGS:', 'Combine').matchAll(/^(\S+) \[[^\]]*\][^\n]*\n\s*-> ([^\n]+)/gm)].map((m) => ({ id: m[1], answer: m[2].trim() }));
+  const claims = children.slice(0, 3).map((c) => {
+    const quote = c.answer.split(/\s+/).slice(0, 8).join(' ');
+    return { text: `${c.id} says: ${quote}`, sourceIds: [c.id], quote, assumption: false };
+  });
+  return { answer: `DEMO roll-up of ${children.map((c) => c.id).join(', ')}: positive margin.`, claims, reasoning: 'Every sub-finding points the same way.', confidence: 'medium', assumptions: [], gaps: [] };
 }
 
 const RESPONDERS = {
@@ -63,10 +77,7 @@ const RESPONDERS = {
   },
   [TASK_MARKERS.research]: research,
   [TASK_MARKERS.critique]: () => ({ agree: true, severity: 'none', issues: [], betterAnswer: '' }),
-  [TASK_MARKERS.rollup]: (prompt) => {
-    const ids = [...between(prompt, 'SUB-FINDINGS:', 'Combine').matchAll(/^(\S+) \[/gm)].map((m) => m[1]);
-    return { answer: `DEMO roll-up of ${ids.join(', ')}: positive margin of 300 EUR.`, claims: [{ text: 'Margin 300 EUR per unit', sourceIds: ids, assumption: false }], confidence: 'medium', assumptions: [], gaps: [] };
-  },
+  [TASK_MARKERS.rollup]: rollup,
   [TASK_MARKERS.chat]: (prompt) => {
     const wantsRerun = /USER(?: REQUEST[^:]*)?: .*(re-?research|again)/i.test(prompt);
     const node = between(prompt, 'NODE ', ' [');

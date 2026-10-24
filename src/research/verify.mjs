@@ -1,4 +1,5 @@
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
+import { attributeClaims, attributionSummary, ungroundedNumbers } from './attribution.mjs';
 import { evaluate, sameNumber, toNumber } from './calc.mjs';
 
 export const GRADES = ['verified', 'supported', 'weak', 'unsupported'];
@@ -79,6 +80,19 @@ function checkDelivers(finding, node) {
   return check('delivers', 'Delivers the listings it asks for', count > 0, count ? `${count} listing(s) with links` : NO_ITEMS_DETAIL);
 }
 
+function checkAttribution(finding) {
+  if (!(finding?.claims ?? []).length) return null;
+  const s = attributionSummary(finding.claims);
+  const missing = finding.claims.filter((c) => c.attributed === false).map((c) => `"${String(c.text).slice(0, 70)}"${c.attributionNote ? ` (${c.attributionNote})` : ''}`);
+  return check('attribution', 'Each claim is backed by a verbatim quote found in its source', s.passed, `${s.attributed} of ${s.factual} claim(s) carry a quote found in the cited source${missing.length ? `; not backed: ${missing.join('; ').slice(0, 240)}` : ''}`);
+}
+
+function checkGrounded(finding, node) {
+  if (!finding?.answer) return null;
+  const extra = ungroundedNumbers(finding, node ?? {});
+  return check('grounded', 'The answer states only numbers its claims support', extra.length === 0, extra.length ? `answer states ${extra.join(', ')} that no claim or calculation supports` : 'every number in the answer comes from a claim');
+}
+
 function checkCalculation(finding) {
   const calc = finding?.calculation;
   if (!calc || !calc.formula) return null;
@@ -132,12 +146,15 @@ function checkCritique(critique) {
   return check('critique', 'Independent reviewer found no major flaw', !major, critique.issues?.length ? critique.issues.join(' | ').slice(0, 300) : 'reviewer agrees');
 }
 
-export function verifyFinding({ finding, sources = [], critique = null, node = null }) {
+export function verifyFinding({ finding: raw, sources = [], critique = null, node = null }) {
+  const finding = raw?.claims ? Object.assign(raw, { claims: attributeClaims(raw.claims, sources) }) : raw;
   const sourceIds = new Set(sources.map((s) => s.id));
   const checks = [
     checkAnswer(finding),
     checkConcrete(finding, node),
     checkDelivers(finding, node),
+    checkAttribution(finding),
+    checkGrounded(finding, node),
     checkCitations(finding, sourceIds),
     checkNumbersSourced(finding),
     checkCalculation(finding),

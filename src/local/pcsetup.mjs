@@ -1,6 +1,7 @@
 export const PC_LLAMA_TAG = 'b11739';
 export const PC_LLAMA_PORT = 8090;
 export const PC_BIG_MODEL_MIN_MB = 11000;
+export const PC_TWO_SLOTS_MIN_MB = 16000;
 
 export function pcSetupScript({ tag = PC_LLAMA_TAG, port = PC_LLAMA_PORT } = {}) {
   return [
@@ -25,10 +26,12 @@ export function pcSetupScript({ tag = PC_LLAMA_TAG, port = PC_LLAMA_PORT } = {})
     "Write-Host \"Devices llama.cpp can use:`n$devices\"",
     "if ($devices -notmatch 'Vulkan|CUDA|SYCL|ROCm|HIP') { Write-Host 'WARNING: llama.cpp found no usable graphics card on this PC, so the model runs on the CPU, far too slowly for research. The research app measures its speed and will not send it research calls. Update the graphics driver (NVIDIA, AMD or Intel) and run this command again.' -ForegroundColor Yellow }",
     `if ($vramMB -ge ${PC_BIG_MODEL_MIN_MB}) { $model = 'ggml-org/Qwen3-14B-GGUF:Q4_K_M' } else { $model = 'ggml-org/Qwen3-4B-GGUF:Q4_K_M' }`,
+    `if ($vramMB -ge ${PC_TWO_SLOTS_MIN_MB}) { $slots = 2 } else { $slots = 1 }`,
+    '$ctx = 16384 * $slots',
     'Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force',
     'Write-Host "Graphics: $gpus ($vramMB MB reported). Model: $model. The first start downloads it once."',
     "Write-Host 'If Windows Firewall asks, allow llama-server on private networks.'",
-    `Start-Process -FilePath $server.FullName -ArgumentList @('-hf', $model, '-ngl', '99', '-c', '16384', '-np', '1', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '0.0.0.0', '--port', '${port}', '-a', 'pc-model') -WorkingDirectory $server.DirectoryName`,
+    `Start-Process -FilePath $server.FullName -ArgumentList @('-hf', $model, '-ngl', '99', '-c', "$ctx", '-np', "$slots", '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '0.0.0.0', '--port', '${port}', '-a', 'pc-model') -WorkingDirectory $server.DirectoryName`,
     "Write-Host 'llama-server is starting in its own window. Keep that window open; the research app finds this PC within a minute.'",
     '',
   ].join('\r\n');

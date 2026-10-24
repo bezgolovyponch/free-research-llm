@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { needsEscalation, verifyFinding } from '../../src/research/verify.mjs';
 
 const sources = [
-  { id: 'S1', url: 'https://a.example/x', domain: 'a.example' },
-  { id: 'S2', url: 'https://b.example/y', domain: 'b.example' },
+  { id: 'S1', url: 'https://a.example/x', domain: 'a.example', text: 'In Germany the average price of this car is 18,000 EUR for a 2019 model.' },
+  { id: 'S2', url: 'https://b.example/y', domain: 'b.example', text: 'Dealers in Poland ask 21,000 EUR for the same car on average.' },
 ];
 
 const good = {
   answer: 'Net margin is 1,800 EUR per car.',
   claims: [
-    { text: 'DE price 18,000 EUR', sourceIds: ['S1'], assumption: false },
-    { text: 'PL price 21,000 EUR', sourceIds: ['S2'], assumption: false },
+    { text: 'DE price 18,000 EUR', sourceIds: ['S1'], quote: 'average price of this car is 18,000 EUR', assumption: false },
+    { text: 'PL price 21,000 EUR', sourceIds: ['S2'], quote: 'Dealers in Poland ask 21,000 EUR', assumption: false },
     { text: 'Transport 1,200 EUR', sourceIds: [], assumption: true },
   ],
   calculation: { formula: 'sell - buy - transport', inputs: { sell: { value: 21000 }, buy: 18000, transport: 1200 }, result: 1800 },
@@ -39,7 +39,7 @@ describe('verifyFinding', () => {
   it('downgrades uncited numbers and high confidence without independent sources to weak', () => {
     const v = verifyFinding({ finding: { answer: 'about 40%', claims: [{ text: 'occupancy 40%', sourceIds: [] }], confidence: 'high' }, sources });
     expect(v.grade).toBe('weak');
-    expect(v.checks.filter((c) => !c.passed).map((c) => c.id)).toEqual(['numbers-sourced', 'independent-sources']);
+    expect(v.checks.filter((c) => !c.passed).map((c) => c.id)).toEqual(['attribution', 'numbers-sourced', 'independent-sources']);
   });
 
   it('treats a major reviewer objection as weak', () => {
@@ -48,7 +48,7 @@ describe('verifyFinding', () => {
   });
 
   it('accepts user data as a verifying source', () => {
-    const v = verifyFinding({ finding: { answer: 'median 12k', claims: [{ text: 'median 12,000', sourceIds: ['D1'] }], confidence: 'medium' }, sources: [{ id: 'D1', kind: 'data', url: '' }] });
+    const v = verifyFinding({ finding: { answer: 'median 12,000', claims: [{ text: 'median 12,000', sourceIds: ['D1'], quote: 'median price: 12,000 EUR' }], confidence: 'medium' }, sources: [{ id: 'D1', kind: 'data', url: '', text: 'rows 240; median price: 12,000 EUR; mean 13,100 EUR' }] });
     expect(v.grade).toBe('verified');
   });
 });
@@ -101,8 +101,8 @@ describe('verify: links and non-answers', () => {
 describe('verify: code-read data', () => {
   it('accepts high confidence when the cited source is data read by code', async () => {
     const { verifyFinding } = await import('../../src/research/verify.mjs');
-    const sources = [{ id: 'S1', kind: 'data', provider: 'marketplace', url: 'https://k.example/s', domain: 'k.example', links: [{ url: 'https://k.example/ad/1', text: 'a' }] }];
-    const finding = { answer: 'Octavia for 3,790 EUR', confidence: 'high', claims: [{ text: 'price 3790 EUR', sourceIds: ['S1'] }], items: [{ url: 'https://k.example/ad/1' }] };
+    const sources = [{ id: 'S1', kind: 'data', provider: 'marketplace', url: 'https://k.example/s', domain: 'k.example', text: 'Skoda Octavia 2014, price 3790 EUR, 180,000 km', links: [{ url: 'https://k.example/ad/1', text: 'a' }] }];
+    const finding = { answer: 'Octavia for 3,790 EUR', confidence: 'high', claims: [{ text: 'price 3790 EUR', sourceIds: ['S1'], quote: 'Skoda Octavia 2014, price 3790 EUR' }], items: [{ url: 'https://k.example/ad/1' }] };
     const result = verifyFinding({ finding, sources });
     expect(result.checks.find((c) => c.id === 'independent-sources').passed).toBe(true);
     expect(result.grade).toBe('verified');

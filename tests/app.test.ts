@@ -49,6 +49,7 @@ describe('App composition', () => {
     const fetchImpl = (async (url: string) => {
       if (!up) throw Object.assign(new Error('refused'), { name: 'TypeError' });
       if (url.endsWith('/v1/models')) return jsonResponse({ data: [{ id: 'Qwen3-4B' }] });
+      if (url.endsWith('/chat/completions')) return jsonResponse({ choices: [{ message: { content: 'x' } }], timings: { prompt_n: 1500, prompt_per_second: 300, predicted_per_second: 40 } });
       return jsonResponse({ default_generation_settings: { n_ctx: 16384 } });
     }) as never;
     const app = new App({ env: { FRL_PROVIDER_ORDER: 'llamacpp', FRL_WIKIPEDIA: '0' }, fetchImpl, dataDir: '/tmp/frl-unused-local' });

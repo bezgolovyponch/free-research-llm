@@ -40,6 +40,7 @@ export function normalizeFinding(raw) {
     value: c?.value ?? null,
     unit: String(c?.unit ?? ''),
     sourceIds: strings(c?.sourceIds ?? c?.sources, 6).map((s) => s.replace(/[[\]]/g, '')),
+    quote: String(c?.quote ?? '').slice(0, 400),
     assumption: Boolean(c?.assumption),
   })).filter((c) => c.text);
   const calc = raw?.calculation && raw.calculation.formula ? {
@@ -57,6 +58,7 @@ export function normalizeFinding(raw) {
   })).filter((i) => /^https?:\/\//.test(i.url));
   return {
     answer: String(raw?.answer ?? '').slice(0, 1200),
+    reasoning: String(raw?.reasoning ?? '').slice(0, 800),
     claims,
     items,
     calculation: calc,

@@ -1018,7 +1018,7 @@ $("btnMapSel").addEventListener("click",()=>{STATE.mapSelect=!STATE.mapSelect;dr
 function claimsHtml(f,sources){
   if(!f||!f.claims.length)return"";
   const srcMap={};(sources||[]).forEach(s=>srcMap[s.id]=s);
-  return '<div class="kv"><div class="k">Claims</div>'+f.claims.map(c=>'<div class="small" style="margin:3px 0">• '+esc(c.text)+" "+c.sourceIds.map(id=>{const s=srcMap[id];const u=s&&safeUrl(s.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener" title="'+esc(s.title)+'">['+esc(id)+"]</a>":'<span class="mono">['+esc(id)+"]</span>";}).join(" ")+(c.assumption?' <span style="color:var(--am)">(assumption)</span>':"")+"</div>").join("")+"</div>";
+  return '<div class="kv"><div class="k">Claims</div>'+f.claims.map(c=>'<div class="small" style="margin:3px 0">• '+esc(c.text)+" "+c.sourceIds.map(id=>{const s=srcMap[id];const u=s&&safeUrl(s.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener" title="'+esc(s.title)+'">['+esc(id)+"]</a>":'<span class="mono">['+esc(id)+"]</span>";}).join(" ")+(c.assumption?' <span style="color:var(--am)">(assumption)</span>':c.attributed===true?' <span style="color:var(--gr)" title="quote found in the cited source">✓ quoted</span>':c.attributed===false?' <span style="color:var(--am)" title="'+esc(c.attributionNote||"quote not found in the cited source")+'">⚠ not backed</span>':"")+(c.quote?'<div class="faint" style="margin-left:12px">“'+esc(c.quote)+'”</div>':"")+"</div>").join("")+(f.reasoning?'<div class="small" style="margin-top:6px"><b>Reasoning:</b> '+esc(f.reasoning)+"</div>":"")+"</div>";
 }
 function suggestionsHtml(sg,parentId){
   if(!sg||!sg.items||!sg.items.length)return"";
