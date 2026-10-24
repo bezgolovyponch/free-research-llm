@@ -386,3 +386,11 @@ Asked: there are no substantial results; clean memory where it is not needed.
 - Memory: this Mac's llama.cpp used 9.3 GB (llama.cpp's RAM prompt cache, default 8 GB) and pushed 14 GB into swap; restarting it then failed with a GPU out-of-memory error. It is stopped and its autostart removed (swap 14.1 → 4.6 GB, free 65%). New llama.cpp starts use `--cache-ram 0` and `--sleep-idle-seconds 300`; the speed check does not wake a sleeping server. Re-enable with `node src/frl.mjs local start --model ggml-org/Qwen3-4B-GGUF:Q4_K_M --ctx 16384 --parallel 1 --kv q8_0 --background`.
 - Results: of 35 delivered items, junk counted toward "at least 50 items" (70%): a cemetery plot, search/news pages, plots at $90k/€400k. Now only valid items count (single listing page that opens, price in range); the loop re-measures before its baseline.
 - CI: one unit test failed on Node 22 without a name in the gate output; the gate now prints failing test names for unit and e2e failures.
+
+## Session 2026-10-24 · confirmation gates and a reworked approach
+
+Asked: recheck how mikoshi-construct is applied and the confirmation gates, so junk is never collected and failures are not produced; take precautions; rework the approach.
+
+- Self-audit against the construct: changes that act on live data shipped with unit tests only (D5 renamed by the candidates repair; the speed check fooled by llama.cpp's prompt cache); pushes went straight to main so CI ran after merge; a UTC/local mix-up in a measurement; items were counted, not screened.
+- App: item gate on every listing (single listing page, item kind, price range after conversion), rejected items kept with reasons, existing listings re-screened at loop start. Witness on the glamping research: 30 of 37 removed (grave, search/news/filter/home pages, houses, $90k–€600k plots), 7 real land listings kept.
+- Process: `node scripts/dryrun.mjs <id>` (read-only witness), `flakes` gate (changed tests 3×), gate names failing tests, pre-push hook refuses direct pushes to main, AUDIT-PROTOCOL S7 (witness), S8 (measurements), O2b (PR + CI before merge). The intermittent server test was a race with the run's final teammate reset; the test now waits for the run to stop.

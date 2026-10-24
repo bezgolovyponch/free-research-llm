@@ -127,6 +127,10 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 
 The glamping research reported 35 delivered items and scored 70% on "at least 50 items", but they included a cemetery plot, search and news pages, and plots at $90,000 and €400,000; the memo itself said none met the criteria. The count check now counts only items that pass every mechanical check: the link opens, it is a single listing (an id in the address, not a search, category or news page) and, when a range is set, its price is in range (`looksLikeListing`, `qualifies`). The loop re-measures the expected-result check before its baseline, so the stricter count is never mistaken for a loss.
 
+## 4l. Item gate: junk never becomes a deliverable
+
+Every listing a piece returns is screened before it is graded or counted (`src/research/itemgate.mjs`): it must be a single listing page (an id in the path or an id parameter; not a search, category, news, filter or home page, not titled "search/results/listings"), of the template's item kind (glamping: a plot of land, in the target countries' languages), and, when a price range is set, priced inside it after currency conversion. Rejected items are kept on the piece with their reasons; an item without a price stays "to check" and the expected-result check reads the price from its page. Existing listings are re-screened when the loop starts. On the glamping research the witness removed 30 of 37 (a grave, search and news pages, houses, plots at $90,000–€600,000) and kept 7 real land listings.
+
 ## 4e. Criteria grounding
 
 A model may propose expected-result checks (`mustMention`, item count, value range) and piece checks, but code keeps only what the user's own text states (`src/research/grounding.mjs`): a must-mention word only when it is quoted or follows "mention / contain / include / name"; a count or range only when the number appears in the expected result, question or constraints. Dropped criteria are logged as "not enforced (the model inferred it, your text does not ask for it)". Piece checks are judged against the piece's desired output, where a word the user literally wrote counts as stated. Checks stored before this rule are re-grounded when a run starts and when a loop starts; a loop re-scores the research before measuring its baseline, so a dropped criterion is never counted as a loop gain. Checks the user sets by hand (**Edit expected result**) are kept as written.
@@ -170,7 +174,10 @@ Agents working on this repo put their own scratch files in their session scratch
 | noComments | no comments in source |
 | testsPresent | every logic module in `src/` has `tests/<same path>.test.ts` |
 | e2e | Playwright on iPhone 14 (WebKit) and Pixel 7 (Chromium): home, tree, piece chat, App assistant proposal + Confirm, Results tab + chat with a file, Terminal running a command |
+| flakes | new or changed test files pass 3 times in a row |
 | tests | the full Vitest suite passes |
+
+Failing tests are named in the gate output. Changes reach `main` only through a pull request whose CI passed; the pre-push hook refuses a direct push (`FRL_PUSH_MAIN=1` overrides once).
 
 ## 7. Keys and privacy protocol
 

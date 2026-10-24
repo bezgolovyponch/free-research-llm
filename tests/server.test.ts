@@ -151,6 +151,7 @@ describe('teammates', () => {
   it('turns Run or Improve on a running research into one more lane instead of an error', { timeout: 90000 }, async () => {
     const created = await call('POST', '/api/projects', { question: 'Which Czech city suits a small specialty bakery best?' });
     await waitFor(created.body.id, 'done');
+    for (let i = 0; i < 400 && app.engine.running.has(created.body.id); i++) await new Promise((r) => setTimeout(r, 25));
     app.engine.running.add(created.body.id);
     try {
       const join = await call('POST', `/api/projects/${created.body.id}/run`, { clientId: 'pc-browser' });

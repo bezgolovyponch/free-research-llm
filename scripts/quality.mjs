@@ -8,6 +8,8 @@ import { SECRET_PATTERNS } from '../src/secrets.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
 
+const FLAKE_ROUNDS = 3;
+
 function failingLines(output, pattern) {
   const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
   return [...new Set(plain.split('\n').filter((l) => pattern.test(l)).map((l) => l.trim().slice(0, 220)))].slice(0, 8);
@@ -80,6 +82,19 @@ const gates = {
     return { passed: result.status === 0, detail: `${summary ? summary.join(', ') : `${result.stdout}${result.stderr}`.slice(-300)}${failing.length ? `\n      ${failing.join('\n      ')}` : ''}` };
   },
 
+  flakes() {
+    const changed = [...new Set([
+      ...run('git', ['diff', '--cached', '--name-only', '--diff-filter=AM']).stdout.split('\n'),
+      ...run('git', ['diff', '--name-only', '--diff-filter=AM']).stdout.split('\n'),
+      ...(process.env.CI ? run('git', ['diff', '--name-only', '--diff-filter=AM', 'HEAD~1']).stdout.split('\n') : []),
+    ])].filter((f) => /^tests\/.+\.test\.ts$/.test(f) && fs.existsSync(path.join(ROOT, f)));
+    if (!changed.length) return { passed: true, detail: 'no new or changed test files' };
+    for (let round = 1; round <= FLAKE_ROUNDS; round++) {
+      const result = run('npx', ['vitest', 'run', ...changed]);
+      if (result.status !== 0) return { passed: false, detail: `round ${round} of ${FLAKE_ROUNDS} failed for ${changed.join(', ')}\n      ${failingLines(`${result.stdout}${result.stderr}`, /^\s*(?:×|FAIL\s|AssertionError|Error:)/).join('\n      ')}` };
+    }
+    return { passed: true, detail: `${changed.length} new or changed test file(s) passed ${FLAKE_ROUNDS} times in a row` };
+  },
   tests() {
     const result = run('npx', ['vitest', 'run']);
     const output = `${result.stdout}${result.stderr}`;

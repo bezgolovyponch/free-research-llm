@@ -12,6 +12,7 @@ import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL } from './deliverable.mjs';
 import { compactProject, compactSources } from './compact.mjs';
+import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
 import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
@@ -308,7 +309,7 @@ export class ResearchEngine {
         tier,
         messages: withGuidance(researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected }), project.guidance),
       });
-      const finding = normalizeFinding(reply.data);
+      const finding = await this.screenFinding(project, normalizeFinding(reply.data));
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
       const retryAnyway = needsEscalation(mechanical) && attempt < MAX_ATTEMPTS;
       const critique = retryAnyway ? null : await this.critique(node, finding, node.sources, reply.provider);
@@ -404,12 +405,38 @@ export class ResearchEngine {
     return dropped.length > 0;
   }
 
+  async itemGateOptions(project) {
+    const convert = this.rates ? await this.rates.converter().catch(() => undefined) : undefined;
+    return { valueRange: project.acceptance?.valueRange ?? null, unit: project.acceptance?.unit ?? '', kind: templateById(project.templateId)?.itemKind ?? null, ...(convert ? { convert } : {}) };
+  }
+
+  async screenFinding(project, finding) {
+    if (!finding.items?.length) return finding;
+    const { kept, rejected } = screenItems(finding.items, await this.itemGateOptions(project));
+    return { ...finding, items: kept, rejected: [...(finding.rejected ?? []), ...rejected].slice(-20) };
+  }
+
+  async rescreenItems(project) {
+    const options = await this.itemGateOptions(project);
+    const changed = [];
+    for (const node of project.nodes) {
+      if (!node.finding?.items?.length) continue;
+      const { kept, rejected } = screenItems(node.finding.items, options);
+      if (!rejected.length) continue;
+      node.finding = { ...node.finding, items: kept, rejected: [...(node.finding.rejected ?? []), ...rejected].slice(-20) };
+      changed.push(`${node.id} −${rejected.length}`);
+    }
+    if (changed.length) this.emit(project, 'edit', `item gate removed listings that are not single ${options.kind?.label ?? 'item'} pages within the range: ${changed.join(', ')}`);
+    return changed;
+  }
+
   async regroundAndRescore(id) {
     const project = await this.load(id);
     const compacted = compactProject(project);
     const fixes = repairTree(project.nodes, project.question);
     if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
     const regrounded = this.reground(project);
+    await this.rescreenItems(project);
     const regraded = this.regrade(project);
     if (fixes.some((f) => ['merged-duplicate', 'grouped-candidates'].includes(f.code)) || regraded.length) {
       await this.store.save(project);
