@@ -192,10 +192,18 @@ export class App {
     });
   }
 
+  untilMeasured(provider) {
+    if (this.localSpeed?.get(provider.baseURL)?.usable) return;
+    provider.state = 'too-slow';
+    provider.detail = 'speed not measured yet: used only after every other model until the test finishes';
+  }
+
   async connectPeer(endpoint) {
     this.env[endpoint.env] = endpoint.url;
     await this.secrets?.write(endpoint.env, endpoint.url).catch(() => {});
     await this.refreshProviders();
+    const peer = this.router.providers.find((p) => p.id === endpoint.id && p.state === 'ready');
+    if (peer) this.untilMeasured(peer);
     const [verdict] = await this.checkLocalSpeed({ only: endpoint.id, force: true });
     if (verdict && !verdict.usable) {
       void this.logs.append('history', { type: 'session', message: `found the other PC's ${endpoint.label} at ${endpoint.url}, but it is ${verdict.text}; not used for research` });
@@ -273,6 +281,7 @@ export class App {
     const waiting = this.router.providers.filter((p) => p.preset?.local && !['ready', 'too-slow'].includes(p.state) && p.baseURL);
     for (const provider of waiting) await provider.discover().catch(() => {});
     const back = waiting.filter((p) => p.state === 'ready');
+    for (const p of back) this.untilMeasured(p);
     for (const p of back) void this.logs.append('history', { type: 'session', message: `${p.preset.label} is answering again (${p.selected.fast}); measuring its speed now` });
     for (const p of back) await this.checkLocalSpeed({ only: p.id, force: true });
     return back.map((p) => p.id);

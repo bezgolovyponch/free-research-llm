@@ -91,6 +91,29 @@ describe('App composition', () => {
     expect(app.status().providers[0].state).toBe('ready');
   });
 
+  it('keeps a PC that just came back as the last resort until its speed test finishes', async () => {
+    let finish = () => {};
+    let testing = () => {};
+    const testStarted = new Promise<void>((r) => { testing = r; });
+    const fetchImpl = (async (url: string) => {
+      if (url.endsWith('/v1/models')) return jsonResponse({ data: [{ id: 'pc-model' }] });
+      if (url.endsWith('/props')) return jsonResponse({ default_generation_settings: { n_ctx: 16384 }, total_slots: 1, is_sleeping: false });
+      testing();
+      await new Promise<void>((r) => { finish = r; });
+      return jsonResponse({ choices: [{ message: { content: 'x' } }], timings: { prompt_n: 1500, prompt_per_second: 900, predicted_per_second: 45 } });
+    }) as never;
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', LLAMACPP_LAN_URL: 'http://192.168.5.26:8090/v1', FRL_WIKIPEDIA: '0' }, fetchImpl, dataDir: '/tmp/frl-unused-measure' });
+    await app.refreshProviders();
+    const lan = app.router.providers[0];
+    lan.state = 'failed';
+    const back = app.rediscoverLocal();
+    await testStarted;
+    expect(lan).toMatchObject({ state: 'too-slow', detail: expect.stringMatching(/speed not measured yet/) });
+    finish();
+    expect(await back).toEqual(['llamacpp-lan']);
+    expect(lan.state).toBe('ready');
+  });
+
   it('simulates the PC path: browser only, model server up, PC asleep, PC back', async () => {
     let pc: 'browser-only' | 'serving' | 'asleep' = 'browser-only';
     const calls: string[] = [];
