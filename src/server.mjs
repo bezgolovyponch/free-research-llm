@@ -20,6 +20,8 @@ import { attachTerminalSockets } from './terminal/socket.mjs';
 import { accessLinks, lanAddresses } from './service.mjs';
 import { ShareBook, shareAllows, shareLinks } from './share.mjs';
 import { REACHABLE_PAGE, RemoteVisits } from './visits.mjs';
+import { EventStream } from './events.mjs';
+import { HeapGuard } from './heapguard.mjs';
 import { pcSetupCommand, pcSetupScript } from './local/pcsetup.mjs';
 import { ensureLocalModel } from './local/autostart.mjs';
 import os from 'node:os';
@@ -318,14 +320,18 @@ export function createServer(app, gate = new AccessGate()) {
   async function serveEvents(req, res, id) {
     const project = await app.engine.load(id);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-    const push = (event, current) => res.write(`data: ${JSON.stringify({ event, project: { ...withResults(current), ...app.engine.teamOf(id) } })}\n\n`);
-    push({ type: 'hello', message: 'connected' }, project);
-    const unsubscribe = app.engine.subscribe(id, push);
-    const ping = setInterval(() => res.write(': ping\n\n'), 20000);
-    req.on('close', () => {
+    req.socket?.setKeepAlive?.(true, 15000);
+    const stream = new EventStream({ res, render: (current) => ({ ...withResults(current), ...app.engine.teamOf(id) }) });
+    stream.push({ type: 'hello', message: 'connected' }, project);
+    const unsubscribe = app.engine.subscribe(id, (event, current) => stream.push(event, current));
+    const ping = setInterval(() => stream.ping(), 20000);
+    const done = () => {
       clearInterval(ping);
       unsubscribe();
-    });
+      stream.close();
+    };
+    req.on('close', done);
+    res.on('close', done);
   }
 
   const visits = new RemoteVisits({ note: (message) => void app.logs.append('history', { type: 'access', message }) });
@@ -438,6 +444,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   setInterval(() => app.routerAdmin.apply(), 60000).unref();
   app.startHousekeeping();
   app.startPeerWatch();
+  new HeapGuard({ onHigh: (mb) => {
+    void app.logs.append('history', { type: 'session', message: `memory at ${mb} MB: restarting gracefully before it runs out (work is saved and the loop resumes)` });
+    app.onRestart?.();
+  } }).start();
   process.on('SIGTERM', () => void stop('SIGTERM'));
   process.on('SIGINT', () => void stop('SIGINT'));
   if (process.env.FRL_AUTO_RESUME !== '0') {

@@ -193,6 +193,35 @@ describe('ProjectImprover in parallel lanes', () => {
   });
 });
 
+describe('ProjectImprover through provider outages', () => {
+  it('pauses instead of ending when every provider fails, then carries on', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-outage-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), lanes: 1 });
+    const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    await engine.run(project.id);
+    const original = engine.regroundAndRescore.bind(engine);
+    let failures = 0;
+    engine.regroundAndRescore = async (id: string) => {
+      if (failures < 2) { failures += 1; throw new Error('every provider failed for synthesize: gemini HTTP 503: This model is currently experiencing high demand'); }
+      return original(id);
+    };
+    let clock = 0;
+    const sleeps: number[] = [];
+    const improver = new ProjectImprover({ engine, now: () => (clock += 1000), sleep: async (ms: number) => { sleeps.push(ms); clock += ms; } });
+    improver.start(project.id, { hours: 0.3 });
+    for (let i = 0; i < 500 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    const saved = await engine.load(project.id);
+    expect(failures).toBe(2);
+    expect(sleeps.slice(0, 2)).toEqual([300000, 300000]);
+    expect(saved.improve.error ?? null).toBeNull();
+    expect(saved.improve.stopReason).toBe('time limit reached');
+    expect(saved.improve.lastPause.reason).toMatch(/every provider failed for synthesize/);
+    expect(saved.log.some((l: { message: string }) => /loop paused 5 min/.test(l.message))).toBe(true);
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
 describe('distinctResearches', () => {
   it('keeps the newest non-demo project per question', () => {
     const list = [

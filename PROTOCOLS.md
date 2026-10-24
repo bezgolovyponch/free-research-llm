@@ -113,6 +113,14 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 | Pieces that asked for specific listings and answered "none found" were graded verified | A piece that asks for listings must deliver at least one listing with a link to be supported or verified; existing ones are re-graded | `src/research/deliverable.mjs`, `checkDelivers`, `effectiveGrade` |
 | Criteria were answered as regional averages, so no plot was ever checked against them | List-type expected results get a funnel tree (PRISMA: identify → screen → include): candidates per region or source, then screening rules per item; the memo screens every delivered item and reports identified / screened out / included | `decomposePrompt` rule 2a, `synthesizePrompt` |
 
+## 4j. Staying up (incident 2026-10-23 23:05)
+
+| What happened | Rule now | Code |
+|---|---|---|
+| The app ran out of memory (2 GB heap, twice in ~7 h): every live-update event wrote the whole research (3.3 MB) to each open page, and a page whose connection silently died kept buffering it | Updates are batched (at most one every 0.5 s per page), the research is serialised only when sent, nothing is written while a page is not reading, and a connection with over 8 MB unread or stuck for 60 s is closed; TCP keep-alive finds dead peers | `src/events.mjs` |
+| The crash restarted the app; the loop's start-up re-roll then failed on every provider (Gemini 503 high demand, Groq 413) and that error ended the loop | Provider outages pause the loop 5 min and it continues, at start-up and in every pass ("every provider failed", 5xx, high demand count as temporary) | `ProjectImprover.whenModelsAnswer` |
+| — | If memory still passes 1.5 GB, the app restarts gracefully (handoff saved, loop resumes) instead of crashing | `src/heapguard.mjs` |
+
 ## 4e. Criteria grounding
 
 A model may propose expected-result checks (`mustMention`, item count, value range) and piece checks, but code keeps only what the user's own text states (`src/research/grounding.mjs`): a must-mention word only when it is quoted or follows "mention / contain / include / name"; a count or range only when the number appears in the expected result, question or constraints. Dropped criteria are logged as "not enforced (the model inferred it, your text does not ask for it)". Piece checks are judged against the piece's desired output, where a word the user literally wrote counts as stated. Checks stored before this rule are re-grounded when a run starts and when a loop starts; a loop re-scores the research before measuring its baseline, so a dropped criterion is never counted as a loop gain. Checks the user sets by hand (**Edit expected result**) are kept as written.

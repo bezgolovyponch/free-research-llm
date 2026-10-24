@@ -14,7 +14,7 @@ const QUOTA_PAUSE_MS = 5 * 60 * 1000;
 const MIN_GAIN = 0.001;
 const REMOVAL_MIN_GAIN = 0.01;
 const DEFAULT_SLICE_MINUTES = 20;
-const QUOTA_ERROR = /no model provider|cooling down|rate limit|quota/i;
+const QUOTA_ERROR = /no model provider|every provider failed|cooling down|rate limit|quota|high demand|unavailable|HTTP 5\d\d/i;
 
 function round(value) {
   return Math.round(value * 1000) / 1000;
@@ -349,14 +349,15 @@ export class ProjectImprover {
     state.lock = new Mutex();
     state.measure = (p) => (scope.length ? scopeScore(p, scope, [...state.pieces], exclude) : projectScore(p, [...state.pieces]));
     await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, scope, exclude, error: null });
-    project = project.phase !== 'done' ? await this.engine.run(id) : await this.engine.regroundAndRescore(id);
+    project = await this.whenModelsAnswer(id, state, () => (project.phase !== 'done' ? this.engine.run(id) : this.engine.regroundAndRescore(id)));
+    if (!project) return this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
     state.pieces = new Set(scoredPieces(project, scope, exclude));
     state.best = state.measure(project);
     await this.record(id, { baseline: state.best.score, best: state.best.score });
     let quiet = 0;
     await this.saveCheckpoint(id, state);
     while (this.live(state)) {
-      const improved = await this.pass(id, state);
+      const improved = await this.whenModelsAnswer(id, state, () => this.pass(id, state));
       await this.saveCheckpoint(id, state);
       quiet = improved ? 0 : quiet + 1;
       await state.lock.run(async () => this.record(id, { passes: ((await this.engine.load(id)).improve?.passes ?? 0) + 1, quietPasses: quiet }));
@@ -364,6 +365,20 @@ export class ProjectImprover {
     state.spawn = null;
     this.engine.leave(id);
     await this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
+  }
+
+  async whenModelsAnswer(id, state, step) {
+    while (this.live(state)) {
+      try {
+        return await step();
+      } catch (error) {
+        if (!QUOTA_ERROR.test(error.message)) throw error;
+        await this.record(id, { lastPause: { at: new Date(this.now()).toISOString(), reason: error.message.slice(0, 200) } });
+        this.engine.emit(await this.engine.load(id), 'improve-state', `loop paused ${Math.round(QUOTA_PAUSE_MS / 60000)} min: models are busy or out of quota (${error.message.slice(0, 120)}); it continues by itself`);
+        await this.sleep(Math.min(QUOTA_PAUSE_MS, Math.max(0, state.deadline - this.now())));
+      }
+    }
+    return null;
   }
 
   async saveCheckpoint(id, state) {

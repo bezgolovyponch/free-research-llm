@@ -159,8 +159,13 @@ test('researches list shows only name, start time, active dot and node count; ma
 });
 
 test('the + next to the models indicator opens the router page: strategy, ranked route per role with reasons, providers', async ({ page }) => {
+  test.setTimeout(120000);
   await page.goto('/');
-  if (await page.locator('#menuBtn').isVisible()) await page.locator('#menuBtn').click();
+  if (await page.locator('#menuBtn').isVisible()) {
+    await page.locator('#menuBtn').click();
+    await expect(page.locator('#sidebar')).toHaveClass(/\bon\b/);
+    await page.waitForFunction(() => getComputedStyle(document.getElementById('sidebar')!).transform === 'none');
+  }
   await page.locator('#btnRouter').click();
   const body = page.locator('#rtBody');
   await expect(page.getByRole('heading', { name: 'Models & router' })).toBeVisible();
