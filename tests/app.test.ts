@@ -68,7 +68,7 @@ describe('App composition', () => {
     expect(localBase('http://127.0.0.1:8090/v1/')).toBe('http://127.0.0.1:8090/v1');
   });
 
-  it('measures a local model and keeps a too-slow one out of research until it gets fast enough', async () => {
+  it('measures a local model and uses a too-slow one only as the last resort until it gets fast enough', async () => {
     let speed = { prompt_n: 1500, prompt_per_second: 12, predicted_per_second: 2.1 };
     const fetchImpl = (async (url: string) => {
       if (url.endsWith('/v1/models')) return jsonResponse({ data: [{ id: 'pc-model' }] });
@@ -80,7 +80,7 @@ describe('App composition', () => {
     const [slow] = await app.checkLocalSpeed();
     expect(slow.usable).toBe(false);
     expect(app.status().providers[0]).toMatchObject({ state: 'too-slow' });
-    expect(app.router.available({ tier: 'fast' })).toEqual([]);
+    expect(app.router.available({ tier: 'fast' }).map((p: { id: string; state: string }) => `${p.id}:${p.state}`)).toEqual([`${app.router.providers[0].id}:too-slow`]);
     expect(await app.rediscoverLocal()).toEqual([]);
     await app.refreshProviders();
     expect(app.status().providers[0].state).toBe('too-slow');

@@ -71,7 +71,8 @@ export class ModelRouter {
     const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
-    const usable = this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose);
+    const ranked = this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose);
+    const usable = [...ranked, ...this.lastResortLocals(tier, purpose, tokens, time)];
     if (!avoid) return usable;
     const author = this.providers.find((p) => p.id === avoid);
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
@@ -80,6 +81,11 @@ export class ModelRouter {
     const sameFamily = usable.filter((p) => p.id !== avoid && family(p) === authorFamily);
     const preferred = [...this.demoteSlow(other, tier), ...this.demoteSlow(sameFamily, tier)];
     return preferred.length ? [...preferred, ...usable.filter((p) => p.id === avoid)] : usable;
+  }
+
+  lastResortLocals(tier, purpose, tokens, time) {
+    if (tier === 'vision') return [];
+    return this.ordered(tier, purpose).filter((p) => p.preset?.local && p.state === 'too-slow' && Boolean(p.selected?.fast || p.selected?.deep) && (!p.maxPromptTokens || tokens <= p.maxPromptTokens) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
   }
 
   benchSlow(provider, error) {

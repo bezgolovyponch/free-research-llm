@@ -287,3 +287,17 @@ describe('ModelRouter local models by measured speed', () => {
   });
 });
 
+
+describe('ModelRouter last-resort local models', () => {
+  it('uses a local model rated too slow after every cloud provider, so research never runs out of models', async () => {
+    let now = 1000;
+    const cloud = provider('gemini', [new ProviderError('quota', { status: 429 })]);
+    const slow = { ...provider('llamacpp-lan', ['{"answer":"from the PC"}']), ready: false, state: 'too-slow', preset: { local: true }, selected: { fast: 'pc-model', deep: 'pc-model' } };
+    const unconfigured = { ...provider('llamacpp', []), ready: false, state: 'failed', preset: { local: true }, selected: {} };
+    const router = new ModelRouter({ providers: [slow, cloud, unconfigured], now: () => now, cooldownMs: 60000 });
+    expect(router.available().map((p: { id: string }) => p.id)).toEqual(['gemini', 'llamacpp-lan']);
+    const reply = await router.complete({ messages: [] });
+    expect(reply).toMatchObject({ provider: 'llamacpp-lan', data: { answer: 'from the PC' } });
+    expect(router.available({ tier: 'vision' }).map((p: { id: string }) => p.id)).toEqual([]);
+  });
+});
