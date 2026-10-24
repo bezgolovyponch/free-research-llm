@@ -21,3 +21,24 @@ describe('item gate', () => {
     expect(plain('Terreno Rústico Ğ')).toBe('terreno rustico g');
   });
 });
+
+describe('item gate: rentals, word ends, broken links', () => {
+  it('refuses plots offered for rent', () => {
+    for (const title of ['Arrendo terreno para estaleiro', 'Terreno para arrendamento', 'Vendo ou alugo terreno com boxes', 'Land for rent near Faro', 'Terreno en alquiler']) {
+      expect(screenItem({ title, url: 'https://portal.example/anuncio/x-ID1abcde' }, options).reasons, title).toContain('offered for rent, not for sale');
+    }
+    expect(screenItem({ title: 'Terreno rústico em Silves', url: 'https://portal.example/anuncio/x-ID1abcde' }, options).ok).toBe(true);
+    expect(screenItem({ title: 'Land', url: 'https://goswap.org/listing/trade-75k-costa-rica-land-for-40-cruising-sailboat-monohull-14136' }, options).reasons).toContain('offered as a swap, not for sale');
+  });
+
+  it('matches a land word only as a whole word, plural allowed', () => {
+    const vn = { label: 'plot of land', terms: ['dat', 'land', 'terreno'] };
+    expect(screenItem({ title: 'Delhi in July', url: 'https://en.climate-data.org/asia/india/delhi/delhi-967662/' }, { kind: vn }).reasons).toContain('not a plot of land');
+    expect(screenItem({ title: 'Ban dat Nha Trang', url: 'https://nhatot.example/mua-ban-dat-nha-trang/135401558.htm' }, { kind: vn }).ok).toBe(true);
+    expect(screenItem({ title: 'Terrenos em Faro', url: 'https://portal.example/anuncio/x-ID1abcde' }, { kind: vn }).ok).toBe(true);
+  });
+
+  it('does not throw on a link with a broken percent escape', () => {
+    expect(() => screenItem({ title: 'Terreno', url: 'https://portal.example/anuncio/terreno-%E0%A4%A-ID1abcde' }, options)).not.toThrow();
+  });
+});

@@ -197,6 +197,33 @@ describe('ResearchEngine', () => {
     expect(engine.teamOf(project.id)).toEqual({ lanes: 3, helpers: ['pc'] });
   });
 
+  it('re-runs without rewriting the memo when asked, but still re-measures the expected result', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find plots for a glamping business, 20000EUR max', expected: '5 plots under 20000 EUR' });
+    await engine.run(project.id);
+    let memos = 0;
+    let measures = 0;
+    const synthesize = engine.synthesize.bind(engine);
+    const checkAcceptance = engine.checkAcceptance.bind(engine);
+    engine.synthesize = async (p: never) => { memos += 1; return synthesize(p); };
+    engine.checkAcceptance = async (p: never) => { measures += 1; return checkAcceptance(p); };
+    await engine.run(project.id, { memo: false });
+    expect([memos, measures]).toEqual([0, 1]);
+    await engine.run(project.id);
+    expect(memos).toBe(1);
+  });
+
+  it('adds gated listings from pages a listing piece already read, once', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find plots for a glamping business, 20000EUR max', expected: '5 plots under 20000 EUR' });
+    const done = await engine.run(project.id);
+    const piece = done.nodes.find((n: { parentId: string | null }) => n.parentId);
+    Object.assign(piece, { deliverable: true, finding: { ...piece.finding, items: [] }, sources: [{ id: 'S1', url: 'https://portal.example/r', links: [{ url: 'https://portal.example/anuncio/terreno-silves-ID1bbbbb', text: 'Terreno Silves | 15 000 €' }, { url: 'https://portal.example/anuncio/arrendo-terreno-ID1eeeee', text: 'Arrendo terreno' }] }] });
+    expect(await engine.harvestAll(done)).toEqual([`${piece.id} +1`]);
+    expect(piece.finding.items).toEqual([expect.objectContaining({ url: 'https://portal.example/anuncio/terreno-silves-ID1bbbbb', value: 15000, harvested: true })]);
+    expect(await engine.harvestAll(done)).toEqual([]);
+  });
+
   it('re-grounds checks stored before the fix, keeps hand-set ones, and re-scores before a loop baseline', async () => {
     const { engine } = engineWith(new ScriptedProvider());
     const project = await engine.createProject({ question: 'Find plots for a glamping business, 20000EUR max', expected: '50 plots feasible for glamping' });

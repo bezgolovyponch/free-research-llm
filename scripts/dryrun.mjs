@@ -21,4 +21,5 @@ section('pieces moved', report.changes.moved);
 section('titles changed', report.changes.retitled);
 section('grades changed', report.changes.regraded);
 section('listings removed by the item gate', report.changes.removedItems);
+section('listings taken from pages already read', report.harvested);
 console.log(`\nlistings kept: ${report.itemsKept}`);

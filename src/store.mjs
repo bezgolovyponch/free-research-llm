@@ -20,7 +20,7 @@ function summarize(p) {
     expectedScore: p.acceptanceResult?.score ?? null,
     nodes: (p.nodes ?? []).length,
     good: (p.nodes ?? []).filter((n) => ['verified', 'supported'].includes(n.status)).length,
-    loop: p.improve ? { baseline: p.improve.baseline ?? null, best: p.improve.best ?? null, trials: (p.improve.trials ?? []).length, kept: (p.improve.trials ?? []).filter((t) => t.outcome === 'kept').length } : null,
+    loop: p.improve ? { baseline: p.improve.baseline ?? null, best: p.improve.best ?? null, trials: (p.improve.trials ?? []).length, kept: (p.improve.trials ?? []).filter((t) => t.outcome === 'kept').length, active: Boolean(p.improve.active), error: p.improve.error ?? null, deadline: p.improve.deadline ?? null, stopReason: p.improve.stopReason ?? null, scope: p.improve.scope ?? [], exclude: p.improve.exclude ?? [] } : null,
   };
 }
 

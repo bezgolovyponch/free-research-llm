@@ -10,7 +10,8 @@ import { needsEscalation, verifyFinding } from './verify.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
-import { NO_ITEMS_DETAIL } from './deliverable.mjs';
+import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
+import { harvestItems } from './harvest.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
@@ -22,6 +23,7 @@ const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0 };
 const LOG_LIMIT = 300;
+const PAGE_CHECKS_KEPT = 2000;
 const MAX_ATTEMPTS = 3;
 const MAX_ATTACHMENTS = 6;
 const ATTACHMENT_TEXT_LIMIT = 20000;
@@ -94,6 +96,7 @@ export class ResearchEngine {
     this.onStop = onStop;
     this.laneCount = Math.min(MAX_LANES, Math.max(1, lanes));
     this.helpers = new Map();
+    this.pageChecks = new Map();
     this.quiet = new Set();
     this.router = router;
     this.search = search;
@@ -311,7 +314,7 @@ export class ResearchEngine {
         tier,
         messages: withGuidance(researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected }), project.guidance),
       });
-      const finding = await this.screenFinding(project, normalizeFinding(reply.data));
+      const finding = await this.withHarvest(project, node, await this.screenFinding(project, normalizeFinding(reply.data)));
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
       const retryAnyway = needsEscalation(mechanical) && attempt < MAX_ATTEMPTS;
       const critique = retryAnyway ? null : await this.critique(node, finding, node.sources, reply.provider);
@@ -418,6 +421,26 @@ export class ResearchEngine {
     return { ...finding, items: kept, rejected: [...(finding.rejected ?? []), ...rejected].slice(-20) };
   }
 
+  async withHarvest(project, node, finding) {
+    if (!asksForItems(node)) return finding;
+    const extra = harvestItems({ ...node, finding }, await this.itemGateOptions(project));
+    return extra.length ? { ...finding, items: [...(finding.items ?? []), ...extra] } : finding;
+  }
+
+  async harvestAll(project) {
+    const options = await this.itemGateOptions(project);
+    const added = [];
+    for (const node of project.nodes) {
+      if (!node.finding || !asksForItems(node)) continue;
+      const extra = harvestItems(node, options);
+      if (!extra.length) continue;
+      node.finding = { ...node.finding, items: [...(node.finding.items ?? []), ...extra] };
+      added.push(`${node.id} +${extra.length}`);
+    }
+    if (added.length) this.emit(project, 'edit', `listings taken from pages already read and passed by the item gate: ${added.join(', ')}`);
+    return added;
+  }
+
   async rescreenItems(project) {
     const options = await this.itemGateOptions(project);
     const changed = [];
@@ -439,6 +462,7 @@ export class ResearchEngine {
     if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
     const regrounded = this.reground(project);
     await this.rescreenItems(project);
+    await this.harvestAll(project);
     const regraded = this.regrade(project);
     if (fixes.some((f) => ['merged-duplicate', 'grouped-candidates'].includes(f.code)) || regraded.length) {
       await this.store.save(project);
@@ -452,7 +476,8 @@ export class ResearchEngine {
     const deliverables = collectDeliverables(project.nodes);
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
-    const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });
+    if (this.pageChecks.size > PAGE_CHECKS_KEPT) for (const key of [...this.pageChecks.keys()].slice(0, this.pageChecks.size - PAGE_CHECKS_KEPT)) this.pageChecks.delete(key);
+    const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert, cache: this.pageChecks });
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }
@@ -465,7 +490,7 @@ export class ResearchEngine {
     return results;
   }
 
-  async run(id, { hints = {} } = {}) {
+  async run(id, { hints = {}, memo = true } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
     this.cancelled.delete(id);
@@ -523,7 +548,8 @@ export class ResearchEngine {
         if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
         return await this.store.save(project);
       }
-      await this.synthesize(project);
+      if (memo || !project.report) await this.synthesize(project);
+      else await this.checkAcceptance(project);
       this.checkSpecs(project);
       project.phase = 'done';
       release();

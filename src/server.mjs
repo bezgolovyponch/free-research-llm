@@ -459,6 +459,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   setInterval(() => app.routerAdmin.apply(), 60000).unref();
   app.startHousekeeping();
   app.startPeerWatch();
+  app.startWatchdog();
   new HeapGuard({ onHigh: (mb) => {
     void app.logs.append('history', { type: 'session', message: `memory at ${mb} MB: restarting gracefully before it runs out (work is saved and the loop resumes)` });
     app.onRestart?.();

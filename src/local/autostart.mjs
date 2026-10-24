@@ -15,7 +15,7 @@ export async function forgetServe(root) {
   await fs.rm(serveFile(root), { force: true });
 }
 
-export async function ensureLocalModel({ root, fetchImpl = fetch, spawnImpl = spawn }) {
+export async function ensureLocalModel({ root, fetchImpl = fetch, spawnImpl = spawn, mayStart = () => true }) {
   let plan;
   try {
     plan = JSON.parse(await fs.readFile(serveFile(root), 'utf8'));
@@ -28,6 +28,7 @@ export async function ensureLocalModel({ root, fetchImpl = fetch, spawnImpl = sp
   } catch {
     plan.down = true;
   }
+  if (!mayStart()) return { started: false, refused: true, reason: 'restart limit reached' };
   const exists = await fs.access(plan.server).then(() => true, () => false);
   if (!exists) return { started: false, reason: `llama-server not found at ${plan.server}` };
   await fs.mkdir(path.join(root, 'data', 'logs'), { recursive: true });
