@@ -12,6 +12,7 @@ describe('pcSetupScript', () => {
     expect(script).toContain("'--host', '0.0.0.0', '--port', '8090'");
     expect(script).toContain("$tag = 'b11739'");
     expect(script).toContain('--list-devices');
+    expect(script).toContain("'--cache-ram', '0', '--sleep-idle-seconds', '300'");
     expect(script).toMatch(/found no usable graphics card/);
     expect(script.split('\r\n').length).toBeGreaterThan(15);
     expect(script).not.toMatch(/share=|token/i);

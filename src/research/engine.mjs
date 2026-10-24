@@ -415,8 +415,7 @@ export class ResearchEngine {
       await this.store.save(project);
       return this.run(id);
     }
-    if (!regrounded && !fixes.length && !compacted) return project;
-    if (regrounded && project.report) await this.checkAcceptance(project);
+    if (project.report) await this.checkAcceptance(project);
     return this.store.save(project);
   }
 

@@ -8,6 +8,11 @@ import { SECRET_PATTERNS } from '../src/secrets.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
 
+function failingLines(output, pattern) {
+  const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+  return [...new Set(plain.split('\n').filter((l) => pattern.test(l)).map((l) => l.trim().slice(0, 220)))].slice(0, 8);
+}
+
 function run(command, args) {
   return spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
@@ -71,13 +76,16 @@ const gates = {
     }
     const result = run('npx', ['playwright', 'test', '--reporter=line']);
     const summary = `${result.stdout}${result.stderr}`.match(/(\d+ passed[^\n]*|\d+ failed[^\n]*)/g);
-    return { passed: result.status === 0, detail: summary ? summary.join(', ') : `${result.stdout}${result.stderr}`.slice(-300) };
+    const failing = result.status === 0 ? [] : failingLines(`${result.stdout}${result.stderr}`, /^\s*(?:✘|\d+\)\s|Error:|Test timeout)/);
+    return { passed: result.status === 0, detail: `${summary ? summary.join(', ') : `${result.stdout}${result.stderr}`.slice(-300)}${failing.length ? `\n      ${failing.join('\n      ')}` : ''}` };
   },
 
   tests() {
     const result = run('npx', ['vitest', 'run']);
-    const summary = `${result.stdout}${result.stderr}`.match(/Tests\s+([^\n]+)/);
-    return { passed: result.status === 0, detail: summary ? summary[1].trim() : result.stderr.slice(-300) };
+    const output = `${result.stdout}${result.stderr}`;
+    const summary = output.match(/Tests\s+([^\n]+)/);
+    const failing = result.status === 0 ? [] : failingLines(output, /^\s*(?:×|FAIL\s|AssertionError|Error:)/);
+    return { passed: result.status === 0, detail: `${summary ? summary[1].trim() : result.stderr.slice(-300)}${failing.length ? `\n      ${failing.join('\n      ')}` : ''}` };
   },
 };
 

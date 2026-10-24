@@ -28,7 +28,7 @@ export function pcSetupScript({ tag = PC_LLAMA_TAG, port = PC_LLAMA_PORT } = {})
     'Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force',
     'Write-Host "Graphics: $gpus ($vramMB MB reported). Model: $model. The first start downloads it once."',
     "Write-Host 'If Windows Firewall asks, allow llama-server on private networks.'",
-    `Start-Process -FilePath $server.FullName -ArgumentList @('-hf', $model, '-ngl', '99', '-c', '16384', '-np', '1', '--host', '0.0.0.0', '--port', '${port}', '-a', 'pc-model') -WorkingDirectory $server.DirectoryName`,
+    `Start-Process -FilePath $server.FullName -ArgumentList @('-hf', $model, '-ngl', '99', '-c', '16384', '-np', '1', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '0.0.0.0', '--port', '${port}', '-a', 'pc-model') -WorkingDirectory $server.DirectoryName`,
     "Write-Host 'llama-server is starting in its own window. Keep that window open; the research app finds this PC within a minute.'",
     '',
   ].join('\r\n');

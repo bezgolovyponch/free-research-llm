@@ -148,7 +148,7 @@ export class OpenAICompatibleProvider {
         this.detail = `model list unavailable, using configured model (${error.message})`;
       } else if (this.preset.local && error.status === 0) {
         this.state = 'not-configured';
-        this.detail = 'not running (optional: install from ollama.com)';
+        this.detail = this.preset.id === 'ollama' ? 'not running (optional: install from ollama.com)' : this.preset.id === 'llamacpp' ? 'not running (optional: node src/frl.mjs local start --model ggml-org/Qwen3-4B-GGUF:Q4_K_M --ctx 16384 --parallel 1 --kv q8_0 --background)' : 'not running or not reachable';
       } else {
         this.state = 'error';
         this.detail = error.message;

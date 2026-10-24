@@ -378,3 +378,11 @@ Asked: why failed; fix, merge.
 - Research file 3.3 MB, 2.4 MB of it page text and link lists: stored sources now capped (4,000 chars, 40 links) after a piece is researched, pages get a light view. Graceful restart at 1 GB heap; memory sampled every 10 min to data/logs/memory.jsonl with the count of open live-update connections.
 - Local models routed by measured speed per call: first when the call fits (this Mac: rollups and short calls), last resort otherwise with a time limit sized to the estimate (a long memo on this Mac gets ~4 min instead of failing at 120 s); the other PC stays unused while it is CPU-only.
 - First live check marked this Mac's llama.cpp "too slow" (reads 0 tokens/s): llama.cpp's prompt cache served the repeated test prompt. The test now sends a unique prompt with cache_prompt false and ignores timings over fewer than 200 prompt tokens. Sources are also compacted when the loop starts. A server test's 12 s wait was too short under full-suite load; it now waits up to 45 s.
+
+## Session 2026-10-24 · no substantial results; memory cleanup
+
+Asked: there are no substantial results; clean memory where it is not needed.
+
+- Memory: this Mac's llama.cpp used 9.3 GB (llama.cpp's RAM prompt cache, default 8 GB) and pushed 14 GB into swap; restarting it then failed with a GPU out-of-memory error. It is stopped and its autostart removed (swap 14.1 → 4.6 GB, free 65%). New llama.cpp starts use `--cache-ram 0` and `--sleep-idle-seconds 300`; the speed check does not wake a sleeping server. Re-enable with `node src/frl.mjs local start --model ggml-org/Qwen3-4B-GGUF:Q4_K_M --ctx 16384 --parallel 1 --kv q8_0 --background`.
+- Results: of 35 delivered items, junk counted toward "at least 50 items" (70%): a cemetery plot, search/news pages, plots at $90k/€400k. Now only valid items count (single listing page that opens, price in range); the loop re-measures before its baseline.
+- CI: one unit test failed on Node 22 without a name in the gate output; the gate now prints failing test names for unit and e2e failures.

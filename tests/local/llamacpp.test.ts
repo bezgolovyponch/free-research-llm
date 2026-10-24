@@ -17,11 +17,11 @@ describe('llama.cpp on this computer', () => {
   });
 
   it('builds the server command: whole model on the GPU, localhost only, named after the model, helpers over RPC', () => {
-    expect(serverArgs({ model: 'ggml-org/gpt-oss-20b-GGUF', helpers: ['192.168.1.20:50052'] })).toEqual(['-hf', 'ggml-org/gpt-oss-20b-GGUF', '-ngl', '99', '-c', '32768', '-np', '2', '--host', '127.0.0.1', '--port', '8090', '-a', 'gpt-oss-20b', '--rpc', '192.168.1.20:50052']);
+    expect(serverArgs({ model: 'ggml-org/gpt-oss-20b-GGUF', helpers: ['192.168.1.20:50052'] })).toEqual(['-hf', 'ggml-org/gpt-oss-20b-GGUF', '-ngl', '99', '-c', '32768', '-np', '2', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'gpt-oss-20b', '--rpc', '192.168.1.20:50052']);
     expect(serverArgs({ model: 'C:\\models\\Qwen3-14B-Q4_K_M.gguf', split: '3,1' })).toEqual(expect.arrayContaining(['-m', 'C:\\models\\Qwen3-14B-Q4_K_M.gguf', '-a', 'Qwen3-14B-Q4_K_M', '-ts', '3,1']));
     expect(aliasFor('ggml-org/Qwen3-32B-GGUF:Q4_K_M')).toBe('Qwen3-32B');
     expect(() => serverArgs({})).toThrow(/choose a model/);
-    expect(serverArgs({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', ctx: 16384, parallel: 1, kv: 'q8_0' })).toEqual(['-hf', 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', '-ngl', '99', '-c', '16384', '-np', '1', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--host', '127.0.0.1', '--port', '8090', '-a', 'Qwen3-4B']);
+    expect(serverArgs({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', ctx: 16384, parallel: 1, kv: 'q8_0' })).toEqual(['-hf', 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', '-ngl', '99', '-c', '16384', '-np', '1', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'Qwen3-4B']);
     expect(() => serverArgs({ model: 'x', kv: 'q2' })).toThrow(/--kv takes/);
     expect(parseHelpers(' 192.168.1.20:50052 , mac.local:50052')).toEqual(['192.168.1.20:50052', 'mac.local:50052']);
     expect(() => parseHelpers('192.168.1.20')).toThrow(/host:port/);

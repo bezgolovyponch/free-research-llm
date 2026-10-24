@@ -217,12 +217,25 @@ export class App {
     }
   }
 
+  async isSleeping(provider) {
+    try {
+      const res = await this.fetchImpl(`${provider.baseURL.replace(/\/v1\/?$/, '')}/props`, { signal: AbortSignal.timeout(4000) });
+      return res.ok && (await res.json()).is_sleeping === true;
+    } catch {
+      return false;
+    }
+  }
+
   async checkLocalSpeed({ only = '', force = false } = {}) {
     this.localSpeed ??= new Map();
     const verdicts = [];
     const locals = this.router.providers.filter((p) => p.preset?.local && p.baseURL && ['ready', 'too-slow'].includes(p.state) && (!only || p.id === only));
     for (const provider of locals) {
       const known = this.localSpeed.get(provider.baseURL);
+      if (!force && known?.speed && (await this.isSleeping(provider))) {
+        verdicts.push(known);
+        continue;
+      }
       if (!force && known && Date.now() - known.at < SPEED_RECHECK_MS) {
         verdicts.push(known);
         continue;

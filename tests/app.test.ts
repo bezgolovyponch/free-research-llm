@@ -85,6 +85,7 @@ describe('App composition', () => {
     expect(app.status().providers[0].state).toBe('too-slow');
     speed = { prompt_n: 1500, prompt_per_second: 300, predicted_per_second: 40 };
     const [fast] = await app.checkLocalSpeed({ force: true });
+    expect(await app.isSleeping(app.router.providers[0])).toBe(false);
     expect(fast.usable).toBe(true);
     expect(app.status().providers[0].state).toBe('ready');
   });

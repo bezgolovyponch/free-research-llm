@@ -73,12 +73,15 @@ export function aliasFor(model) {
 
 const KV_TYPES = new Set(['f16', 'q8_0', 'q4_0']);
 
-export function serverArgs({ model, helpers = [], port = SERVER_PORT, ctx = 16384, split = '', parallel = 2, kv = '' }) {
+export const PROMPT_CACHE_MIB = 0;
+export const SLEEP_IDLE_SECONDS = 300;
+
+export function serverArgs({ model, helpers = [], port = SERVER_PORT, ctx = 16384, split = '', parallel = 2, kv = '', cacheRam = PROMPT_CACHE_MIB, sleepIdle = SLEEP_IDLE_SECONDS }) {
   if (!model) throw new Error('choose a model, e.g. --model ggml-org/gpt-oss-20b-GGUF');
   if (kv && !KV_TYPES.has(kv)) throw new Error(`--kv takes one of ${[...KV_TYPES].join(', ')}`);
   const source = /\.gguf$/i.test(model) ? ['-m', model] : ['-hf', model];
   const slots = Math.max(1, Math.floor(Number(parallel) || 1));
-  return [...source, '-ngl', '99', '-c', String(ctx * slots), '-np', String(slots), ...(kv ? ['-fa', 'on', '-ctk', kv, '-ctv', kv] : []), '--host', '127.0.0.1', '--port', String(port), '-a', aliasFor(model), ...(helpers.length ? ['--rpc', helpers.join(',')] : []), ...(split ? ['-ts', split] : [])];
+  return [...source, '-ngl', '99', '-c', String(ctx * slots), '-np', String(slots), ...(kv ? ['-fa', 'on', '-ctk', kv, '-ctv', kv] : []), '--cache-ram', String(cacheRam), ...(sleepIdle > 0 ? ['--sleep-idle-seconds', String(sleepIdle)] : []), '--host', '127.0.0.1', '--port', String(port), '-a', aliasFor(model), ...(helpers.length ? ['--rpc', helpers.join(',')] : []), ...(split ? ['-ts', split] : [])];
 }
 
 export function helperArgs({ host, port = HELPER_PORT, cache = true }) {

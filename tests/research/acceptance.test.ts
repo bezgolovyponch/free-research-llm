@@ -25,16 +25,38 @@ describe('acceptance', () => {
 
   it('checks count, live deep links and price range with currency conversion', async () => {
     const pages: Record<string, { text: string; status: number }> = {
-      'https://m.example/car/1': { text: `${'Used car Golf '.repeat(20)} 9 000 zł`, status: 200 },
-      'https://m.example/car/2': { text: `${'Used car Astra '.repeat(20)} 9 500 €`, status: 200 },
+      'https://m.example/car/1234567': { text: `${'Used car Golf '.repeat(20)} 9 000 zł`, status: 200 },
+      'https://m.example/car/2234567': { text: `${'Used car Astra '.repeat(20)} 9 500 €`, status: 200 },
       'https://m.example/': { text: 'home '.repeat(100), status: 200 },
     };
     const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 }, convert: (v: number, from: string) => (from === 'PLN' ? v / 4 : v) });
     const spec = normalizeAcceptance({ itemCount: 4, urlsLive: true, valueRange: [2000, 4000], unit: 'EUR', mustMention: ['used'] });
-    const result = await checker.evaluate(spec, [{ url: 'https://m.example/car/1' }, { url: 'https://m.example/car/2' }, { url: 'https://m.example/' }]);
+    const result = await checker.evaluate(spec, [{ url: 'https://m.example/car/1234567' }, { url: 'https://m.example/car/2234567' }, { url: 'https://m.example/' }]);
     const value = Object.fromEntries(result.checks.map((c: { id: string; value: number }) => [c.id, c.value]));
-    expect(value).toEqual({ count: 0.75, live: 0.5, range: 0.25, mentions: 0.5 });
+    expect(value).toEqual({ count: 0.25, live: 0.5, range: 0.25, mentions: 0.5 });
     expect(result.items.map((i: { live: boolean; inRange: boolean }) => [i.live, i.inRange])).toEqual([[true, true], [true, false], [false, false]]);
-    expect(result.score).toBe(0.5);
+    expect(result.score).toBe(0.375);
+  });
+});
+
+describe('valid items only', () => {
+  it('tells single listing pages from search, category and news pages (cases from the glamping research)', async () => {
+    const { looksLikeListing } = await import('../../src/research/acceptance.mjs');
+    for (const url of ['https://www.imovirtual.com/pt/anuncio/terreno-urbano-coimbra-20-000-ID1iZBr', 'https://properties.lefigaro.com/announces/other-real+estate-andalusia-spain/109197729/', 'https://www.olx.pt/d/anuncio/cede-se-jazigo-4-6-lugares-IDJEXGe.html', 'https://www.sahibinden.com/ilan/emlak-arsa-satilik-1234567890/detay']) expect(looksLikeListing(url), url).toBe(true);
+    for (const url of ['https://www.sahibinden.com/satilik-arsa', 'https://www.idealista.com/news/inmobiliario/blog-de-idealista', 'https://www.properstar.com/europe/buy/land-plot/sea-view', 'https://www.mondinion.com/Land_for_Development/country/Turkey/', 'not a url']) expect(looksLikeListing(url), url).toBe(false);
+  });
+
+  it('counts toward "at least N items" only items that open, are single listings and are priced in range', async () => {
+    const { AcceptanceChecker } = await import('../../src/research/acceptance.mjs');
+    const pages: Record<string, string> = {
+      'https://a.example/anuncio/plot-ID1iZBr': 'Rustic land for sale 18 000 EUR near the coast '.repeat(20),
+      'https://a.example/anuncio/plot-ID9xYzQ': 'Seaside plot 400 000 EUR '.repeat(30),
+      'https://a.example/search/land': 'Many plots 15 000 EUR '.repeat(30),
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => ({ status: pages[url] ? 200 : 404, text: pages[url] ?? '' }) });
+    const result = await checker.evaluate({ itemCount: 4, urlsLive: false, valueRange: [0, 20000], unit: 'EUR', mustMention: [] }, Object.keys(pages).map((url, i) => ({ url, value: [18000, 400000, 15000][i], unit: 'EUR' })));
+    const count = result.checks.find((c: { id: string }) => c.id === 'count');
+    expect(count).toMatchObject({ label: 'At least 4 valid items', value: 0.25 });
+    expect(count.detail).toMatch(/^1 of 3 delivered pass every check/);
   });
 });

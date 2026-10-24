@@ -94,6 +94,23 @@ function isDeepLink(url) {
   }
 }
 
+const LISTING_ID = /(?:^|[/_.=&-])(?:\d{5,}|ID[A-Za-z0-9]{4,}|[A-Za-z]{0,6}\d[A-Za-z0-9]{4,})(?=[/_.?&#-]|$)/;
+const NOT_A_LISTING = /\/(?:blog|news|noticias|search|busca|buscar|category|categoria|tag|guides?)(?:\/|$|-)/i;
+
+export function looksLikeListing(url) {
+  try {
+    const u = new URL(url);
+    const where = `${u.pathname}${u.search}`;
+    return LISTING_ID.test(where) && !NOT_A_LISTING.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export function qualifies(item, spec) {
+  return Boolean(item.live && item.listing && (!spec.valueRange || item.inRange));
+}
+
 export class AcceptanceChecker {
   constructor({ readPage, convert = identity }) {
     this.readPage = readPage;
@@ -108,6 +125,7 @@ export class AcceptanceChecker {
     return {
       ...item,
       live,
+      listing: looksLikeListing(item.url),
       inRange: spec.valueRange ? live && inRange(amounts, spec, item.value, this.convert) : null,
       mentions: spec.mustMention.length ? spec.mustMention.filter((m) => pageText.toLowerCase().includes(m.toLowerCase())).length / spec.mustMention.length : null,
     };
@@ -120,7 +138,8 @@ export class AcceptanceChecker {
     const target = spec.itemCount ?? Math.max(1, items.length);
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
     const checks = [];
-    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} items`, value: Math.min(1, deliverables.length / spec.itemCount), detail: `${deliverables.length} delivered` });
+    const valid = items.filter((i) => qualifies(i, spec)).length;
+    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, valid / spec.itemCount), detail: `${valid} of ${deliverables.length} delivered pass every check (a single listing page that opens${spec.valueRange ? ', price in range' : ''})` });
     if (spec.urlsLive) checks.push({ id: 'live', label: 'Links open a real page', value: good((i) => i.live), detail: `${items.filter((i) => i.live).length} of ${items.length} checked links are live` });
     if (spec.valueRange) checks.push({ id: 'range', label: `Value within ${spec.valueRange.join('–')} ${spec.unit}`.trim(), value: good((i) => i.inRange), detail: `${items.filter((i) => i.inRange).length} of ${items.length} pages show a value in range` });
     if (spec.mustMention.length) checks.push({ id: 'mentions', label: `Pages mention: ${spec.mustMention.join(', ')}`, value: items.length ? items.reduce((s, i) => s + (i.mentions ?? 0), 0) / target : 0, detail: 'share of required terms found on the pages' });
