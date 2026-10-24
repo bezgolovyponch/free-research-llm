@@ -37,4 +37,16 @@ describe('ensureLocalModel', () => {
     await rememberServe(dir, { server: path.join(dir, 'missing'), args: [], port: 8090 });
     expect(await ensureLocalModel({ root: dir, fetchImpl: (async () => { throw new Error('x'); }) as never })).toMatchObject({ started: false, reason: expect.stringMatching(/not found/) });
   });
+
+  it('does not start a dead local model when the watchdog restart limit says no', async () => {
+    const dir = await root();
+    const server = path.join(dir, 'llama-server');
+    await fs.writeFile(server, '');
+    await rememberServe(dir, { server, args: [], port: 8090 });
+    let spawned = 0;
+    const spawnImpl = (() => { spawned += 1; return { pid: 1, unref() {} }; }) as never;
+    const down = (async () => { throw new Error('refused'); }) as never;
+    expect(await ensureLocalModel({ root: dir, fetchImpl: down, spawnImpl, mayStart: () => false })).toEqual({ started: false, refused: true, reason: 'restart limit reached' });
+    expect(spawned).toBe(0);
+  });
 });

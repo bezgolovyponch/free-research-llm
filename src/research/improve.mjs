@@ -578,7 +578,7 @@ export class ProjectImprover {
       for (const t of touched) if (merged.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(merged, t);
       if (researched) merged.nodes[merged.nodes.findIndex((n) => n.id === nodeId)] = structuredClone(project.nodes.find((n) => n.id === nodeId));
       await this.engine.store.save({ ...merged, chats: current.chats, log: current.log, improve: current.improve });
-      const after = await this.engine.run(id);
+      const after = await this.engine.run(id, { memo: false });
       if (this.stopped(state) || after.phase === 'cancelled') return await reject('reverted-stopped');
       const outage = after.nodes.find((n) => n.status === 'failed' && QUOTA_ERROR.test(n.error ?? ''));
       if (outage) {
@@ -594,6 +594,7 @@ export class ProjectImprover {
         for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
         state.best = score;
         await this.record(id, { best: score.score }, { ...base, before: best.score, change, outcome: 'kept', score: score.score });
+        await this.engine.resynthesize(id);
         return { kept: true, score };
       }
       return await reject('reverted-whole', '', score.score);

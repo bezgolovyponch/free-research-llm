@@ -17,6 +17,8 @@ import { TempSweeper, describeSweep, sweepHoursFrom } from './housekeeping.mjs';
 import { PeerWatcher } from './local/peerwatch.mjs';
 import { probePeer } from './local/peer.mjs';
 import { measureSpeed, speedVerdict } from './local/speed.mjs';
+import { ensureLocalModel } from './local/autostart.mjs';
+import { WATCH_EVERY_MS, Watchdog } from './watchdog.mjs';
 
 const SPEED_RECHECK_MS = 30 * 60 * 1000;
 export const PC_LANE = 'pc-gpu';
@@ -293,6 +295,31 @@ export class App {
     return changed;
   }
 
+  buildWatchdog() {
+    return new Watchdog({
+      listProjects: async () => (await this.store.list()).map((p) => ({ id: p.id, improve: p.loop })),
+      isLooping: (id) => this.improver.isActive(id),
+      startLoop: async (id, options) => this.improver.start(id, options),
+      ensureLocal: async ({ mayStart }) => (this.env.LLAMACPP_BASE_URL && /127\.0\.0\.1|localhost/.test(this.env.LLAMACPP_BASE_URL) ? ensureLocalModel({ root: ROOT_DIR, fetchImpl: this.fetchImpl, mayStart }) : { started: false }),
+      note: (message) => {
+        void this.logs.append('history', { type: 'session', message: `watchdog: ${message}` });
+        this.noteApp(`Watchdog: ${message}`);
+      },
+    });
+  }
+
+  startWatchdog(everyMs = WATCH_EVERY_MS) {
+    this.watchdog = this.buildWatchdog();
+    this.watchTimer = setInterval(() => void (async () => {
+      try {
+        await this.watchdog.tick();
+      } catch {
+        return;
+      }
+    })(), everyMs);
+    this.watchTimer.unref?.();
+  }
+
   startPeerWatch(everyMs = 30000) {
     this.peerTimer = setInterval(() => void (async () => {
       try {
@@ -324,6 +351,7 @@ export class App {
   async shutdown() {
     this.sweeper.stop();
     if (this.peerTimer) clearInterval(this.peerTimer);
+    if (this.watchTimer) clearInterval(this.watchTimer);
     this.terminal.closeAll();
     await this.improver.shutdown();
     for (const id of [...this.engine.running]) {

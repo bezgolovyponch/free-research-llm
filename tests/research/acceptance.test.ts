@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { AcceptanceChecker, collectDeliverables, hasCriteria, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_CHECK_TTL_MS, PAGE_READS_AT_ONCE, collectDeliverables, hasCriteria, headlinePrice, inRange, looksLikeListing, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
     expect(parseAmounts('Preis 2.500 € VB, 3 999,- €, € 1,234.50, 8 000 PLN, 59 900 Kč')).toEqual([
-      { value: 2500, currency: 'EUR' }, { value: 3999, currency: 'EUR' }, { value: 1234.5, currency: 'EUR' }, { value: 8000, currency: 'PLN' }, { value: 59900, currency: 'CZK' },
+      { value: 2500, currency: 'EUR', perUnit: false }, { value: 3999, currency: 'EUR', perUnit: false }, { value: 1234.5, currency: 'EUR', perUnit: false }, { value: 8000, currency: 'PLN', perUnit: false }, { value: 59900, currency: 'CZK', perUnit: false },
     ]);
     expect(toAmount('12.345,67')).toBe(12345.67);
   });
@@ -58,5 +58,50 @@ describe('valid items only', () => {
     const count = result.checks.find((c: { id: string }) => c.id === 'count');
     expect(count).toMatchObject({ label: 'At least 4 valid items', value: 0.25 });
     expect(count.detail).toMatch(/^1 of 3 delivered pass every check/);
+  });
+});
+
+describe('listing price on the page', () => {
+  it('judges the headline price, not a price per m² or a monthly rent further down', () => {
+    const spec = { valueRange: [0, 20000], unit: 'EUR' } as never;
+    expect(headlinePrice(parseAmounts('Terreno em Faro\n 165 000 € 42,61 €/m² 8005-401'))).toEqual({ value: 165000, currency: 'EUR', perUnit: false });
+    expect(inRange(parseAmounts('Terreno em Faro\n 165 000 € 42,61 €/m² 8005-401'), spec, null)).toBe(false);
+    expect(inRange(parseAmounts('Terreno Urbano | Coimbra | 20.000 € 111,11 €/m²'), spec, null)).toBe(true);
+    expect(parseAmounts('650 € / mês, 1 500 € por noite, 2 400 €/month').every((a) => a.perUnit)).toBe(true);
+    expect(inRange(parseAmounts('no price shown'), spec, 15000)).toBe(true);
+    expect(inRange([], spec, null)).toBe(false);
+  });
+
+  it('never treats chat, social, API or image links as listings, nor keyword searches like /q-20000/', () => {
+    for (const url of ['https://wa.me/905312732069?text=hi', 'https://api.goswap.org/listing/123456', 'https://s3.vietnam-real.estate/p/x/3zg64igysq45/6ad6708821e4.jpg', 'https://www.olx.pt/imoveis/terrenos-quintas/aveiro/q-20000/', 'https://web.archive.org/web/20250101/https://x.example/ad/123456']) expect(looksLikeListing(url), url).toBe(false);
+    expect(looksLikeListing('https://www.imovirtual.com/pt/anuncio/terreno-535-m-quinta-do-anjo-ID1iA1X')).toBe(true);
+  });
+
+  it('checks up to 75 items for 50 wanted, reads each page once within 6 hours, and at most 6 at a time', async () => {
+    let open = 0;
+    let peak = 0;
+    const reads: string[] = [];
+    const cache = new Map();
+    const readPage = async (url: string) => { reads.push(url); open++; peak = Math.max(peak, open); await new Promise((r) => setTimeout(r, 2)); open--; return { status: 200, text: `Plot for sale ${'x'.repeat(200)} 15 000 €` }; };
+    const items = Array.from({ length: 90 }, (_, i) => ({ url: `https://portal.example/ad/plot-${100000 + i}` }));
+    const checker = new AcceptanceChecker({ readPage, cache });
+    const result = await checker.evaluate({ itemCount: 50, valueRange: [0, 20000], unit: 'EUR', mustMention: [], urlsLive: false }, items);
+    expect(MAX_ITEM_CHECKS).toBe(100);
+    expect(result!.items).toHaveLength(75);
+    expect(result!.checks[0]).toMatchObject({ value: 1, passed: true });
+    expect(peak).toBeLessThanOrEqual(PAGE_READS_AT_ONCE);
+    await new AcceptanceChecker({ readPage, cache }).evaluate({ itemCount: 50, valueRange: [0, 20000], unit: 'EUR', mustMention: [], urlsLive: false }, items);
+    expect(reads).toHaveLength(75);
+    expect(PAGE_CHECK_TTL_MS).toBe(6 * 3600 * 1000);
+  });
+
+  it('counts harvested listings from a weak piece, but not what a weak piece\'s model answer listed', () => {
+    const nodes = [
+      { id: 'D1', status: 'weak', finding: { items: [{ url: 'https://a.example/ad/1', harvested: true }, { url: 'https://a.example/ad/2' }] } },
+      { id: 'D2', status: 'supported', finding: { items: [{ url: 'https://a.example/ad/3' }, { url: 'https://a.example/ad/1', harvested: true }] } },
+    ];
+    expect(collectDeliverables(nodes as never).map((i: { url: string; nodeId: string }) => `${i.nodeId} ${i.url}`)).toEqual(['D2 https://a.example/ad/3', 'D1 https://a.example/ad/1']);
+    const mixed = [{ id: 'D1', status: 'weak', finding: { items: [{ url: 'u1', harvested: true }, { url: 'u2', harvested: true, value: 15000 }] } }, { id: 'D2', status: 'verified', finding: { items: [{ url: 'u3' }] } }];
+    expect(collectDeliverables(mixed as never).map((i: { url: string }) => i.url)).toEqual(['u3', 'u2', 'u1']);
   });
 });
