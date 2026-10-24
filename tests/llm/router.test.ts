@@ -265,3 +265,25 @@ describe('ModelRouter timeouts', () => {
   });
 });
 
+describe('ModelRouter local models by measured speed', () => {
+  it('gives a local model only the calls that fit its speed, keeps it as last resort, and sizes its time limit to the call', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const preset = { id: 'llamacpp', label: 'l', baseURL: 'http://127.0.0.1:8090/v1', keyEnv: null, local: true, prefer: { fast: [], deep: [] } };
+    const mac = new OpenAICompatibleProvider({ preset, fetchImpl: (async () => new Response('{}')) as never });
+    mac.state = 'ready';
+    mac.selected = { fast: 'Qwen3-4B', deep: 'Qwen3-4B', vision: null };
+    mac.speed = { prefill: 102, decode: 19.2 };
+    const cloud = { id: 'groq', ready: true, describe: () => ({}), selected: { fast: 'g' }, chat: async () => ({ content: '{}', model: 'g' }) };
+    const router = new ModelRouter({ providers: [mac, cloud] });
+    expect(router.available({ tier: 'fast', purpose: 'rollup', tokens: 1500 }).map((p: { id: string }) => p.id)).toEqual(['llamacpp', 'groq']);
+    expect(router.available({ tier: 'fast', purpose: 'research', tokens: 9000 }).map((p: { id: string }) => p.id)).toEqual(['groq', 'llamacpp']);
+    expect(router.available({ tier: 'deep', purpose: 'synthesize', tokens: 8400 }).map((p: { id: string }) => p.id)[0]).toBe('llamacpp');
+    expect(mac.estimateSeconds(8400, 1500)).toBeCloseTo(160.5, 0);
+    expect(mac.timeoutFor(8400, 1500)).toBe(Math.round(mac.estimateSeconds(8400, 1500) * 1500 + 10000));
+    expect(mac.timeoutFor(500, 50)).toBe(60000);
+    expect(mac.timeoutFor(60000, 4000)).toBe(480000);
+    delete mac.speed;
+    expect(mac.timeoutFor(8400, 1500)).toBeUndefined();
+  });
+});
+

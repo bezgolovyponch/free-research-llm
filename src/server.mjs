@@ -21,6 +21,7 @@ import { accessLinks, lanAddresses } from './service.mjs';
 import { ShareBook, shareAllows, shareLinks } from './share.mjs';
 import { REACHABLE_PAGE, RemoteVisits } from './visits.mjs';
 import { EventStream } from './events.mjs';
+import { clientNodes } from './research/compact.mjs';
 import { HeapGuard } from './heapguard.mjs';
 import { pcSetupCommand, pcSetupScript } from './local/pcsetup.mjs';
 import { ensureLocalModel } from './local/autostart.mjs';
@@ -60,7 +61,7 @@ export function withResults(project) {
   if (!project || typeof project !== 'object' || !Array.isArray(project.nodes) || typeof project.question !== 'string') return project;
   const { plan, ...status } = resultStatus(project);
   const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question) };
-  return { ...project, nodes: project.nodes.map((n) => (cleanTitle(n.title) !== n.title ? { ...n, title: cleanTitle(n.title) } : n)), results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
+  return { ...project, nodes: clientNodes(project.nodes).map((n) => (cleanTitle(n.title) !== n.title ? { ...n, title: cleanTitle(n.title) } : n)), results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
 }
 
 function send(res, status, body, type = 'application/json; charset=utf-8') {
@@ -322,10 +323,13 @@ export function createServer(app, gate = new AccessGate()) {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
     req.socket?.setKeepAlive?.(true, 15000);
     const stream = new EventStream({ res, render: (current) => ({ ...withResults(current), ...app.engine.teamOf(id) }) });
+    app.liveStreams ??= new Set();
+    app.liveStreams.add(stream);
     stream.push({ type: 'hello', message: 'connected' }, project);
     const unsubscribe = app.engine.subscribe(id, (event, current) => stream.push(event, current));
     const ping = setInterval(() => stream.ping(), 20000);
     const done = () => {
+      app.liveStreams?.delete(stream);
       clearInterval(ping);
       unsubscribe();
       stream.close();
@@ -447,7 +451,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   new HeapGuard({ onHigh: (mb) => {
     void app.logs.append('history', { type: 'session', message: `memory at ${mb} MB: restarting gracefully before it runs out (work is saved and the loop resumes)` });
     app.onRestart?.();
-  } }).start();
+  } }).start({ onSample: (sample) => void app.logs.append('memory', sample), extra: () => ({ streams: app.liveStreams?.size ?? 0 }) });
   process.on('SIGTERM', () => void stop('SIGTERM'));
   process.on('SIGINT', () => void stop('SIGINT'));
   if (process.env.FRL_AUTO_RESUME !== '0') {

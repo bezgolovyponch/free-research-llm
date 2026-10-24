@@ -1,4 +1,5 @@
-export const HEAP_LIMIT_MB = 1500;
+export const HEAP_LIMIT_MB = 1024;
+export const SAMPLE_EVERY_MS = 10 * 60 * 1000;
 export const CHECK_EVERY_MS = 60 * 1000;
 
 export class HeapGuard {
@@ -18,9 +19,18 @@ export class HeapGuard {
     return true;
   }
 
-  start() {
+  sample(extra = {}) {
+    const m = process.memoryUsage();
+    return { heapMB: Math.round(m.heapUsed / 1048576), rssMB: Math.round(m.rss / 1048576), ...extra };
+  }
+
+  start({ onSample, extra = () => ({}), sampleEveryMs = SAMPLE_EVERY_MS } = {}) {
     this.timer = setInterval(() => this.check(), this.everyMs);
     this.timer.unref?.();
+    if (onSample) {
+      this.sampler = setInterval(() => onSample(this.sample(extra())), sampleEveryMs);
+      this.sampler.unref?.();
+    }
     return this;
   }
 }

@@ -119,7 +119,9 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 |---|---|---|
 | The app ran out of memory (2 GB heap, twice in ~7 h): every live-update event wrote the whole research (3.3 MB) to each open page, and a page whose connection silently died kept buffering it | Updates are batched (at most one every 0.5 s per page), the research is serialised only when sent, nothing is written while a page is not reading, and a connection with over 8 MB unread or stuck for 60 s is closed; TCP keep-alive finds dead peers | `src/events.mjs` |
 | The crash restarted the app; the loop's start-up re-roll then failed on every provider (Gemini 503 high demand, Groq 413) and that error ended the loop | Provider outages pause the loop 5 min and it continues, at start-up and in every pass ("every provider failed", 5xx, high demand count as temporary) | `ProjectImprover.whenModelsAnswer` |
-| — | If memory still passes 1.5 GB, the app restarts gracefully (handoff saved, loop resumes) instead of crashing | `src/heapguard.mjs` |
+| — | If memory passes 1 GB (sized for an 8 GB computer that also runs llama.cpp), the app restarts gracefully (handoff saved, loop resumes); heap, RSS and open live-update connections are logged every 10 min to `data/logs/memory.jsonl` | `src/heapguard.mjs` |
+| The research file was 3.3 MB, 2.4 MB of it scraped page text and link lists, sent to every page on every update | Stored sources keep 4,000 characters of text and 40 links once a piece is researched (prompts use 2,200 and 15); pages get a light view (300 characters, a link count) | `src/research/compact.mjs` |
+| Local models: the other PC's (CPU, 12 / 2 tokens/s) failed every call; this Mac's timed out on a long memo with a flat 120 s limit | Each call to a local model is estimated from its measured speed (prompt ÷ reading speed + expected answer ÷ writing speed); it goes first when it fits (100 s, memo 300 s), last otherwise, and gets a time limit sized to the estimate (60–480 s); a model too slow even for a short 1,500-token call is not used | `ModelRouter.demoteOverBudget`, `timeoutFor`, `src/local/speed.mjs` |
 
 ## 4e. Criteria grounding
 

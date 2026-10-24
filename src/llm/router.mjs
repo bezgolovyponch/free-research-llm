@@ -8,6 +8,9 @@ const DEFAULT_COOLDOWN_MS = 60000;
 export const SLOW_FACTOR = 4;
 export const SLOW_FLOOR_MS = 20000;
 const MIN_TIMED_CALLS = 3;
+export const EXPECTED_OUTPUT_TOKENS = { synthesize: 1500, decompose: 1500, research: 800, improve: 500, suggest: 600, critique: 300, rollup: 400 };
+export const LOCAL_BUDGET_S = { synthesize: 300, decompose: 300 };
+export const LOCAL_DEFAULT_BUDGET_S = 100;
 export const TIMEOUTS_BEFORE_BENCH = 2;
 export const TIMEOUT_BENCH_MS = 10 * 60 * 1000;
 const TIMED_OUT = /unreachable: timed out/;
@@ -68,7 +71,7 @@ export class ModelRouter {
     const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
-    const usable = this.demoteSlow(this.demoteFull(sized), tier);
+    const usable = this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose);
     if (!avoid) return usable;
     const author = this.providers.find((p) => p.id === avoid);
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
@@ -91,6 +94,16 @@ export class ModelRouter {
     this.cooldownReason.set(provider.id, `too slow: ${streak} timeouts in a row; tried again in 10 min`);
     this.timeoutStreak.set(provider.id, 0);
     return true;
+  }
+
+  demoteOverBudget(providers, tokens, purpose) {
+    const out = EXPECTED_OUTPUT_TOKENS[purpose] ?? 500;
+    const budget = LOCAL_BUDGET_S[purpose] ?? LOCAL_DEFAULT_BUDGET_S;
+    const over = (p) => {
+      const seconds = p.estimateSeconds?.(tokens, out);
+      return seconds !== null && seconds !== undefined && seconds > budget;
+    };
+    return [...providers.filter((p) => !over(p)), ...providers.filter(over)];
   }
 
   demoteFull(providers) {
@@ -185,7 +198,7 @@ export class ModelRouter {
         const model = provider.selected?.[tier] ?? provider.selected?.fast;
         this.inflight.set(provider.id, (this.inflight.get(provider.id) ?? 0) + 1);
         try {
-          const reply = await provider.chat({ messages: attemptMessages, tier, json, temperature });
+          const reply = await provider.chat({ messages: attemptMessages, tier, json, temperature, timeoutMs: provider.timeoutFor?.(estimateTokens(attemptMessages), EXPECTED_OUTPUT_TOKENS[purpose] ?? 500) });
           this.calls++;
           const data = json ? extractJson(reply.content) : null;
           this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms: this.now() - started, tokens: reply.usage?.total_tokens ?? null });

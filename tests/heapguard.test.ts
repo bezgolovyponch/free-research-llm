@@ -7,10 +7,11 @@ describe('HeapGuard', () => {
     const calls: number[] = [];
     const guard = new HeapGuard({ onHigh: (mb: number) => calls.push(mb), usage: () => used });
     expect(guard.check()).toBe(false);
-    used = 1600 * 1048576;
+    used = 1100 * 1048576;
     expect(guard.check()).toBe(true);
     expect(guard.check()).toBe(false);
-    expect(calls).toEqual([1600]);
-    expect(HEAP_LIMIT_MB).toBeLessThan(2048);
+    expect(calls).toEqual([1100]);
+    expect(HEAP_LIMIT_MB).toBe(1024);
+    expect(Object.keys(guard.sample({ streams: 2 }))).toEqual(['heapMB', 'rssMB', 'streams']);
   });
 });

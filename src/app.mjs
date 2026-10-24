@@ -206,6 +206,7 @@ export class App {
     for (const provider of this.router.providers) {
       const known = provider.preset?.local && this.localSpeed?.get(provider.baseURL);
       if (!known) continue;
+      if (known.speed) provider.speed = known.speed;
       if (!known.usable && provider.state === 'ready') {
         provider.state = 'too-slow';
         provider.detail = known.text;
@@ -227,7 +228,8 @@ export class App {
         continue;
       }
       try {
-        const verdict = { ...speedVerdict(await measureSpeed(provider.baseURL, { fetchImpl: this.fetchImpl, model: provider.selected.fast ?? 'local', apiKey: provider.apiKey })), at: Date.now() };
+        const speed = await measureSpeed(provider.baseURL, { fetchImpl: this.fetchImpl, model: provider.selected.fast ?? 'local', apiKey: provider.apiKey });
+        const verdict = { ...speedVerdict(speed), speed, at: Date.now() };
         if (known && known.usable !== verdict.usable) void this.logs.append('history', { type: 'session', message: `${provider.preset.label}: ${verdict.usable ? 'fast enough again' : 'now'} ${verdict.text}` });
         this.localSpeed.set(provider.baseURL, verdict);
         verdicts.push(verdict);

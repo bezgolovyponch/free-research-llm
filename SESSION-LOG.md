@@ -372,3 +372,8 @@ Asked: why failed; fix, merge.
 - Fixed: bounded, batched live-update stream (`src/events.mjs`); loop pauses 5 min on provider outages instead of ending; graceful restart at 1.5 GB heap (`src/heapguard.mjs`).
 - GitHub CI failed twice on the same flaky e2e test (router page: click while the phone sidebar was still sliding in, 60 s limit); the test now waits for the sidebar and has 2 min.
 - CI then failed on Node 22 in another phone-menu e2e test (same cause: clicking inside the sliding sidebar). The app now drops animations under prefers-reduced-motion, and the e2e runs with reduced motion and waits for the menu to open.
+
+## Session 2026-10-24 · memory precautions, local models by speed
+
+- Research file 3.3 MB, 2.4 MB of it page text and link lists: stored sources now capped (4,000 chars, 40 links) after a piece is researched, pages get a light view. Graceful restart at 1 GB heap; memory sampled every 10 min to data/logs/memory.jsonl with the count of open live-update connections.
+- Local models routed by measured speed per call: first when the call fits (this Mac: rollups and short calls), last resort otherwise with a time limit sized to the estimate (a long memo on this Mac gets ~4 min instead of failing at 120 s); the other PC stays unused while it is CPU-only.

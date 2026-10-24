@@ -6,7 +6,8 @@ describe('local model speed gate', () => {
     expect(speedVerdict({ prefill: 102, decode: 19.2 })).toMatchObject({ usable: true });
     const pc = speedVerdict({ prefill: 12, decode: 2.1 });
     expect(pc.usable).toBe(false);
-    expect(pc.text).toMatch(/too slow for research \(reads 12 tokens\/s, writes 2\.1 tokens\/s: a typical 7000-token research call takes 774 s, the limit is 100 s\)/);
+    expect(pc.text).toMatch(/too slow for research \(reads 12 tokens\/s, writes 2\.1 tokens\/s: a typical 7000-token research call takes 774 s; even a short 1500-token call takes 173 s, the limit is 100 s\)/);
+    expect(speedVerdict({ prefill: 102, decode: 19.2 }).text).toMatch(/it gets the calls that fit its speed/);
     expect(projectedSeconds({ prefill: 0, decode: 5 })).toBe(Infinity);
     expect(SPEED_BUDGET_S).toBe(100);
   });

@@ -11,6 +11,7 @@ import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL } from './deliverable.mjs';
+import { compactProject, compactSources } from './compact.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
 import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
@@ -447,6 +448,8 @@ export class ResearchEngine {
       project.phase = 'researching';
       project.error = null;
       for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';
+      const compacted = compactProject(project);
+      if (compacted) this.emit(project, 'tree', `stored page text and links capped for ${compacted} source(s) to keep memory small`);
       const fixes = repairTree(project.nodes, project.question);
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       this.regrade(project);
@@ -465,8 +468,10 @@ export class ResearchEngine {
           const node = byId.get(nodeId);
           if (DONE.has(node.status)) return;
           try {
-            if (isLeaf(project.nodes, node)) await this.researchLeaf(project, node, hints[node.id]);
-            else await this.rollup(project, node);
+            if (isLeaf(project.nodes, node)) {
+              await this.researchLeaf(project, node, hints[node.id]);
+              node.sources = compactSources(node.sources).sources;
+            } else await this.rollup(project, node);
           } catch (error) {
             node.status = 'failed';
             node.error = error.message;

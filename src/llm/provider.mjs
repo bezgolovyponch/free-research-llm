@@ -28,6 +28,8 @@ export function pickModel(models, preferences, freeOnly = false, { strict = fals
 }
 
 const LOCAL_OUTPUT_RESERVE = 3000;
+export const LOCAL_TIMEOUT_MIN_MS = 60000;
+export const LOCAL_TIMEOUT_MAX_MS = 480000;
 
 export function quotaWindow(body) {
   const text = String(body);
@@ -184,7 +186,18 @@ export class OpenAICompatibleProvider {
     return this.ready && (tier !== 'vision' || Boolean(this.selected.vision));
   }
 
-  async chat({ messages, tier = 'fast', json = true, temperature = 0.2, maxTokens = 4000 }) {
+  estimateSeconds(promptTokens, outTokens) {
+    if (!this.speed?.prefill || !this.speed?.decode) return null;
+    return promptTokens / this.speed.prefill + outTokens / this.speed.decode;
+  }
+
+  timeoutFor(promptTokens, outTokens) {
+    const seconds = this.estimateSeconds(promptTokens, outTokens);
+    if (seconds === null) return undefined;
+    return Math.min(LOCAL_TIMEOUT_MAX_MS, Math.max(LOCAL_TIMEOUT_MIN_MS, Math.round(seconds * 1500 + 10000)));
+  }
+
+  async chat({ messages, tier = 'fast', json = true, temperature = 0.2, maxTokens = 4000, timeoutMs }) {
     const model = this.selected[tier] ?? this.selected.fast;
     const cap = this.preset.maxOutputTokens ?? MAX_TOKEN_BUDGET;
     let budget = Math.min(maxTokens, cap);
@@ -194,7 +207,7 @@ export class OpenAICompatibleProvider {
       const payload = { model, messages, temperature, max_tokens: budget, ...(this.preset.extraBody ?? {}), ...(jsonMode ? { response_format: { type: 'json_object' } } : {}) };
       let body;
       try {
-        body = await this.request('/chat/completions', { method: 'POST', body: JSON.stringify(payload) });
+        body = await this.request('/chat/completions', { method: 'POST', body: JSON.stringify(payload), ...(timeoutMs ? { timeoutMs } : {}) });
       } catch (error) {
         if (jsonMode && error.status === 400) {
           jsonMode = false;
