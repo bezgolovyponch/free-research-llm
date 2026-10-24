@@ -53,6 +53,19 @@ describe('verifyFinding', () => {
   });
 });
 
+describe('attribution without claims', () => {
+  it('never grades an answer with no claims behind it above weak', () => {
+    const v = verifyFinding({ finding: { answer: 'A dealer licence is required above 5 cars a year.', claims: [], confidence: 'low' }, sources, node: { method: 'lookup', unit: '' } });
+    expect(v.checks.find((c) => c.id === 'attribution')).toMatchObject({ passed: false, detail: 'the answer has no claims behind it' });
+    expect(v.grade).toBe('weak');
+  });
+
+  it('skips attribution when there is no answer at all', () => {
+    const v = verifyFinding({ finding: { answer: '', claims: [] }, sources });
+    expect(v.checks.some((c) => c.id === 'attribution')).toBe(false);
+  });
+});
+
 describe('concrete answers', () => {
   it('downgrades an answer that says the evidence cannot settle it', () => {
     const v = verifyFinding({ finding: { answer: 'Based on the evidence it is not possible to determine the median price.', claims: [], confidence: 'low' }, sources, node: { method: 'lookup', unit: 'EUR', metric: 'median price' } });
