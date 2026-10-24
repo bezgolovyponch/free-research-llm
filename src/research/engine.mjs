@@ -470,6 +470,12 @@ export class ResearchEngine {
     this.running.add(id);
     this.cancelled.delete(id);
     let project;
+    let released = false;
+    const release = () => {
+      released = true;
+      this.running.delete(id);
+      if (!this.quiet.has(id)) this.leave(id);
+    };
     try {
       project = await this.load(id);
       if (!project.nodes.length) await this.decompose(project);
@@ -512,7 +518,7 @@ export class ResearchEngine {
       });
       if (this.cancelled.has(id)) {
         project.phase = 'cancelled';
-        this.running.delete(id);
+        release();
         this.emit(project, 'phase', 'stopped by user');
         if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
         return await this.store.save(project);
@@ -520,7 +526,7 @@ export class ResearchEngine {
       await this.synthesize(project);
       this.checkSpecs(project);
       project.phase = 'done';
-      this.running.delete(id);
+      release();
       this.emit(project, 'phase', 'done');
       appendAppMessage(project, runSummary(project));
       if (!this.quiet.has(id)) await this.onStop(project, { reason: 'research finished' });
@@ -536,8 +542,7 @@ export class ResearchEngine {
       }
       throw error;
     } finally {
-      this.running.delete(id);
-      if (!this.quiet.has(id)) this.leave(id);
+      if (!released) release();
     }
   }
 
