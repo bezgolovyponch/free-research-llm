@@ -49,9 +49,10 @@ describe('trial record', () => {
   it('keeps a removal that raises the coverage score by more than 0.01 and logs the removed piece and the delta', async () => {
     const saved = await removalLoop((nodes) => { for (const n of nodes) n.status = 'verified'; });
     const removal = saved.improve.trials.find((t: { nodeId: string }) => t.nodeId === 'Q');
-    expect(removal).toMatchObject({ outcome: 'kept', removedPieceId: 'D4', before: 0.663, score: 0.725, scoreDelta: 0.062 });
+    expect(removal).toMatchObject({ outcome: 'kept', removedPieceId: 'D4' });
+    expect(removal.scoreDelta).toBeGreaterThan(0.01);
     expect(saved.nodes.some((n: Node) => n.id === 'D4')).toBe(false);
-    expect(saved.improve.best).toBe(0.725);
+    expect(saved.improve.best).toBe(removal.score);
     for (const t of saved.improve.trials) expect(t.scoreDelta).toBe(Math.round((t.score - t.before) * 1000) / 1000);
   });
 

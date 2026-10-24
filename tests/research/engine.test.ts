@@ -15,7 +15,7 @@ const fakeSearch = {
   async search(queries: string[]) {
     return [
       { kind: 'web', title: 'One', url: 'https://one.example/a', domain: 'one.example', snippet: 's', text: `about ${queries[0]}` },
-      { kind: 'web', title: 'Two', url: 'https://two.example/b', domain: 'two.example', snippet: 's', text: 'more' },
+      { kind: 'web', title: 'Two', url: 'https://two.example/b', domain: 'two.example', snippet: 's', text: 'more evidence from a second independent source on the same question' },
     ];
   },
   describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
@@ -178,6 +178,25 @@ describe('ResearchEngine', () => {
     expect(engine.lanesFor(project.id)).toBe(2);
   });
 
+  it('keeps a teammate who joins a new run while the finished run is still writing its handoff', async () => {
+    let finishHandoff = () => {};
+    let handoffStarted = () => {};
+    const handoffBegun = new Promise<void>((started) => { handoffStarted = started; });
+    const onStop = () => new Promise<void>((done) => { finishHandoff = done; handoffStarted(); });
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), lanes: 2, onStop });
+    const project = await engine.createProject({ question: 'Which Czech city suits a small specialty bakery best?' });
+    const finishing = engine.run(project.id);
+    await handoffBegun;
+    expect(engine.running.has(project.id)).toBe(false);
+    engine.running.add(project.id);
+    expect(engine.join(project.id, 'pc')).toMatchObject({ joined: true, lanes: 3 });
+    finishHandoff();
+    await finishing;
+    expect(engine.running.has(project.id)).toBe(true);
+    expect(engine.teamOf(project.id)).toEqual({ lanes: 3, helpers: ['pc'] });
+  });
+
   it('re-grounds checks stored before the fix, keeps hand-set ones, and re-scores before a loop baseline', async () => {
     const { engine } = engineWith(new ScriptedProvider());
     const project = await engine.createProject({ question: 'Find plots for a glamping business, 20000EUR max', expected: '50 plots feasible for glamping' });
@@ -296,7 +315,7 @@ describe('ResearchEngine', () => {
     expect(p.nodes.some((n: { id: string }) => n.id.startsWith('D3'))).toBe(false);
     const rerun = await engine.run(project.id);
     expect(rerun.phase).toBe('done');
-    expect(rerun.nodes.every((n: { status: string }) => n.status === 'verified')).toBe(true);
+    expect(rerun.nodes.filter((n: { status: string }) => n.status !== 'verified').map((n: { id: string; status: string; verification?: { failures: string[] } }) => `${n.id} ${n.status} ${(n.verification?.failures ?? []).join(' | ')}`)).toEqual([]);
   });
 
   it('rejects a second concurrent run and too-short questions', async () => {

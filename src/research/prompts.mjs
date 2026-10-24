@@ -132,6 +132,8 @@ ${sourcesBlock(sources)}
 ${previousFailures?.length ? `\nA PREVIOUS ATTEMPT FAILED THESE CHECKS — fix the cause:\n- ${previousFailures.join('\n- ')}\n` : ''}
 RULES:
 - Answer only from EVIDENCE and established answers. For legality or licensing queries, require official statutes or terms of service as sources. If evidence is missing, give your best estimate, set "assumption": true on that claim and say what data would settle it in "gaps".
+- Work like a researcher: first list ATOMIC claims (one fact each), each with "quote": the exact words, 5–30 of them, copied character for character from the cited source that state that fact (a number in the claim must appear in its quote). Code checks every quote against the source text; a claim whose quote is not found counts as unsupported.
+- Then write "reasoning": one or two lines that derive the answer from the claims (e.g. "C1 and C2 give 3 plots under 20,000 EUR; C3 rules out one inland, so 2 remain"). The "answer" may state only numbers that appear in your claims or calculation.
 - Every claim containing a number must list sourceIds from the EVIDENCE ids above, or be marked assumption.
 - "sourceIds" may only contain ids shown above (${sources.map((s) => s.id).join(', ') || 'none'}). Never invent ids or URLs.
 - If the method is calculation/comparison, provide "calculation": a formula using variable names (letters, digits, _), + - * / ^ ( ) and min/max/abs/round, the numeric value of each input, and the result. The result will be recomputed by machine.
@@ -141,7 +143,7 @@ RULES:
 - If the sub-question asks for concrete items (listings, offers, products, pages, links), return them in "items". An item "url" must be copied exactly from a LINKS list or a source URL above; any other URL is rejected by machine.
 
 JSON shape:
-{"answer":"one or two sentences that directly answer the sub-question, with the key number","claims":[{"text":"","value":null,"unit":"","sourceIds":["S1"],"assumption":false}],"calculation":{"formula":"","inputs":{"name":{"value":0,"unit":"","sourceId":"S1"}},"result":0,"unit":""},"items":[{"title":"","url":"","value":null,"unit":"","sourceId":"S1"}],"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}
+{"answer":"one or two sentences that directly answer the sub-question, with the key number","claims":[{"text":"","value":null,"unit":"","sourceIds":["S1"],"quote":"exact words from S1","assumption":false}],"reasoning":"C1 + C2 → answer","calculation":{"formula":"","inputs":{"name":{"value":0,"unit":"","sourceId":"S1"}},"result":0,"unit":""},"items":[{"title":"","url":"","value":null,"unit":"","sourceId":"S1"}],"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}
 Omit "calculation" if no arithmetic is involved; omit "items" if no concrete items are asked for.`,
     },
   ];
@@ -179,8 +181,8 @@ DRIVER ${node.id}: ${node.question}
 SUB-FINDINGS:
 ${children.map((c) => `${c.id} [${c.status}] ${c.question}\n  -> ${c.finding?.answer ?? 'no answer'}`).join('\n')}
 
-Combine the sub-findings into the driver's answer. Do not add new facts. Cite sub-finding ids in the text. If a sub-finding is weak or unsupported, say how that limits the conclusion.
-JSON shape: {"answer":"","claims":[{"text":"","sourceIds":[],"assumption":false}],"confidence":"low|medium|high","assumptions":[""],"gaps":[""]}`,
+Combine the sub-findings into the driver's answer. Do not add new facts. Each claim cites the sub-finding id it rests on in "sourceIds" and copies the exact words from that sub-finding's answer in "quote"; code checks the quote. Then give "reasoning": how the claims lead to the driver's answer. If a sub-finding is weak or unsupported, say how that limits the conclusion.
+JSON shape: {"answer":"","claims":[{"text":"","sourceIds":["D1.1"],"quote":"exact words from D1.1's answer","assumption":false}],"reasoning":"","confidence":"low|medium|high","assumptions":[""],"gaps":[""]}`,
     },
   ];
 }
@@ -242,11 +244,13 @@ function specsText(specs = []) {
 
 const SPEC_RULE = `"spec": machine checks taken ONLY from the DESIRED OUTPUT: {"mustMention":[only words the DESIRED OUTPUT explicitly demands (\"must mention X\", quoted words); topic words are not must-mentions],"needsNumber":true|false,"valueRange":[min,max] or null,"unit":"","itemCount":number of linked items wanted or null,"minGrade":"supported"|"verified"}. Code stores it as a regression test for this piece and re-checks it after every run and every loop change.`;
 
-export function variantPrompt({ project, node, score, trials }) {
+export function variantPrompt({ project, node, score, trials, stall = null }) {
   const isRoot = node.id === 'Q';
   const drivers = project.nodes.filter((n) => n.parentId === 'Q').map((n) => `${n.id} [${n.status}] ${n.question}`).join('\n');
   const sources = (node.sources ?? []).filter((s) => s.url).slice(0, 8).map((s) => `${s.id} ${s.title} <${s.url}> (${(s.links ?? []).length} links)`).join('\n') || 'none';
   const tried = trials.slice(-6).map((t) => `- ${t.change} -> ${t.outcome} (${t.score})`).join('\n') || 'none';
+  const refused = stall?.refusedRemovals?.length ? `\nREMOVALS ALREADY TESTED AND REFUSED (never propose them again): ${stall.refusedRemovals.join(', ')}` : '';
+  const stalled = stall?.stalled ? `\nTHE LOOP IS STALLED: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h kept nothing.${stall.weakest ? ` The weakest expected-result check is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%.` : ''} Removing or re-wording pieces has not raised the score. Propose a change that brings NEW evidence for that check: exact public pages to read (sourceUrls), local-language queries, a source type not used yet, or a region not covered yet.` : '';
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -260,7 +264,7 @@ CURRENT SCORE: ${score.score} (share of verified/supported nodes${score.acceptan
 EXPECTED-RESULT CHECKS:
 ${acceptanceBlock(project.acceptanceResult)}
 
-${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change. First remove ("remove") a top-level piece that duplicates another or asks for the same items again; add ("add") only a piece for a missing criterion or a missing region, never another piece that finds the same items. At most 7 top-level pieces (now ${project.nodes.filter((n) => n.parentId === 'Q').length}); a change that adds duplicates or restates the question is refused by code.` : `PIECE ${node.id} [${node.status}]: ${node.question}
+${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change. Remove ("remove") a top-level piece only if it duplicates another or asks for the same items again; add ("add") only a piece for a missing criterion or a missing region, never another piece that finds the same items. At most 7 top-level pieces (now ${project.nodes.filter((n) => n.parentId === 'Q').length}); a change that adds duplicates or restates the question is refused by code.` : `PIECE ${node.id} [${node.status}]: ${node.question}
 method: ${node.method} · metric: ${node.metric} ${node.unit} · queries: ${node.searchQueries.join(' | ')} · direct pages: ${(node.sourceUrls ?? []).join(' ') || 'none'}
 instructions: ${node.instructions || 'none'}
 answer: ${node.finding?.answer ?? 'none'}
@@ -272,8 +276,8 @@ ${sources}
 
 Propose ONE change to this piece: a sharper question, better search queries (local language helps), exact public pages to read directly (sourceUrls), a different method, extra instructions, or a split into 2-3 smaller pieces ("split").`}
 
-ALREADY TRIED (do not repeat):
-${tried}
+ALREADY TRIED (do not repeat; code refuses a repeat without testing it):
+${tried}${refused}${stalled}
 
 Reply with only the fields you change. JSON shape:
 {"change":"one sentence: what and why","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup","instructions":"","split":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"add":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"remove":[""]}`,

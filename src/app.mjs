@@ -19,6 +19,7 @@ import { probePeer } from './local/peer.mjs';
 import { measureSpeed, speedVerdict } from './local/speed.mjs';
 
 const SPEED_RECHECK_MS = 30 * 60 * 1000;
+const SLOW_RECHECK_MS = 10 * 60 * 1000;
 import { AppChat } from './appchat.mjs';
 import { HandoffWriter } from './research/handoff.mjs';
 import { appendAppMessage } from './research/notify.mjs';
@@ -236,7 +237,7 @@ export class App {
         verdicts.push(known);
         continue;
       }
-      if (!force && known && Date.now() - known.at < SPEED_RECHECK_MS) {
+      if (!force && known && Date.now() - known.at < (known.usable ? SPEED_RECHECK_MS : SLOW_RECHECK_MS)) {
         verdicts.push(known);
         continue;
       }
@@ -269,7 +270,8 @@ export class App {
     const waiting = this.router.providers.filter((p) => p.preset?.local && !['ready', 'too-slow'].includes(p.state) && p.baseURL);
     for (const provider of waiting) await provider.discover().catch(() => {});
     const back = waiting.filter((p) => p.state === 'ready');
-    for (const p of back) void this.logs.append('history', { type: 'session', message: `${p.preset.label} is answering again (${p.selected.fast})` });
+    for (const p of back) void this.logs.append('history', { type: 'session', message: `${p.preset.label} is answering again (${p.selected.fast}); measuring its speed now` });
+    for (const p of back) await this.checkLocalSpeed({ only: p.id, force: true });
     return back.map((p) => p.id);
   }
 
