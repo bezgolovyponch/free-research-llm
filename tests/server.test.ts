@@ -198,6 +198,12 @@ describe('research share links', () => {
       expect((await helper('GET', '/api/projects')).body.map((p: { id: string }) => p.id)).toEqual([shared.id]);
       expect((await helper('GET', `/api/projects/${shared.id}`)).body.question).toMatch(/bakery/);
       expect((await helper('GET', '/api/status')).body).toMatchObject({ ledger: [], coders: [] });
+      expect((await helper('GET', '/api/status')).body.thisDevice).toMatchObject({ host: '127.0.0.1', helping: false, servers: null });
+      shareApp.peers.results.set('127.0.0.1', { checkedAt: 0, endpoints: [{ id: 'llamacpp-lan', label: 'llama.cpp', url: 'http://127.0.0.1:8090/v1', ok: false, detail: 'no answer (PC off or asleep, server not started, or blocked by Windows Firewall)' }] });
+      const device = (await helper('GET', '/api/status')).body.thisDevice;
+      expect(device).toMatchObject({ helping: false, checkedAt: '1970-01-01T00:00:00.000Z', servers: [{ label: 'llama.cpp', ok: false }] });
+      expect(device.setup === null || device.setup.includes(`/pc-setup.ps1?share=${view.token}`)).toBe(true);
+      expect((await owner('GET', '/api/status')).thisDevice).toBeUndefined();
       for (const [m, u] of [['GET', `/api/projects/${other.id}`], ['DELETE', `/api/projects/${shared.id}`], ['POST', `/api/projects/${shared.id}/share`], ['POST', '/api/projects'], ['GET', '/api/terminal'], ['GET', '/api/router'], ['GET', '/api/chat'], ['GET', '/api/access']]) expect((await helper(m, u)).status, `${m} ${u}`).toBe(403);
       expect((await fetch(`${started.url}/api/projects`, { headers: remote })).status).toBe(401);
       expect((await fetch(`${started.url}/favicon.ico`, { headers: remote })).status).toBe(204);

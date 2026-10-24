@@ -2,6 +2,7 @@ export const PC_LLAMA_TAG = 'b11739';
 export const PC_LLAMA_PORT = 8090;
 export const PC_BIG_MODEL_MIN_MB = 11000;
 export const PC_TWO_SLOTS_MIN_MB = 16000;
+export const FIREWALL_RULE = 'Free Research LLM model server';
 
 export function pcSetupScript({ tag = PC_LLAMA_TAG, port = PC_LLAMA_PORT } = {}) {
   return [
@@ -30,9 +31,19 @@ export function pcSetupScript({ tag = PC_LLAMA_TAG, port = PC_LLAMA_PORT } = {})
     '$ctx = 16384 * $slots',
     'Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force',
     'Write-Host "Graphics: $gpus ($vramMB MB reported). Model: $model. The first start downloads it once."',
-    "Write-Host 'If Windows Firewall asks, allow llama-server on private networks.'",
-    `Start-Process -FilePath $server.FullName -ArgumentList @('-hf', $model, '-ngl', '99', '-c', "$ctx", '-np', "$slots", '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '0.0.0.0', '--port', '${port}', '-a', 'pc-model') -WorkingDirectory $server.DirectoryName`,
-    "Write-Host 'llama-server is starting in its own window. Keep that window open; the research app finds this PC within a minute.'",
+    `$serverArgs = @('-hf', $model, '-ngl', '99', '-c', "$ctx", '-np', "$slots", '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '0.0.0.0', '--port', '${port}', '-a', 'pc-model')`,
+    'Start-Process -FilePath $server.FullName -ArgumentList $serverArgs -WorkingDirectory $server.DirectoryName -WindowStyle Minimized',
+    "$startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'frl-llama.cmd'",
+    `Set-Content -Path $startup -Encoding ASCII -Value @('@echo off', ('cd /d "{0}"' -f $server.DirectoryName), ('start "frl-llama" /min "{0}" {1}' -f $server.FullName, ($serverArgs -join ' ')))`,
+    "Write-Host \"Starts again by itself after a restart: $startup\"",
+    '$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+    `$rule = '${FIREWALL_RULE}'`,
+    `if ($admin) { if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName $rule -Direction Inbound -Protocol TCP -LocalPort ${port} -Action Allow -Profile Private,Domain | Out-Null }; Write-Host "Firewall: port ${port} open on private networks." } else { Write-Host "Firewall: if the research app still cannot reach this PC, open PowerShell as administrator once and run: New-NetFirewallRule -DisplayName '$rule' -Direction Inbound -Protocol TCP -LocalPort ${port} -Action Allow -Profile Private,Domain" -ForegroundColor Yellow }`,
+    "$public = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq 'Public' })",
+    "if ($public.Count) { Write-Host \"This Wi-Fi is set to Public, which blocks other computers. As administrator run: Set-NetConnectionProfile -InterfaceIndex $($public[0].InterfaceIndex) -NetworkCategory Private\" -ForegroundColor Yellow }",
+    '$up = $false',
+    `for ($i = 0; $i -lt 120 -and -not $up; $i++) { try { Invoke-RestMethod -Uri 'http://127.0.0.1:${port}/v1/models' -TimeoutSec 3 | Out-Null; $up = $true } catch { Start-Sleep -Seconds 5 } }`,
+    `if ($up) { Write-Host 'Model server answers on port ${port}. The research app connects within a minute; keep this PC awake while it helps.' -ForegroundColor Green } else { Write-Host 'The model server did not answer within 10 minutes (the first model download can take longer). Check the minimized frl-llama window.' -ForegroundColor Yellow }`,
     '',
   ].join('\r\n');
 }

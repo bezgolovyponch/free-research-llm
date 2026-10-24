@@ -68,7 +68,7 @@ describe('App composition', () => {
     expect(localBase('http://127.0.0.1:8090/v1/')).toBe('http://127.0.0.1:8090/v1');
   });
 
-  it('measures a local model and keeps a too-slow one out of research until it gets fast enough', async () => {
+  it('measures a local model and uses a too-slow one only as the last resort until it gets fast enough', async () => {
     let speed = { prompt_n: 1500, prompt_per_second: 12, predicted_per_second: 2.1 };
     const fetchImpl = (async (url: string) => {
       if (url.endsWith('/v1/models')) return jsonResponse({ data: [{ id: 'pc-model' }] });
@@ -80,7 +80,7 @@ describe('App composition', () => {
     const [slow] = await app.checkLocalSpeed();
     expect(slow.usable).toBe(false);
     expect(app.status().providers[0]).toMatchObject({ state: 'too-slow' });
-    expect(app.router.available({ tier: 'fast' })).toEqual([]);
+    expect(app.router.available({ tier: 'fast' }).map((p: { id: string; state: string }) => `${p.id}:${p.state}`)).toEqual([`${app.router.providers[0].id}:too-slow`]);
     expect(await app.rediscoverLocal()).toEqual([]);
     await app.refreshProviders();
     expect(app.status().providers[0].state).toBe('too-slow');
@@ -89,6 +89,45 @@ describe('App composition', () => {
     expect(await app.isSleeping(app.router.providers[0])).toBe(false);
     expect(fast.usable).toBe(true);
     expect(app.status().providers[0].state).toBe('ready');
+  });
+
+  it('simulates the PC path: browser only, model server up, PC asleep, PC back', async () => {
+    let pc: 'browser-only' | 'serving' | 'asleep' = 'browser-only';
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      if (!url.startsWith('http://192.168.5.26:8090') || pc !== 'serving') throw new TypeError('fetch failed');
+      if (url.endsWith('/v1/models')) return jsonResponse({ data: [{ id: 'pc-model' }] });
+      if (url.endsWith('/props')) return jsonResponse({ default_generation_settings: { n_ctx: 32768 }, total_slots: 2, is_sleeping: false });
+      calls.push(url);
+      return jsonResponse({ choices: [{ message: { content: '{"answer":"from the PC"}' } }], model: 'pc-model', timings: { prompt_n: 1500, prompt_per_second: 900, predicted_per_second: 45 } });
+    }) as never;
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', FRL_WIKIPEDIA: '0' }, fetchImpl, dataDir: '/tmp/frl-unused-pc-sim' });
+    await app.refreshProviders();
+    app.peers.note('::ffff:192.168.5.26');
+    expect(await app.peers.check()).toEqual([]);
+    expect(app.peers.report('192.168.5.26')!.endpoints.find((e: { id: string }) => e.id === 'llamacpp-lan')).toMatchObject({ ok: false, detail: expect.stringMatching(/no answer/) });
+    pc = 'serving';
+    app.peers.peers.get('192.168.5.26')!.checkedAt = -Infinity;
+    expect((await app.peers.check()).map((e: { id: string }) => e.id)).toEqual(['llamacpp-lan']);
+    const lan = app.router.providers.find((p: { id: string }) => p.id === 'llamacpp-lan')!;
+    expect(lan).toMatchObject({ state: 'ready', maxConcurrent: 2 });
+    app.engine.running.add('r1');
+    expect(app.syncPcLanes()).toEqual(['r1 +1']);
+    expect(app.engine.teamOf('r1')).toEqual({ lanes: 3, helpers: ['pc-gpu'] });
+    expect(app.syncPcLanes()).toEqual([]);
+    expect(await app.router.complete({ messages: [{ role: 'user', content: 'q' }], purpose: 'research' })).toMatchObject({ provider: 'llamacpp-lan', data: { answer: 'from the PC' } });
+    pc = 'asleep';
+    app.router.maxWaitMs = 0;
+    await expect(app.router.complete({ messages: [{ role: 'user', content: 'q' }], purpose: 'research' })).rejects.toThrow(/llamacpp-lan/);
+    await lan.discover();
+    expect(lan.state).not.toBe('ready');
+    expect(app.syncPcLanes()).toEqual(['r1 -1']);
+    expect(app.engine.lanesFor('r1')).toBe(2);
+    pc = 'serving';
+    app.router.cooldownUntil.clear();
+    expect(await app.rediscoverLocal()).toEqual(['llamacpp-lan']);
+    expect(await app.router.complete({ messages: [{ role: 'user', content: 'q' }], purpose: 'research' })).toMatchObject({ provider: 'llamacpp-lan' });
+    expect(calls.length).toBeGreaterThanOrEqual(3);
   });
 
   it('enables search backends from the environment, Wikipedia by default', () => {

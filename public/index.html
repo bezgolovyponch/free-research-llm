@@ -602,6 +602,15 @@ async function loadStatus(){
   $("chipSearch").innerHTML='<i style="background:'+(web.length?"var(--gr)":"var(--am)")+'"></i>'+esc(web.length?web.join(", "):"wikipedia only");
   $("homeNotice").innerHTML=s.demo?'<div class="notice">Demo mode: answers come from a scripted model so you can try the flow.</div>':!ready.length?'<div class="notice err">No model connected. Open <b>Setup &amp; keys</b> and add a free key.</div>':"";
   renderSetup();
+  renderDevice(s.thisDevice);
+}
+function renderDevice(d){
+  let box=$("deviceBanner");
+  if(!d||d.helping||!d.servers){if(box)box.remove();return;}
+  if(!box){box=document.createElement("div");box.id="deviceBanner";box.className="notice err";box.style.cssText="position:fixed;left:12px;right:12px;bottom:12px;z-index:60;max-width:720px;margin:0 auto";document.body.appendChild(box);}
+  const why=d.servers.map(x=>esc(x.label)+": "+esc(x.detail)).join(" · ");
+  box.innerHTML='<b>This computer\'s graphics card is not helping the research.</b> <span class="small">'+esc(d.host)+' · '+why+'</span>'+(d.setup?'<p class="small" style="margin:6px 0">On this PC open PowerShell and run this once. It starts the model server, keeps it running after a restart and opens the firewall port; the app connects within a minute.</p><div class="row"><input readonly id="deviceSetup" value="'+esc(d.setup)+'"><button class="btn secondary sm" id="deviceSetupCopy">Copy</button></div>':'<p class="small" style="margin:6px 0">Open the research link from the owner (More → Share) to get the setup command.</p>');
+  const c=$("deviceSetupCopy");if(c)c.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(d.setup);toast("copied");}catch(e){$("deviceSetup").select();}});
 }
 function renderSetup(){
   const s=STATE.status;if(!s)return;

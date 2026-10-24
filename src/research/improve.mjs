@@ -580,6 +580,12 @@ export class ProjectImprover {
       await this.engine.store.save({ ...merged, chats: current.chats, log: current.log, improve: current.improve });
       const after = await this.engine.run(id);
       if (this.stopped(state) || after.phase === 'cancelled') return await reject('reverted-stopped');
+      const outage = after.nodes.find((n) => n.status === 'failed' && QUOTA_ERROR.test(n.error ?? ''));
+      if (outage) {
+        const result = await reject('provider-outage', `${outage.id}: ${String(outage.error).slice(0, 160)}; not counted against the change`);
+        await this.sleep(Math.min(QUOTA_PAUSE_MS, Math.max(0, state.deadline - this.now())));
+        return result;
+      }
       const broken = regressions(before, after);
       if (broken.length) return await reject('reverted-regression', `breaks passing check(s): ${broken.join(', ')}`);
       if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`);
