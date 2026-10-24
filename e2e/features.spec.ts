@@ -7,6 +7,10 @@ async function noSideScroll(page: Page) {
 
 test.describe.configure({ mode: 'serial' });
 
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 test('app assistant: research requests become a proposal that only the Confirm button turns into a research', async ({ page }) => {
   await page.goto('/#page=assistant');
   await expect(page.getByRole('heading', { name: 'App assistant' })).toBeVisible();

@@ -332,6 +332,7 @@
   }
   @media (min-width:821px){ .phone-only{display:none!important} }
   .is-idle #btnStop{display:none}
+  @media (prefers-reduced-motion: reduce){ *,*::before,*::after{transition:none!important; animation:none!important} }
   @media print{ #sidebar,#inspector,.head-row,.tabs,#mobilebar,.loopbox{display:none!important} body{overflow:visible} .shell{display:block; height:auto} .pane{display:none} #pane-report{display:block} }
 </style>
 </head>

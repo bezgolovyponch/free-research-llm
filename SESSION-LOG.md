@@ -371,3 +371,4 @@ Asked: why failed; fix, merge.
 - The loop stopped at 2026-10-23 21:12 UTC. Cause chain: the app ran out of memory (2 GB heap) at 21:05 because live updates buffered the whole research for pages whose connections had silently died; the always-on service restarted it; the loop's start-up re-roll then failed on every provider (Gemini 503, Groq 413) and that error ended the loop.
 - Fixed: bounded, batched live-update stream (`src/events.mjs`); loop pauses 5 min on provider outages instead of ending; graceful restart at 1.5 GB heap (`src/heapguard.mjs`).
 - GitHub CI failed twice on the same flaky e2e test (router page: click while the phone sidebar was still sliding in, 60 s limit); the test now waits for the sidebar and has 2 min.
+- CI then failed on Node 22 in another phone-menu e2e test (same cause: clicking inside the sliding sidebar). The app now drops animations under prefers-reduced-motion, and the e2e runs with reduced motion and waits for the menu to open.

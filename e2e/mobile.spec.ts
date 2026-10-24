@@ -7,6 +7,10 @@ async function noSideScroll(page: Page) {
 
 test.describe.configure({ mode: 'serial' });
 
+test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 test('home composer fits the phone, menu opens every page without sideways scrolling', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'What do you want to find out?' })).toBeVisible();
@@ -14,6 +18,7 @@ test('home composer fits the phone, menu opens every page without sideways scrol
   await noSideScroll(page);
   for (const name of ['History', 'Setup & keys', 'Guide']) {
     await page.getByRole('button', { name: 'Open menu' }).click();
+    await expect(page.locator('#sidebar')).toHaveClass(/\bon\b/);
     await page.locator('#sidebar .navlink', { hasText: name }).click();
     await expect(page.locator('.view.on h1')).toBeVisible();
     await expect(page.locator('#sidebar')).not.toHaveClass(/\bon\b/);
@@ -69,6 +74,7 @@ test('builds a tree, opens a piece as a sheet, chats in it, runs, and finds it i
   await noSideScroll(page);
 
   await page.getByRole('button', { name: 'Open menu' }).click();
+  await expect(page.locator('#sidebar')).toHaveClass(/\bon\b/);
   await expect(page.locator('#projList')).toContainText('cars to sell 2000-4000');
   await page.locator('#sidebar .navlink', { hasText: 'History' }).click();
   await expect(page.locator('#histProjects')).toContainText('cars to sell 2000-4000');
