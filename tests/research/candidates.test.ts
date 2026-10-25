@@ -51,5 +51,10 @@ describe('candidate table', () => {
     const text = shortlistText(table, 1);
     expect(text.split('\n')).toEqual(['found 9, kept 3, to check 2, screened out 4 (price outside 0–20000 EUR 1, offered for rent, not for sale 1, not a plot of land 1, offered as a swap, not for sale 1, outside the asked regions 1)', '- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated']);
     expect(shortlistText(null)).toBe('');
+    expect(table.kept[0]).toMatchObject({ countryCode: 'PT' });
+    const measured = { ...table, sites: { assessed: 1 }, kept: [{ ...table.kept[0], site: { coastKm: 2.5, beachKm: 3, beaches: 4, viewpoints: 6, attractions: 2, reserves: 1, protectedAreas: 1, hikingRoutes: 2, lodging: 30, campsites: 2, climate: { workable: 9, comfortable: 6, hottest: 27.5, coldest: 7 } }, fit: { score: 0.71, zoning: 'agricultural', pitches: 30 } }] };
+    const lines = shortlistText(measured, 1).split('\n');
+    expect(lines[0]).toContain('kept 3, ranked by code-measured fit');
+    expect(lines[1]).toBe('- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated | fit 0.71 | sea 2.5 km, beach 3 km | 9 workable months (6 comfortable), hottest month max 27.5°C | 16 beaches, viewpoints, sights, reserves and trails within 15 km | zoning agricultural | about 30 pitches');
   });
 });

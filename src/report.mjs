@@ -1,6 +1,7 @@
 import { templateById } from './research/templates.mjs';
 import { ROOT_ID, childrenOf } from './research/tree.mjs';
 import { actionPlan, resultStatus } from './research/gaps.mjs';
+import { explorePoints } from './research/site.mjs';
 
 function bullets(items) {
   return items?.length ? items.map((i) => `- ${i}`).join('\n') : '- none';
@@ -65,10 +66,16 @@ export function itemsCsv(project) {
   return csv([['title', 'value', 'currency', 'url', 'piece', 'link live', 'in range'], ...items.map((i) => [i.title ?? '', i.value ?? '', i.currency ?? '', i.url ?? '', i.nodeId ?? '', i.live ?? i.alive ?? '', i.inRange ?? ''])]);
 }
 
+function siteColumns(row) {
+  const site = row.site;
+  if (!site) return ['', '', '', '', '', '', '', '', '', ''];
+  return [row.fit.score, site.coastKm ?? '', site.beachKm ?? '', site.climate?.workable ?? '', site.climate?.comfortable ?? '', site.climate?.hottest ?? '', explorePoints(site), site.lodging ?? '', row.fit.zoning, row.fit.pitches ?? ''];
+}
+
 export function candidatesCsv(project) {
   const c = project.candidates;
   const rows = [...(c?.kept ?? []).map((r) => ['kept', r]), ...(c?.toCheck ?? []).map((r) => ['to check', r])];
-  return csv([['status', 'title', 'price', 'currency', `price in ${c?.kept?.[0]?.unit || project.acceptance?.unit || 'target unit'}`, 'area', 'area unit', 'place', 'country', 'sea stated', 'url', 'found on', 'read by', 'missing'], ...rows.map(([status, r]) => [status, r.title, r.price ?? '', r.currency, r.value ?? '', r.area ?? '', r.areaUnit, r.place, r.country, r.coast ? 'yes' : '', r.url, r.sourceUrl, (r.via ?? []).join(' '), r.toCheck ?? ''])]);
+  return csv([['status', 'title', 'price', 'currency', `price in ${c?.kept?.[0]?.unit || project.acceptance?.unit || 'target unit'}`, 'area', 'area unit', 'place', 'country', 'sea stated', 'url', 'found on', 'read by', 'missing', 'site fit', 'sea km', 'beach km', 'workable months', 'comfortable months', 'hottest month max °C', 'things to explore within 15 km', 'lodging within 15 km', 'zoning', 'pitches'], ...rows.map(([status, r]) => [status, r.title, r.price ?? '', r.currency, r.value ?? '', r.area ?? '', r.areaUnit, r.place, r.country, r.coast ? 'yes' : '', r.url, r.sourceUrl, (r.via ?? []).join(' '), r.toCheck ?? r.siteNote ?? '', ...siteColumns(r)])]);
 }
 
 export function resultsJson(project) {
