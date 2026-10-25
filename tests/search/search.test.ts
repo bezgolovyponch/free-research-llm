@@ -88,6 +88,11 @@ describe('search', () => {
     expect((await new SearchService({ fetchImpl, backends: [], jinaReader: false }).readPage('https://spa.example/')).text).toBe('');
   });
 
+  it('keeps the coordinates a listing page publishes for its map', async () => {
+    const fetchImpl = fakeFetch([[/plot\.example/, () => new Response(`<html><div class="map" data-lat="44.301234" data-lng="15.091234"></div>${' text'.repeat(120)}</html>`, { headers: { 'content-type': 'text/html' } })]]);
+    expect((await new SearchService({ fetchImpl, backends: [] }).readPage('https://plot.example/listing-ID1abcd')).coords).toEqual({ lat: 44.301234, lon: 15.091234 });
+  });
+
   it('reads listings from a portal page, learns the site recipe and checks it on page 2, adding the page-2 listings', async () => {
     const cards = (page: number) => [1, 2, 3].map((n) => `<div><a href="/anuncio/terreno-${page}${n}-ID1p${page}${n}x">Terreno ${page}${n}</a><p>${page}${n}.000 €</p></div>`).join('') + (page === 1 ? '<a href="/terrenos?page=2">2</a>' : '');
     const page = (body: string) => new Response(`<html lang="pt">${body}${' filler'.repeat(80)}</html>`, { headers: { 'content-type': 'text/html' } });

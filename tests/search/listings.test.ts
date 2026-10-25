@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractListings, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate } from '../../src/search/listings.mjs';
+import { coordsOf, extractListings, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate } from '../../src/search/listings.mjs';
 
 const BASE = 'https://portal.example/land-for-sale';
 
@@ -46,6 +46,13 @@ describe('listing extraction', () => {
       { title: 'Hill plot', url: 'https://portal.example/listing/hill-ID1efgh', value: 9500, unit: 'EUR', area: null, place: '' },
       { title: 'Field', url: 'https://portal.example/listing/field-u5555555', value: null, unit: '', area: 4000, place: '' },
     ]);
+  });
+
+  it('keeps the coordinates a listing record states', () => {
+    const ld = { '@type': 'Product', name: 'Plot by the bay', url: 'https://portal.example/listing/bay-ID1abcd', offers: { price: 14000, priceCurrency: 'EUR' }, geo: { '@type': 'GeoCoordinates', latitude: '44.3012', longitude: '15.0912' } };
+    expect(fromJsonLd(`<script type="application/ld+json">${JSON.stringify(ld)}</script>`, BASE)[0]).toMatchObject({ lat: 44.3012, lon: 15.0912 });
+    expect(coordsOf({ location: { lat: 0, lng: 0 } })).toBeNull();
+    expect(coordsOf({ address: { geo: { lat: 38.2, lng: -7.68 } } })).toEqual({ lat: 38.2, lon: -7.68 });
   });
 
   it('reads the records a site embeds for its own app and finds each record link among the page anchors', () => {

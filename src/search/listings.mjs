@@ -55,6 +55,21 @@ function areaOf(value) {
   return numberOf(value);
 }
 
+const LAT_KEYS = ['latitude', 'lat'];
+const LON_KEYS = ['longitude', 'lng', 'lon', 'long'];
+
+export function coordsOf(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 3) return null;
+  const lat = Number(LAT_KEYS.map((k) => value[k]).find((v) => v !== undefined && v !== null && v !== ''));
+  const lon = Number(LON_KEYS.map((k) => value[k]).find((v) => v !== undefined && v !== null && v !== ''));
+  if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && (lat !== 0 || lon !== 0)) return { lat, lon };
+  for (const key of ['geo', 'location', 'coordinates', 'position', 'address', 'geoPoint', 'point']) {
+    const found = coordsOf(value[key], depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 function placeOf(value, depth = 0) {
   if (!value || depth > 3) return '';
   if (typeof value === 'string') return clean(value, 80);
@@ -134,6 +149,7 @@ function fromRecord(record, base, anchors) {
     unit: price?.unit || (price ? currency : ''),
     area: fieldBy(record, AREA_KEY, areaOf),
     place: placeOf(record.location ?? record.address ?? record.geo ?? null) || clean(fieldBy(record, PLACE_KEY, (v) => (typeof v === 'string' ? v : '')) ?? '', 80),
+    ...coordsOf(record),
   };
 }
 

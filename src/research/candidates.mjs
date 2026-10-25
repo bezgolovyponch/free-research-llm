@@ -2,6 +2,7 @@ import { currencyOf } from './acceptance.mjs';
 import { countryByCode, isNewsPage, itemCountry, mentionsCoast } from './brief.mjs';
 import { screenItem } from './itemgate.mjs';
 import { listingKey } from '../search/listings.mjs';
+import { explorePoints } from './site.mjs';
 
 export const MAX_KEPT = 200;
 export const MAX_TO_CHECK = 100;
@@ -62,6 +63,8 @@ function publicRow(row, verdict, unit) {
     areaUnit: row.areaUnit || (row.area ? 'm²' : ''),
     place: row.place ?? '',
     country: verdict.country.code ? countryByCode(verdict.country.code)?.name ?? verdict.country.code : '',
+    countryCode: verdict.country.code ?? '',
+    ...(Number.isFinite(row.lat) && Number.isFinite(row.lon) ? { lat: row.lat, lon: row.lon } : {}),
     countryBy: verdict.country.by,
     coast: mentionsCoast(row),
     sourceUrl: row.sourceUrl ?? '',
@@ -117,9 +120,17 @@ export function candidateDeliverables(candidates) {
   return (candidates?.kept ?? []).map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
 }
 
+function siteText(row) {
+  const site = row.site;
+  if (!site) return row.siteNote ? ` | ${row.siteNote}` : '';
+  const season = site.climate ? ` | ${site.climate.workable} workable months (${site.climate.comfortable} comfortable), hottest month max ${site.climate.hottest}°C` : '';
+  return ` | fit ${row.fit.score} | sea ${site.coastKm ?? '?'} km, beach ${site.beachKm ?? '?'} km${season} | ${explorePoints(site)} beaches, viewpoints, sights, reserves and trails within 15 km | zoning ${row.fit.zoning}${row.fit.pitches !== null ? ` | about ${row.fit.pitches} pitches` : ''}`;
+}
+
 export function shortlistText(candidates, limit = 15) {
   if (!candidates) return '';
   const reasons = Object.entries(candidates.screened ?? {}).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(', ');
-  const rows = (candidates.kept ?? []).slice(0, limit).map((r) => `- ${r.title} | ${r.value ?? r.price} ${r.unit || r.currency} | ${r.area ? `${r.area} ${r.areaUnit}` : 'area n/a'} | ${r.place || r.country || 'place n/a'}${r.coast ? ' | coast stated' : ''}`);
-  return [`found ${candidates.found}, kept ${candidates.keptCount}, to check ${candidates.toCheckCount}, screened out ${candidates.screenedCount}${reasons ? ` (${reasons})` : ''}`, ...rows].join('\n');
+  const rows = (candidates.kept ?? []).slice(0, limit).map((r) => `- ${r.title} | ${r.value ?? r.price} ${r.unit || r.currency} | ${r.area ? `${r.area} ${r.areaUnit}` : 'area n/a'} | ${r.place || r.country || 'place n/a'}${r.coast ? ' | coast stated' : ''}${siteText(r)}`);
+  const ranked = candidates.sites ? `, ranked by code-measured fit (sea distance, workable months, no-AC heat, things to explore, price trend, cost, zoning)` : '';
+  return [`found ${candidates.found}, kept ${candidates.keptCount}${ranked}, to check ${candidates.toCheckCount}, screened out ${candidates.screenedCount}${reasons ? ` (${reasons})` : ''}`, ...rows].join('\n');
 }

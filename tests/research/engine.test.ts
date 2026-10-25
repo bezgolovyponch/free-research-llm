@@ -255,6 +255,16 @@ describe('ResearchEngine', () => {
     expect(done.candidates.kept.map((r: { value: number }) => r.value)).toEqual([9000, 12000, 15000, 19000]);
     expect(done.acceptanceResult.items.slice(0, 4).map((i: { url: string }) => i.url)).toEqual(done.candidates.kept.map((r: { url: string }) => r.url));
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 2 listing page\(s\) read by code/.test(l.message))).toBe(true);
+    const seen: string[][] = [];
+    engine.sites = { apply: async (c: { kept: Array<{ url: string }>; keptCount: number }) => { seen.push(c.kept.map((r) => r.url)); return { ...c, kept: c.kept.slice(0, 2), keptCount: 2, sites: { assessed: 4, located: 4, far: 2, unlocated: 0, pending: 0, failed: 0 } }; } } as never;
+    const piece = done.nodes.find((n: { parentId: string | null }) => n.parentId);
+    piece.finding = { ...piece.finding, items: [{ title: 'Model pick', url: 'https://other.example/anuncio/terreno-ID9zzzzz', value: 5000, unit: 'EUR' }] };
+    await engine.collectCandidates(done);
+    await engine.checkAcceptance(done);
+    expect(seen[0]).toHaveLength(4);
+    expect(done.candidates.keptCount).toBe(2);
+    expect(done.acceptanceResult.items.map((i: { url: string }) => i.url)).toEqual(done.candidates.kept.map((r: { url: string }) => r.url));
+    expect(done.log.some((l: { message: string }) => /site fit: 4 listing\(s\) measured .* 2 farther than an e-bike ride from the sea/.test(l.message))).toBe(true);
   });
 
   it('searches again before any model call when no retrieved page matches the piece, and shows the model the best passages', async () => {

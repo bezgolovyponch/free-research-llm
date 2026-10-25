@@ -97,7 +97,7 @@ export function normalizeEstimate(raw) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {} }) {
+  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {} }) {
     this.onStop = onStop;
     this.laneCount = Math.min(MAX_LANES, Math.max(1, lanes));
     this.helpers = new Map();
@@ -107,6 +107,7 @@ export class ResearchEngine {
     this.store = store;
     this.demo = demo;
     this.rates = rates;
+    this.sites = sites;
     this.onEvent = onEvent;
     this.listeners = new Map();
     this.running = new Set();
@@ -278,6 +279,11 @@ export class ResearchEngine {
       }
     }
     project.candidates = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
+    if (this.sites && !this.demo) {
+      project.candidates = await this.sites.apply(project.candidates, brief, { readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
+      const s = project.candidates.sites;
+      if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate 2021–2025, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
+    }
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
     return c;
@@ -537,7 +543,7 @@ export class ResearchEngine {
   async checkAcceptance(project) {
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
-    const deliverables = [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))];
+    const deliverables = project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))];
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });

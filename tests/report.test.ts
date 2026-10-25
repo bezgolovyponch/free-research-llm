@@ -48,11 +48,11 @@ describe('results export', () => {
     expect(pieces[2]).toContain('Search for: carrier quotes');
     expect(itemsCsv(p).split('\r\n')[1]).toBe('"Golf, ""2012""",2400,EUR,https://m.de/1,D1,,');
     expect(csvField('-cmd')).toBe("'-cmd");
-    const withTable = { ...p, candidates: { kept: [{ title: 'Terreno Aljezur', url: 'https://imo.example/a', price: 450000000, currency: 'VND', value: 15000, unit: 'EUR', area: 300, areaUnit: 'm²', place: 'Aljezur', country: 'Portugal', coast: true, sourceUrl: 'https://imo.example/r', via: ['json-ld', 'cards'] }], toCheck: [{ title: 'No price', url: 'https://imo.example/b', price: null, currency: '', value: null, unit: 'EUR', area: null, areaUnit: '', place: '', country: '', coast: false, sourceUrl: '', via: [], toCheck: 'price not shown' }] } };
+    const withTable = { ...p, candidates: { kept: [{ title: 'Terreno Aljezur', url: 'https://imo.example/a', price: 450000000, currency: 'VND', value: 15000, unit: 'EUR', area: 300, areaUnit: 'm²', place: 'Aljezur', country: 'Portugal', coast: true, sourceUrl: 'https://imo.example/r', via: ['json-ld', 'cards'], site: { coastKm: 2.5, beachKm: 3, beaches: 10, viewpoints: 12, attractions: 8, reserves: 2, protectedAreas: 4, hikingRoutes: 6, campsites: 3, lodging: 120, climate: { workable: 9, comfortable: 6, hottest: 27.5, coldest: 7 } }, fit: { score: 0.71, zoning: 'agricultural', pitches: 4 } }], toCheck: [{ title: 'No price', url: 'https://imo.example/b', price: null, currency: '', value: null, unit: 'EUR', area: null, areaUnit: '', place: '', country: '', coast: false, sourceUrl: '', via: [], toCheck: 'price not shown' }] } };
     expect(candidatesCsv(withTable).split('\r\n')).toEqual([
-      'status,title,price,currency,price in EUR,area,area unit,place,country,sea stated,url,found on,read by,missing',
-      'kept,Terreno Aljezur,450000000,VND,15000,300,m²,Aljezur,Portugal,yes,https://imo.example/a,https://imo.example/r,json-ld cards,',
-      'to check,No price,,,,,,,,,https://imo.example/b,,,price not shown',
+      'status,title,price,currency,price in EUR,area,area unit,place,country,sea stated,url,found on,read by,missing,site fit,sea km,beach km,workable months,comfortable months,hottest month max °C,things to explore within 15 km,lodging within 15 km,zoning,pitches',
+      'kept,Terreno Aljezur,450000000,VND,15000,300,m²,Aljezur,Portugal,yes,https://imo.example/a,https://imo.example/r,json-ld cards,,0.71,2.5,3,9,6,27.5,42,120,agricultural,4',
+      'to check,No price,,,,,,,,,https://imo.example/b,,,price not shown,,,,,,,,,,',
       '',
     ]);
     expect(resultsJson(withTable).candidates.kept).toHaveLength(1);

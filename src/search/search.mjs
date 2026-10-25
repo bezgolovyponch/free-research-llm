@@ -2,6 +2,7 @@ import { absoluteUrl, domainOf, htmlToText } from './html.mjs';
 import { sourceCountry } from '../research/brief.mjs';
 import { extractListings, listingKey } from './listings.mjs';
 import { selectDiverse } from './selection.mjs';
+import { pageCoordinates } from '../research/site.mjs';
 const USER_AGENT = 'free-research-llm/1.0 (+https://github.com/bezgolovyponch/free-research-llm)';
 const PAGE_TEXT_LIMIT = 6000;
 const MAX_LINKS = 60;
@@ -344,6 +345,7 @@ export class SearchService {
         template: found.template,
         methods: found.methods,
         locale: html ? pageLocale(body) : '',
+        coords: html ? pageCoordinates(body) : null,
         status: res.status,
       };
     } catch {
