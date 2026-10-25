@@ -93,6 +93,13 @@ describe('verify: links and non-answers', () => {
     expect(sameUrl('https://www.a.example/x/#top', 'http://a.example/x')).toBe(true);
   });
 
+  it('accepts an item link that code extracted from the page data as a listing', async () => {
+    const { verifyFinding } = await import('../../src/research/verify.mjs');
+    const withListings = [{ ...sources[0], listings: [{ url: 'https://cars.example/ad/777777', title: 'Golf' }] }];
+    const result = verifyFinding({ finding: { answer: 'Golf for 2,900 EUR', claims: [{ text: 'Golf 2900 EUR', sourceIds: ['S1'] }], items: [{ url: 'https://cars.example/ad/777777' }] }, sources: withListings });
+    expect(result.checks.find((c) => c.id === 'item-links').passed).toBe(true);
+  });
+
   it('fails the concrete-answer check for evasive answers', async () => {
     const { verifyFinding } = await import('../../src/research/verify.mjs');
     for (const answer of [

@@ -224,6 +224,39 @@ describe('ResearchEngine', () => {
     expect(await engine.harvestAll(done)).toEqual([]);
   });
 
+  it('builds the concept brief first, drops off-concept pages before any model call, sweeps portals by code and delivers the screened table', async () => {
+    const ad = (n: number, value: number) => ({ title: `Terreno ${n}`, url: `https://imo.example/pt/anuncio/terreno-${n}-ID1x${n}yz`, value, unit: 'EUR', area: 1000 * n, place: 'Aljezur' });
+    const reads: string[] = [];
+    const portalSearch = {
+      ...fakeSearch,
+      async search() {
+        return [
+          { kind: 'web', title: 'Terrenos', url: 'https://imo.example/pt/resultados', domain: 'imo.example', snippet: 's', text: 'terrenos para venda em Portugal', locale: 'pt', links: [], listings: [ad(1, 9000), ad(2, 15000), ad(3, 90000)] },
+          { kind: 'web', title: 'How far an e-bike goes', url: 'https://bikes.example/range', domain: 'bikes.example', snippet: 's', text: 'battery range 40 miles', links: [], listings: [] },
+        ];
+      },
+      async readPage(url: string) {
+        reads.push(url);
+        if (url === 'https://imo.example/pt/resultados') return { status: 200, text: 'terrenos', locale: 'pt', links: [], listings: [ad(1, 9000), ad(2, 15000), ad(3, 90000)], next: 'https://imo.example/pt/resultados?page=2' };
+        if (url === 'https://imo.example/pt/resultados?page=2') return { status: 200, text: 'terrenos', locale: 'pt', links: [], listings: [ad(4, 12000), ad(5, 19000)], next: '' };
+        return { status: 200, text: `Terreno para venda 9.000 € ${'texto '.repeat(60)}`, links: [], listings: [] };
+      },
+    };
+    const { engine } = engineWith(new ScriptedProvider(), portalSearch);
+    const project = await engine.createProject({ question: 'Find plots for a glamping business near the sea in Portugal, 20000EUR max', expected: '4 plots in Portugal under 20000 EUR' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 4, valueRange: [0, 20000], unit: 'EUR' } });
+    const done = await engine.run(project.id);
+    expect(done.brief.text).toContain('Hard limit: price 0–20000 EUR');
+    expect(done.brief.regions).toEqual(['PT']);
+    expect(done.nodes.flatMap((n: { sources?: Array<{ url: string }> }) => n.sources ?? []).some((s: { url: string }) => s.url.includes('bikes.example'))).toBe(false);
+    expect(done.log.some((l: { message: string }) => /source\(s\) dropped before any model call — outside the asked regions \(bikes\.example\)/.test(l.message))).toBe(true);
+    expect(reads.slice(0, 2)).toEqual(['https://imo.example/pt/resultados', 'https://imo.example/pt/resultados?page=2']);
+    expect(done.candidates).toMatchObject({ keptCount: 4, screened: { 'price outside 0–20000 EUR': 1 } });
+    expect(done.candidates.kept.map((r: { value: number }) => r.value)).toEqual([9000, 12000, 15000, 19000]);
+    expect(done.acceptanceResult.items.slice(0, 4).map((i: { url: string }) => i.url)).toEqual(done.candidates.kept.map((r: { url: string }) => r.url));
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 2 listing page\(s\) read by code/.test(l.message))).toBe(true);
+  });
+
   it('re-grounds checks stored before the fix, keeps hand-set ones, and re-scores before a loop baseline', async () => {
     const { engine } = engineWith(new ScriptedProvider());
     const project = await engine.createProject({ question: 'Find plots for a glamping business, 20000EUR max', expected: '50 plots feasible for glamping' });

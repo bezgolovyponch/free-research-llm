@@ -39,7 +39,7 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function decomposePrompt({ question, template, constraints, dataSummary, expected, feedback = '' }) {
+export function decomposePrompt({ question, template, constraints, dataSummary, expected, brief = '', feedback = '' }) {
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -55,7 +55,7 @@ ${constraintsText(constraints)}
 
 EXPECTED RESULT (what the user wants delivered at the end):
 ${expected || 'not stated — a decision memo'}
-
+${brief ? `\nCONCEPT BRIEF (built by code from the user's words; every piece must serve it, never research general background that does not change which items qualify):\n${brief}\n` : ''}
 DOMAIN PLAYBOOK (${template.label}) — use as a checklist, adapt to the question:
 - typical drivers: ${template.drivers}
 - typical metrics: ${template.metrics}
@@ -113,7 +113,7 @@ function upstreamBlock(upstream) {
   return upstream.map((u) => `${u.id} (${u.status}): ${u.answer}${u.keyNumbers ? ` | numbers: ${u.keyNumbers}` : ''}`).join('\n');
 }
 
-export function researchPrompt({ question, node, sources, upstream, previousFailures, hint, expected }) {
+export function researchPrompt({ question, node, sources, upstream, previousFailures, hint, expected, brief = '' }) {
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -123,7 +123,7 @@ Today is ${today()}. Overall question: ${question}
 
 SUB-QUESTION ${node.id}: ${node.question}
 Metric: ${node.metric || 'n/a'} (${node.unit || 'unit n/a'}) · method: ${node.method}
-${node.instructions ? `INSTRUCTIONS FOR THIS NODE (follow them): ${node.instructions}\n` : ''}${hint ? `User guidance: ${hint}\n` : ''}${expected ? `The user's expected final result: ${expected}\n` : ''}
+${node.instructions ? `INSTRUCTIONS FOR THIS NODE (follow them): ${node.instructions}\n` : ''}${hint ? `User guidance: ${hint}\n` : ''}${expected ? `The user's expected final result: ${expected}\n` : ''}${brief ? `Concept brief (hard limits; ignore source content outside it):\n${brief}\n` : ''}
 ANSWERS ALREADY ESTABLISHED (use them, cite as their node id in text):
 ${upstreamBlock(upstream)}
 
@@ -202,7 +202,7 @@ function itemsBlock(nodes) {
   return `\nCANDIDATE ITEMS FOUND (${items.length}; from passing pieces):\n${items.map((i) => `- [${i.nodeId}] ${String(i.title ?? i.name ?? '').slice(0, 80)} · ${i.value ?? '?'} ${i.unit ?? ''} · ${i.url}`).join('\n')}\nSCREEN them like a systematic review (identify → screen → include): check each item against the screening findings above (price incl. preparation, climate, distance, permits, demand), and state in the verdict the counts: identified, screened out (main reasons), included. An item with unknown facts is "to check", not included.\n`;
 }
 
-export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision' }) {
+export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision', shortlist = '' }) {
   const drivers = nodes.filter((n) => n.parentId === 'Q');
   const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}`);
   return [
@@ -221,6 +221,7 @@ DECISION RULE: ${template.decisionRule}
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
 ${lines.join('\n')}
 ${itemsBlock(nodes)}
+${shortlist ? `\nCANDIDATE TABLE (screened by code against the hard limits; cite counts from it, never invent items):\n${shortlist}\n` : ''}
 ${KIND_RULE[kind] ?? KIND_RULE.decision}
 Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a result of the type asked above and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:

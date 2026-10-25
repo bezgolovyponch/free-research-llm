@@ -40,7 +40,7 @@ describe('results export', () => {
   };
 
   it('exports pieces with their action, delivered items and everything as JSON; the markdown carries the estimate and the plan', async () => {
-    const { csvField, itemsCsv, piecesCsv, resultsJson } = await import('../src/report.mjs');
+    const { candidatesCsv, csvField, itemsCsv, piecesCsv, resultsJson } = await import('../src/report.mjs');
     const pieces = piecesCsv(p).split('\r\n');
     expect(pieces[0]).toBe('piece,title,role,grade,answer,action,why,next step,priority,moves the verdict,sources,first source');
     expect(pieces[1]).toBe("D1,Prices,driver,verified,'=SUM(A1),Done,,,,,1,https://m.de/1");
@@ -48,6 +48,14 @@ describe('results export', () => {
     expect(pieces[2]).toContain('Search for: carrier quotes');
     expect(itemsCsv(p).split('\r\n')[1]).toBe('"Golf, ""2012""",2400,EUR,https://m.de/1,D1,,');
     expect(csvField('-cmd')).toBe("'-cmd");
+    const withTable = { ...p, candidates: { kept: [{ title: 'Terreno Aljezur', url: 'https://imo.example/a', price: 450000000, currency: 'VND', value: 15000, unit: 'EUR', area: 300, areaUnit: 'm²', place: 'Aljezur', country: 'Portugal', coast: true, sourceUrl: 'https://imo.example/r', via: ['json-ld', 'cards'] }], toCheck: [{ title: 'No price', url: 'https://imo.example/b', price: null, currency: '', value: null, unit: 'EUR', area: null, areaUnit: '', place: '', country: '', coast: false, sourceUrl: '', via: [], toCheck: 'price not shown' }] } };
+    expect(candidatesCsv(withTable).split('\r\n')).toEqual([
+      'status,title,price,currency,price in EUR,area,area unit,place,country,sea stated,url,found on,read by,missing',
+      'kept,Terreno Aljezur,450000000,VND,15000,300,m²,Aljezur,Portugal,yes,https://imo.example/a,https://imo.example/r,json-ld cards,',
+      'to check,No price,,,,,,,,,https://imo.example/b,,,price not shown',
+      '',
+    ]);
+    expect(resultsJson(withTable).candidates.kept).toHaveLength(1);
     const json = resultsJson(p);
     expect(json).toMatchObject({ bestEstimate: { value: '18' }, confidence: { provisional: true, byChecks: 'low' }, actions: [{ nodeId: 'D2', action: 'research' }], items: [{ url: 'https://m.de/1' }] });
     expect(json.pieces[0].sources).toEqual([{ id: 'S1', title: 't', url: 'https://m.de/1' }]);

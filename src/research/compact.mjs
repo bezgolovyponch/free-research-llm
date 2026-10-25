@@ -1,15 +1,17 @@
 export const STORED_TEXT_CHARS = 4000;
 export const STORED_LINKS = 40;
+export const STORED_LISTINGS = 60;
 export const CLIENT_TEXT_CHARS = 300;
 
-export function compactSources(sources = [], { text = STORED_TEXT_CHARS, links = STORED_LINKS } = {}) {
+export function compactSources(sources = [], { text = STORED_TEXT_CHARS, links = STORED_LINKS, listings = STORED_LISTINGS } = {}) {
   let trimmed = 0;
   const out = sources.map((s) => {
     const longText = typeof s.text === 'string' && s.text.length > text;
     const manyLinks = Array.isArray(s.links) && s.links.length > links;
-    if (!longText && !manyLinks) return s;
+    const manyListings = Array.isArray(s.listings) && s.listings.length > listings;
+    if (!longText && !manyLinks && !manyListings) return s;
     trimmed += 1;
-    return { ...s, ...(longText ? { text: s.text.slice(0, text) } : {}), ...(manyLinks ? { links: s.links.slice(0, links) } : {}) };
+    return { ...s, ...(longText ? { text: s.text.slice(0, text) } : {}), ...(manyLinks ? { links: s.links.slice(0, links) } : {}), ...(manyListings ? { listings: s.listings.slice(0, listings) } : {}) };
   });
   return { sources: out, trimmed };
 }
@@ -26,10 +28,14 @@ export function compactProject(project) {
 }
 
 function clientSource(s) {
-  const { links, text, ...rest } = s;
-  return { ...rest, text: typeof text === 'string' ? text.slice(0, CLIENT_TEXT_CHARS) : text, linkCount: Array.isArray(links) ? links.length : 0 };
+  const { links, listings, text, ...rest } = s;
+  return { ...rest, text: typeof text === 'string' ? text.slice(0, CLIENT_TEXT_CHARS) : text, linkCount: Array.isArray(links) ? links.length : 0, listingCount: Array.isArray(listings) ? listings.length : 0 };
 }
 
 export function clientNodes(nodes = []) {
   return nodes.map((n) => (n.sources?.length ? { ...n, sources: n.sources.map(clientSource) } : n));
+}
+
+export function clientSweep(sweep) {
+  return { ...sweep, pages: (sweep.pages ?? []).map((p) => ({ id: p.id, url: p.url, from: p.from, status: p.status, listingCount: (p.listings ?? []).length })) };
 }
