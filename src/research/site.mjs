@@ -7,6 +7,11 @@ export const NEW_SITES_PER_PASS = 12;
 export const PAGE_READS_PER_PASS = 40;
 export const MISS_TTL_MS = 24 * 3600 * 1000;
 export const PASS_BUDGET_MS = 8 * 60 * 1000;
+export const MODES = {
+  cache: { newSites: 0, pageReads: 0, budgetMs: 0 },
+  budget: { newSites: NEW_SITES_PER_PASS, pageReads: PAGE_READS_PER_PASS, budgetMs: PASS_BUDGET_MS },
+  all: { newSites: 400, pageReads: 400, budgetMs: 60 * 60 * 1000 },
+};
 export const GEOCODE_GAP_MS = 1100;
 export const CLIMATE_YEARS = ['2021-01-01', '2025-12-31'];
 export const PITCH_M2 = 40;
@@ -207,6 +212,7 @@ export class SiteAssessor {
     this.writing = Promise.resolve();
     this.lastGeocode = -Infinity;
     this.reads = 0;
+    this.limits = MODES.budget;
   }
 
   async httpJson(url, init = {}) {
@@ -269,7 +275,7 @@ export class SiteAssessor {
     if (Number.isFinite(row.lat) && Number.isFinite(row.lon)) return { lat: row.lat, lon: row.lon, by: 'listing data' };
     const known = this.store.points[row.url];
     if (known && this.now() - known.at < (known.point ? SITE_TTL_MS : MISS_TTL_MS)) return known.point;
-    if (this.reads >= PAGE_READS_PER_PASS) return undefined;
+    if (this.reads >= this.limits.pageReads) return undefined;
     this.reads++;
     const point = await this.findPoint(row, readPage);
     this.store.points[row.url] = { at: this.now(), point };
@@ -314,6 +320,7 @@ export class SiteAssessor {
     if (!code) return null;
     const known = this.store.hpi[code];
     if (this.fresh(known)) return known.value;
+    if (!this.limits.newSites) return known?.value ?? null;
     let value = null;
     try {
       const geo = EUROSTAT_CODE[code] ?? code;
@@ -329,7 +336,8 @@ export class SiteAssessor {
     return value;
   }
 
-  async apply(candidates, brief, { readPage = null, onProgress = () => {} } = {}) {
+  async apply(candidates, brief, { readPage = null, onProgress = () => {}, mode = 'budget' } = {}) {
+    this.limits = MODES[mode] ?? MODES.budget;
     if (!candidates?.kept?.length) return candidates;
     await this.load();
     const started = this.now();
@@ -355,7 +363,7 @@ export class SiteAssessor {
         stats.located++;
         let site = this.cachedSite(point.lat, point.lon);
         if (!site) {
-          if (fresh >= NEW_SITES_PER_PASS || this.now() - started > PASS_BUDGET_MS) {
+          if (fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
             stats.pending++;
             kept.push({ ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
             continue;

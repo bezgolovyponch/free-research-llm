@@ -219,6 +219,28 @@ describe('SiteAssessor', () => {
     expect(reads).toBe(PAGE_READS_PER_PASS + 5);
   });
 
+  it('makes no network call in cache mode, so loop trials see the same table as their baseline', async () => {
+    const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
+    const assessor = new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep });
+    let reads = 0;
+    const readPage = async () => { reads++; return { coords: null, place: '' }; };
+    const cold = await assessor.apply({ ...table, kept: [rows[0], rows[2]], keptCount: 2 }, brief, { mode: 'cache', readPage });
+    expect(net.calls).toEqual([]);
+    expect(reads).toBe(0);
+    expect(cold.sites).toMatchObject({ assessed: 0, pending: 2 });
+    await assessor.apply({ ...table, kept: [rows[0]], keptCount: 1 }, brief, {});
+    const calls = net.calls.length;
+    const warm = await assessor.apply({ ...table, kept: [rows[0], rows[2]], keptCount: 2 }, brief, { mode: 'cache', readPage });
+    expect(net.calls.length).toBe(calls);
+    expect(warm.sites).toMatchObject({ assessed: 1, pending: 1 });
+  });
+
+  it('measures every listing in one pass at loop start', async () => {
+    const many = Array.from({ length: NEW_SITES_PER_PASS + 3 }, (_, i) => ({ ...rows[0], url: `https://famalo.example/${i}`, lat: 40 + i * 0.1, lon: 15 }));
+    const out = await new SiteAssessor({ fetchJson: fakeNet().fetchJson, sleep: noSleep }).apply({ ...table, kept: many, keptCount: many.length }, brief, { mode: 'all' });
+    expect(out.sites).toMatchObject({ assessed: NEW_SITES_PER_PASS + 3, pending: 0 });
+  });
+
   it('retries a busy free service, then gives up with its status', async () => {
     const waits: number[] = [];
     const statuses = [502, 429, 200];
