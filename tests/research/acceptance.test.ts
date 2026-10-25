@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_CHECK_TTL_MS, PAGE_READS_AT_ONCE, collectDeliverables, hasCriteria, headlinePrice, inRange, looksLikeListing, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, hasCriteria, headlinePrice, inRange, looksLikeListing, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -77,22 +77,19 @@ describe('listing price on the page', () => {
     expect(looksLikeListing('https://www.imovirtual.com/pt/anuncio/terreno-535-m-quinta-do-anjo-ID1iA1X')).toBe(true);
   });
 
-  it('checks up to 75 items for 50 wanted, reads each page once within 6 hours, and at most 6 at a time', async () => {
+  it('checks up to 75 items for 50 wanted, at most 6 pages at a time', async () => {
     let open = 0;
     let peak = 0;
     const reads: string[] = [];
-    const cache = new Map();
     const readPage = async (url: string) => { reads.push(url); open++; peak = Math.max(peak, open); await new Promise((r) => setTimeout(r, 2)); open--; return { status: 200, text: `Plot for sale ${'x'.repeat(200)} 15 000 €` }; };
     const items = Array.from({ length: 90 }, (_, i) => ({ url: `https://portal.example/ad/plot-${100000 + i}` }));
-    const checker = new AcceptanceChecker({ readPage, cache });
+    const checker = new AcceptanceChecker({ readPage });
     const result = await checker.evaluate({ itemCount: 50, valueRange: [0, 20000], unit: 'EUR', mustMention: [], urlsLive: false }, items);
     expect(MAX_ITEM_CHECKS).toBe(100);
     expect(result!.items).toHaveLength(75);
     expect(result!.checks[0]).toMatchObject({ value: 1, passed: true });
     expect(peak).toBeLessThanOrEqual(PAGE_READS_AT_ONCE);
-    await new AcceptanceChecker({ readPage, cache }).evaluate({ itemCount: 50, valueRange: [0, 20000], unit: 'EUR', mustMention: [], urlsLive: false }, items);
     expect(reads).toHaveLength(75);
-    expect(PAGE_CHECK_TTL_MS).toBe(6 * 3600 * 1000);
   });
 
   it('counts harvested listings from a weak piece, but not what a weak piece\'s model answer listed', () => {

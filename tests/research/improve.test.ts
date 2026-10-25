@@ -194,13 +194,17 @@ describe('ProjectImprover in parallel lanes', () => {
 });
 
 describe('ProjectImprover baseline', () => {
-  it('sweeps the portals once at loop start, never in its trials', async () => {
+  it('sweeps the portals once at loop start, never in its trials, and brings remembered teammates back', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-sweep-'));
     const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
     const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), lanes: 1 });
     const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
     await engine.run(project.id);
     const sweeps: boolean[] = [];
+    const rejoined: string[] = [];
+    engine.store.cache.get(project.id).team = { 'pc-browser': new Date().toISOString() };
+    const join = engine.join.bind(engine);
+    engine.join = (id: string, clientId: string) => { rejoined.push(clientId); return join(id, clientId); };
     const collect = engine.collectCandidates.bind(engine);
     engine.collectCandidates = async (p: never, options: { sweep?: boolean } = {}) => { sweeps.push(Boolean(options.sweep)); return collect(p, options); };
     let clock = 0;
@@ -208,6 +212,7 @@ describe('ProjectImprover baseline', () => {
     improver.start(project.id, { hours: 0.05 });
     for (let i = 0; i < 500 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
     expect(sweeps[0]).toBe(true);
+    expect(rejoined).toEqual(['pc-browser']);
     expect(sweeps.slice(1).every((s) => !s)).toBe(true);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });

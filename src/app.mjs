@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -128,9 +130,24 @@ export function appNoteFor(event, project) {
   return null;
 }
 
+export function buildId(...parts) {
+  const hash = crypto.createHash('sha1');
+  for (const part of parts) hash.update(part);
+  return hash.digest('hex').slice(0, 12);
+}
+
+function readBuild() {
+  try {
+    return buildId(readFileSync(path.join(ROOT_DIR, 'public', 'index.html')), readFileSync(path.join(ROOT_DIR, 'package.json')));
+  } catch {
+    return '';
+  }
+}
+
 export class App {
   constructor({ env = process.env, fetchImpl = fetch, dataDir, logDir, providers, search, secrets = null } = {}) {
     this.secrets = secrets;
+    this.build = readBuild();
     this.dataDir = dataDir ?? path.join(ROOT_DIR, 'data');
     this.env = env;
     this.fetchImpl = fetchImpl;
@@ -379,6 +396,17 @@ export class App {
     await this.logs.queue;
   }
 
+  async seenClient(id, clientId) {
+    const key = String(clientId ?? '').slice(0, 64);
+    if (!key) return false;
+    const project = await this.engine.load(id);
+    if (!this.engine.teammates(project).includes(key)) return false;
+    project.team[key] = new Date().toISOString();
+    if (this.improver.isActive(id)) this.improver.join(id, key);
+    else if (this.engine.running.has(id)) this.engine.join(id, key);
+    return true;
+  }
+
   async resumeInterrupted() {
     const resumed = [];
     for (const record of await this.handoffs.resumable()) {
@@ -500,6 +528,7 @@ export class App {
 
   status() {
     return {
+      build: this.build,
       ready: this.router.ready,
       demo: this.engine.demo,
       providers: this.router.status(),

@@ -105,7 +105,7 @@ function linksBlock(links = []) {
 
 function sourcesBlock(sources) {
   if (!sources.length) return 'NO SOURCES were retrieved. Use general knowledge only, mark every number as "assumption": true, and set confidence "low".';
-  return sources.map((s) => `[${s.id}] ${s.title}${s.url ? ` <${s.url}>` : ''}\n${String(s.text || s.snippet || '').slice(0, 2200)}${linksBlock(s.links)}`).join('\n\n');
+  return sources.map((s) => `[${s.id}] ${s.title}${s.url ? ` <${s.url}>` : ''}\n${String(s.evidence || s.text || s.snippet || '').slice(0, 2200)}${linksBlock(s.links)}`).join('\n\n');
 }
 
 function upstreamBlock(upstream) {

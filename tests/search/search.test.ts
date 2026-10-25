@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, pageLocale } from '../../src/search/search.mjs';
+import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, PAGE_CACHE_SIZE, PAGE_CACHE_TTL_MS, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, pageLocale } from '../../src/search/search.mjs';
 import { SiteRecipes } from '../../src/search/recipes.mjs';
 import { htmlToText } from '../../src/search/html.mjs';
 import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
@@ -103,9 +103,29 @@ describe('search', () => {
     expect(first.listings.map((l: { value: number }) => l.value)).toEqual([11000, 12000, 13000, 21000, 22000, 23000]);
     expect(first.listings[3].page).toBe('https://imo.example/terrenos?page=2');
     expect(recipes.describe()).toEqual([{ host: 'imo.example', template: 'imo.example/anuncio/*', methods: ['cards'], count: 3, country: 'PT', verified: true, misses: 0 }]);
-    const again = await service.readPage('https://imo.example/terrenos');
+    const again = await service.readFresh('https://imo.example/terrenos');
     expect(again.pagesRead).toBeUndefined();
     expect(fetchImpl.calls.filter((c) => c.url.includes('page=2'))).toHaveLength(1);
+  });
+
+  it('is the one page cache: a page read for research, the sweep or the expected-result check is fetched once per 6 hours, failures are not kept', async () => {
+    let clock = 0;
+    const fetchImpl = fakeFetch([
+      [/down\.example/, () => new Response('gone', { status: 503, headers: { 'content-type': 'text/html' } })],
+      [/site\.example/, () => new Response(`<p>${'page text '.repeat(60)}</p>`, { headers: { 'content-type': 'text/html' } })],
+    ]);
+    const service = new SearchService({ fetchImpl, backends: [], jinaReader: false, now: () => clock });
+    await service.readPage('https://site.example/a');
+    await service.readPage('https://site.example/a');
+    await service.readPage('https://down.example/a');
+    await service.readPage('https://down.example/a');
+    expect(fetchImpl.calls.map((c) => c.url)).toEqual(['https://site.example/a', 'https://down.example/a', 'https://down.example/a']);
+    clock = PAGE_CACHE_TTL_MS + 1;
+    await service.readPage('https://site.example/a');
+    expect(fetchImpl.calls).toHaveLength(4);
+    for (let i = 0; i <= PAGE_CACHE_SIZE; i++) service.pages.set(`https://site.example/${i}`, { at: clock, page: {} });
+    await service.readPage('https://site.example/new');
+    expect(service.pages.size).toBe(PAGE_CACHE_SIZE);
   });
 
   it('takes the page language from og:locale or the html tag', () => {

@@ -594,8 +594,10 @@ function applyTheme(v){try{if(v)localStorage.setItem("frl-theme",v);else localSt
 try{const t=localStorage.getItem("frl-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}
 document.querySelectorAll("[data-theme-set]").forEach(b=>b.addEventListener("click",()=>applyTheme(b.dataset.themeSet)));
 
+function newBuild(build){if(!build)return false;if(!STATE.build){STATE.build=build;return false;}if(build===STATE.build)return false;const typing=document.activeElement&&/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)&&document.activeElement.value;if(typing){toast("The app was updated: reload the page when you finish typing");return false;}location.reload();return true;}
 async function loadStatus(){
   try{STATE.status=await api("/api/status");}catch(e){toast("server unreachable: "+e.message);return;}
+  if(newBuild(STATE.status.build))return;
   const s=STATE.status;const ready=s.providers.filter(p=>p.state==="ready");
   $("chipModel").innerHTML='<i style="background:'+(s.demo?"var(--am)":ready.length?"var(--gr)":"var(--rd)")+'"></i>'+(s.demo?"demo models":ready.length+" model"+(ready.length===1?"":"s"));
   const web=s.search.backends.filter(b=>b!=="wikipedia");
@@ -785,8 +787,8 @@ async function openProject(id){
   try{STATE.project=await api("/api/projects/"+encodeURIComponent(id));}catch(e){toast(e.message);return;}
   showPage("project");renderAll();
   if(SNAPSHOT())return;
-  STATE.es=new EventSource("/api/projects/"+encodeURIComponent(id)+"/events");
-  STATE.es.onmessage=(m)=>{const d=JSON.parse(m.data);if(!STATE.project||STATE.project.id!==d.project.id)return;STATE.project=d.project;queueRender();if(d.event&&d.event.type==="phase")loadProjects();};
+  STATE.es=new EventSource("/api/projects/"+encodeURIComponent(id)+"/events?client="+encodeURIComponent(CLIENT_ID));
+  STATE.es.onmessage=(m)=>{const d=JSON.parse(m.data);if(d.event&&d.event.type==="hello"&&newBuild(d.event.build))return;if(!STATE.project||STATE.project.id!==d.project.id)return;STATE.project=d.project;queueRender();if(d.event&&d.event.type==="phase")loadProjects();};
 }
 function queueRender(){if(STATE.drawQueued)return;STATE.drawQueued=true;requestAnimationFrame(()=>{STATE.drawQueued=false;renderAll();});}
 function renderAll(){if(!STATE.project)return;renderHead();renderOutline();renderPieces();drawTree(false);renderInspector();renderChat();renderResults();renderReport();renderSources();renderGates();}

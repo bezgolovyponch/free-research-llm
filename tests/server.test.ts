@@ -168,6 +168,29 @@ describe('teammates', () => {
     }
     expect((await call('GET', `/api/projects/${created.body.id}`)).body.lanes).toBe(2);
   });
+
+  it('keeps a joined browser on the team after a restart: its page reconnects and the lane comes back, and the hello carries the build', { timeout: 90000 }, async () => {
+    const created = await call('POST', '/api/projects', { question: 'Which Czech city suits a small specialty bakery best?' });
+    await waitFor(created.body.id, 'done');
+    for (let i = 0; i < 400 && app.engine.running.has(created.body.id); i++) await new Promise((r) => setTimeout(r, 25));
+    app.engine.running.add(created.body.id);
+    try {
+      await call('POST', `/api/projects/${created.body.id}/run`, { clientId: 'pc-browser' });
+      app.engine.leave(created.body.id);
+      expect(app.engine.teamOf(created.body.id).helpers).toEqual([]);
+      const controller = new AbortController();
+      const res = await fetch(`${base}/api/projects/${created.body.id}/events?client=pc-browser`, { signal: controller.signal });
+      const reader = res.body!.getReader();
+      const first = new TextDecoder().decode((await reader.read()).value);
+      controller.abort();
+      expect(first).toContain(`"build":"${app.build}"`);
+      expect(app.engine.teamOf(created.body.id).helpers).toEqual(['pc-browser']);
+      expect((await call('GET', '/api/status')).body.build).toBe(app.build);
+    } finally {
+      app.engine.running.delete(created.body.id);
+      app.engine.leave(created.body.id);
+    }
+  });
 });
 
 describe('research share links', () => {
