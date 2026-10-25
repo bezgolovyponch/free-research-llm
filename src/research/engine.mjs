@@ -280,7 +280,8 @@ export class ResearchEngine {
     }
     project.candidates = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
     if (this.sites && !this.demo) {
-      project.candidates = await this.sites.apply(project.candidates, brief, { readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
+      const mode = sweep ? 'all' : this.quiet.has(project.id) ? 'cache' : 'budget';
+      project.candidates = await this.sites.apply(project.candidates, brief, { mode, readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
       const s = project.candidates.sites;
       if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate 2021–2025, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
