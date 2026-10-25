@@ -31,6 +31,7 @@ const MAX_ATTEMPTS = 3;
 const MAX_ATTACHMENTS = 6;
 const ATTACHMENT_TEXT_LIMIT = 20000;
 const ATTACHMENT_TYPES = /\.(csv|tsv|txt|md|json|html?)$/i;
+const SWEEP_PAGES_KEPT = 120;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -269,7 +270,10 @@ export class ResearchEngine {
       const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null });
       const result = await sweeper.sweep(project, brief, options);
       if (result) {
-        project.sweep = { ...result, pages: compactSources(result.pages).sources };
+        const fresh = new Set(result.pages.map((page) => page.url));
+        const kept = (project.sweep?.pages ?? []).filter((page) => !fresh.has(page.url));
+        const pages = [...compactSources(result.pages).sources, ...kept].slice(0, SWEEP_PAGES_KEPT).map((page, i) => ({ ...page, id: `P${i + 1}` }));
+        project.sweep = { ...result, pages };
         this.emit(project, 'candidates', `portal sweep: ${result.pagesRead} listing page(s) read by code (budget ${result.budget}), ${result.pages.reduce((n, p) => n + p.listings.length, 0)} new listing(s)`);
       }
     }
@@ -493,7 +497,7 @@ export class ResearchEngine {
     return changed;
   }
 
-  async regroundAndRescore(id) {
+  async regroundAndRescore(id, { sweep = false } = {}) {
     const project = await this.load(id);
     const compacted = compactProject(project);
     const fixes = repairTree(project.nodes, project.question);
@@ -501,7 +505,7 @@ export class ResearchEngine {
     const regrounded = this.reground(project);
     await this.rescreenItems(project);
     await this.harvestAll(project);
-    await this.collectCandidates(project);
+    await this.collectCandidates(project, { sweep });
     const regraded = this.regrade(project);
     if (fixes.some((f) => ['merged-duplicate', 'grouped-candidates'].includes(f.code)) || regraded.length) {
       await this.store.save(project);
@@ -531,7 +535,7 @@ export class ResearchEngine {
     return results;
   }
 
-  async run(id, { hints = {}, memo = true } = {}) {
+  async run(id, { hints = {}, memo = true, sweep = null } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
     this.cancelled.delete(id);
@@ -590,7 +594,7 @@ export class ResearchEngine {
         return await this.store.save(project);
       }
       try {
-        await this.collectCandidates(project, { sweep: !this.quiet.has(id) });
+        await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
       } catch (error) {
         this.emit(project, 'warn', `candidate table not built: ${error.message}`);
       }

@@ -23,3 +23,5 @@ section('grades changed', report.changes.regraded);
 section('listings removed by the item gate', report.changes.removedItems);
 section('listings taken from pages already read', report.harvested);
 console.log(`\nlistings kept: ${report.itemsKept}`);
+const c = report.candidates;
+if (c) console.log(`candidate table (no new page reads): ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);

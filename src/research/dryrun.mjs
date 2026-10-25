@@ -14,6 +14,7 @@ export async function previewMaintenance(engine, original) {
   const rescreened = await engine.rescreenItems(project);
   const harvested = await engine.harvestAll(project);
   const regraded = engine.regrade(project);
+  const candidates = await engine.collectCandidates(project);
   const after = snapshot(project);
   const changes = { moved: [], retitled: [], regraded: [], removedItems: [] };
   for (const [id, now] of after) {
@@ -29,5 +30,5 @@ export async function previewMaintenance(engine, original) {
     }
   }
   const kept = project.nodes.flatMap((n) => n.finding?.items ?? []).length;
-  return { compacted, repairs: repairs.map((r) => `${r.nodeId} ${r.code}`), regrounded, rescreened, harvested, regradedIds: regraded, changes, itemsKept: kept, project };
+  return { compacted, repairs: repairs.map((r) => `${r.nodeId} ${r.code}`), regrounded, rescreened, harvested, regradedIds: regraded, changes, itemsKept: kept, candidates, project };
 }

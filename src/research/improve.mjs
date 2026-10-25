@@ -404,7 +404,7 @@ export class ProjectImprover {
     state.lock = new Mutex();
     state.measure = (p) => (scope.length ? scopeScore(p, scope, [...state.pieces], exclude) : projectScore(p, [...state.pieces]));
     await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, scope, exclude, error: null });
-    project = await this.whenModelsAnswer(id, state, () => (project.phase !== 'done' ? this.engine.run(id) : this.engine.regroundAndRescore(id)));
+    project = await this.whenModelsAnswer(id, state, () => (project.phase !== 'done' ? this.engine.run(id, { sweep: true }) : this.engine.regroundAndRescore(id, { sweep: true })));
     if (!project) return this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
     state.pieces = new Set(scoredPieces(project, scope, exclude));
     state.best = state.measure(project);
