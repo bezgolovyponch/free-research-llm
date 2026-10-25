@@ -195,6 +195,31 @@ describe('SiteAssessor', () => {
     expect(out.kept[0].siteNote).toBe('site check failed: HTTP 429 from overpass-api.de');
   });
 
+  it('looks up the place the listing page states when the card had none', async () => {
+    const net = fakeNet({ geocode: { 'Thuan Giao, Binh Duong, Vietnam': BINH_DUONG } });
+    const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ ...table, kept: [{ ...rows[1], place: '' }], keptCount: 1 }, { coastal: false }, { readPage: async () => ({ coords: null, place: 'Thuan Giao, Binh Duong' }) });
+    expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Thuan Giao, Binh Duong, Vietnam"', site: { climate: { workable: 0 } } });
+  });
+
+  it('retries a busy free service, then gives up with its status', async () => {
+    const waits: number[] = [];
+    const statuses = [502, 429, 200];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { const status = statuses.shift()!; return new Response(status === 200 ? '{"ok":1}' : 'busy', { status }); }) as typeof fetch;
+    try {
+      const assessor = new SiteAssessor({ sleep: async (ms: number) => { waits.push(ms); } });
+      expect(await assessor.httpJson('https://overpass-api.de/api/interpreter')).toEqual({ ok: 1 });
+      expect(waits).toEqual([10000, 30000]);
+      statuses.push(503, 503, 503);
+      await expect(assessor.httpJson('https://overpass-api.de/api/interpreter')).rejects.toThrow('HTTP 503 from overpass-api.de');
+      statuses.length = 0;
+      statuses.push(404);
+      await expect(assessor.httpJson('https://overpass-api.de/api/interpreter')).rejects.toThrow('HTTP 404 from overpass-api.de');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it('waits between place lookups, as the geocoder asks', async () => {
     const waits: number[] = [];
     let t = 0;

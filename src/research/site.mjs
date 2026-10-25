@@ -14,6 +14,8 @@ export const RURAL_PARK_MAX_PITCHES = 30;
 export const POI_SATURATION = 200;
 export const LODGING_SATURATION = 300;
 const MAX_SITES = 2000;
+export const RETRY_STATUS = new Set([429, 502, 503, 504]);
+export const RETRY_WAITS_MS = [10000, 30000];
 const USER_AGENT = 'free-research-llm (site fit; https://github.com/bezgolovyponch/free-research-llm)';
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
@@ -206,9 +208,12 @@ export class SiteAssessor {
   }
 
   async httpJson(url, init = {}) {
-    const res = await fetch(url, { ...init, headers: { 'user-agent': USER_AGENT, accept: 'application/json', ...(init.headers ?? {}) }, signal: AbortSignal.timeout(150000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
-    return res.json();
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(url, { ...init, headers: { 'user-agent': USER_AGENT, accept: 'application/json', ...(init.headers ?? {}) }, signal: AbortSignal.timeout(150000) });
+      if (res.ok) return res.json();
+      if (!RETRY_STATUS.has(res.status) || attempt >= RETRY_WAITS_MS.length) throw new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
+      await this.sleep(RETRY_WAITS_MS[attempt]);
+    }
   }
 
   async load() {
@@ -271,11 +276,12 @@ export class SiteAssessor {
   }
 
   async findPoint(row, readPage) {
+    let page = null;
     if (readPage) {
-      const page = await readPage(row.url).catch(() => null);
+      page = await readPage(row.url).catch(() => null);
       if (page?.coords) return { ...page.coords, by: 'listing page' };
     }
-    const place = String(row.place ?? '').trim();
+    const place = String(row.place || page?.place || '').trim();
     if (!place) return null;
     return this.geocode(row.country && !place.toLowerCase().includes(row.country.toLowerCase()) ? `${place}, ${row.country}` : place, row.countryCode ?? '');
   }

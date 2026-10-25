@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coordsOf, extractListings, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate } from '../../src/search/listings.mjs';
+import { coordsOf, extractListings, pagePlace, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate } from '../../src/search/listings.mjs';
 
 const BASE = 'https://portal.example/land-for-sale';
 
@@ -53,6 +53,13 @@ describe('listing extraction', () => {
     expect(fromJsonLd(`<script type="application/ld+json">${JSON.stringify(ld)}</script>`, BASE)[0]).toMatchObject({ lat: 44.3012, lon: 15.0912 });
     expect(coordsOf({ location: { lat: 0, lng: 0 } })).toBeNull();
     expect(coordsOf({ address: { geo: { lat: 38.2, lng: -7.68 } } })).toEqual({ lat: 38.2, lon: -7.68 });
+  });
+
+  it('finds the place a listing page states, in its address data or its title', () => {
+    expect(pagePlace('<title>Land in Thuan Giao, Binh Duong ₫ 480,000,000 | Dot Property</title>')).toBe('Thuan Giao, Binh Duong');
+    expect(pagePlace('<title>Plot of land for sale in Porto Santo, Madeira, Portugal | Mer et Demeures</title>')).toBe('Porto Santo, Madeira, Portugal');
+    expect(pagePlace('<script type="application/ld+json">{"@type":"Product","address":{"@type":"PostalAddress","addressLocality":"Vir","addressRegion":"Zadarska"}}</script><title>x</title>')).toBe('Vir, Zadarska');
+    expect(pagePlace('<title>Terreno para venda</title>')).toBe('');
   });
 
   it('reads the records a site embeds for its own app and finds each record link among the page anchors', () => {

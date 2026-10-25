@@ -70,6 +70,36 @@ export function coordsOf(value, depth = 0) {
   return null;
 }
 
+const TITLE_PLACE = /\b(?:in|em|en|à|u|na|di|a)\s+([A-ZÀ-ÝĐČŠŽ][\p{L}.'’ -]{1,40}(?:,\s*[\p{L}.'’ -]{2,40}){0,3})/u;
+
+function addressOf(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 12) return '';
+  if (Array.isArray(value)) {
+    for (const inner of value) {
+      const found = addressOf(inner, depth + 1);
+      if (found) return found;
+    }
+    return '';
+  }
+  const parts = [value.addressLocality, value.addressRegion, value.addressCountry].filter((p) => typeof p === 'string' && p.trim());
+  if (parts.length >= 2 || (parts.length && value['@type'] === 'PostalAddress')) return clean(parts.join(', '), 80);
+  for (const inner of Object.values(value)) {
+    const found = addressOf(inner, depth + 1);
+    if (found) return found;
+  }
+  return '';
+}
+
+export function pagePlace(html) {
+  for (const script of scripts(html, /application\/ld\+json/i)) {
+    const found = addressOf(parseJson(script));
+    if (found) return found;
+  }
+  const title = String(html ?? '').match(/<title[^>]*>([^<]{3,200})<\/title>/i)?.[1] ?? '';
+  const m = title.replace(/&amp;/g, '&').match(TITLE_PLACE);
+  return m ? clean(m[1].replace(/\s+(?:for sale|à vendre|para venda|en venta)\b.*$/i, '').trim(), 80) : '';
+}
+
 function placeOf(value, depth = 0) {
   if (!value || depth > 3) return '';
   if (typeof value === 'string') return clean(value, 80);

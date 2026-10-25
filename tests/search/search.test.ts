@@ -91,6 +91,8 @@ describe('search', () => {
   it('keeps the coordinates a listing page publishes for its map', async () => {
     const fetchImpl = fakeFetch([[/plot\.example/, () => new Response(`<html><div class="map" data-lat="44.301234" data-lng="15.091234"></div>${' text'.repeat(120)}</html>`, { headers: { 'content-type': 'text/html' } })]]);
     expect((await new SearchService({ fetchImpl, backends: [] }).readPage('https://plot.example/listing-ID1abcd')).coords).toEqual({ lat: 44.301234, lon: 15.091234 });
+    const titled = fakeFetch([[/plot\.example/, () => new Response(`<html><title>Land in Hoa Quy, Da Nang | Portal</title>${' text'.repeat(120)}</html>`, { headers: { 'content-type': 'text/html' } })]]);
+    expect((await new SearchService({ fetchImpl: titled, backends: [] }).readPage('https://plot.example/listing-ID1abcd')).place).toBe('Hoa Quy, Da Nang');
   });
 
   it('reads listings from a portal page, learns the site recipe and checks it on page 2, adding the page-2 listings', async () => {

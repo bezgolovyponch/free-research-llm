@@ -1,6 +1,6 @@
 import { absoluteUrl, domainOf, htmlToText } from './html.mjs';
 import { sourceCountry } from '../research/brief.mjs';
-import { extractListings, listingKey } from './listings.mjs';
+import { extractListings, listingKey, pagePlace } from './listings.mjs';
 import { selectDiverse } from './selection.mjs';
 import { pageCoordinates } from '../research/site.mjs';
 const USER_AGENT = 'free-research-llm/1.0 (+https://github.com/bezgolovyponch/free-research-llm)';
@@ -346,6 +346,7 @@ export class SearchService {
         methods: found.methods,
         locale: html ? pageLocale(body) : '',
         coords: html ? pageCoordinates(body) : null,
+        place: html ? pagePlace(body) : '',
         status: res.status,
       };
     } catch {
