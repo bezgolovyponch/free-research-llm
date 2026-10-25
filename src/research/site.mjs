@@ -20,6 +20,7 @@ export const RURAL_PARK_MAX_PITCHES = 30;
 export const POI_SATURATION = 200;
 export const LODGING_SATURATION = 300;
 const MAX_SITES = 2000;
+export const STORE_VERSION = 2;
 export const RETRY_STATUS = new Set([429, 502, 503, 504]);
 export const RETRY_WAITS_MS = [10000, 30000];
 const USER_AGENT = 'free-research-llm (site fit; https://github.com/bezgolovyponch/free-research-llm)';
@@ -201,6 +202,15 @@ export function shortSite(site) {
   return { ...rest, climate: climate ? { comfortable: climate.comfortable, workable: climate.workable, hottest: climate.hottest, coldest: climate.coldest } : null };
 }
 
+const fold = (text) => String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
+
+export function namesRegion(displayName, query) {
+  const parts = String(query).split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 3) return true;
+  const region = fold(parts[parts.length - 2]);
+  return fold(displayName).includes(region);
+}
+
 export class SiteAssessor {
   constructor({ file = '', fetchJson = null, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
     this.file = file;
@@ -228,7 +238,10 @@ export class SiteAssessor {
     if (this.loaded) return this;
     try {
       const parsed = JSON.parse(await fs.readFile(this.file, 'utf8'));
-      if (parsed && typeof parsed === 'object') this.store = { sites: parsed.sites ?? {}, places: parsed.places ?? {}, hpi: parsed.hpi ?? {}, points: parsed.points ?? {} };
+      if (parsed && typeof parsed === 'object') {
+        const current = parsed.version === STORE_VERSION;
+        this.store = { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: parsed.hpi ?? {}, points: current ? parsed.points ?? {} : {} };
+      }
     } catch {
       this.store = { sites: {}, places: {}, hpi: {}, points: {} };
     }
@@ -242,7 +255,7 @@ export class SiteAssessor {
       const keys = Object.keys(this.store[table]);
       for (const key of keys.slice(0, Math.max(0, keys.length - MAX_SITES))) delete this.store[table][key];
     }
-    const body = JSON.stringify(this.store);
+    const body = JSON.stringify({ version: STORE_VERSION, ...this.store });
     this.writing = this.writing.then(() => fs.writeFile(this.file, body)).catch(() => {});
     return this.writing;
   }
@@ -265,7 +278,8 @@ export class SiteAssessor {
     this.lastGeocode = this.now();
     const only = /^[A-Z]{2}$/.test(countryCode) ? `&countrycodes=${countryCode.toLowerCase()}` : '';
     const found = await this.fetchJson(`${NOMINATIM_URL}?format=json&limit=1${only}&q=${encodeURIComponent(query)}`);
-    const point = Array.isArray(found) && found.length ? { lat: Number(found[0].lat), lon: Number(found[0].lon), by: `place "${query}"` } : null;
+    const hit = Array.isArray(found) ? found[0] : null;
+    const point = hit && namesRegion(hit.display_name, query) ? { lat: Number(hit.lat), lon: Number(hit.lon), by: `place "${query}"` } : null;
     this.store.places[key] = { at: this.now(), point };
     this.persist();
     return point;
@@ -291,7 +305,7 @@ export class SiteAssessor {
     }
     const place = String(row.place || page?.place || '').trim();
     if (!place) return null;
-    const parts = place.split(',').map((p) => p.trim()).filter(Boolean);
+    const parts = [...new Set(place.split(/,|\s+-\s+/).map((p) => p.trim()).filter(Boolean))];
     for (let k = 0; k < parts.length; k++) {
       const rest = parts.slice(k).join(', ');
       if (row.country && rest.toLowerCase() === row.country.toLowerCase()) break;

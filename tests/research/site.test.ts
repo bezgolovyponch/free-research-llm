@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seaScore, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
+import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seaScore, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
 
 const VIR = { lat: 44.3, lon: 15.09 };
+const DA_NANG = { lat: 16.055, lon: 108.22, name: 'Thai Hoa, Hai Chau, Da Nang, Vietnam' };
 const BINH_DUONG = { lat: 11.0, lon: 106.65 };
 
 function daily(byMonth: (m: number) => [number, number, number]) {
@@ -46,7 +47,7 @@ function fakeNet(opts: { coastFor?: (lat: number) => number | null; geocode?: Re
       const q = decodeURIComponent(url.split('q=')[1]);
       calls.push(url.match(/countrycodes=(\w+)/)?.[1] ?? 'any');
       const hit = opts.geocode?.[q];
-      return hit ? [{ lat: String(hit.lat), lon: String(hit.lon) }] : [];
+      return hit ? [{ lat: String(hit.lat), lon: String(hit.lon), display_name: (hit as { name?: string }).name ?? q }] : [];
     }
     if (url.includes('overpass')) {
       calls.push('overpass');
@@ -181,6 +182,21 @@ describe('SiteAssessor', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('drops looked-up places and points from an older store, keeping measured sites', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-'));
+    const file = path.join(dir, 'sites.json');
+    const now = Date.now();
+    await fs.writeFile(file, JSON.stringify({ sites: { [siteKey(VIR.lat, VIR.lon)]: { at: now, site: { coastKm: 9 } } }, places: { 'hr|vir, croatia': { at: now, point: VIR } }, points: { 'https://x.example/1': { at: now, point: VIR } }, hpi: {} }));
+    const assessor = await new SiteAssessor({ file }).load();
+    expect(assessor.store.places).toEqual({});
+    expect(assessor.store.points).toEqual({});
+    expect(assessor.cachedSite(VIR.lat, VIR.lon)).toEqual({ coastKm: 9 });
+    assessor.persist();
+    await assessor.writing;
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).version).toBe(2);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('measures at most a fixed number of new places per pass and queues the rest', async () => {
     const many = Array.from({ length: NEW_SITES_PER_PASS + 3 }, (_, i) => ({ ...rows[0], url: `https://famalo.example/${i}`, lat: 40 + i * 0.1, lon: 15 }));
     const net = fakeNet();
@@ -239,6 +255,15 @@ describe('SiteAssessor', () => {
     const many = Array.from({ length: NEW_SITES_PER_PASS + 3 }, (_, i) => ({ ...rows[0], url: `https://famalo.example/${i}`, lat: 40 + i * 0.1, lon: 15 }));
     const out = await new SiteAssessor({ fetchJson: fakeNet().fetchJson, sleep: noSleep }).apply({ ...table, kept: many, keptCount: many.length }, brief, { mode: 'all' });
     expect(out.sites).toMatchObject({ assessed: NEW_SITES_PER_PASS + 3, pending: 0 });
+  });
+
+  it('refuses a geocoder match outside the region the place names, and tries the larger place', async () => {
+    expect(namesRegion('Thủ Dầu Một, Bình Dương, Việt Nam', 'Phu Loi, Binh Duong, Vietnam')).toBe(true);
+    expect(namesRegion('Thai Hoa, Hai Chau, Da Nang, Vietnam', 'Thai Hoa, Binh Duong, Vietnam')).toBe(false);
+    const net = fakeNet({ geocode: { 'Thai Hoa, Binh Duong, Vietnam': DA_NANG, 'Binh Duong, Vietnam': BINH_DUONG } });
+    const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ ...table, kept: [{ ...rows[1], place: 'Thai Hoa, Binh Duong - Binh Duong' }], keptCount: 1 }, { coastal: false }, {});
+    expect(out.kept[0]).toMatchObject({ lat: BINH_DUONG.lat, lon: BINH_DUONG.lon });
+    expect(out.kept[0].locatedBy).toContain('the nearest place found');
   });
 
   it('retries a busy free service, then gives up with its status', async () => {
