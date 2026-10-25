@@ -4,7 +4,8 @@ export const EBIKE_KM = 25;
 export const NEAR_KM = 15;
 export const SITE_TTL_MS = 30 * 24 * 3600 * 1000;
 export const NEW_SITES_PER_PASS = 12;
-export const ROWS_PER_PASS = 80;
+export const PAGE_READS_PER_PASS = 40;
+export const MISS_TTL_MS = 24 * 3600 * 1000;
 export const PASS_BUDGET_MS = 8 * 60 * 1000;
 export const GEOCODE_GAP_MS = 1100;
 export const CLIMATE_YEARS = ['2021-01-01', '2025-12-31'];
@@ -205,6 +206,7 @@ export class SiteAssessor {
     this.loaded = !file;
     this.writing = Promise.resolve();
     this.lastGeocode = -Infinity;
+    this.reads = 0;
   }
 
   async httpJson(url, init = {}) {
@@ -266,12 +268,12 @@ export class SiteAssessor {
   async locate(row, readPage) {
     if (Number.isFinite(row.lat) && Number.isFinite(row.lon)) return { lat: row.lat, lon: row.lon, by: 'listing data' };
     const known = this.store.points[row.url];
-    if (this.fresh(known) && known.point) return known.point;
+    if (known && this.now() - known.at < (known.point ? SITE_TTL_MS : MISS_TTL_MS)) return known.point;
+    if (this.reads >= PAGE_READS_PER_PASS) return undefined;
+    this.reads++;
     const point = await this.findPoint(row, readPage);
-    if (point) {
-      this.store.points[row.url] = { at: this.now(), point };
-      this.persist();
-    }
+    this.store.points[row.url] = { at: this.now(), point };
+    this.persist();
     return point;
   }
 
@@ -283,7 +285,15 @@ export class SiteAssessor {
     }
     const place = String(row.place || page?.place || '').trim();
     if (!place) return null;
-    return this.geocode(row.country && !place.toLowerCase().includes(row.country.toLowerCase()) ? `${place}, ${row.country}` : place, row.countryCode ?? '');
+    const parts = place.split(',').map((p) => p.trim()).filter(Boolean);
+    for (let k = 0; k < parts.length; k++) {
+      const rest = parts.slice(k).join(', ');
+      if (row.country && rest.toLowerCase() === row.country.toLowerCase()) break;
+      const query = row.country && !rest.toLowerCase().includes(row.country.toLowerCase()) ? `${rest}, ${row.country}` : rest;
+      const point = await this.geocode(query, row.countryCode ?? '');
+      if (point) return k ? { ...point, by: `${point.by}, the nearest place found for "${place}"` } : point;
+    }
+    return null;
   }
 
   async assess(lat, lon) {
@@ -328,14 +338,15 @@ export class SiteAssessor {
     const stats = { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 };
     const kept = [];
     const far = [];
-    for (const [i, row] of candidates.kept.entries()) {
-      if (i >= ROWS_PER_PASS) {
-        kept.push(row);
-        stats.pending++;
-        continue;
-      }
+    this.reads = 0;
+    for (const row of candidates.kept) {
       try {
         const point = await this.locate(row, readPage);
+        if (point === undefined) {
+          stats.pending++;
+          kept.push({ ...row, site: null, fit: null, siteNote: 'site check queued for the next pass' });
+          continue;
+        }
         if (!point) {
           stats.unlocated++;
           kept.push({ ...row, site: null, fit: null, siteNote: 'location not shown' });

@@ -95,7 +95,7 @@ export function pagePlace(html) {
     const found = addressOf(parseJson(script));
     if (found) return found;
   }
-  const title = String(html ?? '').match(/<title[^>]*>([^<]{3,200})<\/title>/i)?.[1] ?? '';
+  const title = String(html ?? '').match(/<title[^>]*>([^<]{3,200})<\/title>/i)?.[1] ?? String(html ?? '').match(/^Title:\s*(.{3,200})$/m)?.[1] ?? '';
   const m = title.replace(/&amp;/g, '&').match(TITLE_PLACE);
   return m ? clean(m[1].replace(/\s+(?:for sale|à vendre|para venda|en venta)\b.*$/i, '').trim(), 80) : '';
 }

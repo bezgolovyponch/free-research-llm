@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { EBIKE_KM, NEW_SITES_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seaScore, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
+import { EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seaScore, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
 
 const VIR = { lat: 44.3, lon: 15.09 };
 const BINH_DUONG = { lat: 11.0, lon: 106.65 };
@@ -199,6 +199,24 @@ describe('SiteAssessor', () => {
     const net = fakeNet({ geocode: { 'Thuan Giao, Binh Duong, Vietnam': BINH_DUONG } });
     const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ ...table, kept: [{ ...rows[1], place: '' }], keptCount: 1 }, { coastal: false }, { readPage: async () => ({ coords: null, place: 'Thuan Giao, Binh Duong' }) });
     expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Thuan Giao, Binh Duong, Vietnam"', site: { climate: { workable: 0 } } });
+  });
+
+  it('falls back to the nearest larger place the geocoder knows', async () => {
+    const net = fakeNet({ geocode: { 'Binh Duong, Vietnam': BINH_DUONG } });
+    const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ ...table, kept: [{ ...rows[1], place: 'Chanh Nghia, Thu Dau Mot, Binh Duong' }], keptCount: 1 }, { coastal: false }, {});
+    expect(out.kept[0].locatedBy).toBe('place "Binh Duong, Vietnam", the nearest place found for "Chanh Nghia, Thu Dau Mot, Binh Duong"');
+  });
+
+  it('reads each listing page once a day at most, and only a fixed number of new pages per pass', async () => {
+    let reads = 0;
+    const readPage = async () => { reads++; return { coords: null, place: '' }; };
+    const many = Array.from({ length: PAGE_READS_PER_PASS + 5 }, (_, i) => ({ ...rows[2], url: `https://imo.example/ID${i}` }));
+    const assessor = new SiteAssessor({ fetchJson: fakeNet().fetchJson, sleep: noSleep });
+    const first = await assessor.apply({ ...table, kept: many, keptCount: many.length }, { coastal: false }, { readPage });
+    expect(reads).toBe(PAGE_READS_PER_PASS);
+    expect(first.sites).toMatchObject({ unlocated: PAGE_READS_PER_PASS, pending: 5 });
+    await assessor.apply({ ...table, kept: many, keptCount: many.length }, { coastal: false }, { readPage });
+    expect(reads).toBe(PAGE_READS_PER_PASS + 5);
   });
 
   it('retries a busy free service, then gives up with its status', async () => {

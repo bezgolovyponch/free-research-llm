@@ -60,6 +60,7 @@ describe('listing extraction', () => {
     expect(pagePlace('<title>Plot of land for sale in Porto Santo, Madeira, Portugal | Mer et Demeures</title>')).toBe('Porto Santo, Madeira, Portugal');
     expect(pagePlace('<script type="application/ld+json">{"@type":"Product","address":{"@type":"PostalAddress","addressLocality":"Vir","addressRegion":"Zadarska"}}</script><title>x</title>')).toBe('Vir, Zadarska');
     expect(pagePlace('<title>Terreno para venda</title>')).toBe('');
+    expect(pagePlace('Title: Sea view plot for sale in Porto Santo, Madeira | Agency\n\nURL Source: https://agency.example/1')).toBe('Porto Santo, Madeira');
   });
 
   it('reads the records a site embeds for its own app and finds each record link among the page anchors', () => {

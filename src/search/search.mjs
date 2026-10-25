@@ -346,7 +346,7 @@ export class SearchService {
         methods: found.methods,
         locale: html ? pageLocale(body) : '',
         coords: html ? pageCoordinates(body) : null,
-        place: html ? pagePlace(body) : '',
+        place: pagePlace(body),
         status: res.status,
       };
     } catch {
