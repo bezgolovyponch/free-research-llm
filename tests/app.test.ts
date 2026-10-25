@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { App, ProviderFactory, appNoteFor, buildSearch, localBase, routeOrderFrom } from '../src/app.mjs';
+import { App, ProviderFactory, appNoteFor, buildId, buildSearch, localBase, routeOrderFrom } from '../src/app.mjs';
 import { fakeFetch, jsonResponse } from './helpers/fake-fetch';
 
 describe('App composition', () => {
@@ -238,5 +238,14 @@ describe('App reports in the app conversation', () => {
     expect((await app.appChat.thread()).map((m: { content: string }) => m.content)).toContain('New research: Which kiosk spot in Brno pays back fastest?');
     await app.logs.queue;
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
+describe('build id', () => {
+  it('changes when the page or the package changes, so open pages reload themselves after an update', () => {
+    expect(buildId('a', 'b')).toMatch(/^[0-9a-f]{12}$/);
+    expect(buildId('a', 'b')).toBe(buildId('a', 'b'));
+    expect(buildId('a', 'b')).not.toBe(buildId('a2', 'b'));
+    expect(new App({ env: {}, providers: [] }).status().build).toMatch(/^[0-9a-f]{12}$/);
   });
 });

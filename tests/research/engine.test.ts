@@ -6,7 +6,7 @@ import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
-import { ResearchEngine } from '../../src/research/engine.mjs';
+import { ResearchEngine, TEAM_TTL_MS } from '../../src/research/engine.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
 const fakeSearch = {
@@ -255,6 +255,48 @@ describe('ResearchEngine', () => {
     expect(done.candidates.kept.map((r: { value: number }) => r.value)).toEqual([9000, 12000, 15000, 19000]);
     expect(done.acceptanceResult.items.slice(0, 4).map((i: { url: string }) => i.url)).toEqual(done.candidates.kept.map((r: { url: string }) => r.url));
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 2 listing page\(s\) read by code/.test(l.message))).toBe(true);
+  });
+
+  it('searches again before any model call when no retrieved page matches the piece, and shows the model the best passages', async () => {
+    const queries: string[][] = [];
+    const prompts: string[] = [];
+    const offTopic = {
+      ...fakeSearch,
+      async search(q: string[]) {
+        queries.push(q);
+        if (queries.length === 1) return [{ kind: 'web', title: 'Bikes', url: 'https://bikes.example/a', domain: 'bikes.example', snippet: 's', text: 'battery range' }, { kind: 'web', title: 'Shop', url: 'https://shop.example/b', domain: 'shop.example', snippet: 's', text: 'free delivery' }];
+        return [{ kind: 'web', title: 'Answer', url: 'https://answer.example/c', domain: 'answer.example', snippet: 's', text: `${q.join(' ')} documented here` }];
+      },
+    };
+    const scripted = new ScriptedProvider();
+    const provider = { id: 'demo', ready: true, describe: () => scripted.describe(), async chat(args: { messages: Array<{ content: string }> }) { prompts.push(args.messages.at(-1)!.content); return scripted.chat(args as never); } };
+    const { engine } = engineWith(provider, offTopic, 1);
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    const built = await engine.buildTree(project.id);
+    const leaf = built.nodes.find((n: { id: string }) => !built.nodes.some((m: { parentId: string }) => m.parentId === n.id));
+    await engine.researchLeaf(built, leaf, '');
+    expect(built.log.some((l: { message: string }) => l.message === `${leaf.id}: retrieved pages do not match the question; searching again before any model call`)).toBe(true);
+    expect(queries[1]).toContain(leaf.question);
+    expect(leaf.sources.map((s: { url: string }) => s.url)).toContain('https://answer.example/c');
+    const research = prompts.find((p) => p.includes(TASK_MARKERS.research))!;
+    expect(research.indexOf('https://answer.example/c')).toBeLessThan(research.indexOf('https://bikes.example/a'));
+  });
+
+  it('remembers joined browsers on the research, forgets one that leaves or is not seen for a day, and rejoins the rest', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    await engine.load(project.id);
+    engine.join(project.id, 'pc');
+    engine.join(project.id, 'phone');
+    const saved = engine.store.cache.get(project.id);
+    expect(Object.keys(saved.team)).toEqual(['pc', 'phone']);
+    engine.leaveOne(project.id, 'phone');
+    expect(Object.keys(saved.team)).toEqual(['pc']);
+    engine.leave(project.id);
+    expect(engine.rejoinTeam(project.id)).toEqual(['pc']);
+    expect(engine.teamOf(project.id).helpers).toEqual(['pc']);
+    expect(engine.rejoinTeam(project.id)).toEqual([]);
+    expect(engine.teammates(saved, Date.parse(saved.team.pc) + TEAM_TTL_MS + 1)).toEqual([]);
   });
 
   it('re-grounds checks stored before the fix, keeps hand-set ones, and re-scores before a loop baseline', async () => {

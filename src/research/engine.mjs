@@ -15,6 +15,7 @@ import { harvestItems } from './harvest.mjs';
 import { buildBrief, describeBrief, onConcept } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText } from './candidates.mjs';
 import { CandidateSweeper } from './sweep.mjs';
+import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
@@ -26,12 +27,12 @@ const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0 };
 const LOG_LIMIT = 300;
-const PAGE_CHECKS_KEPT = 2000;
 const MAX_ATTEMPTS = 3;
 const MAX_ATTACHMENTS = 6;
 const ATTACHMENT_TEXT_LIMIT = 20000;
 const ATTACHMENT_TYPES = /\.(csv|tsv|txt|md|json|html?)$/i;
 const SWEEP_PAGES_KEPT = 120;
+export const TEAM_TTL_MS = 24 * 3600 * 1000;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -100,7 +101,6 @@ export class ResearchEngine {
     this.onStop = onStop;
     this.laneCount = Math.min(MAX_LANES, Math.max(1, lanes));
     this.helpers = new Map();
-    this.pageChecks = new Map();
     this.quiet = new Set();
     this.router = router;
     this.search = search;
@@ -320,6 +320,23 @@ export class ResearchEngine {
     this.emit(project, 'node', `${node.id}: ${added.length} new source(s) from gap search`, { nodeId: node.id });
   }
 
+  rankSources(project, node) {
+    const ranked = selectEvidence(node.sources ?? [], evidenceQuery(node, project.brief));
+    return { verdict: retrievalVerdict(ranked), shown: diverseOrder(ranked) };
+  }
+
+  async correctiveSearch(project, node) {
+    if (!this.search?.enabled) return;
+    const queries = [...new Set([node.question, `${node.title} ${node.metric ?? ''}`.trim()].filter(Boolean))].filter((q) => !(node.searchQueries ?? []).includes(q));
+    if (!queries.length) return;
+    this.emit(project, 'node', `${node.id}: retrieved pages do not match the question; searching again before any model call`, { nodeId: node.id });
+    const found = this.onConceptOnly(project, node, await this.search.search(queries, { maxSources: 4, exclude: node.sources.map((s) => s.url).filter(Boolean) }));
+    const { sources, added } = mergeSources(node.sources, found);
+    node.sources = sources;
+    node.followUpQueries = [...(node.followUpQueries ?? []), ...queries];
+    this.emit(project, 'node', `${node.id}: ${added.length} new source(s) from the corrective search`, { nodeId: node.id });
+  }
+
   upstreamFor(project, node) {
     const byId = new Map(project.nodes.map((n) => [n.id, n]));
     return node.dependsOn.map((id) => byId.get(id)).filter((n) => n?.finding).map((n) => ({ id: n.id, status: n.status, answer: n.finding.answer, keyNumbers: keyNumbers(n.finding) }));
@@ -348,18 +365,20 @@ export class ResearchEngine {
     }
     this.emit(project, 'node', `${node.id}: ${node.sources.length} source(s) from ${new Set(node.sources.filter((x) => x.url).map((x) => hostOf(x.url))).size} site(s), analysing`, { nodeId: node.id });
     let failures = [];
+    if (this.rankSources(project, node).verdict === 'incorrect') await this.correctiveSearch(project, node);
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const tier = attempt === 1 ? 'fast' : 'deep';
       if (attempt > 1) await this.searchGaps(project, node);
+      const { shown } = this.rankSources(project, node);
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
-        messages: withGuidance(researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected, brief: (project.brief ?? this.briefOf(project)).text }), project.guidance),
+        messages: withGuidance(researchPrompt({ question: project.question, node, sources: shown, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected, brief: (project.brief ?? this.briefOf(project)).text }), project.guidance),
       });
       const finding = await this.withHarvest(project, node, await this.screenFinding(project, normalizeFinding(reply.data)));
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
       const retryAnyway = needsEscalation(mechanical) && attempt < MAX_ATTEMPTS;
-      const critique = retryAnyway ? null : await this.critique(node, finding, node.sources, reply.provider);
+      const critique = retryAnyway ? null : await this.critique(node, finding, shown, reply.provider);
       const verification = retryAnyway ? mechanical : verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
       this.emit(project, 'node', `${node.id}: ${verification.grade} (attempt ${attempt}, ${tier} tier, ${reply.provider})`, { nodeId: node.id });
@@ -521,8 +540,7 @@ export class ResearchEngine {
     const deliverables = [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))];
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
-    if (this.pageChecks.size > PAGE_CHECKS_KEPT) for (const key of [...this.pageChecks.keys()].slice(0, this.pageChecks.size - PAGE_CHECKS_KEPT)) this.pageChecks.delete(key);
-    const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert, cache: this.pageChecks });
+    const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }
@@ -548,6 +566,7 @@ export class ResearchEngine {
     };
     try {
       project = await this.load(id);
+      if (!this.quiet.has(id)) this.rejoinTeam(id);
       if (!project.nodes.length) await this.decompose(project);
       this.reground(project);
       project.phase = 'researching';
@@ -637,15 +656,31 @@ export class ResearchEngine {
     if (!already && this.laneCount + team.size < MAX_LANES) team.add(key);
     this.helpers.set(id, team);
     const project = this.store.cache.get(id);
+    if (project && team.has(key)) project.team = { ...(project.team ?? {}), [key]: new Date().toISOString() };
     const lanes = this.lanesFor(id);
     if (project && !already) this.emit(project, 'team', team.has(key) ? `a teammate joined: now ${lanes} lanes work on this research at once` : `a teammate joined; already at the maximum of ${lanes} lanes`);
     return { joined: team.has(key), already, lanes, mine: team.has(key) };
+  }
+
+  teammates(project, now = Date.now()) {
+    return Object.entries(project?.team ?? {}).filter(([, at]) => now - Date.parse(at) < TEAM_TTL_MS).map(([key]) => key);
+  }
+
+  rejoinTeam(id, join = (clientId) => this.join(id, clientId)) {
+    const team = this.helpers.get(id) ?? new Set();
+    const missing = this.teammates(this.store.cache.get(id)).filter((key) => !team.has(key));
+    missing.forEach((key) => join(key));
+    return missing;
   }
 
   leaveOne(id, clientId = '') {
     const team = this.helpers.get(id);
     const removed = Boolean(team?.delete(String(clientId)));
     const project = this.store.cache.get(id);
+    if (project?.team?.[clientId]) {
+      const { [clientId]: gone, ...rest } = project.team;
+      project.team = rest;
+    }
     if (project && removed) this.emit(project, 'team', `a teammate left: now ${this.lanesFor(id)} lanes`);
     return { left: removed, lanes: this.lanesFor(id), mine: false };
   }

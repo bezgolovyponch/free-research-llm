@@ -329,14 +329,15 @@ export function createServer(app, gate = new AccessGate()) {
     return { projectId: id, ...status, remote: app.remote, links: status.token ? shareLinks(bases, { projectId: id, token: status.token }) : [], pcSetup: status.token && bases[0] ? pcSetupCommand(bases[0].url, status.token) : null };
   }
 
-  async function serveEvents(req, res, id) {
+  async function serveEvents(req, res, id, clientId = '') {
     const project = await app.engine.load(id);
+    await app.seenClient(id, clientId);
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
     req.socket?.setKeepAlive?.(true, 15000);
     const stream = new EventStream({ res, render: (current) => ({ ...withResults(current), ...app.engine.teamOf(id) }) });
     app.liveStreams ??= new Set();
     app.liveStreams.add(stream);
-    stream.push({ type: 'hello', message: 'connected' }, project);
+    stream.push({ type: 'hello', message: 'connected', build: app.build }, project);
     const unsubscribe = app.engine.subscribe(id, (event, current) => stream.push(event, current));
     const ping = setInterval(() => stream.ping(), 20000);
     const done = () => {
@@ -381,7 +382,7 @@ export function createServer(app, gate = new AccessGate()) {
         return send(res, 200, await fs.readFile(path.join(ROOT_DIR, 'public', 'index.html'), 'utf8'), 'text/html; charset=utf-8');
       }
       const events = url.pathname.match(/^\/api\/projects\/([\w-]+)\/events$/);
-      if (req.method === 'GET' && events) return await serveEvents(req, res, events[1]);
+      if (req.method === 'GET' && events) return await serveEvents(req, res, events[1], url.searchParams.get('client') ?? '');
       const handoff = url.pathname.match(/^\/api\/projects\/([\w-]+)\/handoff\.md$/);
       if (req.method === 'GET' && handoff) return send(res, 200, (await app.handoffs.markdown(handoff[1])) ?? '# No handoff yet\n\nOne is written every time a run or loop stops.\n', 'text/markdown; charset=utf-8');
       const report = url.pathname.match(/^\/api\/projects\/([\w-]+)\/report\.md$/);

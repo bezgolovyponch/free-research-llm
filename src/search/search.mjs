@@ -6,6 +6,8 @@ const USER_AGENT = 'free-research-llm/1.0 (+https://github.com/bezgolovyponch/fr
 const PAGE_TEXT_LIMIT = 6000;
 const MAX_LINKS = 60;
 const MIN_LISTINGS_FOR_RECIPE = 3;
+export const PAGE_CACHE_TTL_MS = 6 * 3600 * 1000;
+export const PAGE_CACHE_SIZE = 300;
 
 export function pageLocale(html) {
   const head = String(html ?? '').slice(0, 20000);
@@ -30,8 +32,12 @@ export class SearchHttpError extends Error {
 
 const STOPWORDS = new Set('the a an and or of in on for to with by from at is are was be what which how many much who when where why does do this that these those per vs into about over under than price prices cost costs current currently 2024 2025 2026 2027'.split(' '));
 
+export function tokens(textValue) {
+  return String(textValue ?? '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !STOPWORDS.has(w));
+}
+
 export function keywords(textValue) {
-  return [...new Set(String(textValue ?? '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !STOPWORDS.has(w)))];
+  return [...new Set(tokens(textValue))];
 }
 
 export function isRelevant(result, query) {
@@ -301,6 +307,7 @@ export class SearchService {
   constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000, recipes = null }) {
     this.backends = backends;
     this.recipes = recipes;
+    this.pages = new Map();
     this.jinaKey = jinaKey;
     this.now = now;
     this.blockMs = blockMs;
@@ -356,6 +363,16 @@ export class SearchService {
   }
 
   async readPage(url) {
+    const hit = this.pages.get(url);
+    if (hit && this.now() - hit.at < PAGE_CACHE_TTL_MS) return hit.page;
+    const page = await this.readFresh(url);
+    this.pages.delete(url);
+    if (page.status >= 200 && page.status < 400) this.pages.set(url, { at: this.now(), page });
+    while (this.pages.size > PAGE_CACHE_SIZE) this.pages.delete(this.pages.keys().next().value);
+    return page;
+  }
+
+  async readFresh(url) {
     await this.recipes?.load();
     const page = await this.readRaw(url);
     if (!this.recipes) return page;

@@ -15,7 +15,6 @@ const AMOUNT = new RegExp(`${CURRENCY_TOKEN}[ \\u00a0\\u202f]?${NUMBER_TOKEN}${S
 const SCALES = { thousand: 1e3, k: 1e3, million: 1e6, mil: 1e6, mln: 1e6, mn: 1e6, milyon: 1e6, 'triệu': 1e6, trieu: 1e6, billion: 1e9, bn: 1e9, bln: 1e9, milyar: 1e9, 'tỷ': 1e9, ty: 1e9, b: 1e9 };
 export const MAX_ITEM_CHECKS = 100;
 export const PAGE_READS_AT_ONCE = 6;
-export const PAGE_CHECK_TTL_MS = 6 * 3600 * 1000;
 const MIN_LIVE_TEXT = 200;
 
 function text(value, max = 200) {
@@ -135,19 +134,9 @@ export function qualifies(item, spec) {
 }
 
 export class AcceptanceChecker {
-  constructor({ readPage, convert = identity, cache = null, now = () => Date.now() }) {
+  constructor({ readPage, convert = identity }) {
     this.readPage = readPage;
     this.convert = convert;
-    this.cache = cache;
-    this.now = now;
-  }
-
-  async readOnce(url) {
-    const hit = this.cache?.get(url);
-    if (hit && this.now() - hit.at < PAGE_CHECK_TTL_MS) return hit.page;
-    const page = this.readPage ? await this.readPage(url) : { text: '', status: 0 };
-    this.cache?.set(url, { at: this.now(), page: { status: page?.status ?? 0, text: String(page?.text ?? '').slice(0, 20000) } });
-    return page;
   }
 
   async inspectAll(items, spec) {
@@ -164,7 +153,7 @@ export class AcceptanceChecker {
   }
 
   async inspect(item, spec) {
-    const page = await this.readOnce(item.url);
+    const page = this.readPage ? await this.readPage(item.url) : { text: '', status: 0 };
     const pageText = String(page.text ?? '');
     const live = page.status >= 200 && page.status < 400 && pageText.length >= MIN_LIVE_TEXT && isDeepLink(item.url);
     const amounts = parseAmounts(pageText);

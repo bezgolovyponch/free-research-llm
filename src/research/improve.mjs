@@ -398,6 +398,7 @@ export class ProjectImprover {
 
   async loop(id, state) {
     let project = await this.engine.load(id);
+    this.engine.rejoinTeam(id, (clientId) => this.join(id, clientId));
     const scope = state.scope ?? [];
     const exclude = state.exclude ?? [];
     state.pieces = new Set();
