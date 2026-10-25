@@ -105,3 +105,19 @@ describe('listing price on the page', () => {
     expect(collectDeliverables(mixed as never).map((i: { url: string }) => i.url)).toEqual(['u3', 'u2', 'u1']);
   });
 });
+
+describe('prices in more currencies and scales', () => {
+  it('reads lira, dong, scale words, and never a reference code or a number on another line', () => {
+    expect(parseAmounts('450.000 TL · 2,150,000,000 ₫ · ₫ 75.6 billion · Giá 1,1 tỷ · € 20 k · € 1.2 million')).toEqual([
+      { value: 450000, currency: 'TRY', perUnit: false },
+      { value: 2150000000, currency: 'VND', perUnit: false },
+      { value: 75600000000, currency: 'VND', perUnit: false },
+      { value: 1100000000, currency: 'VND', perUnit: false },
+      { value: 20000, currency: 'EUR', perUnit: false },
+      { value: 1200000, currency: 'EUR', perUnit: false },
+    ]);
+    expect(parseAmounts('Ref: PTFS125161 $840.000')).toEqual([{ value: 840000, currency: 'USD', perUnit: false }]);
+    expect(parseAmounts('Farm land 1\n$10.000')).toEqual([{ value: 10000, currency: 'USD', perUnit: false }]);
+    expect(parseAmounts('Tlaxcala 5 and title 7')).toEqual([]);
+  });
+});

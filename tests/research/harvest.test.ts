@@ -33,4 +33,12 @@ describe('harvestItems', () => {
     const links = Array.from({ length: 40 }, (_, i) => ({ url: `https://portal.example/anuncio/terreno-${i}-ID1x${String(i).padStart(4, '0')}`, text: 'Terreno' }));
     expect(harvestItems({ sources: [{ id: 'S1', url: 'https://portal.example/r', links }] }, options)).toHaveLength(HARVEST_PER_PIECE);
   });
+
+  it('takes structured listings read from the page data first, with their price, area and place', () => {
+    const node = { sources: [{ id: 'S1', url: 'https://portal.example/r', listings: [
+      { title: 'Terreno Aljezur', url: 'https://portal.example/anuncio/terreno-aljezur-ID1hhhhh', value: 14000, unit: 'EUR', area: 2500, place: 'Aljezur', via: ['embedded-json'] },
+      { title: 'Terreno Loulé', url: 'https://portal.example/anuncio/terreno-loule-ID1iiiii', value: 360000, unit: 'EUR' },
+    ], links: [{ url: 'https://portal.example/anuncio/terreno-aljezur-ID1hhhhh', text: 'Terreno Aljezur' }] }] };
+    expect(harvestItems(node, options)).toEqual([{ title: 'Terreno Aljezur', url: 'https://portal.example/anuncio/terreno-aljezur-ID1hhhhh', value: 14000, unit: 'EUR', area: 2500, place: 'Aljezur', sourceId: 'S1', harvested: true, via: ['embedded-json'] }]);
+  });
 });

@@ -4,10 +4,15 @@ const CURRENCIES = {
   CZK: ['kč', 'kc', 'czk'],
   USD: ['$', 'usd'],
   GBP: ['£', 'gbp'],
+  TRY: ['₺', 'tl', 'try'],
+  VND: ['₫', 'vnd', 'vnđ'],
 };
-const CURRENCY_TOKEN = '(€|eur|euro|zł|zl|pln|kč|kc|czk|\\$|usd|£|gbp)';
-const NUMBER_TOKEN = '(\\d{1,3}(?:[ .,\\u00a0\\u202f]\\d{3})+(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)';
-const AMOUNT = new RegExp(`${CURRENCY_TOKEN}\\s?${NUMBER_TOKEN}|${NUMBER_TOKEN}\\s?(?:,-\\s?)?${CURRENCY_TOKEN}`, 'gi');
+const CURRENCY_TOKEN = '(€|eur|euro|zł|zl|pln|kč|kc|czk|\\$|usd|£|gbp|₺|(?<![a-z])tl(?![a-z])|₫|vnđ|vnd)';
+const NUMBER_TOKEN = '(?<![A-Za-z\\d.,])(\\d{1,3}(?:[ .,\\u00a0\\u202f]\\d{3})+(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)';
+const SCALE_TOKEN = '(?:[ \\u00a0\\u202f]?(thousand|k|million|mil|mln|mn|milyon|triệu|trieu|billion|bn|bln|milyar|tỷ|ty|b)(?![a-zà-ỹ²\\d]))?';
+const LOCAL_SCALE_TOKEN = '[ \\u00a0\\u202f]?(tỷ|triệu)(?![a-zà-ỹ])';
+const AMOUNT = new RegExp(`${CURRENCY_TOKEN}[ \\u00a0\\u202f]?${NUMBER_TOKEN}${SCALE_TOKEN}|${NUMBER_TOKEN}${SCALE_TOKEN}[ \\u00a0\\u202f]?(?:,-[ \\u00a0\\u202f]?)?${CURRENCY_TOKEN}|${NUMBER_TOKEN}${LOCAL_SCALE_TOKEN}`, 'gi');
+const SCALES = { thousand: 1e3, k: 1e3, million: 1e6, mil: 1e6, mln: 1e6, mn: 1e6, milyon: 1e6, 'triệu': 1e6, trieu: 1e6, billion: 1e9, bn: 1e9, bln: 1e9, milyar: 1e9, 'tỷ': 1e9, ty: 1e9, b: 1e9 };
 export const MAX_ITEM_CHECKS = 100;
 export const PAGE_READS_AT_ONCE = 6;
 export const PAGE_CHECK_TTL_MS = 6 * 3600 * 1000;
@@ -40,8 +45,9 @@ export function parseAmounts(pageText) {
   const amounts = [];
   const textValue = String(pageText ?? '');
   for (const m of textValue.matchAll(AMOUNT)) {
-    const currency = currencyOf(m[1] ?? m[4]);
-    const value = toAmount(m[2] ?? m[3]);
+    const currency = m[8] ? 'VND' : currencyOf(m[1] ?? m[6]);
+    const scale = SCALES[String(m[3] ?? m[5] ?? m[8] ?? '').toLowerCase()] ?? 1;
+    const value = toAmount(m[2] ?? m[4] ?? m[7]) * scale;
     const perUnit = PER_UNIT.test(textValue.slice(m.index + m[0].length, m.index + m[0].length + 14));
     if (currency && Number.isFinite(value)) amounts.push({ value, currency, perUnit });
   }

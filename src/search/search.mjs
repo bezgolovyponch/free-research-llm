@@ -1,30 +1,16 @@
+import { absoluteUrl, domainOf, htmlToText } from './html.mjs';
+import { sourceCountry } from '../research/brief.mjs';
+import { extractListings, listingKey } from './listings.mjs';
 import { selectDiverse } from './selection.mjs';
 const USER_AGENT = 'free-research-llm/1.0 (+https://github.com/bezgolovyponch/free-research-llm)';
 const PAGE_TEXT_LIMIT = 6000;
 const MAX_LINKS = 60;
+const MIN_LISTINGS_FOR_RECIPE = 3;
 
-function domainOf(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return '';
-  }
-}
-
-export function htmlToText(html) {
-  return String(html ?? '')
-    .replace(/<(script|style|noscript|svg|nav|footer|header)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<br\s*\/?>|<\/p>|<\/li>|<\/h\d>|<\/tr>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s*\n+/g, '\n')
-    .trim();
+export function pageLocale(html) {
+  const head = String(html ?? '').slice(0, 20000);
+  const og = head.match(/<meta[^>]+property=["']og:locale["'][^>]+content=["']([A-Za-z]{2,3}[-_][A-Za-z]{2})["']/i)?.[1] ?? head.match(/<meta[^>]+content=["']([A-Za-z]{2,3}[-_][A-Za-z]{2})["'][^>]+property=["']og:locale["']/i)?.[1];
+  return og ?? head.match(/<html[^>]*\blang=["']([A-Za-z]{2,3}(?:[-_][A-Za-z]{2})?)["']/i)?.[1] ?? '';
 }
 
 export class SearchHttpError extends Error {
@@ -39,17 +25,6 @@ export class SearchHttpError extends Error {
 
   get invalidKey() {
     return [401, 403].includes(this.status);
-  }
-}
-
-function absoluteUrl(href, base) {
-  try {
-    const url = new URL(href.replace(/&amp;/g, '&'), base);
-    if (!/^https?:$/.test(url.protocol)) return '';
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return '';
   }
 }
 
@@ -323,8 +298,9 @@ export const KEYED_SEARCH_BACKENDS = [
 ];
 
 export class SearchService {
-  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000 }) {
+  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000, recipes = null }) {
     this.backends = backends;
+    this.recipes = recipes;
     this.jinaKey = jinaKey;
     this.now = now;
     this.blockMs = blockMs;
@@ -342,33 +318,57 @@ export class SearchService {
     return this.backends.length > 0;
   }
 
-  async fetchPage(url, accept, extraHeaders = {}) {
+  async fetchPage(url, accept, extraHeaders = {}, listingBase = url) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept, ...extraHeaders }, signal: controller.signal });
       const type = res.headers.get('content-type') ?? '';
-      if (!res.ok || !/text\/(html|plain|markdown)/.test(type)) return { text: '', links: [], status: res.status };
+      if (!res.ok || !/text\/(html|plain|markdown)/.test(type)) return { text: '', links: [], listings: [], next: '', status: res.status };
       const body = await res.text();
       const html = /html/.test(type);
+      const base = html ? res.url || url : listingBase;
+      const found = extractListings(body, base, { isHtml: html, recipe: this.recipes?.get(base) ?? null });
       return {
         text: (html ? htmlToText(body) : body.trim()).slice(0, PAGE_TEXT_LIMIT),
-        links: html ? extractLinks(body, res.url || url) : [],
+        links: html ? extractLinks(body, base) : extractMarkdownLinks(body, base),
+        listings: found.items,
+        next: found.next,
+        template: found.template,
+        methods: found.methods,
+        locale: html ? pageLocale(body) : '',
         status: res.status,
       };
     } catch {
-      return { text: '', links: [], status: 0 };
+      return { text: '', links: [], listings: [], next: '', status: 0 };
     } finally {
       clearTimeout(timer);
     }
   }
 
-  async readPage(url) {
+  async readRaw(url) {
     const direct = await this.fetchPage(url, 'text/html,text/plain');
-    if (direct.text.length >= 400 || !this.jinaReader) return direct;
-    const viaReader = await this.fetchPage(`https://r.jina.ai/${url}`, 'text/plain', this.jinaKey ? { authorization: `Bearer ${this.jinaKey}` } : {});
-    if (viaReader.text.length <= direct.text.length) return direct;
-    return { text: viaReader.text, links: extractMarkdownLinks(viaReader.text, url), status: viaReader.status, via: 'jina' };
+    if ((direct.text.length >= 400 && direct.listings.length) || !this.jinaReader) return direct;
+    if (direct.text.length >= 400 && !this.recipes?.get(url)) return direct;
+    const viaReader = await this.fetchPage(`https://r.jina.ai/${url}`, 'text/plain', this.jinaKey ? { authorization: `Bearer ${this.jinaKey}` } : {}, url);
+    if (viaReader.text.length <= direct.text.length && viaReader.listings.length <= direct.listings.length) return direct;
+    return { ...viaReader, via: 'jina' };
+  }
+
+  async readPage(url) {
+    await this.recipes?.load();
+    const page = await this.readRaw(url);
+    if (!this.recipes) return page;
+    const priced = page.listings.filter((l) => l.value !== null && l.value !== undefined).length;
+    if (priced >= MIN_LISTINGS_FOR_RECIPE) this.recipes.learn(url, { template: page.template, methods: page.methods, count: page.listings.length, country: sourceCountry({ url, locale: page.locale, text: page.text }), sample: page.listings.map((l) => l.title) });
+    else if (page.status >= 200 && page.status < 400 && this.recipes.get(url) && !page.listings.length && page.next) this.recipes.miss(url);
+    if (priced < MIN_LISTINGS_FOR_RECIPE || !page.next || !this.recipes.needsCheck(url)) return page;
+    const second = await this.readRaw(page.next);
+    const ok = this.recipes.verify(url, { count: second.listings.length, template: second.template });
+    if (!ok) return page;
+    const seen = new Set(page.listings.map((l) => listingKey(l.url)));
+    const more = second.listings.filter((l) => !seen.has(listingKey(l.url))).map((l) => ({ ...l, page: page.next }));
+    return { ...page, listings: [...page.listings, ...more], next: second.next || page.next, pagesRead: 2 };
   }
 
   async readPages(urls) {
@@ -381,6 +381,8 @@ export class SearchService {
       snippet: p.text.slice(0, 300),
       text: p.text,
       links: p.links,
+      listings: p.listings ?? [],
+      locale: p.locale ?? '',
       provider: p.via ? `direct+${p.via}` : 'direct',
       query: '',
     }));
@@ -425,6 +427,8 @@ export class SearchService {
       await Promise.all(sources.slice(0, 5).map(async (s) => {
         const page = await this.readPage(s.url);
         s.links = page.links;
+        s.listings = page.listings ?? [];
+        s.locale = page.locale ?? '';
         if (page.text.length > String(s.text ?? '').length) s.text = page.text;
       }));
     }
@@ -436,6 +440,8 @@ export class SearchService {
       snippet: String(s.snippet ?? '').slice(0, 400),
       text: String(s.text || s.snippet || '').slice(0, PAGE_TEXT_LIMIT),
       links: s.links ?? [],
+      listings: s.listings ?? [],
+      locale: s.locale ?? '',
       provider: s.provider,
       query: s.query,
       tier: s.tier,
@@ -444,6 +450,6 @@ export class SearchService {
 
   describe() {
     const blocked = this.backends.filter((b) => (this.blockedUntil.get(b.id) ?? 0) > this.now()).map((b) => b.id);
-    return { enabled: this.enabled, backends: this.backends.map((b) => b.id), blocked, health: Object.fromEntries(this.health), lastErrors: this.lastErrors };
+    return { enabled: this.enabled, backends: this.backends.map((b) => b.id), blocked, health: Object.fromEntries(this.health), lastErrors: this.lastErrors, recipes: this.recipes?.describe() ?? [] };
   }
 }

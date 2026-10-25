@@ -28,7 +28,7 @@ function decodedUrl(url) {
   }
 }
 
-function isKind(item, kind) {
+export function isKind(item, kind) {
   if (!kind?.terms?.length) return true;
   const text = plain(`${item.title} ${decodedUrl(item.url)}`);
   return kind.terms.some((term) => new RegExp(`(?:^|[^a-z])${plain(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:e?s)?(?![a-z])`).test(text));

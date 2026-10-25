@@ -1,5 +1,5 @@
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
-import { htmlToText } from '../search/search.mjs';
+import { htmlToText } from '../search/html.mjs';
 import { TASK_MARKERS } from '../research/prompts.mjs';
 
 export const MAX_FILE_BYTES = 6 * 1024 * 1024;

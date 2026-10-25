@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, htmlToText } from '../../src/search/search.mjs';
+import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, pageLocale } from '../../src/search/search.mjs';
+import { SiteRecipes } from '../../src/search/recipes.mjs';
+import { htmlToText } from '../../src/search/html.mjs';
 import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
 
 describe('search', () => {
@@ -84,6 +86,32 @@ describe('search', () => {
     const { text } = await new SearchService({ fetchImpl, backends: [] }).readPage('https://spa.example/');
     expect(text.startsWith('Reader text')).toBe(true);
     expect((await new SearchService({ fetchImpl, backends: [], jinaReader: false }).readPage('https://spa.example/')).text).toBe('');
+  });
+
+  it('reads listings from a portal page, learns the site recipe and checks it on page 2, adding the page-2 listings', async () => {
+    const cards = (page: number) => [1, 2, 3].map((n) => `<div><a href="/anuncio/terreno-${page}${n}-ID1p${page}${n}x">Terreno ${page}${n}</a><p>${page}${n}.000 €</p></div>`).join('') + (page === 1 ? '<a href="/terrenos?page=2">2</a>' : '');
+    const page = (body: string) => new Response(`<html lang="pt">${body}${' filler'.repeat(80)}</html>`, { headers: { 'content-type': 'text/html' } });
+    const fetchImpl = fakeFetch([
+      [/terrenos\?page=2/, () => page(cards(2))],
+      [/terrenos/, () => page(cards(1))],
+    ]);
+    const recipes = new SiteRecipes();
+    const service = new SearchService({ fetchImpl, backends: [], recipes });
+    const first = await service.readPage('https://imo.example/terrenos');
+    expect(first.locale).toBe('pt');
+    expect(first.pagesRead).toBe(2);
+    expect(first.listings.map((l: { value: number }) => l.value)).toEqual([11000, 12000, 13000, 21000, 22000, 23000]);
+    expect(first.listings[3].page).toBe('https://imo.example/terrenos?page=2');
+    expect(recipes.describe()).toEqual([{ host: 'imo.example', template: 'imo.example/anuncio/*', methods: ['cards'], count: 3, country: 'PT', verified: true, misses: 0 }]);
+    const again = await service.readPage('https://imo.example/terrenos');
+    expect(again.pagesRead).toBeUndefined();
+    expect(fetchImpl.calls.filter((c) => c.url.includes('page=2'))).toHaveLength(1);
+  });
+
+  it('takes the page language from og:locale or the html tag', () => {
+    expect(pageLocale('<meta property="og:locale" content="pt_PT"><html lang="en">')).toBe('pt_PT');
+    expect(pageLocale('<html lang="vi">')).toBe('vi');
+    expect(pageLocale('<html>')).toBe('');
   });
 });
 

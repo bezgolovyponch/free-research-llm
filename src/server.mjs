@@ -8,7 +8,7 @@ import { KeychainSecrets } from './secrets.mjs';
 import { AccessGate, newAccessToken } from './auth.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { TEMPLATES } from './research/templates.mjs';
-import { itemsCsv, piecesCsv, resultsJson, toMarkdown } from './report.mjs';
+import { candidatesCsv, itemsCsv, piecesCsv, resultsJson, toMarkdown } from './report.mjs';
 import { resultStatus } from './research/gaps.mjs';
 import { resultModel } from './research/result.mjs';
 import { auditTree, cleanTitle } from './research/treeaudit.mjs';
@@ -21,7 +21,7 @@ import { accessLinks, lanAddresses } from './service.mjs';
 import { ShareBook, shareAllows, shareLinks } from './share.mjs';
 import { REACHABLE_PAGE, RemoteVisits } from './visits.mjs';
 import { EventStream } from './events.mjs';
-import { clientNodes } from './research/compact.mjs';
+import { clientNodes, clientSweep } from './research/compact.mjs';
 import { HeapGuard } from './heapguard.mjs';
 import { pcSetupCommand, pcSetupScript } from './local/pcsetup.mjs';
 import { ensureLocalModel } from './local/autostart.mjs';
@@ -61,7 +61,7 @@ export function withResults(project) {
   if (!project || typeof project !== 'object' || !Array.isArray(project.nodes) || typeof project.question !== 'string') return project;
   const { plan, ...status } = resultStatus(project);
   const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question) };
-  return { ...project, nodes: clientNodes(project.nodes).map((n) => (cleanTitle(n.title) !== n.title ? { ...n, title: cleanTitle(n.title) } : n)), results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
+  return { ...project, ...(project.sweep ? { sweep: clientSweep(project.sweep) } : {}), nodes: clientNodes(project.nodes).map((n) => (cleanTitle(n.title) !== n.title ? { ...n, title: cleanTitle(n.title) } : n)), results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
 }
 
 function send(res, status, body, type = 'application/json; charset=utf-8') {
@@ -390,13 +390,14 @@ export function createServer(app, gate = new AccessGate()) {
         res.setHeader('content-disposition', `attachment; filename="${project.id}.md"`);
         return send(res, 200, toMarkdown(project), 'text/markdown; charset=utf-8');
       }
-      const exported = url.pathname.match(/^\/api\/projects\/([\w-]+)\/(results\.json|pieces\.csv|items\.csv)$/);
+      const exported = url.pathname.match(/^\/api\/projects\/([\w-]+)\/(results\.json|pieces\.csv|items\.csv|candidates\.csv)$/);
       if (req.method === 'GET' && exported) {
         const project = await app.engine.load(exported[1]);
         const [kind, ext] = exported[2].split('.');
         res.setHeader('content-disposition', `attachment; filename="${project.id}-${kind}.${ext}"`);
         if (ext === 'json') return send(res, 200, resultsJson(project));
-        return send(res, 200, `\ufeff${kind === 'pieces' ? piecesCsv(project) : itemsCsv(project)}`, 'text/csv; charset=utf-8');
+        const table = { pieces: piecesCsv, items: itemsCsv, candidates: candidatesCsv }[kind];
+        return send(res, 200, `\ufeff${table(project)}`, 'text/csv; charset=utf-8');
       }
       for (const [method, pattern, handler] of routes) {
         const match = url.pathname.match(pattern);

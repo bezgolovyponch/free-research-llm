@@ -117,7 +117,7 @@ export function sameUrl(a, b) {
 function checkItemLinks(finding, sources) {
   const items = finding?.items ?? [];
   if (!items.length) return null;
-  const known = sources.flatMap((s) => [s.url, ...(s.links ?? []).map((l) => l.url)]).filter(Boolean);
+  const known = sources.flatMap((s) => [s.url, ...(s.links ?? []).map((l) => l.url), ...(s.listings ?? []).map((l) => l.url)]).filter(Boolean);
   const invented = items.filter((item) => !known.some((url) => sameUrl(url, item.url)));
   return check(
     'item-links',

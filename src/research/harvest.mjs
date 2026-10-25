@@ -20,13 +20,16 @@ function linkItem(link, source) {
   return { title: title || url, url, value: price?.value ?? null, unit: price?.currency ?? '', sourceId: source.id, harvested: true };
 }
 
+function listingItem(listing, source) {
+  return { title: String(listing.title ?? listing.url).slice(0, 160), url: listing.url, value: listing.value ?? null, unit: listing.unit ?? '', ...(listing.area ? { area: listing.area } : {}), ...(listing.place ? { place: listing.place } : {}), sourceId: source.id, harvested: true, via: listing.via ?? [] };
+}
+
 export function harvestItems(node, options = {}, limit = HARVEST_PER_PIECE) {
   const known = new Set((node.finding?.items ?? []).map((i) => urlKey(i.url)));
   const found = new Map();
   for (const source of node.sources ?? []) {
     if (!source.url) continue;
-    for (const link of source.links ?? []) {
-      const item = linkItem(link, source);
+    for (const item of [...(source.listings ?? []).map((l) => listingItem(l, source)), ...(source.links ?? []).map((l) => linkItem(l, source))]) {
       const key = urlKey(item.url);
       if (!/^https?:\/\//.test(item.url) || IMAGE_TITLE.test(item.title) || known.has(key) || found.has(key)) continue;
       if (screenItem(item, options).ok) found.set(key, item);

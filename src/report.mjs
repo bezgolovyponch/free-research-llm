@@ -65,6 +65,12 @@ export function itemsCsv(project) {
   return csv([['title', 'value', 'currency', 'url', 'piece', 'link live', 'in range'], ...items.map((i) => [i.title ?? '', i.value ?? '', i.currency ?? '', i.url ?? '', i.nodeId ?? '', i.live ?? i.alive ?? '', i.inRange ?? ''])]);
 }
 
+export function candidatesCsv(project) {
+  const c = project.candidates;
+  const rows = [...(c?.kept ?? []).map((r) => ['kept', r]), ...(c?.toCheck ?? []).map((r) => ['to check', r])];
+  return csv([['status', 'title', 'price', 'currency', `price in ${c?.kept?.[0]?.unit || project.acceptance?.unit || 'target unit'}`, 'area', 'area unit', 'place', 'country', 'sea stated', 'url', 'found on', 'read by', 'missing'], ...rows.map(([status, r]) => [status, r.title, r.price ?? '', r.currency, r.value ?? '', r.area ?? '', r.areaUnit, r.place, r.country, r.coast ? 'yes' : '', r.url, r.sourceUrl, (r.via ?? []).join(' '), r.toCheck ?? ''])]);
+}
+
 export function resultsJson(project) {
   const status = resultStatus(project);
   return {
@@ -78,6 +84,7 @@ export function resultsJson(project) {
     actions: status.plan,
     pieces: project.nodes.map((n) => ({ id: n.id, parentId: n.parentId, title: n.title, question: n.question, grade: n.status, answer: n.finding?.answer ?? null, claims: n.finding?.claims ?? [], gaps: n.finding?.gaps ?? [], sources: (n.sources ?? []).filter((x) => x.url).map((x) => ({ id: x.id, title: x.title, url: x.url })) })),
     items: project.acceptanceResult?.items ?? project.report?.deliverables ?? [],
+    candidates: project.candidates ?? null,
     memo: project.report ? { summary: project.report.summary, keyNumbers: project.report.keyNumbers, scenarios: project.report.scenarios, sensitivity: project.report.sensitivity, risks: project.report.risks, nextSteps: project.report.nextSteps } : null,
   };
 }

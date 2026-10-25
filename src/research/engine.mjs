@@ -1,5 +1,5 @@
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
-import { htmlToText } from '../search/search.mjs';
+import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
@@ -12,6 +12,9 @@ import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
+import { buildBrief, describeBrief, onConcept } from './brief.mjs';
+import { buildCandidates, candidateDeliverables, shortlistText } from './candidates.mjs';
+import { CandidateSweeper } from './sweep.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
@@ -206,7 +209,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({
         purpose: 'decompose',
         tier: 'deep',
-        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, feedback }), project.guidance),
+        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
       repairTree(tree.nodes, project.question);
@@ -241,6 +244,41 @@ export class ResearchEngine {
     }
   }
 
+  briefOf(project) {
+    const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: templateById(project.templateId) });
+    project.brief = { ...brief, text: describeBrief(brief) };
+    return project.brief;
+  }
+
+  onConceptOnly(project, node, sources) {
+    const brief = project.brief ?? this.briefOf(project);
+    const kept = sources.filter((s) => onConcept(s, brief));
+    const dropped = sources.length - kept.length;
+    if (dropped) this.emit(project, 'node', `${node.id}: ${dropped} source(s) dropped before any model call — outside the asked regions (${sources.filter((s) => !kept.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
+    return kept;
+  }
+
+  async collectCandidates(project, { sweep = false } = {}) {
+    const brief = this.briefOf(project);
+    if (!brief.kind) {
+      project.candidates = null;
+      return null;
+    }
+    const options = await this.itemGateOptions(project);
+    if (sweep && this.search?.readPage) {
+      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null });
+      const result = await sweeper.sweep(project, brief, options);
+      if (result) {
+        project.sweep = { ...result, pages: compactSources(result.pages).sources };
+        this.emit(project, 'candidates', `portal sweep: ${result.pagesRead} listing page(s) read by code (budget ${result.budget}), ${result.pages.reduce((n, p) => n + p.listings.length, 0)} new listing(s)`);
+      }
+    }
+    project.candidates = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
+    const c = project.candidates;
+    this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
+    return c;
+  }
+
   entitiesOf(project) {
     const domains = entityDomains(project.question);
     return { domains, names: entityNames(domains), subject: entityNames(domains)[0] ?? null };
@@ -260,7 +298,7 @@ export class ResearchEngine {
       const direct = [...(node.sourceUrls?.length && this.search.readPages ? await this.search.readPages(node.sourceUrls) : [])];
       const queries = [...new Set([...entityQueries(node, entities.domains), ...scopedQueries(node, entities.names)])];
       const web = await this.search.search(queries, { maxSources: 8 - direct.length, exclude: direct.map((d) => d.url), wanted: terms(`${node.title} ${node.question}`), entities: entities.domains, usedDomains: this.usedDomains(project, node), names: mentionedNames(node, entities.names) });
-      [...direct, ...web].forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
+      this.onConceptOnly(project, node, [...direct, ...web]).forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
       if (!web.length && this.search.lastErrors.length) this.emit(project, 'warn', `${node.id}: search failed (${this.search.lastErrors.join('; ').slice(0, 200)})`, { nodeId: node.id });
     }
     return [...sources, ...this.dataSources(project, node)];
@@ -272,7 +310,7 @@ export class ResearchEngine {
     if (!queries.length) return;
     node.followUpQueries = [...(node.followUpQueries ?? []), ...queries];
     this.emit(project, 'node', `${node.id}: searching the gaps — ${queries.join(' | ').slice(0, 160)}`, { nodeId: node.id });
-    const found = await this.search.search(queries, { maxSources: 4, exclude: node.sources.map((s) => s.url).filter(Boolean) });
+    const found = this.onConceptOnly(project, node, await this.search.search(queries, { maxSources: 4, exclude: node.sources.map((s) => s.url).filter(Boolean) }));
     const { sources, added } = mergeSources(node.sources, found);
     node.sources = sources;
     this.emit(project, 'node', `${node.id}: ${added.length} new source(s) from gap search`, { nodeId: node.id });
@@ -312,7 +350,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
-        messages: withGuidance(researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected }), project.guidance),
+        messages: withGuidance(researchPrompt({ question: project.question, node, sources: node.sources, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected, brief: (project.brief ?? this.briefOf(project)).text }), project.guidance),
       });
       const finding = await this.withHarvest(project, node, await this.screenFinding(project, normalizeFinding(reply.data)));
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
@@ -351,7 +389,7 @@ export class ResearchEngine {
     const reply = await this.router.complete({
       purpose: 'synthesize',
       tier: 'deep',
-      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project) }), project.guidance),
+      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates) }), project.guidance),
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
@@ -463,6 +501,7 @@ export class ResearchEngine {
     const regrounded = this.reground(project);
     await this.rescreenItems(project);
     await this.harvestAll(project);
+    await this.collectCandidates(project);
     const regraded = this.regrade(project);
     if (fixes.some((f) => ['merged-duplicate', 'grouped-candidates'].includes(f.code)) || regraded.length) {
       await this.store.save(project);
@@ -473,7 +512,9 @@ export class ResearchEngine {
   }
 
   async checkAcceptance(project) {
-    const deliverables = collectDeliverables(project.nodes);
+    const fromTable = candidateDeliverables(project.candidates);
+    const listed = new Set(fromTable.map((d) => d.url));
+    const deliverables = [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))];
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     if (this.pageChecks.size > PAGE_CHECKS_KEPT) for (const key of [...this.pageChecks.keys()].slice(0, this.pageChecks.size - PAGE_CHECKS_KEPT)) this.pageChecks.delete(key);
@@ -547,6 +588,11 @@ export class ResearchEngine {
         this.emit(project, 'phase', 'stopped by user');
         if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
         return await this.store.save(project);
+      }
+      try {
+        await this.collectCandidates(project, { sweep: !this.quiet.has(id) });
+      } catch (error) {
+        this.emit(project, 'warn', `candidate table not built: ${error.message}`);
       }
       if (memo || !project.report) await this.synthesize(project);
       else await this.checkAcceptance(project);
