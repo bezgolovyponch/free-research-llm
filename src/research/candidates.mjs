@@ -117,10 +117,11 @@ export function buildCandidates(nodes, brief, options = {}) {
 }
 
 export function candidateDeliverables(candidates) {
-  return (candidates?.kept ?? []).map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
+  return (candidates?.kept ?? []).filter((row) => !row.plan || row.plan.tier === 'fits').map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
 }
 
 function siteText(row) {
+  if (row.plan) return ` | ${row.plan.tier}: ${row.plan.verdict} | why: ${row.plan.why.join('; ')}${row.plan.risks.length ? ` | risks: ${row.plan.risks.join('; ')}` : ''}`;
   const site = row.site;
   if (!site) return row.siteNote ? ` | ${row.siteNote}` : '';
   const season = site.climate ? ` | ${site.climate.workable} workable months (${site.climate.comfortable} comfortable), hottest month max ${site.climate.hottest}°C` : '';

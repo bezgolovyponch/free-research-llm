@@ -22,6 +22,21 @@ describe('concept brief', () => {
     ].join('\n'));
   });
 
+  it('narrows a group word to the members the user named anywhere, and says so', () => {
+    const named = buildBrief({ question: 'Find plots near the sea', acceptance: { expected: '50 Plots In EU, Vietnam and Turkey', itemCount: 50, valueRange: [0, 20000], unit: 'EUR' }, constraints: { location: 'Spain, Portugal, Turkey' }, template: { itemKind: kind } });
+    expect(named.regions).toEqual(['PT', 'ES', 'TR', 'VN']);
+    expect(named.regions).not.toContain('HR');
+    expect(named.groups).toEqual([]);
+    expect(describeBrief(named)).toContain('Where: Portugal, Spain, Turkey, Vietnam (near the sea) · EU narrowed to Portugal, Spain, the members you named');
+  });
+
+  it('reads a country from a site name that spells it out', async () => {
+    const { hostCountries } = await import('../../src/research/brief.mjs');
+    expect(hostCountries('https://turkeyrealestate.com/land')).toEqual(['TR']);
+    expect(hostCountries('https://imovirtual.com/x')).toEqual([]);
+    expect(onConcept({ url: 'https://turkeyrealestate.com/land', title: 'Antalya land' }, { kind, regions: ['TR'] })).toBe(true);
+  });
+
   it('has no item kind or exclusions when no list is asked for', () => {
     const memo = buildBrief({ question: 'Is it profitable to resell RAV4s from Germany in Poland?', acceptance: {}, template: { itemKind: kind } });
     expect(memo).toMatchObject({ kind: null, regions: ['DE', 'PL'], excludes: [] });

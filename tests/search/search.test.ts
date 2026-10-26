@@ -78,6 +78,14 @@ describe('search', () => {
     expect(sources.map((s) => s.url)).toEqual(['https://new.example']);
   });
 
+  it('keeps a long page whole, so a fact deep in the page reaches the evidence and quote checks', async () => {
+    const body = `<html><body><div>${'menu '.repeat(3000)}</div><p>The IMT rate is 5% for rural land</p></body></html>`;
+    const fetchImpl = fakeFetch([[/law\.example/, () => new Response(body, { headers: { 'content-type': 'text/html' } })]]);
+    const { text } = await new SearchService({ fetchImpl, backends: [] }).readPage('https://law.example/pt');
+    expect(text.length).toBeGreaterThan(6000);
+    expect(text).toContain('The IMT rate is 5% for rural land');
+  });
+
   it('falls back to the Jina reader when a page yields too little text', async () => {
     const fetchImpl = fakeFetch([
       [/r\.jina\.ai/, () => new Response('Reader text '.repeat(50), { headers: { 'content-type': 'text/plain' } })],

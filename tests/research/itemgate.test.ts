@@ -38,6 +38,15 @@ describe('item gate: rentals, word ends, broken links', () => {
     expect(screenItem({ title: 'Terrenos em Faro', url: 'https://portal.example/anuncio/x-ID1abcde' }, { kind: vn }).ok).toBe(true);
   });
 
+  it('refuses an item of another kind that shares a word with the asked kind', async () => {
+    const { isKind } = await import('../../src/research/itemgate.mjs');
+    const { templateById } = await import('../../src/research/templates.mjs');
+    const plots = templateById('glamping-location').itemKind;
+    expect(isKind({ title: 'Ver foto 2016 Land Rover Range Rover Evoque 16.950', url: 'https://rd.example/cars/1' }, plots)).toBe(false);
+    expect(isKind({ title: 'Terreno rústico com acesso de carro', url: 'https://imo.example/terreno-1' }, plots)).toBe(true);
+    expect(isKind({ title: 'Land Rover', url: 'https://x.example/1' }, { label: 'x', terms: ['land'] })).toBe(true);
+  });
+
   it('does not throw on a link with a broken percent escape', () => {
     expect(() => screenItem({ title: 'Terreno', url: 'https://portal.example/anuncio/terreno-%E0%A4%A-ID1abcde' }, options)).not.toThrow();
   });

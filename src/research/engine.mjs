@@ -14,6 +14,7 @@ import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, describeBrief, onConcept } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText } from './candidates.mjs';
+import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
@@ -248,7 +249,9 @@ export class ResearchEngine {
 
   briefOf(project) {
     const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: templateById(project.templateId) });
-    project.brief = { ...brief, text: describeBrief(brief) };
+    const strategy = brief.kind ? strategyFor(project.templateId) : null;
+    const foundation = strategy ? foundationOf(strategy, project) : null;
+    project.brief = { ...brief, foundation, text: [describeBrief(brief), foundationText(foundation)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -267,6 +270,13 @@ export class ResearchEngine {
       return null;
     }
     const options = await this.itemGateOptions(project);
+    const strategy = strategyFor(project.templateId);
+    if (strategy && this.search?.readPage && !this.demo && !this.quiet.has(project.id)) {
+      project.strategyCheck = await new StrategyRetriever({ readPage: (url) => this.search.readPage(url) }).retrieve(strategy, project.strategyCheck ?? null);
+      const quoted = strategy.sources.filter((s) => s.quotes.length);
+      const confirmed = quoted.filter((s) => project.strategyCheck[s.id]?.confirmed > 0).length;
+      this.emit(project, 'candidates', `strategy "${strategy.label}": ${confirmed} of ${quoted.length} sources re-read online with their quotes found (${project.strategyCheck.at})`);
+    }
     if (sweep && this.search?.readPage) {
       const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null });
       const result = await sweeper.sweep(project, brief, options);
@@ -284,6 +294,11 @@ export class ResearchEngine {
       project.candidates = await this.sites.apply(project.candidates, brief, { mode, readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
       const s = project.candidates.sites;
       if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate 2021–2025, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
+    }
+    if (strategy) {
+      project.candidates = applyStrategy(project.candidates, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
+      const t = project.candidates.tiers;
+      this.emit(project, 'candidates', `strategy paths: ${t.fits} fit every criterion, ${t['trade-off']} trade-offs with their potential, ${t.unverified} to confirm, ${t.blocked} blocked by law`);
     }
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);

@@ -74,6 +74,42 @@ test('results tab shows what was delivered and has its own chat', async ({ page 
   await expect(page.locator('#chatMsgs .msg.assistant').last()).toContainText('DEMO', { timeout: 20000 });
 });
 
+test('candidate table: every plot says why it fits, sorts by any column and filters by tier', async ({ page }) => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const base = await (await page.request.post('/api/projects', { data: { question: 'E2E base research for the plot table', autoRun: false } })).json();
+  const plan = (tier: string, verdict: string, entry: number, why: string[]) => ({ tier, verdict, why, tradeoffs: tier === 'trade-off' ? ['sea within 20 km by e-bike: no (sea 32 km)'] : [], potential: [], risks: ['ask the Câmara'], units: 10, areaM2: 1000, entry: { total: entry }, path: 'Rural camping park', checks: [], sources: [] });
+  const row = (title: string, value: number, sea: number, months: number, p: object) => ({ title, url: `https://imo.example/anuncio/${title.replace(/\W+/g, '-')}`, price: value, currency: 'EUR', value, unit: 'EUR', area: 1000, areaUnit: 'm²', place: 'Nazaré', country: 'Portugal', countryCode: 'PT', site: { coastKm: sea, beachKm: sea, beaches: 2, viewpoints: 3, attractions: 1, reserves: 0, protectedAreas: 0, hikingRoutes: 1, campsites: 1, lodging: 9, climate: { workable: months, comfortable: months - 3, hottest: 24, coldest: 8 } }, fit: { score: 0.8, hpi: 17.6, zoning: 'agricultural', pitches: 10 }, plan: p });
+  const kept = [
+    row('Coastal plot Nazare', 20000, 2.7, 12, plan('fits', 'fits every criterion', 21160, ['sea 2.7 km: inside the 20 km e-bike ride'])),
+    row('Inland plot Tomar', 5000, 32, 12, plan('trade-off', 'trade-off with potential: lake or reservoir 1.2 km away', 5290, ['12 workable months'])),
+    row('Cheap plot Alenquer', 8500, 13.8, 11, plan('fits', 'fits every criterion', 8993, ['sea 13.8 km: inside the 20 km e-bike ride'])),
+  ];
+  const id = 'e2e-plot-table-000001';
+  const { results: _results, ...stored } = base;
+  const project = { ...stored, id, question: 'E2E plots for glamping near the sea', phase: 'done', brief: { kind: { label: 'plot of land', terms: ['plot'] }, regions: ['PT'], text: 'Deliver: 3 single plot of land listing pages for sale' }, candidates: { found: 3, kept, keptCount: 2, tiers: { fits: 2, 'trade-off': 1, unverified: 0, blocked: 0 }, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [], strategy: { label: 'Low-entry glamping', rules: { ebikeKm: { value: 20, source: 'guidance' } }, sources: [{ id: 'pt-park', title: 'Portaria 1320/2008 summary', url: 'https://www.ac-arquitetos.com/post/x', confirmed: 3, quotes: 3 }], foundation: { complete: true, missing: [], clauses: [{ text: '10 month a year', criteria: ['season'] }], criteria: [{ id: 'season', label: 'workable months a year', measure: 'Open-Meteo daily weather 2021–2025' }] } } } };
+  await fs.writeFile(path.join(process.env.FRL_E2E_DATA_DIR!, `${id}.json`), JSON.stringify(project));
+  await page.goto(`/#p=${id}`);
+  await page.locator('.tabs .tab', { hasText: 'Results' }).click();
+  const table = page.locator('#candRows');
+  await expect(table).toContainText('Coastal plot Nazare', { timeout: 20000 });
+  await expect(page.locator('#candidateTable')).toContainText('every part of your question has a code check');
+  await expect(page.locator('#candidateTable')).toContainText('1/1 sources re-read online');
+  await expect(table).toContainText('sea 2.7 km: inside the 20 km e-bike ride');
+  await expect(table).toContainText('Risks: ask the Câmara');
+  const titles = () => table.locator('tr td:nth-child(3) a').allTextContents();
+  expect(await titles()).toEqual(['Coastal plot Nazare', 'Cheap plot Alenquer', 'Inland plot Tomar']);
+  await table.locator('th[data-csort="entry"]').click();
+  expect(await titles()).toEqual(['Inland plot Tomar', 'Cheap plot Alenquer', 'Coastal plot Nazare']);
+  await page.locator('#candRows th[data-csort="entry"]').click();
+  expect(await titles()).toEqual(['Coastal plot Nazare', 'Cheap plot Alenquer', 'Inland plot Tomar']);
+  await page.locator('#candRows th[data-csort="sea"]').click();
+  expect(await titles()).toEqual(['Coastal plot Nazare', 'Cheap plot Alenquer', 'Inland plot Tomar']);
+  await page.locator('button[data-ctier="trade-off"]').click();
+  expect(await titles()).toEqual(['Inland plot Tomar']);
+  await expect(page.locator('#candRows')).toContainText('lake or reservoir 1.2 km away');
+});
+
 test('terminal opens a real shell from the button and runs a command', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Open terminal' }).click();

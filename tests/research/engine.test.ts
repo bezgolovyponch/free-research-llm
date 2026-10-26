@@ -250,10 +250,14 @@ describe('ResearchEngine', () => {
     expect(done.brief.regions).toEqual(['PT']);
     expect(done.nodes.flatMap((n: { sources?: Array<{ url: string }> }) => n.sources ?? []).some((s: { url: string }) => s.url.includes('bikes.example'))).toBe(false);
     expect(done.log.some((l: { message: string }) => /source\(s\) dropped before any model call — outside the asked regions \(bikes\.example\)/.test(l.message))).toBe(true);
-    expect(reads.slice(0, 2)).toEqual(['https://imo.example/pt/resultados', 'https://imo.example/pt/resultados?page=2']);
-    expect(done.candidates).toMatchObject({ keptCount: 4, screened: { 'price outside 0–20000 EUR': 1 } });
+    expect(reads.filter((u) => u.includes('imo.example')).slice(0, 2)).toEqual(['https://imo.example/pt/resultados', 'https://imo.example/pt/resultados?page=2']);
+    expect(reads.findIndex((u) => u.includes('ac-arquitetos.com'))).toBeLessThan(reads.indexOf('https://imo.example/pt/resultados'));
+    expect(done.brief.text).toContain('Decision model (code checks every listing against it');
+    expect(done.log.some((l: { message: string }) => /^strategy "Low-entry glamping/.test(l.message))).toBe(true);
+    expect(done.candidates).toMatchObject({ keptCount: 0, tiers: { fits: 0, unverified: 4 }, screened: { 'price outside 0–20000 EUR': 1 } });
     expect(done.candidates.kept.map((r: { value: number }) => r.value)).toEqual([9000, 12000, 15000, 19000]);
-    expect(done.acceptanceResult.items.slice(0, 4).map((i: { url: string }) => i.url)).toEqual(done.candidates.kept.map((r: { url: string }) => r.url));
+    expect(done.candidates.kept[0].plan.verdict).toContain('location not measured yet');
+    expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 2 listing page\(s\) read by code/.test(l.message))).toBe(true);
     const seen: string[][] = [];
     const modes: string[] = [];
@@ -269,8 +273,9 @@ describe('ResearchEngine', () => {
     await engine.collectCandidates(done, { sweep: true });
     engine.quiet.delete(done.id);
     expect(modes).toEqual(['budget', 'all', 'cache', 'all']);
-    expect(done.candidates.keptCount).toBe(2);
-    expect(done.acceptanceResult.items.map((i: { url: string }) => i.url)).toEqual(done.candidates.kept.map((r: { url: string }) => r.url));
+    expect(done.candidates.kept).toHaveLength(2);
+    expect(done.candidates.keptCount).toBe(0);
+    expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);
     expect(done.log.some((l: { message: string }) => /site fit: 4 listing\(s\) measured .* 2 farther than an e-bike ride from the sea/.test(l.message))).toBe(true);
   });
 

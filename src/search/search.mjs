@@ -5,6 +5,7 @@ import { selectDiverse } from './selection.mjs';
 import { pageCoordinates } from '../research/site.mjs';
 const USER_AGENT = 'free-research-llm/1.0 (+https://github.com/bezgolovyponch/free-research-llm)';
 const PAGE_TEXT_LIMIT = 6000;
+export const READ_TEXT_LIMIT = 40000;
 const MAX_LINKS = 60;
 const MIN_LISTINGS_FOR_RECIPE = 3;
 export const PAGE_CACHE_TTL_MS = 6 * 3600 * 1000;
@@ -338,7 +339,7 @@ export class SearchService {
       const base = html ? res.url || url : listingBase;
       const found = extractListings(body, base, { isHtml: html, recipe: this.recipes?.get(base) ?? null });
       return {
-        text: (html ? htmlToText(body) : body.trim()).slice(0, PAGE_TEXT_LIMIT),
+        text: (html ? htmlToText(body) : body.trim()).slice(0, READ_TEXT_LIMIT),
         links: html ? extractLinks(body, base) : extractMarkdownLinks(body, base),
         listings: found.items,
         next: found.next,
@@ -458,7 +459,7 @@ export class SearchService {
       url: s.url,
       domain: domainOf(s.url),
       snippet: String(s.snippet ?? '').slice(0, 400),
-      text: String(s.text || s.snippet || '').slice(0, PAGE_TEXT_LIMIT),
+      text: String(s.text || s.snippet || '').slice(0, READ_TEXT_LIMIT),
       links: s.links ?? [],
       listings: s.listings ?? [],
       locale: s.locale ?? '',

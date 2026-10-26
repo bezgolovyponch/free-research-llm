@@ -123,6 +123,14 @@ describe('site measurements', () => {
     expect(site).toMatchObject({ coastKm: 0.6, beaches: 1, beachKm: 1.1, viewpoints: 13, attractions: 4, reserves: 2, protectedAreas: 3, hikingRoutes: 5, campsites: 2, lodging: 40 });
   });
 
+  it('finds the nearest lake or reservoir for the potential of an inland plot', async () => {
+    const { lakeQuery, parseLakes } = await import('../../src/research/site.mjs');
+    expect(lakeQuery(39.5, -8.3)).toContain('[natural=water][water~"^(lake|reservoir)$"]');
+    expect(overpassQuery(39.5, -8.3)).toContain('[natural=water]');
+    expect(parseLakes({ elements: [{ type: 'way', tags: { natural: 'water', water: 'reservoir' }, center: { lat: 39.51, lon: -8.3 } }] }, 39.5, -8.3)).toBe(1.1);
+    expect(parseLakes({ elements: [] }, 39.5, -8.3)).toBeNull();
+  });
+
   it('ranks a plot by the business criteria, so a stunning short-season site still scores', () => {
     const site = { ...parseSurroundings(overpassAt(VIR, 0.005), VIR.lat, VIR.lon), climate: seasonOf(monthlyClimate(mediterranean)) };
     const fit = fitOf({ title: 'Poljoprivredno zemljište 240 m od uvale', value: 12110, area: 1211 }, site, { hpi: 13.9, maxValue: 20000 });
@@ -156,6 +164,8 @@ describe('SiteAssessor', () => {
     expect(out.sites).toMatchObject({ assessed: 3, located: 3, far: 2, unlocated: 0 });
     expect(out.examples.at(-1).reasons[0]).toMatch(/farther than 25 km from the sea/);
     expect(net.calls.filter((c) => /^(hr|vn|any)$/.test(c))).toEqual(['hr', 'vn']);
+    expect(out.far.map((r: { url: string }) => r.url).sort()).toEqual(['https://dot.example/3735470', 'https://imo.example/ID1j4lK']);
+    expect(out.farReason).toBe(`farther than ${EBIKE_KM} km from the sea`);
   });
 
   it('keeps every row when the brief does not ask for the sea, and marks rows it cannot locate', async () => {

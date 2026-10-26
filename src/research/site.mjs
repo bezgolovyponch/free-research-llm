@@ -29,6 +29,8 @@ const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 const HPI_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hpi_a';
 const EUROSTAT_CODE = { GR: 'EL' };
+export const EU_AGGREGATE = 'EU27_2020';
+const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"]';
 const COUNT_FILTERS = {
   viewpoints: '[tourism=viewpoint]',
   attractions: '[tourism=attraction]',
@@ -64,8 +66,18 @@ export function overpassQuery(lat, lon, coastKm = 10) {
     '[out:json][timeout:120];',
     `way(around:${coastKm * 1000},${lat},${lon})[natural=coastline];out geom;`,
     `nwr${near}[natural=beach];out center;`,
+    `nwr${near}${LAKE_FILTER};out center;`,
     ...Object.values(COUNT_FILTERS).map((f) => `nwr${near}${f};out count;`),
   ].join('');
+}
+
+export function lakeQuery(lat, lon) {
+  return `[out:json][timeout:120];nwr(around:${NEAR_KM * 1000},${lat},${lon})${LAKE_FILTER};out center;`;
+}
+
+export function parseLakes(json, lat, lon) {
+  const lakes = (json?.elements ?? []).filter((e) => e.tags?.natural === 'water').map((e) => ({ lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  return nearestKm(lat, lon, lakes);
 }
 
 export function coastQuery(lat, lon) {
@@ -81,7 +93,7 @@ export function parseSurroundings(json, lat, lon) {
   const beaches = elements.filter((e) => e.tags?.natural === 'beach').map((b) => ({ lat: b.lat ?? b.center?.lat, lon: b.lon ?? b.center?.lon })).filter((b) => Number.isFinite(b.lat) && Number.isFinite(b.lon));
   const counts = elements.filter((e) => e.type === 'count').map((e) => Number(e.tags?.total ?? 0));
   const named = Object.fromEntries(Object.keys(COUNT_FILTERS).map((key, i) => [key, counts[i] ?? 0]));
-  return { coastKm: nearestKm(lat, lon, coastPoints(elements)), beaches: beaches.length, beachKm: nearestKm(lat, lon, beaches), ...named };
+  return { coastKm: nearestKm(lat, lon, coastPoints(elements)), beaches: beaches.length, beachKm: nearestKm(lat, lon, beaches), lakeKm: parseLakes(json, lat, lon), ...named };
 }
 
 export function parseCoast(json, lat, lon) {
@@ -330,6 +342,14 @@ export class SiteAssessor {
     return site;
   }
 
+  async addLakes(lat, lon, site) {
+    const post = (query) => this.fetchJson(OVERPASS_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}` });
+    const withLakes = { ...site, lakeKm: parseLakes(await post(lakeQuery(lat, lon)), lat, lon) };
+    this.store.sites[siteKey(lat, lon)] = { at: this.store.sites[siteKey(lat, lon)]?.at ?? this.now(), site: withLakes };
+    this.persist();
+    return withLakes;
+  }
+
   async priceTrend(code) {
     if (!code) return null;
     const known = this.store.hpi[code];
@@ -391,6 +411,11 @@ export class SiteAssessor {
         const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, site, { hpi: trend?.change ?? null, maxValue }) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
+          if (site.lakeKm === undefined && fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
+            fresh++;
+            site = await this.addLakes(point.lat, point.lon, site);
+            assessed.site = shortSite(site);
+          }
           far.push(assessed);
         } else kept.push(assessed);
       } catch (error) {
@@ -409,7 +434,9 @@ export class SiteAssessor {
       screened,
       screenedCount: candidates.screenedCount + far.length,
       examples,
-      sites: { ...stats, at: new Date(this.now()).toISOString() },
+      far,
+      farReason: reason,
+      sites: { ...stats, euHpi: (await this.priceTrend(EU_AGGREGATE))?.change ?? null, at: new Date(this.now()).toISOString() },
     };
   }
 }
