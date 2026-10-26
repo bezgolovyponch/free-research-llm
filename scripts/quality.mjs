@@ -59,12 +59,13 @@ const gates = {
         const doc = parseYaml(fs.readFileSync(path.join(ROOT, file), 'utf8'));
         const jobs = Object.entries(doc?.jobs ?? {});
         if (!jobs.length) failures.push(`${file}: no jobs`);
+        for (const [name, job] of jobs) if (!Number.isFinite(job?.['timeout-minutes'])) failures.push(`${file}: job ${name} has no timeout-minutes, so a hung step waits six hours`);
         for (const [name, job] of jobs) for (const [i, step] of (job?.steps ?? []).entries()) if (!step?.uses && !step?.run) failures.push(`${file}: job ${name} step ${i + 1} has neither uses nor run`);
       } catch (error) {
         failures.push(`${file}: ${String(error.message).split('\n')[0]}`);
       }
     }
-    return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : `${workflows.length} CI workflow file(s) parse, no duplicate keys` };
+    return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : `${workflows.length} CI workflow file(s) parse, no duplicate keys, every job has a timeout` };
   },
 
   independence(files) {
