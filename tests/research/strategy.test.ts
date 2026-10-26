@@ -172,7 +172,7 @@ describe('decision model from the user words', () => {
     const rows = [10, 12, 14, 16, 18].map((eurPerM2) => ({ countryCode: 'VN', country: 'Vietnam', value: eurPerM2 * 250, area: 250, areaUnit: 'm²' }));
     const medians = pricePerM2Medians(rows);
     expect(medians).toEqual({ 'VN|not stated': 14 });
-    expect(implausiblyCheap({ countryCode: 'VN', country: 'Vietnam', value: 250, area: 250, areaUnit: 'm²' }, medians)).toBe('€1.00/m² is under a tenth of the median for land in Vietnam in this table (€14.00/m²): check the price and area on the listing');
+    expect(implausiblyCheap({ countryCode: 'VN', country: 'Vietnam', value: 250, area: 250, areaUnit: 'm²' }, medians)).toBe('€1.00/m² is under a tenth of the median for land in Vietnam among the listings found (€14.00/m²): check the price and area on the listing');
     expect(implausiblyCheap(rows[0], medians)).toBeNull();
     expect(pricePerM2Medians(rows.slice(0, 4))).toEqual({});
   });
@@ -198,7 +198,7 @@ describe('decision model from the user words', () => {
     const out = applyStrategy({ sites: { euHpi: 5.5 }, kept: [...rural, ...urban, estoril], screened: {}, screenedCount: 0 }, GLAMPING_LOW_ENTRY, { convert: toEur });
     const row = out.kept.find((r: { url: string }) => r.url === 'estoril');
     expect(row.plan.tier).toBe('unverified');
-    expect(row.plan.verdict).toBe('to confirm: €2.50/m² is under a tenth of the median for buildable land in Portugal in this table (€37.50/m²): check the price and area on the listing');
+    expect(row.plan.verdict).toBe('to confirm: €2.50/m² is under a tenth of the median for buildable land in Portugal among the listings found (€37.50/m²): check the price and area on the listing');
     expect(out.kept.find((r: { url: string }) => r.url === 'r0').plan.tier).toBe('fits');
   });
 

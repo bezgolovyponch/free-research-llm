@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { countryByCode } from './brief.mjs';
+import { countryByCode, regionsIn } from './brief.mjs';
 import { areaFromText } from '../search/listings.mjs';
 
 export const GONE_STATUS = new Set([404, 410]);
@@ -25,6 +25,7 @@ export const POI_SATURATION = 200;
 export const LODGING_SATURATION = 300;
 const MAX_SITES = 2000;
 export const STORE_VERSION = 4;
+const STORE_TABLES = ['sites', 'places', 'hpi', 'points', 'facts'];
 export const RETRY_STATUS = new Set([429, 502, 503, 504]);
 export const RETRY_WAITS_MS = [10000, 30000];
 const USER_AGENT = 'free-research-llm (site fit; https://github.com/bezgolovyponch/free-research-llm)';
@@ -239,10 +240,16 @@ export function pageCoordinates(html) {
 
 const GENERIC_TITLE = /\b(?:terreno|terrenos|rustic|rústic|urban|venda|vende|lote|plot|land|sale|satılık|satilik|tarla|arsa|parcela|finca|solar|quinta|perto|near|com|with|para|for|zona|sea|mar|praia|beach|vista|view|ref|id)\b/i;
 
-export function titlePlace(title, kindTerms = []) {
+const ADMIN_AREA = /\b(?:region|regi[aã]o|regi[oó]n|district|distrito|province|prov[ií]ncia|county|state|condado|b[oö]lgesi|il[cç]e|t[iỉ]nh)\b/i;
+
+export function titlePlaces(title, kindTerms = []) {
   const kind = new RegExp(`\\b(?:${kindTerms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') || 'x^'})\\b`, 'i');
   const segments = String(title ?? '').split(/\s*[,|–—]\s*|\s+-\s+/).map((s) => s.trim());
-  return segments.find((s) => /^\p{Lu}/u.test(s) && !/\d/.test(s) && s.split(/\s+/).length <= 4 && !GENERIC_TITLE.test(s) && !kind.test(s)) ?? null;
+  return segments.filter((s) => /^\p{Lu}/u.test(s) && !/\d/.test(s) && s.split(/\s+/).length <= 4 && !GENERIC_TITLE.test(s) && !ADMIN_AREA.test(s) && !kind.test(s) && !countryByCode(s.toUpperCase()) && !regionsIn(s).length);
+}
+
+export function titlePlace(title, kindTerms = []) {
+  return titlePlaces(title, kindTerms)[0] ?? null;
 }
 
 export function shortSite(site) {
@@ -265,7 +272,8 @@ export class SiteAssessor {
     this.file = file;
     this.now = now;
     this.sleep = sleep;
-    this.fetchJson = fetchJson ?? ((url, init) => this.httpJson(url, init));
+    this.httpJsonBound = (url, init) => this.httpJson(url, init);
+    this.fetchJson = fetchJson ?? this.httpJsonBound;
     this.store = { sites: {}, places: {}, hpi: {}, points: {}, facts: {} };
     this.loaded = !file;
     this.writing = Promise.resolve();
@@ -283,31 +291,58 @@ export class SiteAssessor {
     }
   }
 
-  async load() {
-    if (this.loaded) return this;
+  worker() {
+    return this.file ? new SiteAssessor({ file: this.file, fetchJson: this.fetchJson === this.httpJsonBound ? null : this.fetchJson, now: this.now, sleep: this.sleep }) : null;
+  }
+
+  async readStore() {
     try {
       const parsed = JSON.parse(await fs.readFile(this.file, 'utf8'));
-      if (parsed && typeof parsed === 'object') {
-        const current = parsed.version === STORE_VERSION;
-        const looked = (entry) => String(entry?.point?.by ?? '').startsWith('place');
-        const points = Object.fromEntries(Object.entries(parsed.points ?? {}).filter(([, entry]) => current || !looked(entry)));
-        this.store = { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: current ? parsed.hpi ?? {} : {}, points, facts: parsed.facts ?? {} };
-      }
+      if (!parsed || typeof parsed !== 'object') return null;
+      const current = parsed.version === STORE_VERSION;
+      const looked = (entry) => String(entry?.point?.by ?? '').startsWith('place');
+      const points = Object.fromEntries(Object.entries(parsed.points ?? {}).filter(([, entry]) => current || !looked(entry)));
+      return { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: current ? parsed.hpi ?? {} : {}, points, facts: parsed.facts ?? {} };
     } catch {
-      this.store = { sites: {}, places: {}, hpi: {}, points: {}, facts: {} };
+      return null;
     }
+  }
+
+  merge(other) {
+    if (!other) return;
+    for (const table of STORE_TABLES) {
+      const mine = this.store[table] ?? {};
+      for (const [key, entry] of Object.entries(other[table] ?? {})) if (!mine[key] || (entry?.at ?? 0) > (mine[key]?.at ?? 0)) mine[key] = entry;
+      this.store[table] = mine;
+    }
+  }
+
+  async load() {
+    if (this.loaded) return this;
+    this.merge(await this.readStore());
     this.loaded = true;
     return this;
   }
 
+  async reload() {
+    if (!this.file) return this;
+    await this.writing;
+    this.merge(await this.readStore());
+    this.loaded = true;
+    return this;
+  }
+
+
   persist() {
     if (!this.file) return this.writing;
-    for (const table of ['sites', 'places', 'points', 'facts']) {
-      const keys = Object.keys(this.store[table]);
-      for (const key of keys.slice(0, Math.max(0, keys.length - MAX_SITES))) delete this.store[table][key];
-    }
-    const body = JSON.stringify({ version: STORE_VERSION, ...this.store });
-    this.writing = this.writing.then(() => fs.writeFile(this.file, body)).catch(() => {});
+    this.writing = this.writing.then(async () => {
+      this.merge(await this.readStore());
+      for (const table of ['sites', 'places', 'points', 'facts']) {
+        const keys = Object.entries(this.store[table]).sort((a, b) => (a[1]?.at ?? 0) - (b[1]?.at ?? 0)).map(([key]) => key);
+        for (const key of keys.slice(0, Math.max(0, keys.length - MAX_SITES))) delete this.store[table][key];
+      }
+      await fs.writeFile(this.file, JSON.stringify({ version: STORE_VERSION, ...this.store }));
+    }).catch(() => {});
     return this.writing;
   }
 
@@ -350,12 +385,17 @@ export class SiteAssessor {
   }
 
   async titleConflict(row, point, brief) {
-    const name = titlePlace(row.title, brief?.kind?.terms ?? []);
-    if (!name || !row.country || String(row.place ?? '').toLowerCase().includes(name.toLowerCase())) return null;
-    const named = await this.geocode(`${name}, ${row.country}`, row.countryCode ?? '');
-    if (!named) return null;
-    const km = haversineKm(point.lat, point.lon, named.lat, named.lon);
-    return km > TITLE_PLACE_KM ? `the title names ${name}, ${Math.round(km)} km from where the listing's map puts it` : null;
+    if (!row.country) return null;
+    const names = titlePlaces(row.title, brief?.kind?.terms ?? []).filter((n) => !String(row.place ?? '').toLowerCase().includes(n.toLowerCase())).slice(0, 2);
+    const far = [];
+    for (const name of names) {
+      const named = await this.geocode(`${name}, ${row.country}`, row.countryCode ?? '');
+      if (!named) continue;
+      const km = haversineKm(point.lat, point.lon, named.lat, named.lon);
+      if (km <= TITLE_PLACE_KM) return null;
+      far.push(`${name}, ${Math.round(km)} km`);
+    }
+    return far.length ? `the title names ${far.join(' and ')} from where the listing's map puts it` : null;
   }
 
   noteFacts(url, page) {

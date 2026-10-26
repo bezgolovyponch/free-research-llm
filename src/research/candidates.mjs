@@ -3,6 +3,7 @@ import { countryByCode, isNewsPage, itemCountry, mentionsCoast } from './brief.m
 import { screenItem } from './itemgate.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { explorePoints } from './site.mjs';
+import { pricePerM2Medians } from './strategy.mjs';
 
 export const MAX_KEPT = 200;
 export const MAX_TO_CHECK = 100;
@@ -83,6 +84,7 @@ export function buildCandidates(nodes, brief, options = {}) {
   const screened = {};
   const examples = [];
   const outside = [];
+  const market = [];
   let found = 0;
   const unique = new Map();
   for (const row of rowsFrom(nodes)) {
@@ -95,6 +97,7 @@ export function buildCandidates(nodes, brief, options = {}) {
   for (const row of unique.values()) {
     found++;
     const verdict = screenCandidate(row, brief, options);
+    if (verdict.value !== null && verdict.country.code && verdict.reasons.every((r) => /^price .* is outside|outside the asked regions$/.test(r))) market.push({ countryCode: verdict.country.code, value: verdict.value, area: row.area ?? null, areaUnit: row.areaUnit ?? '', title: row.title ?? '', place: row.place ?? '' });
     if (verdict.reasons.length) {
       for (const reason of verdict.reasons) {
         const label = reason.replace(/^price .* is outside/, 'price outside').replace(/^in .*, outside the asked regions$/, 'outside the asked regions');
@@ -114,6 +117,8 @@ export function buildCandidates(nodes, brief, options = {}) {
     toCheck: toCheck.slice(0, MAX_TO_CHECK),
     outside: outside.sort((a, b) => (a.value ?? Infinity) - (b.value ?? Infinity)).slice(0, MAX_OUTSIDE),
     outsideCount: outside.length,
+    priceMedians: pricePerM2Medians(market),
+    marketRows: market.filter((r) => r.area).length,
     toCheckCount: toCheck.length,
     screened,
     screenedCount: found - kept.length - toCheck.length,

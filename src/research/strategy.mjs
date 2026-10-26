@@ -275,7 +275,7 @@ export function implausiblyCheap(row, medians) {
   if (!m2 || !mid || !Number.isFinite(row.value)) return null;
   const perM2 = row.value / m2;
   const zoning = zoningOf(row);
-  return perM2 < mid * IMPLAUSIBLE_SHARE ? `€${perM2.toFixed(2)}/m² is under a tenth of the median for ${zoning === 'not stated' ? '' : `${zoning} `}land in ${row.country || row.countryCode} in this table (€${mid.toFixed(2)}/m²): check the price and area on the listing` : null;
+  return perM2 < mid * IMPLAUSIBLE_SHARE ? `€${perM2.toFixed(2)}/m² is under a tenth of the median for ${zoning === 'not stated' ? '' : `${zoning} `}land in ${row.country || row.countryCode} among the listings found (€${mid.toFixed(2)}/m²): check the price and area on the listing` : null;
 }
 
 export function applyStrategy(candidates, strategy, { convert = null, retrieved = null, foundation = null } = {}) {
@@ -284,7 +284,7 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   const euHpi = candidates.sites?.euHpi ?? null;
   const trends = candidates.sites?.trends ?? null;
   const all = [...(candidates.kept ?? []), ...(candidates.far ?? [])];
-  const medians = pricePerM2Medians(all);
+  const medians = { ...pricePerM2Medians(all), ...(candidates.priceMedians ?? {}) };
   const rows = all.map((row) => {
     const plan = planFor(row, model, { convert, euHpi, trends });
     const cheap = implausiblyCheap(row, medians);

@@ -355,6 +355,7 @@ describe('title and map agree', () => {
     expect(titlePlace('Terreno rústico, perto do mar, Vieira de Leiria, 290m2', ['terreno'])).toBe('Vieira de Leiria');
     expect(titlePlace('Terreno para venda', ['terreno'])).toBeNull();
     expect(titlePlace('Terreno Urbano | Coimbra | 20.000 €', ['terreno'])).toBe('Coimbra');
+    expect(titlePlace('Plot of land of 1,640 m² Nazaré , Centro Region , Portugal', ['plot', 'land'])).toBeNull();
   });
 
   it('flags a listing whose map point is far from the place its title names', async () => {
@@ -366,5 +367,25 @@ describe('title and map agree', () => {
     expect(out.kept[0].placeConflict).toBe("the title names Vieira de Leiria, 123 km from where the listing's map puts it");
     const agrees = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ found: 1, kept: [{ ...row, lat: VIEIRA.lat, lon: VIEIRA.lon }], keptCount: 1, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [] }, { coastal: false, kind: { terms: ['terreno'] } }, {});
     expect(agrees.kept[0].placeConflict).toBeUndefined();
+  });
+});
+
+describe('two measuring instances on one cache file', () => {
+  it('keep each other\'s measurements: every write merges what is on disk, newer entries win', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-merge-'));
+    const file = path.join(dir, 'sites.json');
+    let now = 1000;
+    const a = await new SiteAssessor({ file, now: () => now }).load();
+    const b = await new SiteAssessor({ file, now: () => now }).load();
+    a.store.sites['1.00,1.00'] = { at: now, site: { coastKm: 1 } };
+    await a.persist();
+    now = 2000;
+    b.store.sites['2.00,2.00'] = { at: now, site: { coastKm: 2 } };
+    await b.persist();
+    await a.reload();
+    expect(Object.keys(a.store.sites).sort()).toEqual(['1.00,1.00', '2.00,2.00']);
+    const disk = JSON.parse(await fs.readFile(file, 'utf8'));
+    expect(Object.keys(disk.sites).sort()).toEqual(['1.00,1.00', '2.00,2.00']);
+    await fs.rm(dir, { recursive: true, force: true });
   });
 });

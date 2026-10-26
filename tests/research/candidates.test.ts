@@ -57,6 +57,10 @@ describe('candidate table', () => {
     expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['https://imo.pt/anuncio/terreno-ID1abcd']);
     expect(out.outside.map((r: { url: string }) => r.url)).toEqual(['https://famalo.hr/zemljiste-1-14501']);
     expect(out.outsideCount).toBe(1);
+    const priced = [1, 2, 3, 4, 5].map((n) => ({ title: `Terreno urbano ${n}`, url: `https://imo.pt/anuncio/terreno-urbano-ID1u${n}xy`, value: 40000 + n * 1000, unit: 'EUR', area: 400 }));
+    const withMarket = buildCandidates([{ id: 'D1', sources: [{ url: 'https://p.example/r', listings: [...priced, { title: 'Terreno urbano Estoril', url: 'https://imo.pt/anuncio/terreno-urbano-estoril-ID1e1xy', value: 1000, unit: 'EUR', area: 400 }] }] }], b, {});
+    expect(withMarket.priceMedians['PT|buildable']).toBe(106.25);
+    expect(withMarket.kept.map((r: { url: string }) => r.url)).toEqual(['https://imo.pt/anuncio/terreno-urbano-estoril-ID1e1xy']);
   });
 
   it('hands the kept rows to the expected-result check and a short table to the memo', () => {

@@ -528,3 +528,31 @@ describe('ResearchEngine', () => {
     await expect(engine.addNode(project.id, 'Q', { question: 'What do e-bikes cost in Germany?', title: 'Prices' })).rejects.toThrow(/duplicates D1/);
   });
 });
+
+describe('site measurements in the background', () => {
+  it('measures queued rows with a second worker and rebuilds the table, or leaves it for the loop when the loop runs', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find plots for a glamping business near the sea in Portugal, 20000EUR max', expected: '4 plots in Portugal under 20000 EUR', autoRun: false });
+    let reloaded = 0;
+    let release: () => void = () => {};
+    const done = new Promise<void>((r) => { release = r; });
+    engine.sites = { file: '/tmp/x.json', reload: async () => { reloaded++; }, worker: () => ({ apply: async () => { await done; return { sites: { assessed: 7, pending: 2 } }; } }), apply: async (c: object) => c } as never;
+    const collected: string[] = [];
+    engine.collectCandidates = (async (p: { id: string }) => { collected.push(p.id); return null; }) as never;
+    engine.startSiteWarm(project.id, { kept: [] }, {});
+    engine.startSiteWarm(project.id, { kept: [] }, {});
+    expect(engine.siteWarm.get(project.id)).toMatchObject({ running: true, ready: false });
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reloaded).toBe(1);
+    expect(collected).toEqual([project.id]);
+    expect(engine.siteWarm.has(project.id)).toBe(false);
+    const log = (await engine.load(project.id)).log.map((l: { message: string }) => l.message);
+    expect(log.some((m: string) => m === 'site fit in the background: 7 listing(s) measured, 2 still queued; table rebuilt from the measurements')).toBe(true);
+    engine.quiet.add(project.id);
+    engine.startSiteWarm(project.id, { kept: [] }, {});
+    await new Promise((r) => setTimeout(r, 20));
+    expect(engine.siteWarm.get(project.id)).toMatchObject({ ready: true, measured: 7 });
+    expect(collected).toEqual([project.id]);
+  });
+});

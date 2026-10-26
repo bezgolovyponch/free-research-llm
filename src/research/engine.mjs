@@ -109,6 +109,7 @@ export class ResearchEngine {
     this.demo = demo;
     this.rates = rates;
     this.sites = sites;
+    this.siteWarm = new Map();
     this.onEvent = onEvent;
     this.listeners = new Map();
     this.running = new Set();
@@ -291,8 +292,10 @@ export class ResearchEngine {
     project.candidates = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
     if (this.sites && !this.demo) {
       const mode = sweep ? 'all' : this.quiet.has(project.id) ? 'cache' : 'budget';
+      const raw = project.candidates;
       project.candidates = await this.sites.apply(project.candidates, brief, { mode, readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
       const s = project.candidates.sites;
+      if (s?.pending) this.startSiteWarm(project.id, raw, brief);
       if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate 2021–2025, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
     if (strategy) {
@@ -304,6 +307,46 @@ export class ResearchEngine {
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
     return c;
+  }
+
+  startSiteWarm(id, raw, brief) {
+    if (!this.sites?.file || this.siteWarm.get(id)?.running) return;
+    const worker = this.sites.worker ? this.sites.worker() : null;
+    if (!worker) return;
+    const state = { running: true, ready: false, measured: 0 };
+    this.siteWarm.set(id, state);
+    void (async () => {
+      try {
+        const out = await worker.apply(raw, brief, { mode: 'all', readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
+        state.measured = out?.sites?.assessed ?? 0;
+        state.pending = out?.sites?.pending ?? 0;
+        state.ready = true;
+        if (!this.quiet.has(id)) await this.applyWarmed(id);
+      } catch (error) {
+        state.error = String(error.message).slice(0, 120);
+      } finally {
+        state.running = false;
+      }
+    })();
+  }
+
+  takeWarmed(id) {
+    const state = this.siteWarm.get(id);
+    if (!state?.ready) return null;
+    this.siteWarm.delete(id);
+    return state;
+  }
+
+  async applyWarmed(id) {
+    const state = this.takeWarmed(id);
+    if (!state) return null;
+    await this.sites.reload();
+    const project = await this.load(id);
+    this.emit(project, 'candidates', `site fit in the background: ${state.measured} listing(s) measured${state.pending ? `, ${state.pending} still queued` : ''}; table rebuilt from the measurements`);
+    await this.collectCandidates(project);
+    await this.checkAcceptance(project);
+    await this.store.save(project);
+    return project;
   }
 
   entitiesOf(project) {
