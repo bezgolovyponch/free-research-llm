@@ -272,7 +272,7 @@ export class ResearchEngine {
     }
     const options = await this.itemGateOptions(project);
     const strategy = strategyFor(project.templateId);
-    if (strategy && this.search?.readPage && !this.demo && !this.quiet.has(project.id)) {
+    if (strategy && this.search?.readPage && !this.demo && (sweep || !this.quiet.has(project.id))) {
       project.strategyCheck = await new StrategyRetriever({ readPage: (url) => this.search.readPage(url) }).retrieve(strategy, project.strategyCheck ?? null);
       const quoted = strategy.sources.filter((s) => s.quotes.length);
       const confirmed = quoted.filter((s) => project.strategyCheck[s.id]?.confirmed > 0).length;
