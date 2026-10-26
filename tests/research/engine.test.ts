@@ -272,7 +272,11 @@ describe('ResearchEngine', () => {
     await engine.collectCandidates(done, { sweep: true });
     engine.quiet.add(done.id);
     await engine.collectCandidates(done);
+    const strategyLines = () => done.log.filter((l: { message: string }) => /^strategy "Low-entry glamping/.test(l.message)).length;
+    const before = strategyLines();
+    done.strategyCheck = null;
     await engine.collectCandidates(done, { sweep: true });
+    expect(strategyLines()).toBe(before + 1);
     engine.quiet.delete(done.id);
     expect(modes).toEqual(['budget', 'all', 'cache', 'all']);
     expect(done.candidates.kept).toHaveLength(2);
