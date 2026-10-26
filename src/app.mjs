@@ -32,6 +32,7 @@ import { AppChat } from './appchat.mjs';
 import { HandoffWriter } from './research/handoff.mjs';
 import { appendAppMessage } from './research/notify.mjs';
 import { ProjectStore } from './store.mjs';
+import { spawn } from 'node:child_process';
 import { DocsIndex } from './chat/docs.mjs';
 import { MediaReader } from './chat/media.mjs';
 import { TerminalHub } from './terminal/hub.mjs';
@@ -165,7 +166,13 @@ export class App {
     this.handoffs = new HandoffWriter({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'handoff') });
     const rates = new ExchangeRates({ fetchImpl });
     this.sites = new SiteAssessor({ file: path.join(this.dataDir, 'sites.json') });
-    this.engine = new ResearchEngine({ router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
+    const verificationDir = path.join(this.dataDir, 'verification');
+    const verifier = this.demo ? null : { dir: verificationDir, run: (id) => new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [path.join(ROOT_DIR, 'verifier', 'verify.mjs'), id, '--data', this.dataDir, '--projects', this.store.dir], { stdio: 'ignore' });
+      child.on('error', reject);
+      child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`verifier exited with ${code}`))));
+    }) };
+    this.engine = new ResearchEngine({ verifier, router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
     this.improver = new ProjectImprover({ engine: this.engine, checkpoint: async (id, resume) => this.handoffs.write(await this.engine.load(id), { reason: 'loop running (checkpoint for a crash or power cut)', resume }) });
     this.suggester = new SubIssueSuggester({ engine: this.engine });
     this.port = Number(env.PORT || 4600);

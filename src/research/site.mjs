@@ -29,7 +29,7 @@ const STORE_TABLES = ['sites', 'places', 'hpi', 'points', 'facts'];
 export const RETRY_STATUS = new Set([429, 502, 503, 504]);
 export const RETRY_WAITS_MS = [10000, 30000];
 const USER_AGENT = 'free-research-llm (site fit; https://github.com/bezgolovyponch/free-research-llm)';
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+export const OVERPASS_URLS = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 const HPI_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hpi_a';
@@ -435,7 +435,7 @@ export class SiteAssessor {
   async assess(lat, lon) {
     const cached = this.cachedSite(lat, lon);
     if (cached) return cached;
-    const post = (query) => this.fetchJson(OVERPASS_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}` });
+    const post = (query) => this.overpass(query);
     const site = parseSurroundings(await post(overpassQuery(lat, lon)), lat, lon);
     if (site.coastKm === null) site.coastKm = parseCoast(await post(coastQuery(lat, lon)), lat, lon);
     const [start, end] = CLIMATE_YEARS;
@@ -453,8 +453,24 @@ export class SiteAssessor {
     return { trends, euHpi: trends[EU_AGGREGATE]?.real ?? null };
   }
 
+  async overpass(query) {
+    const start = this.overpassAt ?? 0;
+    let last = null;
+    for (let i = 0; i < OVERPASS_URLS.length; i++) {
+      const at = (start + i) % OVERPASS_URLS.length;
+      try {
+        const json = await this.fetchJson(OVERPASS_URLS[at], { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}` });
+        this.overpassAt = at;
+        return json;
+      } catch (error) {
+        last = error;
+      }
+    }
+    throw last ?? new Error('no Overpass instance answered');
+  }
+
   async addLakes(lat, lon, site) {
-    const post = (query) => this.fetchJson(OVERPASS_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}` });
+    const post = (query) => this.overpass(query);
     const withLakes = { ...site, lakeKm: parseLakes(await post(lakeQuery(lat, lon)), lat, lon), lakesNamed: true };
     this.store.sites[siteKey(lat, lon)] = { at: this.store.sites[siteKey(lat, lon)]?.at ?? this.now(), site: withLakes };
     this.persist();

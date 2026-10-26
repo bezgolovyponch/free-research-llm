@@ -389,3 +389,20 @@ describe('two measuring instances on one cache file', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
+
+describe('Overpass instances', () => {
+  it('moves to the next public instance when one refuses, and keeps using the one that answered', async () => {
+    const { OVERPASS_URLS } = await import('../../src/research/site.mjs');
+    const asked: string[] = [];
+    const fetchJson = async (url: string) => {
+      asked.push(url);
+      if (url === OVERPASS_URLS[0]) throw new Error('fetch failed');
+      return { elements: [] };
+    };
+    const assessor = new SiteAssessor({ fetchJson, sleep: noSleep });
+    expect(await assessor.overpass('[out:json];')).toEqual({ elements: [] });
+    expect(await assessor.overpass('[out:json];')).toEqual({ elements: [] });
+    expect(asked).toEqual([OVERPASS_URLS[0], OVERPASS_URLS[1], OVERPASS_URLS[1]]);
+    await expect(new SiteAssessor({ fetchJson: async () => { throw new Error('down'); }, sleep: noSleep }).overpass('q')).rejects.toThrow('down');
+  });
+});

@@ -1,0 +1,282 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export const PRICE_TOLERANCE = 0.02;
+export const AREA_TOLERANCE = 0.05;
+export const DEFAULT_SEA_KM = 25;
+const UA = 'free-research-llm-verifier (independent check; https://github.com/bezgolovyponch/free-research-llm)';
+const NOMINATIM_REVERSE = 'https://nominatim.openstreetmap.org/reverse';
+export const OVERPASS_INSTANCES = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
+const ECB = 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml';
+
+export const COUNTRY_NAMES = {
+  PT: ['portugal'], ES: ['spain', 'espana'], TR: ['turkey', 'turkiye'], VN: ['vietnam', 'viet nam'], HR: ['croatia', 'hrvatska'], IT: ['italy', 'italia'], GR: ['greece'], FR: ['france'], DE: ['germany', 'deutschland'], BG: ['bulgaria'], CY: ['cyprus'], MT: ['malta'], AL: ['albania'], ME: ['montenegro'], MA: ['morocco'],
+  CZ: ['czechia', 'czech republic'], PL: ['poland'], RO: ['romania'], SI: ['slovenia'], AT: ['austria'], NL: ['netherlands'], BE: ['belgium'], IE: ['ireland'], DK: ['denmark'], SE: ['sweden'], FI: ['finland'], EE: ['estonia'], LV: ['latvia'], LT: ['lithuania'], SK: ['slovakia'], HU: ['hungary'], LU: ['luxembourg'],
+};
+export const EU = ['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'];
+
+const fold = (t) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+export function namedCountries(text) {
+  const t = fold(text);
+  return Object.entries(COUNTRY_NAMES).filter(([, names]) => names.some((n) => new RegExp(`(^|[^a-z])${n}([^a-z]|$)`).test(t))).map(([code]) => code);
+}
+
+export function obligationsOf(project) {
+  const words = [project.question, project.acceptance?.expected, ...Object.values(project.constraints ?? {})].filter((v) => typeof v === 'string').join(' ');
+  const named = namedCountries(words);
+  const euWord = /(^|[^a-z])(eu|european union)([^a-z]|$)/.test(fold(words));
+  const regions = [...new Set([...named, ...(euWord && !named.some((c) => EU.includes(c)) ? EU : [])])];
+  const months = String(project.question ?? '').match(/(\d{1,2})\s*months?\b/i);
+  const km = String(project.guidance ?? '').match(/about\s+(\d{1,3})\s*km/i);
+  return {
+    priceMin: project.acceptance?.valueRange?.[0] ?? 0,
+    priceMax: project.acceptance?.valueRange?.[1] ?? null,
+    currency: String(project.acceptance?.unit ?? 'EUR').toUpperCase(),
+    regions,
+    seaKm: km ? Number(km[1]) : DEFAULT_SEA_KM,
+    seaFrom: km ? 'guidance' : 'default',
+    minMonths: months ? Number(months[1]) : null,
+    workable: { tmaxMin: 14, tmaxMax: 31, tminMin: 5, rainMax: 200, from: 'app-defined (glamping without air conditioning)' },
+  };
+}
+
+export function numberOf(text) {
+  let s = String(text ?? '').replace(/[\s  ]/g, '');
+  if (/^\d{1,3}([.,]\d{3})+$/.test(s)) return Number(s.replace(/[.,]/g, ''));
+  if (/,\d{1,2}$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+  else s = s.replace(/,/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function jsonLdOffers(html) {
+  const out = [];
+  for (const m of String(html ?? '').matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    let data;
+    try {
+      data = JSON.parse(m[1].trim());
+    } catch {
+      continue;
+    }
+    const walk = (v) => {
+      if (!v || typeof v !== 'object') return;
+      if (Array.isArray(v)) return v.forEach(walk);
+      if (v.price !== undefined && (v.priceCurrency || v.currency)) out.push({ price: numberOf(v.price), currency: String(v.priceCurrency ?? v.currency).toUpperCase() });
+      Object.values(v).forEach(walk);
+    };
+    walk(data);
+  }
+  return out.filter((o) => o.price !== null);
+}
+
+const SYMBOL = { '€': 'EUR', '£': 'GBP', $: 'USD', '₺': 'TRY', '₫': 'VND' };
+
+export function textPrices(text) {
+  const out = [];
+  for (const m of String(text ?? '').matchAll(/(€|£|\$|₺|₫|EUR|TRY|TL|VND|GBP|USD)\s?(\d[\d.,\s ]{0,15}\d|\d)|(\d[\d.,\s ]{0,15}\d|\d)\s?(€|£|₺|₫|EUR|TRY|TL|VND|GBP|USD)/g)) {
+    const raw = m[2] ?? m[3];
+    const sym = m[1] ?? m[4];
+    const price = numberOf(raw);
+    if (price !== null) out.push({ price, currency: SYMBOL[sym] ?? (sym === 'TL' ? 'TRY' : sym) });
+  }
+  return out;
+}
+
+export function pageText(html) {
+  return String(html ?? '').replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').replace(/&euro;/g, '€').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+}
+
+export function pageAreas(text) {
+  const out = [];
+  for (const m of String(text ?? '').matchAll(/(\d[\d.,\s ]{0,12}\d|\d)\s?(m²|m2|sqm|ha\b|hectares?)/gi)) {
+    const n = numberOf(m[1]);
+    if (n === null || n <= 0) continue;
+    out.push(/^h/i.test(m[2]) ? n * 10000 : n);
+  }
+  return out;
+}
+
+export function pageCoords(html) {
+  const m = String(html ?? '').match(/"lat(?:itude)?"\s*:\s*"?(-?\d{1,3}\.\d{3,})"?\s*,\s*"(?:lng|lon|long|longitude)"\s*:\s*"?(-?\d{1,3}\.\d{3,})/i);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lon = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && !(Math.abs(lat) < 1 && Math.abs(lon) < 1) ? { lat, lon } : null;
+}
+
+export function kmBetween(a, b) {
+  const r = (x) => (x * Math.PI) / 180;
+  const h = Math.sin(r(b.lat - a.lat) / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(r(b.lon - a.lon) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+export function workableMonths(daily, rule) {
+  const months = Array.from({ length: 12 }, () => ({ max: [], min: [], rain: 0, years: new Set() }));
+  (daily?.time ?? []).forEach((day, i) => {
+    const m = months[Number(day.slice(5, 7)) - 1];
+    if (Number.isFinite(daily.temperature_2m_max?.[i])) m.max.push(daily.temperature_2m_max[i]);
+    if (Number.isFinite(daily.temperature_2m_min?.[i])) m.min.push(daily.temperature_2m_min[i]);
+    m.rain += daily.precipitation_sum?.[i] ?? 0;
+    m.years.add(day.slice(0, 4));
+  });
+  const avg = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  return months.filter((m) => m.max.length && m.min.length && avg(m.max) >= rule.tmaxMin && avg(m.max) <= rule.tmaxMax && avg(m.min) >= rule.tminMin && m.rain / m.years.size <= rule.rainMax).length;
+}
+
+export function compare(name, appValue, found, tolerance) {
+  if (appValue === null || appValue === undefined) return { check: name, status: 'unconfirmed', detail: 'the app gave no value' };
+  if (!found.length) return { check: name, status: 'unconfirmed', detail: 'not found on the page' };
+  const best = found.reduce((a, b) => (Math.abs(b - appValue) < Math.abs(a - appValue) ? b : a));
+  const ok = Math.abs(best - appValue) <= tolerance * Math.max(1, Math.abs(appValue));
+  return { check: name, status: ok ? 'confirmed' : 'refuted', detail: `page ${best}, app ${appValue}` };
+}
+
+export class Verifier {
+  constructor({ fetchImpl = fetch, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+    this.fetch = fetchImpl;
+    this.now = now;
+    this.sleep = sleep;
+    this.lastNominatim = 0;
+    this.rates = null;
+  }
+
+  async get(url, init = {}) {
+    const res = await this.fetch(url, { ...init, headers: { 'user-agent': UA, ...(init.headers ?? {}) }, signal: AbortSignal.timeout(120000) });
+    return res;
+  }
+
+  async json(url, init) {
+    const res = await this.get(url, init);
+    if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
+    return res.json();
+  }
+
+  async eurRates() {
+    if (this.rates) return this.rates;
+    const res = await this.get(ECB);
+    const xml = await res.text();
+    this.rates = { EUR: 1 };
+    for (const m of xml.matchAll(/currency='([A-Z]{3})' rate='([\d.]+)'/g)) this.rates[m[1]] = Number(m[2]);
+    return this.rates;
+  }
+
+  async toEur(price, currency) {
+    if (currency === 'EUR') return price;
+    const rates = await this.eurRates();
+    return rates[currency] ? price / rates[currency] : null;
+  }
+
+  async country(point) {
+    const wait = this.lastNominatim + 1100 - this.now();
+    if (wait > 0) await this.sleep(wait);
+    this.lastNominatim = this.now();
+    const d = await this.json(`${NOMINATIM_REVERSE}?format=json&zoom=10&lat=${point.lat}&lon=${point.lon}`);
+    return String(d?.address?.country_code ?? '').toUpperCase();
+  }
+
+  async seaKm(point, radiusKm) {
+    const q = `[out:json][timeout:120];way(around:${radiusKm * 1000},${point.lat},${point.lon})[natural=coastline];out geom;`;
+    let d = null;
+    let failure = null;
+    for (const url of OVERPASS_INSTANCES) {
+      try {
+        d = await this.json(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(q)}` });
+        break;
+      } catch (error) {
+        failure = error;
+      }
+    }
+    if (!d) throw failure ?? new Error('no Overpass instance answered');
+    let best = Infinity;
+    for (const w of d?.elements ?? []) for (const g of w.geometry ?? []) best = Math.min(best, kmBetween(point, g));
+    return best === Infinity ? null : Math.round(best * 10) / 10;
+  }
+
+  async months(point, rule) {
+    const d = await this.json(`${ARCHIVE}?latitude=${point.lat.toFixed(3)}&longitude=${point.lon.toFixed(3)}&start_date=2021-01-01&end_date=2025-12-31&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=GMT`);
+    return workableMonths(d?.daily, rule);
+  }
+
+  async verifyRow(row, ob) {
+    const checks = [];
+    let html = '';
+    try {
+      const res = await this.get(row.url);
+      html = res.ok ? await res.text() : '';
+      checks.push({ check: 'listing online', status: res.ok ? 'confirmed' : res.status === 404 || res.status === 410 ? 'refuted' : 'unconfirmed', detail: `HTTP ${res.status}` });
+    } catch (error) {
+      checks.push({ check: 'listing online', status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
+    }
+    const text = pageText(html);
+    const prices = [...jsonLdOffers(html), ...textPrices(text)].filter((p) => p.currency === String(row.currency || ob.currency).toUpperCase()).map((p) => p.price);
+    checks.push(compare('price on the page', row.price, prices, PRICE_TOLERANCE));
+    const eur = row.price !== null && row.price !== undefined ? await this.toEur(row.price, String(row.currency || ob.currency).toUpperCase()).catch(() => null) : null;
+    checks.push(eur === null ? { check: 'price within the limit', status: 'unconfirmed', detail: 'no exchange rate' } : { check: 'price within the limit', status: eur >= ob.priceMin && (ob.priceMax === null || eur <= ob.priceMax * (1 + PRICE_TOLERANCE)) ? 'confirmed' : 'refuted', detail: `€${Math.round(eur)} against ${ob.priceMin}–${ob.priceMax}` });
+    if (row.area) checks.push(compare('area on the page', row.areaM2 ?? row.area, pageAreas(text), AREA_TOLERANCE));
+    const own = pageCoords(html);
+    const point = own ?? (Number.isFinite(row.lat) && Number.isFinite(row.lon) ? { lat: row.lat, lon: row.lon } : null);
+    if (!point) checks.push({ check: 'location', status: 'unconfirmed', detail: 'no coordinates' });
+    else {
+      checks.push({ check: 'location source', status: own ? 'confirmed' : 'unconfirmed', detail: own ? 'coordinates read from the listing page' : 'the app\'s point was used' });
+      try {
+        const code = await this.country(point);
+        checks.push({ check: 'in the asked countries', status: ob.regions.length ? (ob.regions.includes(code) ? 'confirmed' : 'refuted') : 'confirmed', detail: code || 'unknown' });
+      } catch (error) {
+        checks.push({ check: 'in the asked countries', status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
+      }
+      try {
+        const km = await this.seaKm(point, ob.seaKm + 5);
+        checks.push({ check: `sea within ${ob.seaKm} km`, status: km !== null && km <= ob.seaKm ? 'confirmed' : 'refuted', detail: km === null ? `no coastline within ${ob.seaKm + 5} km` : `${km} km` });
+      } catch (error) {
+        checks.push({ check: `sea within ${ob.seaKm} km`, status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
+      }
+      if (ob.minMonths) {
+        try {
+          const n = await this.months(point, ob.workable);
+          checks.push({ check: `${ob.minMonths}+ workable months`, status: n >= ob.minMonths ? 'confirmed' : 'refuted', detail: `${n} months by the ${ob.workable.from} rule` });
+        } catch (error) {
+          checks.push({ check: `${ob.minMonths}+ workable months`, status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
+        }
+      }
+    }
+    const refuted = checks.filter((c) => c.status === 'refuted');
+    const unconfirmed = checks.filter((c) => c.status === 'unconfirmed' && c.check !== 'location source');
+    return { url: row.url, verdict: refuted.length ? 'refuted' : unconfirmed.length ? 'unconfirmed' : 'confirmed', checks };
+  }
+
+  async verify(project) {
+    const ob = obligationsOf(project);
+    const rows = (project.candidates?.kept ?? []).filter((r) => r.plan?.tier === 'fits');
+    const inputs = crypto.createHash('sha256').update(JSON.stringify({ ob, rows: rows.map((r) => [r.url, r.price, r.currency, r.area, r.lat, r.lon]) })).digest('hex');
+    const results = [];
+    for (const row of rows) results.push(await this.verifyRow(row, ob));
+    return { id: project.id, at: new Date(this.now()).toISOString(), inputs, obligations: ob, results, confirmed: results.filter((r) => r.verdict === 'confirmed').map((r) => r.url) };
+  }
+}
+
+export async function main(argv = process.argv.slice(2)) {
+  const [id] = argv;
+  const dataAt = argv.indexOf('--data');
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const dataDir = dataAt > -1 ? argv[dataAt + 1] : path.join(root, 'data');
+  if (!id) {
+    console.log('usage: node verifier/verify.mjs <research id> [--data <data dir>] [--projects <projects dir>]');
+    return 1;
+  }
+  const projectsAt = argv.indexOf('--projects');
+  const projectsDir = projectsAt > -1 ? argv[projectsAt + 1] : path.join(dataDir, 'projects');
+  const project = JSON.parse(await fs.readFile(path.join(projectsDir, `${id}.json`), 'utf8'));
+  const record = await new Verifier().verify(project);
+  const out = path.join(dataDir, 'verification');
+  await fs.mkdir(out, { recursive: true });
+  await fs.writeFile(path.join(out, `${id}.json`), JSON.stringify(record, null, 1));
+  await fs.appendFile(path.join(out, `${id}.jsonl`), `${JSON.stringify({ at: record.at, inputs: record.inputs, confirmed: record.confirmed.length, checked: record.results.length })}\n`);
+  console.log(`verified ${record.results.length} row(s): ${record.confirmed.length} confirmed, ${record.results.filter((r) => r.verdict === 'refuted').length} refuted, ${record.results.filter((r) => r.verdict === 'unconfirmed').length} unconfirmed`);
+  return 0;
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) process.exitCode = await main();

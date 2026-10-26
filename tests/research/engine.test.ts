@@ -574,3 +574,29 @@ describe('graded research answers feed routing', () => {
     expect(seen.observed).toBeGreaterThan(0);
   });
 });
+
+describe('external verifier from the engine', () => {
+  it('starts the verifier once per set of fits, then rebuilds the table from its record', async () => {
+    const { applyVerification } = await import('../../src/research/verification.mjs');
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find plots near the sea in Portugal, 20000EUR max', expected: '2 plots', autoRun: false });
+    let runs = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    engine.verifier = { dir: '/nonexistent', run: async () => { runs++; await gate; } } as never;
+    engine.sites = { reload: async () => {} } as never;
+    const rebuilt: string[] = [];
+    engine.collectCandidates = (async (p: { id: string }) => { rebuilt.push(p.id); return null; }) as never;
+    project.candidates = applyVerification({ tiers: { fits: 1 }, keptCount: 1, kept: [{ url: 'a', plan: { tier: 'fits' } }] }, null);
+    engine.startVerification(project);
+    engine.startVerification(project);
+    expect(runs).toBe(1);
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(rebuilt).toEqual([project.id]);
+    const log = (await engine.load(project.id)).log.map((l: { message: string }) => l.message);
+    expect(log).toContain('external verifier finished; table rebuilt: only plots it confirmed count toward the result');
+    engine.startVerification(project);
+    expect(runs).toBe(1);
+  });
+});

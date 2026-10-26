@@ -27,7 +27,7 @@ function repoFiles() {
 }
 
 function sourceModules(files) {
-  return files.filter((f) => /^(src|scripts)\/.*\.mjs$/.test(f));
+  return files.filter((f) => /^(src|scripts|verifier)\/.*\.mjs$/.test(f));
 }
 
 function mergeBase() {
@@ -67,6 +67,11 @@ const gates = {
     return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : `${workflows.length} CI workflow file(s) parse, no duplicate keys` };
   },
 
+  independence(files) {
+    const offenders = sourceModules(files).filter((f) => f.startsWith('verifier/')).filter((f) => /(?:from\s+|import\()\s*['"](?:\.\.\/)+src\//.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
+    return { passed: offenders.length === 0, detail: offenders.length ? `the external verifier imports app code: ${offenders.join(', ')}` : 'the external verifier shares no code with the app' };
+  },
+
   secrets(files) {
     const hits = [];
     for (const file of files) {
@@ -93,8 +98,8 @@ const gates = {
 
   testsPresent(files) {
     const missing = sourceModules(files)
-      .filter((f) => f.startsWith('src/') && !UNTESTED_ENTRYPOINTS.has(f))
-      .filter((f) => !fs.existsSync(path.join(ROOT, `tests/${f.slice(4, -4)}.test.ts`)));
+      .filter((f) => (f.startsWith('src/') || f.startsWith('verifier/')) && !UNTESTED_ENTRYPOINTS.has(f))
+      .filter((f) => !fs.existsSync(path.join(ROOT, f.startsWith('src/') ? `tests/${f.slice(4, -4)}.test.ts` : `tests/${f.slice(0, -4)}.test.ts`)));
     return { passed: missing.length === 0, detail: missing.length ? `no test file for: ${missing.join(', ')}` : 'every logic module has a matching test file' };
   },
 

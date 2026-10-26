@@ -128,7 +128,7 @@ export function buildCandidates(nodes, brief, options = {}) {
 }
 
 export function candidateDeliverables(candidates) {
-  return (candidates?.kept ?? []).filter((row) => !row.plan || row.plan.tier === 'fits').map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
+  return (candidates?.kept ?? []).filter((row) => !row.plan || (row.plan.tier === 'fits' && (!candidates.verification || row.verified?.verdict === 'confirmed'))).map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
 }
 
 function siteText(row) {
@@ -151,5 +151,7 @@ export function tableVerdict(candidates, itemCount = null) {
   const t = candidates?.tiers;
   if (!t) return '';
   const target = itemCount ? ` of the ${itemCount} asked` : '';
-  return `Decision model: ${t.fits} plot${t.fits === 1 ? '' : 's'}${target} fit every check; ${t['trade-off']} trade-off${t['trade-off'] === 1 ? '' : 's'} with their potential; ${t.unverified} to confirm; ${t.weak ?? 0} weak; ${t.blocked} blocked by law`;
+  const v = candidates.verification;
+  const verified = v ? ` (externally verified: ${v.confirmed} confirmed, ${v.refuted} refuted, ${v.unconfirmed + v.pending} not yet confirmed; only confirmed ones count)` : '';
+  return `Decision model: ${t.fits} plot${t.fits === 1 ? '' : 's'}${target} fit every check${verified}; ${t['trade-off']} trade-off${t['trade-off'] === 1 ? '' : 's'} with their potential; ${t.unverified} to confirm; ${t.weak ?? 0} weak; ${t.blocked} blocked by law`;
 }
