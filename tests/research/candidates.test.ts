@@ -59,7 +59,8 @@ describe('candidate table', () => {
     expect(out.outsideCount).toBe(1);
     const priced = [1, 2, 3, 4, 5].map((n) => ({ title: `Terreno urbano ${n}`, url: `https://imo.pt/anuncio/terreno-urbano-ID1u${n}xy`, value: 40000 + n * 1000, unit: 'EUR', area: 400 }));
     const withMarket = buildCandidates([{ id: 'D1', sources: [{ url: 'https://p.example/r', listings: [...priced, { title: 'Terreno urbano Estoril', url: 'https://imo.pt/anuncio/terreno-urbano-estoril-ID1e1xy', value: 1000, unit: 'EUR', area: 400 }] }] }], b, {});
-    expect(withMarket.priceMedians['PT|buildable']).toBe(106.25);
+    expect(withMarket.priceMedians['PT|buildable']).toMatchObject({ n: 6 });
+    expect(withMarket.priceMedians['PT|buildable'].median).toBeCloseTo(106.24, 1);
     expect(withMarket.kept.map((r: { url: string }) => r.url)).toEqual(['https://imo.pt/anuncio/terreno-urbano-estoril-ID1e1xy']);
   });
 

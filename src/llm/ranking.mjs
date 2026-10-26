@@ -74,31 +74,39 @@ export function providerStats(ledger, { now = Date.now(), windowMs = WINDOW_MS }
   return Object.fromEntries(Object.entries(stats).map(([id, s]) => [id, { calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, reliability: (s.ok + 1) / (s.calls + 2), medianMs: { fast: median(s.ms.fast) ?? median(s.ms.all), deep: median(s.ms.deep) ?? median(s.ms.all) } }]));
 }
 
+function qualityText(row) {
+  const seen = Math.round(row.qualityObserved ?? 0);
+  return seen ? `answers passed the gates ${Math.round((row.quality ?? 0) * 100)}% (${Math.round(row.passed ?? 0)} of ${seen} recent, decayed)` : `no graded answers yet: prior ${row.capability}/5 (${row.capabilityBasis})`;
+}
+
 function reasonFor(row, role, strategy, rank) {
   if (!row.ready) return row.notReady;
   const parts = [];
   if (row.cooling) parts.push(row.coolingReason ? `benched ${row.cooling > 3600 ? `${Math.round(row.cooling / 3600)} h` : `${row.cooling} s`}: ${row.coolingReason}` : `cooling ${row.cooling} s, skipped until then`);
   if (strategy === 'custom') parts.push(`your position ${rank + 1}`);
   else if (strategy === 'fastest') parts.push(row.medianMs ? `median ${(row.medianMs / 1000).toFixed(1)} s` : 'no timing yet, placed after measured ones');
-  else if (strategy === 'smartest') parts.push(`capability ${row.capability}/5`);
-  else parts.push(`score ${row.score.toFixed(2)}: capability ${row.capability}/5, reliability ${Math.round(row.reliability * 100)}%, ${row.medianMs ? `${(row.medianMs / 1000).toFixed(1)} s` : 'no timing yet'}`);
+  else if (strategy === 'smartest') parts.push(qualityText(row));
+  else parts.push(`score ${row.score.toFixed(2)}: ${qualityText(row)}, reliability ${Math.round(row.reliability * 100)}%, ${row.medianMs ? `${(row.medianMs / 1000).toFixed(1)} s` : 'no timing yet'}`);
   if (row.reliability < MIN_RELIABILITY && row.calls >= 4) parts.push(`moved down: only ${Math.round(row.reliability * 100)}% of calls worked`);
   if (row.capability <= 1 && strategy !== 'custom' && strategy !== 'smartest') parts.push('kept last: too small for research');
   return parts.join(' · ');
 }
 
-export function rankRole({ role, strategy, providers, stats, customOrder = [], now = Date.now() }) {
+export function rankRole({ role, strategy, providers, stats, customOrder = [], now = Date.now(), outcomes = null, purposeClass = null, rng = Math.random }) {
+  const cls = purposeClass ?? (role === 'deep' ? 'research' : 'volume');
   const rows = providers.map((p) => {
     const s = stats[p.id] ?? { calls: 0, ok: 0, failed: 0, rateLimited: 0, reliability: 0.5, medianMs: {} };
     const [capability, capabilityBasis] = capabilityOf(p);
-    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, medianMs: s.medianMs[role] ?? null };
+    const posterior = outcomes ? outcomes.posterior(p.id, cls, capability) : { mean: capability / 5, observed: 0, pass: 0, fail: 0 };
+    const draw = outcomes ? outcomes.sample(p.id, cls, capability, rng) : capability / 5;
+    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, quality: posterior.mean, qualityObserved: posterior.observed, passed: posterior.pass, draw, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, medianMs: s.medianMs[role] ?? null };
   });
   const timed = rows.filter((r) => r.medianMs).map((r) => r.medianMs);
   const fastest = timed.length ? Math.min(...timed) : null;
   const w = WEIGHTS[role];
   for (const r of rows) {
     const speed = r.medianMs && fastest ? fastest / r.medianMs : 0.5;
-    r.score = w.capability * (r.capability / 5) + w.reliability * r.reliability + w.speed * speed;
+    r.score = w.capability * r.draw + w.reliability * r.reliability + w.speed * speed;
   }
   const weak = (r) => (r.capability <= 1 ? 2 : 0) + (r.reliability < MIN_RELIABILITY && r.calls >= 4 ? 1 : 0);
   const custom = (r) => {
@@ -108,18 +116,18 @@ export function rankRole({ role, strategy, providers, stats, customOrder = [], n
   const compare = {
     custom: (a, b) => custom(a) - custom(b),
     fastest: (a, b) => weak(a) - weak(b) || (a.medianMs ?? Infinity) - (b.medianMs ?? Infinity) || b.score - a.score,
-    smartest: (a, b) => b.capability - a.capability || b.reliability - a.reliability,
+    smartest: (a, b) => b.quality - a.quality || b.reliability - a.reliability,
     balanced: (a, b) => weak(a) - weak(b) || b.score - a.score,
   }[strategy] ?? ((a, b) => b.score - a.score);
   const ordered = [...rows].sort((a, b) => Number(b.ready) - Number(a.ready) || compare(a, b) || a.id.localeCompare(b.id));
   return ordered.map((r, rank) => ({ ...r, rank: r.ready ? rank + 1 : null, why: reasonFor(r, role, strategy, rank), score: Math.round(r.score * 100) / 100, reliability: Math.round(r.reliability * 100) / 100 }));
 }
 
-export function routeFor({ strategy, providers, ledger, enabled, customOrder, now = Date.now() }) {
+export function routeFor({ strategy, providers, ledger, enabled, customOrder, now = Date.now(), outcomes = null, rng = Math.random }) {
   const used = providers.filter((p) => enabled.includes(p.id));
   const stats = providerStats(ledger, { now });
-  const deep = rankRole({ role: 'deep', strategy, providers: used, stats, customOrder, now });
-  const fast = rankRole({ role: 'fast', strategy, providers: used, stats, customOrder, now });
+  const deep = rankRole({ role: 'deep', strategy, providers: used, stats, customOrder, now, outcomes, rng });
+  const fast = rankRole({ role: 'fast', strategy, providers: used, stats, customOrder, now, outcomes, rng });
   return { deep, fast, order: { deep: deep.map((r) => r.id), fast: fast.map((r) => r.id) }, stats };
 }
 
@@ -204,17 +212,19 @@ function orderBy(rows, compare) {
   return [...rows].sort((a, b) => Number(b.ready) - Number(a.ready) || compare(a, b) || a.id.localeCompare(b.id)).map((r) => r.id);
 }
 
-export function purposePlan({ providers, stats, usage = {}, enabled }) {
+export function purposePlan({ providers, stats, usage = {}, enabled, outcomes = null, rng = Math.random }) {
   const used = providers.filter((p) => enabled.includes(p.id));
-  const deep = rankRole({ role: 'deep', strategy: 'balanced', providers: used, stats });
-  const fast = rankRole({ role: 'fast', strategy: 'balanced', providers: used, stats });
-  const weak = (r) => (r.capability <= 1 ? 2 : 0) + (r.reliability < 0.5 && r.calls >= 4 ? 1 : 0);
+  const rank = (role, purposeClass) => rankRole({ role, strategy: 'balanced', providers: used, stats, outcomes, purposeClass, rng });
+  const topRows = rank('deep', 'top');
+  const deep = rank('deep', 'research');
+  const fast = rank('fast', 'volume');
+  const weak = (r) => (r.capability <= 1 && !(r.qualityObserved >= 5 && r.quality >= 0.5) ? 2 : 0) + (r.reliability < 0.5 && r.calls >= 4 ? 1 : 0);
   const spent = (r) => ((usage[r.id]?.today?.used ?? 0) >= 0.9 ? 1 : 0);
-  const reserved = deep.filter((r) => r.ready).sort((a, b) => b.capability - a.capability || b.reliability - a.reliability)[0]?.id;
+  const reserved = topRows.filter((r) => r.ready).sort((a, b) => b.quality - a.quality || b.reliability - a.reliability)[0]?.id;
   const reservedTight = reserved && (usage[reserved]?.today?.used ?? 0) >= RESERVE_UNTIL;
-  const top = orderBy(deep, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || b.capability - a.capability || b.reliability - a.reliability);
+  const top = orderBy(topRows, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || b.draw - a.draw || b.reliability - a.reliability);
   const research = orderBy(deep, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved && reservedTight) - Number(b.id === reserved && reservedTight) || b.score - a.score);
-  const volume = orderBy(fast, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved) - Number(b.id === reserved) || (b.capability >= 3) - (a.capability >= 3) || (a.medianMs ?? 1e9) - (b.medianMs ?? 1e9));
+  const volume = orderBy(fast, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved) - Number(b.id === reserved) || b.draw - a.draw || (a.medianMs ?? 1e9) - (b.medianMs ?? 1e9));
   const orders = { top, research, volume };
   const byPurpose = Object.fromEntries(Object.entries(PURPOSE_CLASS).map(([purpose, cls]) => [purpose, orders[cls]]));
   byPurpose['research:deep'] = top;

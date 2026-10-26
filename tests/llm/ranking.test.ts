@@ -33,7 +33,7 @@ describe('router ranking', () => {
     const rows = rankRole({ role: 'deep', strategy: 'balanced', providers, stats: providerStats(ledger, { now }) });
     expect(rows.map((r: { id: string }) => r.id)).toEqual(['cerebras', 'pollinations', 'gemini', 'mistral']);
     expect(rows[0]).toMatchObject({ rank: 1, model: 'gpt-oss-120b', capability: 4, reliability: 0.95 });
-    expect(rows[0].why).toMatch(/^score 0\.\d+: capability 4\/5, reliability 95%, 1\.0 s$/);
+    expect(rows[0].why).toMatch(/^score 0\.\d+: no graded answers yet: prior 4\/5 \(gpt-oss-120b\), reliability 95%, 1\.0 s$/);
     expect(rows[2].why).toContain('moved down: only 25% of calls worked');
     expect(rows[3]).toMatchObject({ rank: null, why: 'set MISTRAL_API_KEY' });
   });

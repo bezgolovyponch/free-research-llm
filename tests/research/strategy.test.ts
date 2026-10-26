@@ -167,12 +167,13 @@ describe('decision model from the user words', () => {
     expect(planFor({ ...nazare, site: null }, GLAMPING_LOW_ENTRY, { euHpi: 2.9, trends: { PT: { change: 17.6, inflation: 2.2, real: 15.1, year: '2025' } } }).verdict).not.toContain('price series');
   });
 
-  it('flags a price per m² under a tenth of the country median as implausible', async () => {
+  it('flags a low price per m² by the robust rule median − 2.5 MAD on log prices (Leys et al. 2013)', async () => {
     const { implausiblyCheap, pricePerM2Medians } = await import('../../src/research/strategy.mjs');
     const rows = [10, 12, 14, 16, 18].map((eurPerM2) => ({ countryCode: 'VN', country: 'Vietnam', value: eurPerM2 * 250, area: 250, areaUnit: 'm²' }));
     const medians = pricePerM2Medians(rows);
-    expect(medians).toEqual({ 'VN|not stated': 14 });
-    expect(implausiblyCheap({ countryCode: 'VN', country: 'Vietnam', value: 250, area: 250, areaUnit: 'm²' }, medians)).toBe('€1.00/m² is under a tenth of the median for land in Vietnam among the listings found (€14.00/m²): check the price and area on the listing');
+    expect(medians['VN|not stated']).toMatchObject({ n: 5 });
+    expect(medians['VN|not stated'].median).toBeCloseTo(14, 5);
+    expect(implausiblyCheap({ countryCode: 'VN', country: 'Vietnam', value: 250, area: 250, areaUnit: 'm²' }, medians)).toMatch(/^€1\.00\/m² is a low outlier for land in Vietnam among the 5 listings found \(median €14\.00\/m²; outliers below €\d+\.\d\d\/m² by median − 2\.5 MAD\): check the price and area on the listing$/);
     expect(implausiblyCheap(rows[0], medians)).toBeNull();
     expect(pricePerM2Medians(rows.slice(0, 4))).toEqual({});
   });
@@ -198,7 +199,7 @@ describe('decision model from the user words', () => {
     const out = applyStrategy({ sites: { euHpi: 5.5 }, kept: [...rural, ...urban, estoril], screened: {}, screenedCount: 0 }, GLAMPING_LOW_ENTRY, { convert: toEur });
     const row = out.kept.find((r: { url: string }) => r.url === 'estoril');
     expect(row.plan.tier).toBe('unverified');
-    expect(row.plan.verdict).toBe('to confirm: €2.50/m² is under a tenth of the median for buildable land in Portugal among the listings found (€37.50/m²): check the price and area on the listing');
+    expect(row.plan.verdict).toMatch(/^to confirm: €2\.50\/m² is a low outlier for buildable land in Portugal among the 6 listings found/);
     expect(out.kept.find((r: { url: string }) => r.url === 'r0').plan.tier).toBe('fits');
   });
 

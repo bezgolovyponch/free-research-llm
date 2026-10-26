@@ -28,6 +28,15 @@ function sourceModules(files) {
   return files.filter((f) => /^(src|scripts)\/.*\.mjs$/.test(f));
 }
 
+function mergeBase() {
+  const head = run('git', ['rev-parse', 'HEAD']).stdout.trim();
+  for (const ref of ['origin/main', 'main']) {
+    const base = run('git', ['merge-base', 'HEAD', ref]).stdout.trim();
+    if (base && base !== head) return base;
+  }
+  return process.env.CI ? run('git', ['rev-parse', 'HEAD~1']).stdout.trim() : '';
+}
+
 const gates = {
   syntax(files) {
     const failures = sourceModules(files).filter((f) => run(process.execPath, ['--check', f]).status !== 0);
@@ -83,10 +92,11 @@ const gates = {
   },
 
   flakes() {
+    const base = mergeBase();
     const changed = [...new Set([
       ...run('git', ['diff', '--cached', '--name-only', '--diff-filter=AM']).stdout.split('\n'),
       ...run('git', ['diff', '--name-only', '--diff-filter=AM']).stdout.split('\n'),
-      ...(process.env.CI ? run('git', ['diff', '--name-only', '--diff-filter=AM', 'HEAD~1']).stdout.split('\n') : []),
+      ...(base ? run('git', ['diff', '--name-only', '--diff-filter=AM', base]).stdout.split('\n') : []),
     ])].filter((f) => /^tests\/.+\.test\.ts$/.test(f) && fs.existsSync(path.join(ROOT, f)));
     if (!changed.length) return { passed: true, detail: 'no new or changed test files' };
     for (let round = 1; round <= FLAKE_ROUNDS; round++) {

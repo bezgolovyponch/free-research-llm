@@ -156,7 +156,8 @@ export function summaryOf(models, stats) {
 }
 
 export class RouterAdmin {
-  constructor({ env, secrets, reload, statuses, ledger, applyOrder, history = null, checker = new KeyChecker(), links = new LinkVerifier(), now = () => Date.now() }) {
+  constructor({ env, secrets, reload, statuses, ledger, applyOrder, history = null, checker = new KeyChecker(), links = new LinkVerifier(), now = () => Date.now(), outcomes = null }) {
+    this.outcomes = outcomes;
     this.now = now;
     this.history = history ?? (async () => this.ledger());
     this.env = env;
@@ -176,9 +177,9 @@ export class RouterAdmin {
   route() {
     const strategy = strategyOf(this.env);
     const enabled = modelOrder(this.env).enabled;
-    const base = routeFor({ strategy: strategy === 'max' ? 'balanced' : strategy, providers: this.statuses(), ledger: this.ledger(), enabled, customOrder: enabled, now: this.now() });
+    const base = routeFor({ strategy: strategy === 'max' ? 'balanced' : strategy, providers: this.statuses(), ledger: this.ledger(), enabled, customOrder: enabled, now: this.now(), outcomes: this.outcomes });
     if (strategy !== 'max') return { strategy, ...base };
-    const plan = purposePlan({ providers: this.statuses(), stats: base.stats, usage: usageInfo(this.ledger(), { now: this.now() }).providers, enabled });
+    const plan = purposePlan({ providers: this.statuses(), stats: base.stats, usage: usageInfo(this.ledger(), { now: this.now() }).providers, enabled, outcomes: this.outcomes });
     return { strategy, ...base, order: { ...base.order, byPurpose: plan.byPurpose }, plan: { reserved: plan.reserved, classes: plan.orders, purposes: PURPOSE_CLASS } };
   }
 

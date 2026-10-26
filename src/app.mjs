@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { PROVIDER_PRESETS, ROUTE_ORDER, SEARCH_KEYS } from './llm/presets.mjs';
 import { OpenAICompatibleProvider } from './llm/provider.mjs';
 import { ModelRouter } from './llm/router.mjs';
+import { OutcomeBook } from './llm/outcomes.mjs';
 import { ScriptedProvider } from './llm/scripted-provider.mjs';
 import { ResearchEngine } from './research/engine.mjs';
 import { KEYED_SEARCH_BACKENDS, SearchService, SearxngBackend, WikipediaBackend } from './search/search.mjs';
@@ -156,7 +157,8 @@ export class App {
     this.demo = env.FRL_DEMO === '1';
     this.factory = new ProviderFactory({ env, fetchImpl });
     this.logs = new EventLog({ dir: logDir ?? path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'logs') });
-    this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), onLedger: (row) => this.logs.append('model-calls', row) });
+    this.outcomes = new OutcomeBook({ file: path.join(this.dataDir, 'outcomes.json') });
+    this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), onLedger: (row) => this.logs.append('model-calls', row), outcomes: this.outcomes });
     this.recipes = new SiteRecipes({ file: path.join(this.dataDir, 'recipes.json') });
     this.search = search ?? buildSearch({ env, fetchImpl, recipes: this.recipes });
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects'), isBusy: (id) => Boolean(this.engine?.running.has(id) || this.improver?.isActive(id)) });
@@ -184,7 +186,16 @@ export class App {
       },
       checker: new KeyChecker({ fetchImpl }),
       links: new LinkVerifier({ fetchImpl }),
+      outcomes: this.outcomes,
     });
+    void (async () => {
+      try {
+        await this.outcomes.load();
+        this.routerAdmin.apply();
+      } catch {
+        return;
+      }
+    })();
     this.changes = new ChangeBook({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'changes') });
     const workDir = path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'work');
     const restart = () => this.restartForCode(env);

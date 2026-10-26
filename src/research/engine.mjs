@@ -272,7 +272,7 @@ export class ResearchEngine {
     }
     const options = await this.itemGateOptions(project);
     const strategy = strategyFor(project.templateId);
-    if (strategy && this.search?.readPage && !this.demo && !this.quiet.has(project.id)) {
+    if (strategy && this.search?.readPage && !this.demo && (sweep || !this.quiet.has(project.id))) {
       project.strategyCheck = await new StrategyRetriever({ readPage: (url) => this.search.readPage(url) }).retrieve(strategy, project.strategyCheck ?? null);
       const quoted = strategy.sources.filter((s) => s.quotes.length);
       const confirmed = quoted.filter((s) => project.strategyCheck[s.id]?.confirmed > 0).length;
@@ -447,6 +447,7 @@ export class ResearchEngine {
       const critique = retryAnyway ? null : await this.critique(node, finding, shown, reply.provider);
       const verification = retryAnyway ? mechanical : verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
+      this.router.recordOutcome?.({ provider: reply.provider, purpose: 'research', passed: verification.grade === 'verified' || verification.grade === 'supported' });
       this.emit(project, 'node', `${node.id}: ${verification.grade} (attempt ${attempt}, ${tier} tier, ${reply.provider})`, { nodeId: node.id });
       if (!needsEscalation(verification)) return;
       failures = [...verification.failures, ...(critique?.issues ?? [])];
