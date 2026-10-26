@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seaScore, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
+import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
 
 const VIR = { lat: 44.3, lon: 15.09 };
 const DA_NANG = { lat: 16.055, lon: 108.22, name: 'Thai Hoa, Hai Chau, Da Nang, Vietnam' };
@@ -80,13 +80,6 @@ describe('site measurements', () => {
     expect(siteKey(44.301, 15.089)).toBe('44.30,15.08');
   });
 
-  it('scores the sea by e-bike distance and nothing beyond the e-bike limit', () => {
-    expect(seaScore(0.5)).toBe(1);
-    expect(seaScore(8)).toBe(0.8);
-    expect(seaScore(EBIKE_KM)).toBe(0.2);
-    expect(seaScore(EBIKE_KM + 1)).toBe(0);
-    expect(seaScore(null)).toBe(0);
-  });
 
   it('turns daily weather into monthly means and counts workable glamping months', () => {
     const months = monthlyClimate(mediterranean);
@@ -132,14 +125,9 @@ describe('site measurements', () => {
     expect(parseLakes({ elements: [] }, 39.5, -8.3)).toBeNull();
   });
 
-  it('ranks a plot by the business criteria, so a stunning short-season site still scores', () => {
-    const site = { ...parseSurroundings(overpassAt(VIR, 0.005), VIR.lat, VIR.lon), climate: seasonOf(monthlyClimate(mediterranean)) };
-    const fit = fitOf({ title: 'Poljoprivredno zemljište 240 m od uvale', value: 12110, area: 1211 }, site, { hpi: 13.9, maxValue: 20000 });
-    expect(fit.parts).toMatchObject({ sea: 1, season: 0.75, noAc: 0.6, zoning: 0.5 });
-    expect(fit.pitches).toBe(18);
-    expect(fit.score).toBeGreaterThan(0.6);
-    const inland = fitOf({ title: 'Land', value: 15000 }, { ...site, coastKm: 60, viewpoints: 0, attractions: 0, beaches: 0, reserves: 0, protectedAreas: 0, hikingRoutes: 0 }, { hpi: null, maxValue: 20000 });
-    expect(inland.score).toBeLessThan(fit.score - 0.3);
+  it('describes a plot by measured facts only, with no hand-weighted score', () => {
+    const fit = fitOf({ title: 'Poljoprivredno zemljište 240 m od uvale', value: 12110, area: 1211 }, { hpi: 13.9 });
+    expect(fit).toEqual({ zoning: 'agricultural', pitches: 18, hpi: 13.9 });
   });
 });
 
@@ -387,5 +375,45 @@ describe('two measuring instances on one cache file', () => {
     const disk = JSON.parse(await fs.readFile(file, 'utf8'));
     expect(Object.keys(disk.sites).sort()).toEqual(['1.00,1.00', '2.00,2.00']);
     await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('Overpass instances', () => {
+  it('moves to the next public instance when one refuses, and keeps using the one that answered', async () => {
+    const { OVERPASS_URLS } = await import('../../src/research/site.mjs');
+    const asked: string[] = [];
+    const fetchJson = async (url: string) => {
+      asked.push(url);
+      if (url === OVERPASS_URLS[0]) throw new Error('fetch failed');
+      return { elements: [] };
+    };
+    const assessor = new SiteAssessor({ fetchJson, sleep: noSleep });
+    expect(await assessor.overpass('[out:json];')).toEqual({ elements: [] });
+    expect(await assessor.overpass('[out:json];')).toEqual({ elements: [] });
+    expect(asked).toEqual([OVERPASS_URLS[0], OVERPASS_URLS[1], OVERPASS_URLS[1]]);
+    await expect(new SiteAssessor({ fetchJson: async () => { throw new Error('down'); }, sleep: noSleep }).overpass('q')).rejects.toThrow('down');
+  });
+
+  it('rests an instance that failed for ten minutes instead of waiting on it again for every place', async () => {
+    const { OVERPASS_URLS, INSTANCE_REST_MS } = await import('../../src/research/site.mjs');
+    let now = 0;
+    const asked: string[] = [];
+    const fetchJson = async (url: string) => {
+      asked.push(url);
+      if (url === OVERPASS_URLS[1]) throw new Error('timeout');
+      if (url === OVERPASS_URLS[0] && now < 1) throw new Error('refused');
+      return { elements: [] };
+    };
+    const assessor = new SiteAssessor({ fetchJson, sleep: noSleep, now: () => now });
+    await assessor.overpass('q');
+    expect(asked).toEqual([OVERPASS_URLS[0], OVERPASS_URLS[1], OVERPASS_URLS[2]]);
+    asked.length = 0;
+    await assessor.overpass('q');
+    expect(asked).toEqual([OVERPASS_URLS[2]]);
+    now = INSTANCE_REST_MS + 5;
+    assessor.overpassAt = 0;
+    asked.length = 0;
+    await assessor.overpass('q');
+    expect(asked).toEqual([OVERPASS_URLS[0]]);
   });
 });

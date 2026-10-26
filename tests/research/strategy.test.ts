@@ -12,7 +12,7 @@ describe('low-entry glamping strategy', () => {
     expect(strategyFor('glamping-location')).toBe(GLAMPING_LOW_ENTRY);
     expect(strategyFor('taxes')).toBeNull();
     const ids = new Set(GLAMPING_LOW_ENTRY.sources.map((s) => s.id));
-    for (const rule of Object.values(rules)) expect(ids.has(rule.source) || ['question', 'guidance'].includes(rule.source)).toBe(true);
+    for (const rule of Object.values(rules)) expect(ids.has(rule.source) || ['question', 'guidance', 'assumption'].includes(rule.source)).toBe(true);
     for (const country of Object.values(GLAMPING_LOW_ENTRY.countries)) for (const id of country.sources) expect(ids.has(id)).toBe(true);
   });
 
@@ -144,6 +144,7 @@ describe('decision model from the user words', () => {
     expect(f.rules.minWorkableMonths).toEqual({ value: 10, source: 'question' });
     expect(f.rules.ebikeKm).toEqual({ value: 20, source: 'guidance' });
     expect(foundationText(f)).toContain('at least 10 workable months');
+    expect(foundationText(f)).toContain('31 °C (no air conditioning; this limit is assumed, not taken from your words or a source)');
   });
 
   it('names the clauses it cannot check yet instead of pretending they are covered', async () => {

@@ -27,7 +27,7 @@ function repoFiles() {
 }
 
 function sourceModules(files) {
-  return files.filter((f) => /^(src|scripts)\/.*\.mjs$/.test(f));
+  return files.filter((f) => /^(src|scripts|verifier)\/.*\.mjs$/.test(f));
 }
 
 function mergeBase() {
@@ -59,12 +59,23 @@ const gates = {
         const doc = parseYaml(fs.readFileSync(path.join(ROOT, file), 'utf8'));
         const jobs = Object.entries(doc?.jobs ?? {});
         if (!jobs.length) failures.push(`${file}: no jobs`);
+        const locked = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8')).packages?.['node_modules/playwright']?.version;
+        for (const [name, job] of jobs) {
+          const tag = String(job?.container?.image ?? '').match(/^mcr\.microsoft\.com\/playwright:v([\d.]+)-/)?.[1];
+          if (tag && tag !== locked) failures.push(`${file}: job ${name} runs Playwright image v${tag} but package-lock.json has ${locked}`);
+        }
+        for (const [name, job] of jobs) if (!Number.isFinite(job?.['timeout-minutes'])) failures.push(`${file}: job ${name} has no timeout-minutes, so a hung step waits six hours`);
         for (const [name, job] of jobs) for (const [i, step] of (job?.steps ?? []).entries()) if (!step?.uses && !step?.run) failures.push(`${file}: job ${name} step ${i + 1} has neither uses nor run`);
       } catch (error) {
         failures.push(`${file}: ${String(error.message).split('\n')[0]}`);
       }
     }
-    return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : `${workflows.length} CI workflow file(s) parse, no duplicate keys` };
+    return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : `${workflows.length} CI workflow file(s) parse, no duplicate keys, every job has a timeout, the Playwright image matches the lockfile` };
+  },
+
+  independence(files) {
+    const offenders = sourceModules(files).filter((f) => f.startsWith('verifier/')).filter((f) => /(?:from\s+|import\()\s*['"](?:\.\.\/)+src\//.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
+    return { passed: offenders.length === 0, detail: offenders.length ? `the external verifier imports app code: ${offenders.join(', ')}` : 'the external verifier shares no code with the app' };
   },
 
   secrets(files) {
@@ -93,8 +104,8 @@ const gates = {
 
   testsPresent(files) {
     const missing = sourceModules(files)
-      .filter((f) => f.startsWith('src/') && !UNTESTED_ENTRYPOINTS.has(f))
-      .filter((f) => !fs.existsSync(path.join(ROOT, `tests/${f.slice(4, -4)}.test.ts`)));
+      .filter((f) => (f.startsWith('src/') || f.startsWith('verifier/')) && !UNTESTED_ENTRYPOINTS.has(f))
+      .filter((f) => !fs.existsSync(path.join(ROOT, f.startsWith('src/') ? `tests/${f.slice(4, -4)}.test.ts` : `tests/${f.slice(0, -4)}.test.ts`)));
     return { passed: missing.length === 0, detail: missing.length ? `no test file for: ${missing.join(', ')}` : 'every logic module has a matching test file' };
   },
 

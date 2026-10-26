@@ -26,7 +26,8 @@ It adapts three existing protocols instead of inventing a new one (and the mikos
 | # | Check | Pass when |
 |---|---|---|
 | O1 | **Every request covered.** Walk the S2 checklist | Every item is done, or its blocker is stated in plain words |
-| O2 | **Gate.** `npm run quality` | It prints `quality gate: PASSED`. Quote its summary lines; never write "tests pass" without them |
+| O2 | **Gate.** `npm run quality`, run by a read-only verifier (in Claude Code, mikoshi's `harness` agent), not by the author | It prints `quality gate: PASSED`. Quote its summary lines; never write "tests pass" without them |
+| O2c | **Results signed off outside the app.** Any change to how results are produced | The external verifier (`node verifier/verify.mjs <id> --data <scratch dir> --projects data/projects`) is run on a live research and its confirmed, refuted and unconfirmed counts are reported; the app's own gates never certify a result |
 | O2b | **CI before merge.** | The change is on a branch with a pull request, CI passes on Node 22 and 24, then it is merged; `main` is never pushed directly (the pre-push hook refuses it). New or changed tests pass 3 times in a row (`flakes` gate) |
 | O3 | **Tests for changed logic.** Every new or changed module in `src/` | It has `tests/<same path>.test.ts` that fails without the change |
 | O4 | **Real use.** The change works in the running app, not only in tests | Exercised through the HTTP API, the browser (e2e) or the terminal. Say which, and what was seen |

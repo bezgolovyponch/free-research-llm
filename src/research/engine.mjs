@@ -15,6 +15,7 @@ import { harvestItems } from './harvest.mjs';
 import { buildBrief, describeBrief, onConcept } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
+import { applyVerification, fitsSignature, readVerification } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
@@ -98,7 +99,9 @@ export function normalizeEstimate(raw) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {} }) {
+  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null }) {
+    this.verifier = verifier;
+    this.verifying = new Map();
     this.onStop = onStop;
     this.laneCount = Math.min(MAX_LANES, Math.max(1, lanes));
     this.helpers = new Map();
@@ -303,6 +306,10 @@ export class ResearchEngine {
       const t = project.candidates.tiers;
       this.emit(project, 'candidates', `strategy paths: ${t.fits} fit every criterion, ${t['trade-off']} trade-offs with their potential, ${t.unverified} to confirm, ${t.weak} weak, ${t.blocked} blocked by law`);
     }
+    if (strategy && this.verifier) {
+      project.candidates = applyVerification(project.candidates, await readVerification(this.verifier.dir, project.id));
+      this.startVerification(project);
+    }
     if (project.report) this.planActions(project);
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
@@ -330,6 +337,29 @@ export class ResearchEngine {
     })();
   }
 
+  startVerification(project) {
+    const id = project.id;
+    const c = project.candidates;
+    if (!c?.verification?.pending || this.verifying.get(id)?.running) return;
+    const signature = fitsSignature(c);
+    if (this.verifying.get(id)?.signature === signature) return;
+    const state = { running: true, signature };
+    this.verifying.set(id, state);
+    this.emit(project, 'candidates', `external verifier started on ${c.verification.pending} plot(s) that fit every check: it re-reads each listing and re-measures it with its own code`);
+    void (async () => {
+      try {
+        await this.verifier.run(id);
+        const ready = this.siteWarm.get(id) ?? { running: false, ready: false, measured: 0 };
+        this.siteWarm.set(id, { ...ready, ready: true, verified: true });
+        if (!this.quiet.has(id)) await this.applyWarmed(id);
+      } catch (error) {
+        state.error = String(error.message).slice(0, 120);
+      } finally {
+        state.running = false;
+      }
+    })();
+  }
+
   takeWarmed(id) {
     const state = this.siteWarm.get(id);
     if (!state?.ready) return null;
@@ -342,7 +372,7 @@ export class ResearchEngine {
     if (!state) return null;
     await this.sites.reload();
     const project = await this.load(id);
-    this.emit(project, 'candidates', `site fit in the background: ${state.measured} listing(s) measured${state.pending ? `, ${state.pending} still queued` : ''}; table rebuilt from the measurements`);
+    this.emit(project, 'candidates', state.verified ? 'external verifier finished; table rebuilt: only plots it confirmed count toward the result' : `site fit in the background: ${state.measured} listing(s) measured${state.pending ? `, ${state.pending} still queued` : ''}; table rebuilt from the measurements`);
     await this.collectCandidates(project);
     await this.checkAcceptance(project);
     await this.store.save(project);

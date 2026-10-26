@@ -77,7 +77,7 @@ describe('reference case: low-entry glamping plots (every note the user gave on 
 
   it(`N12 ${note('N12')} · N13 ${note('N13')}`, () => {
     expect(foundation.rules.minWorkableMonths).toEqual({ value: 10, source: 'question' });
-    expect(foundation.rules.maxHottest.value).toBe(31);
+    expect(foundation.rules.maxHottest).toEqual({ value: 31, source: 'assumption' });
     expect(foundation.rules.ebikeKm).toEqual({ value: 20, source: 'guidance' });
   });
 

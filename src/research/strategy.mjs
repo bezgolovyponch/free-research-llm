@@ -30,7 +30,7 @@ export const GLAMPING_LOW_ENTRY = {
     ruralMaxUnits: { value: 30, source: 'pt-rural' },
     tent: { value: 729, currency: 'GBP', source: 'tent' },
     minWorkableMonths: { value: 10, source: 'question' },
-    maxHottest: { value: 31, source: 'question' },
+    maxHottest: { value: 31, source: 'assumption' },
     ebikeKm: { value: 20, source: 'guidance' },
     trendAboveEu: { value: true, source: 'eurostat' },
   },
@@ -59,7 +59,7 @@ export const GLAMPING_LOW_ENTRY = {
     ES: {
       path: 'Tourist camping or "alojamiento singular" on non-urbanizable land, allowed by the municipality (sometimes through a Plan Especial)',
       tax: { agricultural: 0.1, buildable: 0.1, 'not stated': 0.1 },
-      taxLabel: 'ITP up to 10% (general rate in Galicia, Valencia, Cantabria; Andalucía 7%)',
+      taxLabel: 'ITP 10% (general rate in Galicia, Valencia, Cantabria; Andalucía 7%; Cataluña 10–13%)',
       sources: ['es-glamping', 'es-tax'],
       risks: ['the regional camping decree and the municipality decide; confirm urban compatibility before buying'],
       agriculturalRisk: '',
@@ -114,7 +114,7 @@ export function foundationOf(strategy, project) {
 export function foundationText(foundation) {
   if (!foundation) return '';
   const r = foundation.rules;
-  const lines = [`Decision model (code checks every listing against it; a listing counts only when every check is measured and met): sea within ${r.ebikeKm.value} km by e-bike; at least ${r.minWorkableMonths.value} workable months; hottest month at most ${r.maxHottest.value} °C (no air conditioning); room for ${r.minUnits.value}+ units; a legal path for the buyer; country price trend above the EU average; entry cost = price + transfer tax + ${r.minUnits.value} bell tents.`];
+  const lines = [`Decision model (code checks every listing against it; a listing counts only when every check is measured and met): sea within ${r.ebikeKm.value} km by e-bike; at least ${r.minWorkableMonths.value} workable months; hottest month at most ${r.maxHottest.value} °C (no air conditioning${r.maxHottest.source === 'assumption' ? '; this limit is assumed, not taken from your words or a source' : ''}); room for ${r.minUnits.value}+ units; a legal path for the buyer; country price trend above the EU average; entry cost = price + transfer tax + ${r.minUnits.value} bell tents.`];
   if (foundation.missing.length) lines.push(`Not modelled yet (no code check): ${foundation.missing.join('; ')}`);
   return lines.join('\n');
 }
@@ -296,9 +296,9 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   const rows = all.map((row) => {
     const plan = planFor(row, model, { convert, euHpi, trends });
     const cheap = implausiblyCheap(row, medians);
-    if (!cheap) return { ...row, plan, fit: { ...(row.fit ?? {}), score: plan.share } };
+    if (!cheap) return { ...row, plan };
     const doubtful = ['fits', 'trade-off'].includes(plan.tier);
-    return { ...row, fit: { ...(row.fit ?? {}), score: plan.share }, plan: { ...plan, risks: [...plan.risks, cheap], ...(doubtful ? { tier: 'unverified', verdict: `to confirm: ${cheap}` } : {}) } };
+    return { ...row, plan: { ...plan, risks: [...plan.risks, cheap], ...(doubtful ? { tier: 'unverified', verdict: `to confirm: ${cheap}` } : {}) } };
   });
   rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || b.plan.share - a.plan.share || (a.plan.entry?.total ?? Infinity) - (b.plan.entry?.total ?? Infinity));
   const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
