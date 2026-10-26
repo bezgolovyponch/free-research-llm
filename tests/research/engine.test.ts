@@ -556,3 +556,17 @@ describe('site measurements in the background', () => {
     expect(collected).toEqual([project.id]);
   });
 });
+
+describe('graded research answers feed routing', () => {
+  it('records each research grade for the provider that wrote it', async () => {
+    const { OutcomeBook } = await import('../../src/llm/outcomes.mjs');
+    const provider = new ScriptedProvider();
+    const { engine, router } = engineWith(provider);
+    const outcomes = new OutcomeBook();
+    router.outcomes = outcomes;
+    const project = await engine.createProject({ question: 'Is it profitable to resell used vans from Germany in Czechia?', autoRun: false });
+    await engine.run(project.id);
+    const seen = outcomes.posterior(provider.id, 'research', 3);
+    expect(seen.observed).toBeGreaterThan(0);
+  });
+});

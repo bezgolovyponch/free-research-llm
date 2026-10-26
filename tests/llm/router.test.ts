@@ -301,3 +301,17 @@ describe('ModelRouter last-resort local models', () => {
     expect(router.available({ tier: 'vision' }).map((p: { id: string }) => p.id)).toEqual([]);
   });
 });
+
+describe('router outcomes', () => {
+  it('records a graded answer under the purpose class the routing plan uses', async () => {
+    const { OutcomeBook } = await import('../../src/llm/outcomes.mjs');
+    const { ModelRouter } = await import('../../src/llm/router.mjs');
+    const outcomes = new OutcomeBook({ now: () => 1000 });
+    const router = new ModelRouter({ providers: [], outcomes });
+    router.recordOutcome({ provider: 'groq', purpose: 'research', passed: true });
+    router.recordOutcome({ provider: 'groq', purpose: 'synthesize', passed: false });
+    expect(outcomes.posterior('groq', 'research', 4)).toMatchObject({ pass: 1, fail: 0 });
+    expect(outcomes.posterior('groq', 'top', 4)).toMatchObject({ pass: 0, fail: 1 });
+    expect(() => new ModelRouter({ providers: [] }).recordOutcome({ provider: 'x', purpose: 'research', passed: true })).not.toThrow();
+  });
+});

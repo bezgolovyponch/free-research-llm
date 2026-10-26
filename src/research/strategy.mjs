@@ -214,7 +214,9 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   if (SHARED_TITLE.test(words)) risks.push('shared title (hisseli): you buy a share, not a parcel');
   const tradeoffs = failed.filter((c) => c.id !== 'legal').map((c) => `${c.label}: no (${c.detail})`);
   const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set(unknown.map((c) => c.detail))].join('; ')}` : tier === 'trade-off' ? `trade-off with potential: ${potential.join('; ')}` : tooSmall ? `does not fit: ${tradeoffs.join('; ')}; too little land for a glamping site, which nothing nearby can make up for` : `does not fit: ${tradeoffs.join('; ')}; nothing nearby draws guests to make up for it`;
-  return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };
+  const measured = checks.filter((c) => c.ok !== null);
+  const share = measured.length ? Math.round((measured.filter((c) => c.ok).length / checks.length) * 100) / 100 : 0;
+  return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, share, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };
 }
 
 export const PROJECTION_YEARS = 5;
@@ -249,7 +251,11 @@ export function opportunityOf(row, plan, { trends = null, euTrend = null } = {})
 
 export const TIER_ORDER = { fits: 0, 'trade-off': 1, unverified: 2, weak: 3, blocked: 4 };
 export const MIN_ROWS_FOR_MEDIAN = 5;
-export const IMPLAUSIBLE_SHARE = 0.1;
+
+const priceGroup = (row) => `${row.countryCode}|${zoningOf(row)}`;
+
+export const MAD_THRESHOLD = 2.5;
+export const MAD_CONSISTENCY = 1.4826;
 
 const median = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -257,25 +263,27 @@ const median = (values) => {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
-const priceGroup = (row) => `${row.countryCode}|${zoningOf(row)}`;
-
 export function pricePerM2Medians(rows) {
   const by = {};
   for (const r of rows) {
     const m2 = areaM2(r);
     if (!m2 || !Number.isFinite(r.value) || r.value <= 0) continue;
-    (by[priceGroup(r)] ??= []).push(r.value / m2);
+    (by[priceGroup(r)] ??= []).push(Math.log(r.value / m2));
   }
-  return Object.fromEntries(Object.entries(by).filter(([, v]) => v.length >= MIN_ROWS_FOR_MEDIAN).map(([c, v]) => [c, median(v)]));
+  return Object.fromEntries(Object.entries(by).filter(([, v]) => v.length >= MIN_ROWS_FOR_MEDIAN).map(([group, logs]) => {
+    const mid = median(logs);
+    return [group, { median: Math.exp(mid), logMedian: mid, logMad: median(logs.map((x) => Math.abs(x - mid))), n: logs.length }];
+  }));
 }
 
 export function implausiblyCheap(row, medians) {
   const m2 = areaM2(row);
-  const mid = medians[priceGroup(row)];
-  if (!m2 || !mid || !Number.isFinite(row.value)) return null;
+  const stats = medians[priceGroup(row)];
+  if (!m2 || !stats || !Number.isFinite(row.value) || row.value <= 0) return null;
   const perM2 = row.value / m2;
+  const floor = stats.logMedian - MAD_THRESHOLD * MAD_CONSISTENCY * stats.logMad;
   const zoning = zoningOf(row);
-  return perM2 < mid * IMPLAUSIBLE_SHARE ? `€${perM2.toFixed(2)}/m² is under a tenth of the median for ${zoning === 'not stated' ? '' : `${zoning} `}land in ${row.country || row.countryCode} among the listings found (€${mid.toFixed(2)}/m²): check the price and area on the listing` : null;
+  return Math.log(perM2) < floor ? `€${perM2.toFixed(2)}/m² is a low outlier for ${zoning === 'not stated' ? '' : `${zoning} `}land in ${row.country || row.countryCode} among the ${stats.n} listings found (median €${stats.median.toFixed(2)}/m²; outliers below €${Math.exp(floor).toFixed(2)}/m² by median − 2.5 MAD): check the price and area on the listing` : null;
 }
 
 export function applyStrategy(candidates, strategy, { convert = null, retrieved = null, foundation = null } = {}) {
@@ -288,11 +296,11 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   const rows = all.map((row) => {
     const plan = planFor(row, model, { convert, euHpi, trends });
     const cheap = implausiblyCheap(row, medians);
-    if (!cheap) return { ...row, plan };
+    if (!cheap) return { ...row, plan, fit: { ...(row.fit ?? {}), score: plan.share } };
     const doubtful = ['fits', 'trade-off'].includes(plan.tier);
-    return { ...row, plan: { ...plan, risks: [...plan.risks, cheap], ...(doubtful ? { tier: 'unverified', verdict: `to confirm: ${cheap}` } : {}) } };
+    return { ...row, fit: { ...(row.fit ?? {}), score: plan.share }, plan: { ...plan, risks: [...plan.risks, cheap], ...(doubtful ? { tier: 'unverified', verdict: `to confirm: ${cheap}` } : {}) } };
   });
-  rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || (b.fit?.score ?? -1) - (a.fit?.score ?? -1));
+  rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || b.plan.share - a.plan.share || (a.plan.entry?.total ?? Infinity) - (b.plan.entry?.total ?? Infinity));
   const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
   const euTrend = trends?.EU27_2020 ?? null;
   const outside = (candidates.outside ?? []).map((row) => {

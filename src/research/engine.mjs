@@ -447,6 +447,7 @@ export class ResearchEngine {
       const critique = retryAnyway ? null : await this.critique(node, finding, shown, reply.provider);
       const verification = retryAnyway ? mechanical : verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
+      this.router.recordOutcome?.({ provider: reply.provider, purpose: 'research', passed: verification.grade === 'verified' || verification.grade === 'supported' });
       this.emit(project, 'node', `${node.id}: ${verification.grade} (attempt ${attempt}, ${tier} tier, ${reply.provider})`, { nodeId: node.id });
       if (!needsEscalation(verification)) return;
       failures = [...verification.failures, ...(critique?.issues ?? [])];

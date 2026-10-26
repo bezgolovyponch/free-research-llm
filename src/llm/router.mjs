@@ -1,3 +1,4 @@
+import { PURPOSE_CLASS } from './ranking.mjs';
 import { extractJson } from '../research/json.mjs';
 import { ProviderError } from './provider.mjs';
 import { MAX_PROMPT_TOKENS, familyOf } from './ranking.mjs';
@@ -30,7 +31,8 @@ const MAX_WAIT_ROUNDS = 3;
 const REPAIR_INSTRUCTION = 'Your previous reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.';
 
 export class ModelRouter {
-  constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {} }) {
+  constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {}, outcomes = null }) {
+    this.outcomes = outcomes;
     this.providers = providers;
     this.routeOrder = routeOrder;
     this.cooldownMs = cooldownMs;
@@ -129,6 +131,11 @@ export class ModelRouter {
     const fastest = Math.min(...known);
     const slow = (ms) => ms !== null && ms >= SLOW_FLOOR_MS && ms >= fastest * SLOW_FACTOR;
     return [...timed.filter(([, ms]) => !slow(ms)), ...timed.filter(([, ms]) => slow(ms))].map(([p]) => p);
+  }
+
+  recordOutcome({ provider, purpose, passed }) {
+    const purposeClass = PURPOSE_CLASS[purpose] ?? purpose;
+    this.outcomes?.record({ provider, purposeClass, passed: Boolean(passed) });
   }
 
   record(entry) {
