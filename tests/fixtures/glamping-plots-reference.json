@@ -1,0 +1,93 @@
+{
+  "id": "glamping-plots-reference",
+  "recordedAt": "2026-10-26",
+  "question": "Find appropriate plots to buy for glamping business, but also with the strong price increase trend, very low enterance investments, 20000EUR max, 10 month a year, mild climate to have Glampings so no air condition, nearby sea or the ocean accessible by ebike",
+  "templateId": "glamping-location",
+  "constraints": {
+    "location": "Spain, Portugal, Turkey",
+    "budget": "20000",
+    "horizon": "1 year"
+  },
+  "acceptance": {
+    "expected": "50 Plots In EU, Vietnam and Turkey strongly feasible for Glamping business 10 minth, 1 year",
+    "itemCount": 50,
+    "valueRange": [
+      0,
+      20000
+    ],
+    "unit": "EUR"
+  },
+  "guidance": "Investment logic: a very low purchase price is the point. Land that needs work (clearing, levelling or terracing, access track, water, power, drainage) is in scope; judge each plot by purchase price + preparation cost and by its suitability for glamping after that work, not by its raw state. \"Accessible by e-bike\" means the sea is within e-bike distance (about 20 km on ordinary roads); dedicated bike lanes are not required.",
+  "notes": [
+    {
+      "id": "N1",
+      "said": "You have proposed Croatia eventhough it hasnt been requested",
+      "rule": "countries the user names narrow a group word; Croatia, Bulgaria, Italy never enter the asked table"
+    },
+    {
+      "id": "N2",
+      "said": "What else complete inappropriate you have proposed?",
+      "rule": "other kinds that share a word (a Land Rover ad, a cemetery plot) are refused by the kind gate"
+    },
+    {
+      "id": "N3",
+      "said": "Retrieve first the strategy available online and then calculate the paths",
+      "rule": "strategy sources are re-read with their quotes before the sweep; each row gets a legal path and an entry cost"
+    },
+    {
+      "id": "N4",
+      "said": "there have to be a logic reason WHY it fits to the glamping business with low entry investment",
+      "rule": "every row states why in numbers: sea, season, heat, units, entry cost, real trend, legal path"
+    },
+    {
+      "id": "N5",
+      "said": "The results table have to be easy sortable",
+      "rule": "every column sorts; tiers filter (e2e)"
+    },
+    {
+      "id": "N6",
+      "said": "If there is a place far away from the sea - show the potential and defend each plot reasonability",
+      "rule": "a far plot with a real draw is a trade-off with its potential; without one it is weak, never silently dropped"
+    },
+    {
+      "id": "N7",
+      "said": "a stunning location with a shorter season should still count",
+      "rule": "a seaside plot with a short season is a trade-off, not a reject"
+    },
+    {
+      "id": "N8",
+      "said": "the incomplete understanding in prior doesnt count as the research base",
+      "rule": "only rows with every check measured and met count; unmeasured rows are to confirm; clauses without a check are shown as not modelled"
+    },
+    {
+      "id": "N9",
+      "said": "some of the plots are not in the place we have discussed and requested",
+      "rule": "tree pieces naming other countries are narrowed or removed; the brief lists only the named countries"
+    },
+    {
+      "id": "N10",
+      "said": "croatia italy or bulgaria can be separately shown in secondary table ... potential ... scenic views not yet occupied",
+      "rule": "rows failing only on country go to a separate table ranked by opportunity and never count"
+    },
+    {
+      "id": "N11",
+      "said": "strong price increase trend",
+      "rule": "trend is real (deflated by HICP), per country, against the EU"
+    },
+    {
+      "id": "N12",
+      "said": "10 month a year, mild climate ... no air condition",
+      "rule": "thresholds come from the user words: 10 workable months; hottest month at most 31 °C"
+    },
+    {
+      "id": "N13",
+      "said": "accessible by ebike",
+      "rule": "sea within the e-bike distance from the guidance (about 20 km)"
+    },
+    {
+      "id": "N14",
+      "said": "why would I need to check it myself",
+      "rule": "the app measures every business criterion itself; legal blockers (a foreign buyer in Vietnam) are stated"
+    }
+  ]
+}
