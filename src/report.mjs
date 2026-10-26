@@ -74,8 +74,8 @@ function siteColumns(row) {
 
 export function candidatesCsv(project) {
   const c = project.candidates;
-  const rows = [...(c?.kept ?? []).map((r) => ['kept', r]), ...(c?.toCheck ?? []).map((r) => ['to check', r])];
-  const plan = (r) => (r.plan ? [r.plan.tier, r.plan.verdict, r.plan.entry?.total ?? '', r.plan.areaM2 ?? '', r.plan.units ?? '', (r.site?.lakesNamed ? r.site.lakeKm ?? '' : ''), r.plan.why.join(' | '), r.plan.risks.join(' | '), r.plan.path ?? ''] : ['', '', '', '', '', '', '', '', '']);
+  const rows = [...(c?.kept ?? []).map((r) => ['kept', r]), ...(c?.toCheck ?? []).map((r) => ['to check', r]), ...(c?.outside ?? []).map((r) => ['outside your countries', r])];
+  const plan = (r) => (r.plan ? [r.plan.tier, r.plan.verdict, r.plan.entry?.total ?? '', r.plan.areaM2 ?? '', r.plan.units ?? '', (r.site?.lakesNamed ? r.site.lakeKm ?? '' : ''), (r.plan.opportunity?.reasons ?? r.plan.why).join(' | '), r.plan.risks.join(' | '), r.plan.path ?? ''] : ['', '', '', '', '', '', '', '', '']);
   return csv([['status', 'tier', 'verdict', 'entry cost EUR', 'area m²', 'units', 'lake km', 'why it fits', 'risks', 'legal path', 'title', 'price', 'currency', `price in ${c?.kept?.[0]?.unit || project.acceptance?.unit || 'target unit'}`, 'area', 'area unit', 'place', 'country', 'sea stated', 'url', 'found on', 'read by', 'missing', 'site fit', 'sea km', 'beach km', 'workable months', 'comfortable months', 'hottest month max °C', 'things to explore within 15 km', 'lodging within 15 km', 'zoning', 'pitches'], ...rows.map(([status, r]) => [status, ...plan(r), r.title, r.price ?? '', r.currency, r.value ?? '', r.area ?? '', r.areaUnit, r.place, r.country, r.coast ? 'yes' : '', r.url, r.sourceUrl, (r.via ?? []).join(' '), r.toCheck ?? r.siteNote ?? '', ...siteColumns(r)])]);
 }
 

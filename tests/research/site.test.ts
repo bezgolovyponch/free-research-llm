@@ -162,7 +162,7 @@ describe('SiteAssessor', () => {
     expect(out.screenedCount).toBe(9);
     expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['https://famalo.example/14451']);
     expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Vir, Croatia"', site: { coastKm: 0.6, climate: { workable: 9 } }, fit: { zoning: 'agricultural', hpi: 11.7 } });
-    expect(out.sites.trends.HR).toEqual({ change: 13.9, inflation: 2, real: 11.7, year: '2025' });
+    expect(out.sites.trends.HR).toEqual({ change: 13.9, inflation: 2, real: 11.7, year: '2025', realCagr: 9.7, since: '2024' });
     expect(out.sites.euHpi).toBe(11.7);
     expect(out.sites).toMatchObject({ assessed: 3, located: 3, far: 2, unlocated: 0 });
     expect(out.examples.at(-1).reasons[0]).toMatch(/farther than 25 km from the sea/);
@@ -240,10 +240,12 @@ describe('SiteAssessor', () => {
   });
 
   it('turns a nominal house-price change into a real one with the same year of inflation', async () => {
-    const { realChange, trendOf, yearly } = await import('../../src/research/site.mjs');
+    const { realCagr, realChange, trendOf, yearly } = await import('../../src/research/site.mjs');
     expect(realChange(41.5, 34.9)).toBe(4.9);
     expect(realChange(5.5, 2.5)).toBe(2.9);
-    expect(trendOf({ 2024: 10, 2025: 41.5 }, { 2024: 58.5, 2025: 34.9 })).toEqual({ change: 41.5, inflation: 34.9, real: 4.9, year: '2025' });
+    expect(trendOf({ 2024: 10, 2025: 41.5 }, { 2024: 58.5, 2025: 34.9 })).toEqual({ change: 41.5, inflation: 34.9, real: 4.9, year: '2025', realCagr: -14.7, since: '2024' });
+    expect(realCagr({ 2021: 10, 2022: 10 }, { 2021: 0, 2022: 0 }, ['2021', '2022'])).toBe(10);
+    expect(realCagr({ 2025: 5 }, { 2025: 2 }, ['2025'])).toBeNull();
     expect(trendOf({ 2025: 5 }, { 2024: 2 })).toBeNull();
     expect(yearly({ dimension: { time: { category: { index: { 2024: 0, 2025: 1 } } } }, value: { 1: 3.2 } })).toEqual({ 2025: 3.2 });
   });

@@ -46,6 +46,19 @@ describe('candidate table', () => {
     ]);
   });
 
+  it('keeps listings that fail only on the country for a separate outside table, never among the kept', () => {
+    const b = buildBrief({ question: 'plots near the sea', acceptance: { expected: '2 plots in Portugal', itemCount: 2, valueRange: [0, 20000], unit: 'EUR' }, template: { itemKind: { label: 'plot of land', terms: ['zemljiste', 'terreno'] } } });
+    const nodes = [{ id: 'D1', sources: [{ url: 'https://p.example/r', listings: [
+      { title: 'Zemljiste Vir', url: 'https://famalo.hr/zemljiste-1-14501', value: 12000, unit: 'EUR' },
+      { title: 'Zemljiste Pag', url: 'https://famalo.hr/zemljiste-2-14502', value: 90000, unit: 'EUR' },
+      { title: 'Terreno Mira', url: 'https://imo.pt/anuncio/terreno-ID1abcd', value: 5000, unit: 'EUR' },
+    ] }] }];
+    const out = buildCandidates(nodes, b, {});
+    expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['https://imo.pt/anuncio/terreno-ID1abcd']);
+    expect(out.outside.map((r: { url: string }) => r.url)).toEqual(['https://famalo.hr/zemljiste-1-14501']);
+    expect(out.outsideCount).toBe(1);
+  });
+
   it('hands the kept rows to the expected-result check and a short table to the memo', () => {
     expect(candidateDeliverables(table)[0]).toEqual({ title: 'Terreno rústico junto à praia', url: 'https://imo.example/pt/anuncio/terreno-praia-ID1aaaa', value: 14000, unit: 'EUR', nodeId: 'D1.1', harvested: true, candidate: true });
     const text = shortlistText(table, 1);

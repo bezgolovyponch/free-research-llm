@@ -85,9 +85,14 @@ test('candidate table: every plot says why it fits, sorts by any column and filt
     row('Inland plot Tomar', 5000, 32, 12, plan('trade-off', 'trade-off with potential: lake or reservoir 1.2 km away', 5290, ['12 workable months'])),
     row('Cheap plot Alenquer', 8500, 13.8, 11, plan('fits', 'fits every criterion', 8993, ['sea 13.8 km: inside the 20 km e-bike ride'])),
   ];
+  const opp = (score: number, why: string) => ({ ...plan('unverified', 'to confirm', 15000, []), opportunity: { score, reasons: [why] } });
+  const outside = [
+    { ...row('Pag plot Croatia', 9000, 1, 7, opp(3, '2 of 4 site checks met')), country: 'Croatia', countryCode: 'HR' },
+    { ...row('Vir plot Croatia', 12000, 0.3, 7, opp(7, 'scenic and still open: 54 things to explore, only 1 campsite')), country: 'Croatia', countryCode: 'HR' },
+  ];
   const id = 'e2e-plot-table-000001';
   const { results: _results, ...stored } = base;
-  const project = { ...stored, id, question: 'E2E plots for glamping near the sea', phase: 'done', brief: { kind: { label: 'plot of land', terms: ['plot'] }, regions: ['PT'], text: 'Deliver: 3 single plot of land listing pages for sale' }, candidates: { found: 3, kept, keptCount: 2, tiers: { fits: 2, 'trade-off': 1, unverified: 0, blocked: 0 }, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [], strategy: { label: 'Low-entry glamping', rules: { ebikeKm: { value: 20, source: 'guidance' } }, sources: [{ id: 'pt-park', title: 'Portaria 1320/2008 summary', url: 'https://www.ac-arquitetos.com/post/x', confirmed: 3, quotes: 3 }], foundation: { complete: true, missing: [], clauses: [{ text: '10 month a year', criteria: ['season'] }], criteria: [{ id: 'season', label: 'workable months a year', measure: 'Open-Meteo daily weather 2021–2025' }] } } } };
+  const project = { ...stored, id, question: 'E2E plots for glamping near the sea', phase: 'done', brief: { kind: { label: 'plot of land', terms: ['plot'] }, regions: ['PT'], text: 'Deliver: 3 single plot of land listing pages for sale' }, candidates: { found: 5, kept, outside, keptCount: 2, tiers: { fits: 2, 'trade-off': 1, unverified: 0, blocked: 0 }, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [], strategy: { label: 'Low-entry glamping', rules: { ebikeKm: { value: 20, source: 'guidance' } }, sources: [{ id: 'pt-park', title: 'Portaria 1320/2008 summary', url: 'https://www.ac-arquitetos.com/post/x', confirmed: 3, quotes: 3 }], foundation: { complete: true, missing: [], clauses: [{ text: '10 month a year', criteria: ['season'] }], criteria: [{ id: 'season', label: 'workable months a year', measure: 'Open-Meteo daily weather 2021–2025' }] } } } };
   await fs.writeFile(path.join(process.env.FRL_E2E_DATA_DIR!, `${id}.json`), JSON.stringify(project));
   await page.goto(`/#p=${id}`);
   await page.locator('.tabs .tab', { hasText: 'Results' }).click();
@@ -108,6 +113,13 @@ test('candidate table: every plot says why it fits, sorts by any column and filt
   await page.locator('button[data-ctier="trade-off"]').click();
   expect(await titles()).toEqual(['Inland plot Tomar']);
   await expect(page.locator('#candRows')).toContainText('lake or reservoir 1.2 km away');
+  const outTitles = () => page.locator('#outRows tr td:nth-child(3) a').allTextContents();
+  await expect(page.locator('#outsideTable')).toContainText('Outside your countries, worth a look');
+  expect(await outTitles()).toEqual(['Vir plot Croatia', 'Pag plot Croatia']);
+  await expect(page.locator('#outRows')).toContainText('scenic and still open');
+  await page.locator('#outRows th[data-csort="price"]').click();
+  expect(await outTitles()).toEqual(['Pag plot Croatia', 'Vir plot Croatia']);
+  expect(await titles()).toEqual(['Inland plot Tomar']);
 });
 
 test('terminal opens a real shell from the button and runs a command', async ({ page }) => {

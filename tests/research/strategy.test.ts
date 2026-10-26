@@ -201,4 +201,17 @@ describe('decision model from the user words', () => {
     expect(row.plan.verdict).toBe('to confirm: €2.50/m² is under a tenth of the median for buildable land in Portugal in this table (€37.50/m²): check the price and area on the listing');
     expect(out.kept.find((r: { url: string }) => r.url === 'r0').plan.tier).toBe('fits');
   });
+
+  it('ranks plots outside the asked countries by opportunity: site checks, real trend and its continuation, scenic places with few campsites', async () => {
+    const { opportunityOf } = await import('../../src/research/strategy.mjs');
+    const vir = { ...nazare, countryCode: 'HR', country: 'Croatia', site: site(0.3, { viewpoints: 40, campsites: 1, climate: climate(7, 30.2) }) };
+    const plan = planFor(vir, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 2.9 });
+    const opp = opportunityOf(vir, plan, { trends: { HR: { realCagr: 6.2, since: '2020', year: '2025' } }, euTrend: { realCagr: 2.1 } });
+    expect(opp.score).toBe(3 + 2 + 2);
+    expect(opp.reasons.join(' | ')).toContain('Croatia house prices +6.2% a year after inflation 2020–2025 (EU +2.1%); if that continues, about +35% in 5 years (a trend continuation for housing, not a land forecast)');
+    expect(opp.reasons.join(' | ')).toContain('scenic and still open: 54 beaches, viewpoints, sights, reserves and trails within 15 km, only 1 campsite');
+    const out = applyStrategy({ sites: { euHpi: 2.9, trends: { HR: { realCagr: 6.2, since: '2020', year: '2025' }, EU27_2020: { realCagr: 2.1 } } }, kept: [], outside: [{ ...vir, url: 'low', site: site(40, { viewpoints: 0, beaches: 0, attractions: 0, campsites: 9 }) }, { ...vir, url: 'high' }], screened: {}, screenedCount: 0 }, GLAMPING_LOW_ENTRY, { convert: toEur });
+    expect(out.outside.map((r: { url: string }) => r.url)).toEqual(['high', 'low']);
+    expect(out.keptCount).toBe(0);
+  });
 });

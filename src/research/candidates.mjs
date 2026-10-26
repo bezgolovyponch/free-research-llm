@@ -7,6 +7,8 @@ import { explorePoints } from './site.mjs';
 export const MAX_KEPT = 200;
 export const MAX_TO_CHECK = 100;
 export const MAX_SCREENED_EXAMPLES = 30;
+export const MAX_OUTSIDE = 150;
+const OUTSIDE_REASON = /^in .*, outside the asked regions$/;
 export const MIN_PLAUSIBLE_SHARE = 0.01;
 
 function rowsFrom(nodes) {
@@ -80,6 +82,7 @@ export function buildCandidates(nodes, brief, options = {}) {
   const toCheck = [];
   const screened = {};
   const examples = [];
+  const outside = [];
   let found = 0;
   const unique = new Map();
   for (const row of rowsFrom(nodes)) {
@@ -98,6 +101,7 @@ export function buildCandidates(nodes, brief, options = {}) {
         screened[label] = (screened[label] ?? 0) + 1;
       }
       if (examples.length < MAX_SCREENED_EXAMPLES) examples.push({ title: String(row.title ?? '').slice(0, 100), url: row.url, reasons: verdict.reasons });
+      if (verdict.reasons.every((r) => OUTSIDE_REASON.test(r)) && !verdict.missing.length) outside.push(publicRow(row, verdict, unit));
       continue;
     }
     (verdict.missing.length ? toCheck : kept).push(publicRow(row, verdict, unit));
@@ -108,6 +112,8 @@ export function buildCandidates(nodes, brief, options = {}) {
     kept: kept.slice(0, MAX_KEPT),
     keptCount: kept.length,
     toCheck: toCheck.slice(0, MAX_TO_CHECK),
+    outside: outside.sort((a, b) => (a.value ?? Infinity) - (b.value ?? Infinity)).slice(0, MAX_OUTSIDE),
+    outsideCount: outside.length,
     toCheckCount: toCheck.length,
     screened,
     screenedCount: found - kept.length - toCheck.length,

@@ -217,6 +217,36 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };
 }
 
+export const PROJECTION_YEARS = 5;
+export const FEW_COMPETITORS = 2;
+
+export function opportunityOf(row, plan, { trends = null, euTrend = null } = {}) {
+  const trend = trends?.[row.countryCode] ?? null;
+  const site = row.site;
+  const reasons = [];
+  let score = 0;
+  const met = plan.checks.filter((c) => ['sea', 'season', 'noAc', 'units'].includes(c.id));
+  const passed = met.filter((c) => c.ok === true).length;
+  score += passed;
+  reasons.push(`${passed} of ${met.length} site checks met (${met.map((c) => `${c.label}: ${c.ok === true ? 'yes' : c.ok === false ? 'no' : '?'}`).join(', ')})`);
+  if (trend?.realCagr !== null && trend?.realCagr !== undefined) {
+    const projected = Math.round(((1 + trend.realCagr / 100) ** PROJECTION_YEARS - 1) * 100);
+    const above = euTrend?.realCagr !== null && euTrend?.realCagr !== undefined && trend.realCagr > euTrend.realCagr;
+    if (above) score += 2;
+    reasons.push(`${row.country} house prices ${trend.realCagr >= 0 ? '+' : ''}${trend.realCagr}% a year after inflation ${trend.since}–${trend.year}${euTrend?.realCagr !== undefined && euTrend?.realCagr !== null ? ` (EU ${euTrend.realCagr >= 0 ? '+' : ''}${euTrend.realCagr}%)` : ''}; if that continues, about ${projected >= 0 ? '+' : ''}${projected}% in ${PROJECTION_YEARS} years (a trend continuation for housing, not a land forecast)`);
+  }
+  if (site) {
+    const scenic = explorePoints(site);
+    const rivals = (site.campsites ?? 0);
+    if (scenic >= STRONG_EXPLORE && rivals <= FEW_COMPETITORS) {
+      score += 2;
+      reasons.push(`scenic and still open: ${scenic} beaches, viewpoints, sights, reserves and trails within 15 km, only ${rivals} campsite${rivals === 1 ? '' : 's'}`);
+    } else reasons.push(`${scenic} things to explore and ${rivals} campsites within 15 km`);
+  }
+  if (plan.entry) reasons.push(`entry ≈ €${Math.round(plan.entry.total).toLocaleString('en-US')}`);
+  return { score, reasons };
+}
+
 export const TIER_ORDER = { fits: 0, 'trade-off': 1, unverified: 2, weak: 3, blocked: 4 };
 export const MIN_ROWS_FOR_MEDIAN = 5;
 export const IMPLAUSIBLE_SHARE = 0.1;
@@ -264,6 +294,11 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   });
   rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || (b.fit?.score ?? -1) - (a.fit?.score ?? -1));
   const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
+  const euTrend = trends?.EU27_2020 ?? null;
+  const outside = (candidates.outside ?? []).map((row) => {
+    const plan = planFor(row, model, { convert, euHpi, trends });
+    return { ...row, plan: { ...plan, opportunity: opportunityOf(row, plan, { trends, euTrend }) } };
+  }).sort((a, b) => b.plan.opportunity.score - a.plan.opportunity.score || (a.plan.entry?.total ?? Infinity) - (b.plan.entry?.total ?? Infinity));
   const { far, ...rest } = candidates;
   const moved = far?.length ?? 0;
   const screened = { ...rest.screened };
@@ -271,7 +306,7 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
     screened[rest.farReason] = (screened[rest.farReason] ?? 0) - moved;
     if (screened[rest.farReason] <= 0) delete screened[rest.farReason];
   }
-  return { ...rest, screened, screenedCount: (rest.screenedCount ?? 0) - moved, examples: (rest.examples ?? []).filter((e) => !rows.some((r) => r.url === e.url)), kept: rows, keptCount: tiers.fits, tiers, strategy: { id: strategy.id, label: strategy.label, rules: model.rules, foundation, euHpi, sources: strategy.sources.map(({ id, title, url, quotes }) => ({ id, title, url, quoted: quotes.length > 0, ...(retrieved?.[id] ?? {}) })), retrievedAt: retrieved?.at ?? null } };
+  return { ...rest, screened, screenedCount: (rest.screenedCount ?? 0) - moved, examples: (rest.examples ?? []).filter((e) => !rows.some((r) => r.url === e.url)), outside, kept: rows, keptCount: tiers.fits, tiers, strategy: { id: strategy.id, label: strategy.label, rules: model.rules, foundation, euHpi, sources: strategy.sources.map(({ id, title, url, quotes }) => ({ id, title, url, quoted: quotes.length > 0, ...(retrieved?.[id] ?? {}) })), retrievedAt: retrieved?.at ?? null } };
 }
 
 export class StrategyRetriever {

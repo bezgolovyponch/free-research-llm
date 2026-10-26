@@ -188,10 +188,17 @@ export function realChange(nominal, inflation) {
   return round(((1 + nominal / 100) / (1 + inflation / 100) - 1) * 100, 1);
 }
 
+export function realCagr(hpi, hicp, years) {
+  if (years.length < 2) return null;
+  const factor = years.reduce((f, y) => f * ((1 + hpi[y] / 100) / (1 + hicp[y] / 100)), 1);
+  return round((factor ** (1 / years.length) - 1) * 100, 1);
+}
+
 export function trendOf(hpi, hicp) {
   const years = Object.keys(hpi).filter((y) => hicp[y] !== undefined).sort();
   const year = years.at(-1);
-  return year ? { change: hpi[year], inflation: hicp[year], real: realChange(hpi[year], hicp[year]), year } : null;
+  if (!year) return null;
+  return { change: hpi[year], inflation: hicp[year], real: realChange(hpi[year], hicp[year]), year, realCagr: realCagr(hpi, hicp, years), since: years[0] };
 }
 
 export function fitOf(row, site, { hpi = null, maxValue = null } = {}) {
@@ -434,19 +441,12 @@ export class SiteAssessor {
   }
 
 
-  async apply(candidates, brief, { readPage = null, onProgress = () => {}, mode = 'budget' } = {}) {
-    this.limits = MODES[mode] ?? MODES.budget;
-    if (!candidates?.kept?.length) return candidates;
-    await this.load();
-    const started = this.now();
-    const maxValue = brief?.valueRange?.[1] ?? null;
-    let fresh = 0;
-    const stats = { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 };
-    const kept = [];
+  async measureRows(rows, brief, ctx) {
+    const { readPage, onProgress, stats, started, maxValue } = ctx;
+    const near = [];
     const far = [];
-    this.reads = 0;
     const gone = [];
-    for (const original of candidates.kept) {
+    for (const original of rows) {
       try {
         const point = await this.locate(original, readPage);
         const facts = await this.factsOf(original, readPage);
@@ -457,29 +457,29 @@ export class SiteAssessor {
         const row = original.area || !facts?.area ? original : { ...original, area: facts.area, areaUnit: 'm²', areaBy: 'listing page' };
         if (point === undefined) {
           stats.pending++;
-          kept.push({ ...row, site: null, fit: null, siteNote: 'site check queued for the next pass' });
+          near.push({ ...row, site: null, fit: null, siteNote: 'site check queued for the next pass' });
           continue;
         }
         if (!point) {
           stats.unlocated++;
-          kept.push({ ...row, site: null, fit: null, siteNote: 'location not shown' });
+          near.push({ ...row, site: null, fit: null, siteNote: 'location not shown' });
           continue;
         }
         stats.located++;
         let site = this.cachedSite(point.lat, point.lon);
         if (!site) {
-          if (fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
+          if (ctx.fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
             stats.pending++;
-            kept.push({ ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
+            near.push({ ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
             continue;
           }
-          fresh++;
+          ctx.fresh++;
           site = await this.assess(point.lat, point.lon);
           onProgress(stats);
         }
         stats.assessed++;
-        if (!site.lakesNamed && fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
-          fresh++;
+        if (!site.lakesNamed && ctx.fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
+          ctx.fresh++;
           site = await this.addLakes(point.lat, point.lon, site);
         }
         const conflict = await this.titleConflict(row, point, brief);
@@ -488,12 +488,27 @@ export class SiteAssessor {
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
           far.push(assessed);
-        } else kept.push(assessed);
+        } else near.push(assessed);
       } catch (error) {
         stats.failed++;
-        kept.push({ ...original, site: null, fit: null, siteNote: `site check failed: ${String(error.message).slice(0, 80)}` });
+        near.push({ ...original, site: null, fit: null, siteNote: `site check failed: ${String(error.message).slice(0, 80)}` });
       }
     }
+    return { near, far, gone };
+  }
+
+  async apply(candidates, brief, { readPage = null, onProgress = () => {}, mode = 'budget' } = {}) {
+    this.limits = MODES[mode] ?? MODES.budget;
+    if (!candidates?.kept?.length && !candidates?.outside?.length) return candidates;
+    await this.load();
+    this.reads = 0;
+    const stats = { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 };
+    const ctx = { readPage, onProgress, stats, started: this.now(), maxValue: brief?.valueRange?.[1] ?? null, fresh: 0 };
+    const inside = await this.measureRows(candidates.kept ?? [], brief, ctx);
+    const kept = inside.near;
+    const { far, gone } = inside;
+    const outsideStats = { ...stats };
+    const beyond = await this.measureRows(candidates.outside ?? [], brief, { ...ctx, stats: outsideStats });
     kept.sort((a, b) => (b.fit?.score ?? -1) - (a.fit?.score ?? -1));
     const reason = `farther than ${EBIKE_KM} km from the sea`;
     const removed = 'listing removed from the portal';
@@ -504,13 +519,15 @@ export class SiteAssessor {
     return {
       ...candidates,
       kept,
-      keptCount: candidates.keptCount - far.length - gone.length,
+      keptCount: (candidates.keptCount ?? 0) - far.length - gone.length,
       screened,
-      screenedCount: candidates.screenedCount + far.length + gone.length,
+      screenedCount: (candidates.screenedCount ?? 0) + far.length + gone.length,
       examples,
       far,
       farReason: reason,
-      sites: { ...stats, ...(await this.trends(candidates.kept)), at: new Date(this.now()).toISOString() },
+      outside: [...beyond.near, ...beyond.far],
+      sites: { ...stats, ...(await this.trends([...(candidates.kept ?? []), ...(candidates.outside ?? [])])), at: new Date(this.now()).toISOString() },
     };
   }
+
 }

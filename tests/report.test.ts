@@ -57,6 +57,8 @@ describe('results export', () => {
     ]);
     expect(resultsJson(withTable).candidates.kept).toHaveLength(1);
     const planned = { ...withTable, candidates: { kept: [{ ...withTable.candidates.kept[0], site: { ...withTable.candidates.kept[0].site, lakeKm: 1.2, lakesNamed: true }, plan: { tier: 'trade-off', verdict: 'trade-off with potential: lake', entry: { total: 18490 }, areaM2: 300, units: 4, why: ['sea 2.5 km', '9 workable months'], risks: ['ask the Câmara'], path: 'Rural camping park' } }], toCheck: [] } };
+    const outsideRow = { ...withTable.candidates.kept[0], title: 'Zemljište Vir', country: 'Croatia', plan: { tier: 'unverified', verdict: 'to confirm', entry: { total: 15000 }, areaM2: 1211, units: 18, why: [], risks: [], path: null, opportunity: { score: 6, reasons: ['scenic and still open: 80 things to explore, only 1 campsite'] } } };
+    expect(candidatesCsv({ ...withTable, candidates: { kept: [], toCheck: [], outside: [outsideRow] } }).split('\r\n')[1]).toMatch(/^outside your countries,unverified,to confirm,15000,1211,18,,scenic and still open: 80 things to explore\, only 1 campsite|^outside your countries,unverified,to confirm,15000,1211,18,,"scenic and still open/);
     expect(candidatesCsv(planned).split('\r\n')[1]).toMatch(/^kept,trade-off,trade-off with potential: lake,18490,300,4,1\.2,sea 2\.5 km \| 9 workable months,ask the Câmara,Rural camping park,Terreno Aljezur,/);
     const json = resultsJson(p);
     expect(json).toMatchObject({ bestEstimate: { value: '18' }, confidence: { provisional: true, byChecks: 'low' }, actions: [{ nodeId: 'D2', action: 'research' }], items: [{ url: 'https://m.de/1' }] });

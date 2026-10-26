@@ -1335,9 +1335,11 @@ const CAND_COLS=[
   ["trend","Real trend %",r=>r.plan&&r.plan.trend!=null?r.plan.trend:r.fit&&r.fit.hpi!=null?r.fit.hpi:-Infinity],
   ["country","Country",r=>String(r.country||"")+" "+String(r.place||"")],
 ];
-function sortedCandidates(rows){
-  const st=STATE.candSort||{key:"tier",dir:1};const col=CAND_COLS.find(c=>c[0]===st.key)||CAND_COLS[0];
-  const tier=STATE.candTier||"all";
+const OUT_COLS=[["opp","Opportunity",r=>r.plan&&r.plan.opportunity?-r.plan.opportunity.score:0]].concat(CAND_COLS.filter(c=>c[0]!=="tier"));
+function sortState(table){STATE.candSort=STATE.candSort||{};return STATE.candSort[table]||(table==="out"?{key:"opp",dir:1}:{key:"tier",dir:1});}
+function sortedCandidates(rows,table,cols){
+  const st=sortState(table);const col=cols.find(c=>c[0]===st.key)||cols[0];
+  const tier=table==="out"?"all":STATE.candTier||"all";
   return rows.filter(r=>tier==="all"||(r.plan&&r.plan.tier===tier)).map((r,i)=>[r,i]).sort((a,b)=>{const x=col[2](a[0]),y=col[2](b[0]);return (x<y?-1:x>y?1:a[1]-b[1])*st.dir;}).map(([r])=>r);
 }
 function siteCell(r){
@@ -1364,12 +1366,17 @@ function candidatesHtml(p){
   if(c.sites)h+='<div class="small faint">Site fit measured by code: sea distance, lakes and things to explore within 15 km (OpenStreetMap), workable glamping months 2021–2025 (Open-Meteo), housing-price trend (Eurostat), zoning words on the listing · '+c.sites.assessed+" measured, "+c.sites.unlocated+" without a location, "+c.sites.pending+" queued</div>";
   const link=r=>{const u=safeUrl(r.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(trunc(r.title,60))+"</a>":esc(trunc(r.title,60));};
   const row=r=>{const tl=r.plan?TIER_LABEL[r.plan.tier]:null;const s=r.site,cl=s&&s.climate;return '<tr data-tier="'+esc(r.plan?r.plan.tier:"")+'"><td class="small">'+(tl?'<b style="color:'+tl[0]+'">'+tl[1]+"</b>":"–")+'</td><td class="small mono">'+(r.fit?esc(Math.round(r.fit.score*100)):"–")+"</td><td>"+link(r)+'</td><td class="small mono">'+num(r.plan&&r.plan.entry?r.plan.entry.total:null)+'</td><td class="small mono">'+num(r.value)+(r.currency&&r.currency!==r.unit&&r.price!=null?'<div class="faint">'+esc(Number(r.price).toLocaleString())+" "+esc(r.currency)+"</div>":"")+'</td><td class="small mono">'+num(r.plan?r.plan.areaM2:r.area)+'</td><td class="small mono">'+num(r.plan?r.plan.units:null)+'</td><td class="small mono">'+(s?esc(s.coastKm??">25"):"–")+'</td><td class="small mono">'+(cl?esc(cl.workable):"–")+'</td><td class="small mono">'+(cl?esc(cl.hottest):"–")+'</td><td class="small mono">'+(s?esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0)):"–")+'</td><td class="small mono">'+(r.plan&&r.plan.trend!=null?esc((r.plan.trend>=0?"+":"")+r.plan.trend):r.fit&&r.fit.hpi!=null?esc(r.fit.hpi):"–")+'</td><td class="small">'+esc(r.country||"")+'<div class="faint">'+esc(trunc(r.place||"",30))+'</div></td><td class="small" style="min-width:260px">'+planCell(r)+(r.siteNote&&!r.site?'<div class="faint">'+esc(r.siteNote)+"</div>":"")+"</td></tr>";};
-  const st=STATE.candSort||{key:"tier",dir:1};
-  const head="<tr>"+CAND_COLS.map(([k,l])=>'<th data-csort="'+k+'" style="cursor:pointer;white-space:nowrap" title="Sort by '+esc(l)+'">'+esc(l)+(st.key===k?(st.dir>0?" ▲":" ▼"):"")+"</th>").join("")+"<th>Why it fits · potential · risks</th></tr>";
+  const headOf=(table,cols,last)=>{const st=sortState(table);return "<tr>"+cols.map(([k,l])=>'<th data-csort="'+k+'" data-ctable="'+table+'" style="cursor:pointer;white-space:nowrap" title="Sort by '+esc(l)+'">'+esc(l)+(st.key===k?(st.dir>0?" ▲":" ▼"):"")+"</th>").join("")+"<th>"+last+"</th></tr>";};
+  const head=headOf("in",CAND_COLS,"Why it fits · potential · risks");
   if(c.kept.length){
     const tiers=["all","fits","trade-off","unverified","weak","blocked"].filter(x=>x==="all"||!t||t[x]);
     h+='<div class="row" style="gap:4px;margin-top:8px;flex-wrap:wrap"><span class="small faint">Show:</span>'+tiers.map(x=>'<button class="btn '+((STATE.candTier||"all")===x?"secondary":"ghost")+' sm" data-ctier="'+x+'">'+(x==="all"?"All "+c.kept.length:TIER_LABEL[x][1]+" "+t[x])+"</button>").join("")+'<span class="small faint">· click a column to sort</span></div>';
-    h+='<div class="tablewrap"><table class="rtable" id="candRows" style="margin-top:6px">'+head+sortedCandidates(c.kept).map(row).join("")+"</table></div>";
+    h+='<div class="tablewrap"><table class="rtable" id="candRows" style="margin-top:6px">'+head+sortedCandidates(c.kept,"in",CAND_COLS).map(row).join("")+"</table></div>";
+  }
+  const out=c.outside||[];
+  if(out.length){
+    const outRow=r=>{const op=r.plan&&r.plan.opportunity;const base=row(r).replace(/^<tr[^>]*><td class="small">[\s\S]*?<\/td>/,'<tr><td class="small mono"><b>'+esc(op?op.score:"–")+"</b></td>");return base.replace(/<td class="small" style="min-width:260px">[\s\S]*<\/td><\/tr>$/,'<td class="small" style="min-width:260px">'+(op?'<ul class="small" style="margin:0 0 0 14px;padding:0">'+op.reasons.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul>":"")+(r.plan&&r.plan.risks.length?'<div class="small" style="color:var(--rd)">Risks: '+esc(r.plan.risks.join("; "))+"</div>":"")+"</td></tr>");};
+    h+='<details id="outsideTable" style="margin-top:12px" open><summary><b>Outside your countries, worth a look</b> · '+out.length+' plot(s) that pass every limit except the country, ranked by opportunity: site checks met, real price trend and its 5-year continuation, scenic places with few campsites yet, entry cost. They never count toward your result.</summary><div class="tablewrap"><table class="rtable" id="outRows" style="margin-top:6px">'+headOf("out",OUT_COLS,"Why it is worth a look · risks")+sortedCandidates(out,"out",OUT_COLS).map(outRow).join("")+"</table></div></details>";
   }
   const oldHead='<tr><th>Listing</th><th>Price</th><th>Area</th><th>Place</th><th>Site fit · sea · season · explore</th></tr>';
   const oldRow=r=>"<tr><td>"+link(r)+'</td><td class="small">'+num(r.value)+" "+esc(r.unit||"")+'</td><td class="small">'+esc(r.area?Number(r.area).toLocaleString()+" "+(r.areaUnit||""):"–")+'</td><td class="small">'+esc(trunc(r.place||"",40))+(r.country?'<div class="faint">'+esc(r.country)+"</div>":"")+'</td><td class="small">'+siteCell(r)+(r.toCheck?'<div style="color:var(--am)">'+esc(r.toCheck)+"</div>":"")+"</td></tr>";
@@ -1381,7 +1388,7 @@ document.addEventListener("click",e=>{
   const th=e.target.closest&&e.target.closest("th[data-csort]");
   const tb=e.target.closest&&e.target.closest("button[data-ctier]");
   if(!th&&!tb)return;
-  if(th){const k=th.dataset.csort;const st=STATE.candSort||{key:"tier",dir:1};STATE.candSort={key:k,dir:st.key===k?-st.dir:1};}
+  if(th){const k=th.dataset.csort,t=th.dataset.ctable||"in";const st=sortState(t);STATE.candSort[t]={key:k,dir:st.key===k?-st.dir:1};}
   if(tb)STATE.candTier=tb.dataset.ctier;
   renderResults();
 });
