@@ -94,11 +94,12 @@ export class CandidateSweeper {
       onPage(record);
       return page;
     };
+    const skipped = (start) => !start.seed && keptNow() >= target && visited.has(start.country);
     for (const [index, start] of starts.entries()) {
       if (left <= 0) break;
-      const reserved = starts.length - index - 1;
-      if (keptNow() >= target && visited.has(start.country)) continue;
+      if (skipped(start)) continue;
       visited.add(start.country);
+      const reserved = starts.slice(index + 1).filter((s) => s.seed || !visited.has(s.country)).length;
       const first = await visit(start.url, start.seed ? `seed portal for ${start.country}` : 'portal page already read');
       if (!first?.listings?.length) continue;
       const filtered = brief.valueRange ? priceFilterUrl(first.links, start.url, brief.valueRange[1]) : '';

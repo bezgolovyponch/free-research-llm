@@ -54,4 +54,13 @@ describe('portal sweep', () => {
     await new CandidateSweeper({ search, seeds }).sweep({ nodes: [] }, twoCountries, {});
     expect(read).toEqual(['https://seed.example/pt/1', 'https://seed.example/es/1', 'https://seed.example/pt/2']);
   });
+
+  it('pages through every seed portal even when other pages already met the count, keeping one page for each start still to come', async () => {
+    const one = buildBrief({ question: 'Plots near the sea, 20000EUR max', acceptance: { expected: '1 plot in Portugal or Spain', itemCount: 1, valueRange: [0, 20000], unit: 'EUR' }, template: { itemKind: kind } });
+    const read: string[] = [];
+    const search = { readPage: async (url: string) => { read.push(url); const next = url.endsWith('p=3') ? '' : url.includes('?p=') ? url.replace(/p=(\d)/, (_m, d) => `p=${Number(d) + 1}`) : `${url}?p=2`; return { status: 200, locale: 'pt', text: '', links: [], listings: [listing(read.length, 5000), listing(read.length + 100, 6000)], next }; } };
+    const seeds = () => [{ url: 'https://seed.example/pt/1', country: 'PT', sample: ['terreno'], count: 1, seed: true }, { url: 'https://seed.example/pt/2', country: 'PT', sample: ['terreno'], count: 1, seed: true }, { url: 'https://seed.example/es/1', country: 'ES', sample: ['terreno'], count: 1, seed: true }];
+    await new CandidateSweeper({ search, seeds, budget: 6 }).sweep({ nodes: [] }, one, {});
+    expect(read).toEqual(['https://seed.example/pt/1', 'https://seed.example/pt/1?p=2', 'https://seed.example/pt/1?p=3', 'https://seed.example/es/1', 'https://seed.example/es/1?p=2', 'https://seed.example/pt/2']);
+  });
 });
