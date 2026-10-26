@@ -258,7 +258,8 @@ describe('ResearchEngine', () => {
     expect(done.candidates.kept.map((r: { value: number }) => r.value)).toEqual([9000, 12000, 15000, 19000]);
     expect(done.candidates.kept[0].plan.verdict).toContain('location not measured yet');
     expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);
-    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 2 listing page\(s\) read by code/.test(l.message))).toBe(true);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 12 listing page\(s\) read by code/.test(l.message))).toBe(true);
+    expect(reads).toContain('https://www.imovirtual.com/pt/resultados/comprar/terreno/faro?priceMax=20000');
     const seen: string[][] = [];
     const modes: string[] = [];
     engine.sites = { apply: async (c: { kept: Array<{ url: string }>; keptCount: number }, _b: unknown, o: { mode: string }) => { modes.push(o.mode); seen.push(c.kept.map((r) => r.url)); return { ...c, kept: c.kept.slice(0, 2), keptCount: 2, sites: { assessed: 4, located: 4, far: 2, unlocated: 0, pending: 0, failed: 0 } }; } } as never;

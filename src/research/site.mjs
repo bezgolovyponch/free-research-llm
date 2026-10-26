@@ -20,7 +20,7 @@ export const RURAL_PARK_MAX_PITCHES = 30;
 export const POI_SATURATION = 200;
 export const LODGING_SATURATION = 300;
 const MAX_SITES = 2000;
-export const STORE_VERSION = 2;
+export const STORE_VERSION = 3;
 export const RETRY_STATUS = new Set([429, 502, 503, 504]);
 export const RETRY_WAITS_MS = [10000, 30000];
 const USER_AGENT = 'free-research-llm (site fit; https://github.com/bezgolovyponch/free-research-llm)';
@@ -28,6 +28,8 @@ const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 const HPI_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hpi_a';
+const HICP_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_aind';
+export const MIN_PLACE_RANK = 12;
 const EUROSTAT_CODE = { GR: 'EL' };
 export const EU_AGGREGATE = 'EU27_2020';
 const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"]';
@@ -172,6 +174,21 @@ export function zoningOf(row) {
   return 'not stated';
 }
 
+export function yearly(d) {
+  const index = d?.dimension?.time?.category?.index ?? {};
+  return Object.fromEntries(Object.entries(index).filter(([, i]) => d.value?.[i] !== undefined).map(([year, i]) => [year, Number(d.value[i])]));
+}
+
+export function realChange(nominal, inflation) {
+  return round(((1 + nominal / 100) / (1 + inflation / 100) - 1) * 100, 1);
+}
+
+export function trendOf(hpi, hicp) {
+  const years = Object.keys(hpi).filter((y) => hicp[y] !== undefined).sort();
+  const year = years.at(-1);
+  return year ? { change: hpi[year], inflation: hicp[year], real: realChange(hpi[year], hicp[year]), year } : null;
+}
+
 export function fitOf(row, site, { hpi = null, maxValue = null } = {}) {
   const zoning = zoningOf(row);
   const parts = {
@@ -252,7 +269,9 @@ export class SiteAssessor {
       const parsed = JSON.parse(await fs.readFile(this.file, 'utf8'));
       if (parsed && typeof parsed === 'object') {
         const current = parsed.version === STORE_VERSION;
-        this.store = { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: parsed.hpi ?? {}, points: current ? parsed.points ?? {} : {} };
+        const looked = (entry) => String(entry?.point?.by ?? '').startsWith('place');
+        const points = Object.fromEntries(Object.entries(parsed.points ?? {}).filter(([, entry]) => current || !looked(entry)));
+        this.store = { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: current ? parsed.hpi ?? {} : {}, points };
       }
     } catch {
       this.store = { sites: {}, places: {}, hpi: {}, points: {} };
@@ -291,7 +310,8 @@ export class SiteAssessor {
     const only = /^[A-Z]{2}$/.test(countryCode) ? `&countrycodes=${countryCode.toLowerCase()}` : '';
     const found = await this.fetchJson(`${NOMINATIM_URL}?format=json&limit=1${only}&q=${encodeURIComponent(query)}`);
     const hit = Array.isArray(found) ? found[0] : null;
-    const point = hit && namesRegion(hit.display_name, query) ? { lat: Number(hit.lat), lon: Number(hit.lon), by: `place "${query}"` } : null;
+    const fine = hit && (hit.place_rank === undefined || Number(hit.place_rank) >= MIN_PLACE_RANK);
+    const point = fine && namesRegion(hit.display_name, query) ? { lat: Number(hit.lat), lon: Number(hit.lon), by: `place "${query}"` } : null;
     this.store.places[key] = { at: this.now(), point };
     this.persist();
     return point;
@@ -342,6 +362,13 @@ export class SiteAssessor {
     return site;
   }
 
+  async trends(rows) {
+    const codes = [...new Set(rows.map((r) => r.countryCode).filter(Boolean)), EU_AGGREGATE];
+    const trends = {};
+    for (const code of codes) trends[code] = await this.priceTrend(code);
+    return { trends, euHpi: trends[EU_AGGREGATE]?.real ?? null };
+  }
+
   async addLakes(lat, lon, site) {
     const post = (query) => this.fetchJson(OVERPASS_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}` });
     const withLakes = { ...site, lakeKm: parseLakes(await post(lakeQuery(lat, lon)), lat, lon) };
@@ -358,10 +385,9 @@ export class SiteAssessor {
     let value = null;
     try {
       const geo = EUROSTAT_CODE[code] ?? code;
-      const d = await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`);
-      const years = Object.entries(d?.dimension?.time?.category?.index ?? {}).sort((a, b) => b[1] - a[1]);
-      const latest = years.find(([, i]) => d.value?.[i] !== undefined);
-      value = latest ? { change: Number(d.value[latest[1]]), year: latest[0] } : null;
+      const hpi = yearly(await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`));
+      const hicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${geo}&sinceTimePeriod=2020`));
+      value = trendOf(hpi, hicp);
     } catch {
       value = null;
     }
@@ -369,6 +395,7 @@ export class SiteAssessor {
     this.persist();
     return value;
   }
+
 
   async apply(candidates, brief, { readPage = null, onProgress = () => {}, mode = 'budget' } = {}) {
     this.limits = MODES[mode] ?? MODES.budget;
@@ -408,7 +435,7 @@ export class SiteAssessor {
         }
         stats.assessed++;
         const trend = await this.priceTrend(row.countryCode);
-        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, site, { hpi: trend?.change ?? null, maxValue }) };
+        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, site, { hpi: trend?.real ?? null, maxValue }) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
           if (site.lakeKm === undefined && fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
@@ -436,7 +463,7 @@ export class SiteAssessor {
       examples,
       far,
       farReason: reason,
-      sites: { ...stats, euHpi: (await this.priceTrend(EU_AGGREGATE))?.change ?? null, at: new Date(this.now()).toISOString() },
+      sites: { ...stats, ...(await this.trends(candidates.kept)), at: new Date(this.now()).toISOString() },
     };
   }
 }

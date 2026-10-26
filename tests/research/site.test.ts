@@ -63,6 +63,7 @@ function fakeNet(opts: { coastFor?: (lat: number) => number | null; geocode?: Re
     }
     if (url.includes('eurostat')) {
       calls.push('hpi');
+      if (url.includes('prc_hicp_aind')) return { dimension: { time: { category: { index: { 2024: 0, 2025: 1 } } } }, value: { 0: 2.4, 1: 2 } };
       return { dimension: { time: { category: { index: { 2024: 0, 2025: 1 } } } }, value: { 0: 10.4, 1: 13.9 } };
     }
     throw new Error(`unexpected ${url}`);
@@ -160,7 +161,9 @@ describe('SiteAssessor', () => {
     expect(out.screened[`farther than ${EBIKE_KM} km from the sea`]).toBe(2);
     expect(out.screenedCount).toBe(9);
     expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['https://famalo.example/14451']);
-    expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Vir, Croatia"', site: { coastKm: 0.6, climate: { workable: 9 } }, fit: { zoning: 'agricultural', hpi: 13.9 } });
+    expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Vir, Croatia"', site: { coastKm: 0.6, climate: { workable: 9 } }, fit: { zoning: 'agricultural', hpi: 11.7 } });
+    expect(out.sites.trends.HR).toEqual({ change: 13.9, inflation: 2, real: 11.7, year: '2025' });
+    expect(out.sites.euHpi).toBe(11.7);
     expect(out.sites).toMatchObject({ assessed: 3, located: 3, far: 2, unlocated: 0 });
     expect(out.examples.at(-1).reasons[0]).toMatch(/farther than 25 km from the sea/);
     expect(net.calls.filter((c) => /^(hr|vn|any)$/.test(c))).toEqual(['hr', 'vn']);
@@ -196,14 +199,15 @@ describe('SiteAssessor', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-'));
     const file = path.join(dir, 'sites.json');
     const now = Date.now();
-    await fs.writeFile(file, JSON.stringify({ sites: { [siteKey(VIR.lat, VIR.lon)]: { at: now, site: { coastKm: 9 } } }, places: { 'hr|vir, croatia': { at: now, point: VIR } }, points: { 'https://x.example/1': { at: now, point: VIR } }, hpi: {} }));
+    await fs.writeFile(file, JSON.stringify({ sites: { [siteKey(VIR.lat, VIR.lon)]: { at: now, site: { coastKm: 9 } } }, places: { 'hr|vir, croatia': { at: now, point: VIR } }, points: { 'https://x.example/1': { at: now, point: { ...VIR, by: 'place "Vir, Croatia"' } }, 'https://x.example/2': { at: now, point: { ...VIR, by: 'listing page' } } }, hpi: { HR: { at: now, value: { change: 13.9, year: '2025' } } } }));
     const assessor = await new SiteAssessor({ file }).load();
     expect(assessor.store.places).toEqual({});
-    expect(assessor.store.points).toEqual({});
+    expect(Object.keys(assessor.store.points)).toEqual(['https://x.example/2']);
+    expect(assessor.store.hpi).toEqual({});
     expect(assessor.cachedSite(VIR.lat, VIR.lon)).toEqual({ coastKm: 9 });
     assessor.persist();
     await assessor.writing;
-    expect(JSON.parse(await fs.readFile(file, 'utf8')).version).toBe(2);
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).version).toBe(3);
     await fs.rm(dir, { recursive: true, force: true });
   });
 
@@ -225,6 +229,23 @@ describe('SiteAssessor', () => {
     const net = fakeNet({ geocode: { 'Thuan Giao, Binh Duong, Vietnam': BINH_DUONG } });
     const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ ...table, kept: [{ ...rows[1], place: '' }], keptCount: 1 }, { coastal: false }, { readPage: async () => ({ coords: null, place: 'Thuan Giao, Binh Duong' }) });
     expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Thuan Giao, Binh Duong, Vietnam"', site: { climate: { workable: 0 } } });
+  });
+
+  it('refuses a country, state or province match: too coarse to measure the sea from', async () => {
+    const coarse = async (url: string) => (url.includes('nominatim') ? [{ lat: '39.0', lon: '35.0', display_name: 'Türkiye', place_rank: 4 }] : null);
+    const assessor = new SiteAssessor({ fetchJson: coarse as never, sleep: noSleep });
+    expect(await assessor.geocode('Türkiye', 'TR')).toBeNull();
+    const town = async (url: string) => (url.includes('nominatim') ? [{ lat: '39.5', lon: '-9.0', display_name: 'Famalicão, Nazaré, Leiria, Portugal', place_rank: 16 }] : null);
+    expect(await new SiteAssessor({ fetchJson: town as never, sleep: noSleep }).geocode('Famalicão, Nazaré, Portugal', 'PT')).toMatchObject({ lat: 39.5, lon: -9 });
+  });
+
+  it('turns a nominal house-price change into a real one with the same year of inflation', async () => {
+    const { realChange, trendOf, yearly } = await import('../../src/research/site.mjs');
+    expect(realChange(41.5, 34.9)).toBe(4.9);
+    expect(realChange(5.5, 2.5)).toBe(2.9);
+    expect(trendOf({ 2024: 10, 2025: 41.5 }, { 2024: 58.5, 2025: 34.9 })).toEqual({ change: 41.5, inflation: 34.9, real: 4.9, year: '2025' });
+    expect(trendOf({ 2025: 5 }, { 2024: 2 })).toBeNull();
+    expect(yearly({ dimension: { time: { category: { index: { 2024: 0, 2025: 1 } } } }, value: { 1: 3.2 } })).toEqual({ 2025: 3.2 });
   });
 
   it('falls back to the nearest larger place the geocoder knows', async () => {

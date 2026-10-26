@@ -39,6 +39,10 @@ describe('low-entry glamping strategy', () => {
     expect(plan.tier).toBe('fits');
     expect(plan.why.join(' | ')).toContain('sea 2.7 km');
     expect(plan.why.join(' | ')).toContain('12 workable months');
+    expect(plan.why.join(' | ')).toContain('hottest month average high 24 °C: tents work without air conditioning');
+    const hot = planFor({ ...nazare, site: site(2.7, { climate: climate(10, 34.6) }) }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
+    expect(hot.why.join(' ')).not.toContain('without air conditioning');
+    expect(hot.tradeoffs.join(' ')).toContain('hottest month average max 34.6 °C');
     expect(plan.why.join(' | ')).toContain('holds 24 units');
     expect(plan.why.join(' | ')).toContain('entry ≈ €23,785');
     expect(plan.why.join(' | ')).toContain('Rural camping park');
@@ -69,6 +73,7 @@ describe('low-entry glamping strategy', () => {
     const plan = planFor({ ...nazare, site: null, area: null }, GLAMPING_LOW_ENTRY);
     expect(plan.tier).toBe('unverified');
     expect(plan.verdict).toContain('area not shown');
+    expect(plan.verdict.match(/climate not measured yet/g)).toHaveLength(1);
   });
 
   it('flags a Turkish shared title and the foreign-buyer project duty', () => {
@@ -147,5 +152,10 @@ describe('decision model from the user words', () => {
     expect(tr.tier).toBe('unverified');
     expect(tr.verdict).toContain('no official price series for Turkey');
     expect(planFor(nazare, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 }).why.join(' ')).toContain('vs EU +5.5%');
+    const trends = { TR: { change: 41.5, inflation: 34.9, real: 4.9, year: '2025' } };
+    const turkey = planFor({ ...nazare, countryCode: 'TR', country: 'Turkey', fit: { hpi: null } }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 2.9, trends });
+    expect(turkey.checks.find((c: { id: string }) => c.id === 'trend')).toMatchObject({ ok: true, detail: 'Turkey +4.9% a year after inflation vs EU +2.9% (Eurostat, housing)' });
+    expect(turkey.why.join(' ')).toContain('(nominal +41.5%, inflation 34.9%, 2025)');
+    expect(planFor({ ...nazare, site: null }, GLAMPING_LOW_ENTRY, { euHpi: 2.9, trends: { PT: { change: 17.6, inflation: 2.2, real: 15.1, year: '2025' } } }).verdict).not.toContain('price series');
   });
 });

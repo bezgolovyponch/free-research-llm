@@ -3,8 +3,9 @@ import { buildCandidates } from './candidates.mjs';
 import { isKind } from './itemgate.mjs';
 import { looksLikeListing } from './acceptance.mjs';
 import { listingKey } from '../search/listings.mjs';
+import { roundRobin, seedPortals } from './portals.mjs';
 
-export const PAGE_BUDGET = 60;
+export const PAGE_BUDGET = 90;
 export const PAGES_PER_SITE = 6;
 export const MIN_PORTAL_LISTINGS = 3;
 const STORED_PAGE_TEXT = 1500;
@@ -51,20 +52,21 @@ export function portalPages(nodes, brief, extra = []) {
     if (shown < MIN_PORTAL_LISTINGS) continue;
     const country = sourceCountry(source);
     if (brief?.regions?.length && country && !brief.regions.includes(country)) continue;
-    if (!pages.has(source.url)) pages.set(source.url, { url: source.url, listings: shown });
+    if (!pages.has(source.url)) pages.set(source.url, { url: source.url, listings: shown, country });
   }
   for (const page of extra) {
     if (pages.has(page.url)) continue;
     if (brief?.regions?.length && !brief.regions.includes(page.country)) continue;
     if (!isKind({ title: (page.sample ?? []).join(' '), url: page.url }, brief?.kind)) continue;
-    pages.set(page.url, { url: page.url, listings: page.count ?? 0 });
+    pages.set(page.url, { url: page.url, listings: page.count ?? 0, country: page.country, seed: Boolean(page.seed) });
   }
   return [...pages.values()].sort((a, b) => b.listings - a.listings);
 }
 
 export class CandidateSweeper {
-  constructor({ search, recipes = null, budget = PAGE_BUDGET, perSite = PAGES_PER_SITE }) {
+  constructor({ search, recipes = null, budget = PAGE_BUDGET, perSite = PAGES_PER_SITE, seeds = seedPortals }) {
     this.search = search;
+    this.seeds = seeds;
     this.recipes = recipes;
     this.budget = budget;
     this.perSite = perSite;
@@ -73,7 +75,8 @@ export class CandidateSweeper {
   async sweep(project, brief, options = {}, onPage = () => {}) {
     if (!brief?.kind || !this.search?.readPage) return null;
     const target = Math.ceil((brief.itemCount ?? 20) * 1.5);
-    const starts = portalPages(project.nodes, brief, this.recipes?.verifiedSearchPages?.() ?? []);
+    const starts = roundRobin(portalPages(project.nodes, brief, [...this.seeds(brief), ...(this.recipes?.verifiedSearchPages?.() ?? [])]), (p) => p.country);
+    const visited = new Set();
     const pages = [];
     const read = new Set();
     const keys = new Set();
@@ -91,14 +94,17 @@ export class CandidateSweeper {
       onPage(record);
       return page;
     };
-    for (const start of starts) {
-      if (left <= 0 || keptNow() >= target) break;
-      const first = await visit(start.url, 'portal page already read');
+    for (const [index, start] of starts.entries()) {
+      if (left <= 0) break;
+      const reserved = starts.length - index - 1;
+      if (keptNow() >= target && visited.has(start.country)) continue;
+      visited.add(start.country);
+      const first = await visit(start.url, start.seed ? `seed portal for ${start.country}` : 'portal page already read');
       if (!first?.listings?.length) continue;
       const filtered = brief.valueRange ? priceFilterUrl(first.links, start.url, brief.valueRange[1]) : '';
       let page = filtered ? (await visit(filtered, `price filter found on ${hostOf(start.url)}`)) ?? first : first;
       if (!page?.listings?.length) page = first;
-      for (let n = 1; n < this.perSite && page?.next && left > 0 && keptNow() < target; n++) page = await visit(page.next, 'next page link');
+      for (let n = 1; n < this.perSite && page?.next && left > reserved && (start.seed || keptNow() < target); n++) page = await visit(page.next, 'next page link');
     }
     return { pages, pagesRead: pages.length, budget: this.budget, at: new Date().toISOString() };
   }

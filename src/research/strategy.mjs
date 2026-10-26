@@ -139,6 +139,7 @@ export function unitsFor(m2, rules) {
 }
 
 const eur = (n) => `€${Math.round(n).toLocaleString('en-US')}`;
+const signed = (n) => (n >= 0 ? `+${n}` : `${n}`);
 
 export function entryCost(row, country, units, rules, convert) {
   if (!country?.tax || !Number.isFinite(row.value)) return null;
@@ -154,8 +155,10 @@ function check(id, label, ok, detail) {
   return { id, label, ok, detail };
 }
 
-export function planFor(row, strategy, { convert = null, euHpi = null } = {}) {
+export function planFor(row, strategy, { convert = null, euHpi = null, trends = null } = {}) {
   const rules = strategy.rules;
+  const trend = trends?.[row.countryCode] ?? null;
+  const hpi = trend?.real ?? row.fit?.hpi ?? null;
   const country = strategy.countries[row.countryCode] ?? null;
   const site = row.site;
   const climate = site?.climate ?? null;
@@ -166,11 +169,11 @@ export function planFor(row, strategy, { convert = null, euHpi = null } = {}) {
   const zoning = zoningOf(row);
   const ebike = rules.ebikeKm.value;
   const checks = [
-    check('sea', `sea within ${ebike} km by e-bike`, site ? site.coastKm !== null && site.coastKm <= ebike : null, site ? `sea ${site.coastKm ?? `>25`} km` : 'location not measured yet'),
+    check('sea', `sea within ${ebike} km by e-bike`, site ? site.coastKm !== null && site.coastKm <= ebike : null, site ? `sea ${site.coastKm ?? '>25'} km` : 'location not measured yet'),
     check('season', `${rules.minWorkableMonths.value}+ workable months`, climate ? climate.workable >= rules.minWorkableMonths.value : null, climate ? `${climate.workable} workable months (${climate.comfortable} comfortable)` : 'climate not measured yet'),
     check('noAc', 'no air conditioning needed', climate ? climate.hottest <= rules.maxHottest.value : null, climate ? `hottest month average max ${climate.hottest} °C` : 'climate not measured yet'),
     check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${rules.pitchM2.value} m² each on ${rules.campingShare.value * 100}% of the land` : 'area not shown'),
-    check('trend', 'price trend above the EU average', row.fit?.hpi === null || row.fit?.hpi === undefined || euHpi === null ? null : row.fit.hpi > euHpi, row.fit?.hpi === null || row.fit?.hpi === undefined ? `no official price series for ${row.country || 'this country'} in the model` : `${row.country} +${row.fit.hpi}% a year vs EU ${euHpi === null ? '?' : `+${euHpi}%`} (Eurostat, housing)`),
+    check('trend', 'real price trend above the EU average', hpi === null || euHpi === null ? null : hpi > euHpi, hpi === null ? `no official price series for ${row.country || 'this country'} in the model` : `${row.country} ${signed(hpi)}% a year after inflation vs EU ${euHpi === null ? '?' : `${signed(euHpi)}%`} (Eurostat, housing)`),
     check('legal', 'a legal path for a buyer', country ? !country.blocker && !INDUSTRIAL.test(words) : null, country?.blocker ?? (INDUSTRIAL.test(words) ? 'industrial site: camping parks must be 1,000 m from insalubrious industry (Portaria 1320/2008)' : country?.path ?? 'no path researched for this country')),
   ];
   const failed = checks.filter((c) => c.ok === false);
@@ -179,10 +182,11 @@ export function planFor(row, strategy, { convert = null, euHpi = null } = {}) {
   const tier = blocked ? 'blocked' : failed.length ? 'trade-off' : unknown.length ? 'unverified' : 'fits';
   const why = [];
   if (site?.coastKm !== null && site?.coastKm !== undefined && site.coastKm <= ebike) why.push(`sea ${site.coastKm} km${site.beachKm !== null && site.beachKm !== undefined ? `, beach ${site.beachKm} km` : ''}: inside the ${ebike} km e-bike ride`);
-  if (climate && climate.workable >= rules.minWorkableMonths.value) why.push(`${climate.workable} workable months, hottest ${climate.hottest} °C: tents work without air conditioning`);
+  if (climate && climate.workable >= rules.minWorkableMonths.value) why.push(`${climate.workable} workable months a year`);
+  if (climate && climate.hottest <= rules.maxHottest.value) why.push(`hottest month average high ${climate.hottest} °C: tents work without air conditioning`);
   if (units !== null && units >= rules.minUnits.value) why.push(`${Math.round(m2).toLocaleString('en-US')} m² holds ${units} units, ${rules.minUnits.value} are enough to open`);
   if (cost) why.push(`entry ≈ ${eur(cost.total)} (price ${eur(cost.price)} + ${cost.taxLabel} ${eur(cost.tax)}${cost.tents !== null ? ` + ${cost.units} bell tents ${eur(cost.tents)}` : ''}; excludes ${cost.excludes})`);
-  if (row.fit?.hpi !== null && row.fit?.hpi !== undefined && euHpi !== null && row.fit.hpi > euHpi) why.push(`${row.country} house prices +${row.fit.hpi}% a year vs EU +${euHpi}% (Eurostat, country level, not land)`);
+  if (hpi !== null && euHpi !== null && hpi > euHpi) why.push(`${row.country} house prices ${signed(hpi)}% a year after inflation${trend ? ` (nominal ${signed(trend.change)}%, inflation ${trend.inflation}%, ${trend.year})` : ''} vs EU ${signed(euHpi)}% (Eurostat, country level, not land)`);
   if (site) why.push(`${explorePoints(site)} things to explore and ${(site.lodging ?? 0) + (site.campsites ?? 0)} places to stay within 15 km (demand)`);
   if (country?.path && !country.blocker) why.push(`path: ${country.path}`);
   const potential = [];
@@ -197,8 +201,8 @@ export function planFor(row, strategy, { convert = null, euHpi = null } = {}) {
   if (zoning === 'agricultural' && country?.agriculturalRisk) risks.push(country.agriculturalRisk);
   if (SHARED_TITLE.test(words)) risks.push('shared title (hisseli): you buy a share, not a parcel');
   const tradeoffs = failed.filter((c) => c.id !== 'legal').map((c) => `${c.label}: no (${c.detail})`);
-  const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${unknown.map((c) => c.detail).join('; ')}` : potential.length ? `trade-off with potential: ${potential.join('; ')}` : `weak: ${tradeoffs.join('; ')}`;
-  return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };
+  const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set(unknown.map((c) => c.detail))].join('; ')}` : potential.length ? `trade-off with potential: ${potential.join('; ')}` : `weak: ${tradeoffs.join('; ')}`;
+  return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };
 }
 
 export const TIER_ORDER = { fits: 0, 'trade-off': 1, unverified: 2, blocked: 3 };
@@ -207,7 +211,8 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   if (!candidates || !strategy) return candidates;
   const model = foundation ? { ...strategy, rules: foundation.rules } : strategy;
   const euHpi = candidates.sites?.euHpi ?? null;
-  const rows = [...(candidates.kept ?? []), ...(candidates.far ?? [])].map((row) => ({ ...row, plan: planFor(row, model, { convert, euHpi }) }));
+  const trends = candidates.sites?.trends ?? null;
+  const rows = [...(candidates.kept ?? []), ...(candidates.far ?? [])].map((row) => ({ ...row, plan: planFor(row, model, { convert, euHpi, trends }) }));
   rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || (b.fit?.score ?? -1) - (a.fit?.score ?? -1));
   const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
   const { far, ...rest } = candidates;
