@@ -1,5 +1,5 @@
 import { compactProject } from './compact.mjs';
-import { repairTree } from './treeaudit.mjs';
+import { modelOf, repairTree } from './treeaudit.mjs';
 
 function snapshot(project) {
   return new Map(project.nodes.map((n) => [n.id, { parentId: n.parentId, title: n.title, status: n.status, items: (n.finding?.items ?? []).map((i) => i.url) }]));
@@ -9,7 +9,7 @@ export async function previewMaintenance(engine, original) {
   const project = structuredClone(original);
   const before = snapshot(project);
   const compacted = compactProject(project);
-  const repairs = repairTree(project.nodes, project.question);
+  const repairs = repairTree(project.nodes, project.question, modelOf({ ...project, brief: engine.briefOf(project) }));
   const regrounded = engine.reground(project);
   const rescreened = await engine.rescreenItems(project);
   const harvested = await engine.harvestAll(project);

@@ -215,8 +215,8 @@ export class ResearchEngine {
         messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
-      repairTree(tree.nodes, project.question);
-      return { reply, tree, issues: auditTree(tree.nodes, project.question, modelOf({ ...project, brief: project.brief ?? this.briefOf(project) })) };
+      repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
+      return { reply, tree, issues: auditTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) })) };
     };
     let { reply, tree, issues } = await ask('');
     if (issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced')) {
@@ -541,7 +541,7 @@ export class ResearchEngine {
   async regroundAndRescore(id, { sweep = false } = {}) {
     const project = await this.load(id);
     const compacted = compactProject(project);
-    const fixes = repairTree(project.nodes, project.question);
+    const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
     if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
     const regrounded = this.reground(project);
     await this.rescreenItems(project);
@@ -596,7 +596,7 @@ export class ResearchEngine {
       for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';
       const compacted = compactProject(project);
       if (compacted) this.emit(project, 'tree', `stored page text and links capped for ${compacted} source(s) to keep memory small`);
-      const fixes = repairTree(project.nodes, project.question);
+      const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       this.regrade(project);
       this.emit(project, 'phase', 'researching sub-questions in dependency order');

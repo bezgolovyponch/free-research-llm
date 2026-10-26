@@ -1,6 +1,6 @@
 import { ROOT_ID } from './tree.mjs';
 import { asksForItems } from './deliverable.mjs';
-import { regionsIn } from './brief.mjs';
+import { countryByCode, regionsIn } from './brief.mjs';
 import { criteriaOfText, strategyFor } from './strategy.mjs';
 
 export const CANDIDATES_TITLE = 'Candidate listings (identification)';
@@ -145,8 +145,63 @@ export function groupCandidateDrivers(nodes) {
   return [{ code: 'grouped-candidates', nodeId: host.id, detail: `${moving.map((d) => d.id).join(', ')} search for listings; moved under ${host.id} "${CANDIDATES_TITLE}" (funnel: identify → screen → include)` }];
 }
 
-export function repairTree(nodes, question = '') {
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function namesFor(code) {
+  const c = countryByCode(code);
+  return c ? [c.name, ...c.aliases] : [];
+}
+
+export function narrowText(text, regions) {
+  if (!regions?.length) return text;
+  const named = regions.map((c) => countryByCode(c)?.name).filter(Boolean);
+  const euNamed = regions.filter((c) => countryByCode(c)?.group === 'EU').map((c) => countryByCode(c).name);
+  let out = String(text ?? '');
+  const eu = euNamed.length ? euNamed.join(' and ') : named.join(' and ');
+  out = out.replace(/\b(?:the\s+)?(?:EU|E\.U\.|European Union)(?![A-Za-z])(?:\s+countries)?(?:\s*\([^)]*\))?/g, eu);
+  for (const code of regionsIn(out).filter((c) => !regions.includes(c))) {
+    for (const name of namesFor(code)) {
+      const n = escapeRe(name);
+      out = out.replace(new RegExp(`\\s*,\\s*(?:and\\s+)?${n}\\b`, 'gi'), '').replace(new RegExp(`\\b${n}\\s*(?:,\\s*|\\s+and\\s+)`, 'gi'), '').replace(new RegExp(`\\s+and\\s+${n}\\b`, 'gi'), '').replace(new RegExp(`\\b${n}\\b`, 'gi'), named.join(' and '));
+    }
+  }
+  return out.replace(/\(\s*,\s*/g, '(').replace(/,\s*\)/g, ')').replace(/\s{2,}/g, ' ').replace(/,\s*,/g, ',').replace(/,\s*and\s*,/g, ' and').replace(/\s+,/g, ',').replace(/,\s*(?:and\s*)?$/g, '').trim();
+}
+
+const DEMONYMS = { Italian: 'IT', Greek: 'GR', Croatian: 'HR', French: 'FR', German: 'DE', Spanish: 'ES', Portuguese: 'PT', Turkish: 'TR', Vietnamese: 'VN', Bulgarian: 'BG', Cypriot: 'CY', Maltese: 'MT', Albanian: 'AL', Montenegrin: 'ME', Slovenian: 'SI', Romanian: 'RO', Moroccan: 'MA', Thai: 'TH' };
+
+export function countriesIn(text) {
+  const codes = new Set(regionsIn(text));
+  for (const [word, code] of Object.entries(DEMONYMS)) if (new RegExp(`\\b${word}\\b`).test(String(text ?? ''))) codes.add(code);
+  return [...codes];
+}
+
+export function narrowRegions(nodes, regions = []) {
+  if (!regions.length) return [];
   const fixes = [];
+  for (const n of [...nodes]) {
+    if (n.parentId === null || n.parentId === undefined) continue;
+    const named = countriesIn(textOf(n));
+    const outside = named.filter((c) => !regions.includes(c));
+    if (!outside.length) continue;
+    const leaf = !nodes.some((m) => m.parentId === n.id) && !nodes.some((m) => (m.dependsOn ?? []).includes(n.id));
+    if (leaf && !named.some((c) => regions.includes(c)) && !/\b(?:EU|European Union)\b/.test(textOf(n))) {
+      nodes.splice(nodes.indexOf(n), 1);
+      fixes.push({ code: 'removed-off-scope', nodeId: n.id, detail: `${n.id} researched only ${outside.join(', ')}, outside the asked regions; removed` });
+      continue;
+    }
+    const question = narrowText(n.question, regions);
+    const narrowed = narrowText(n.title, regions);
+    const title = regionsIn(n.title).length && !regionsIn(narrowed).length ? titleFromQuestion(question).replace(/(?:\s+(?:and|or|in|of|the|for|with|to|a))+$/i, '') || narrowed : narrowed;
+    if (countriesIn(`${title} ${question}`).some((c) => !regions.includes(c))) continue;
+    Object.assign(n, { title, question, status: 'pending', finding: null, verification: null, critique: null, error: null });
+    fixes.push({ code: 'narrowed-regions', nodeId: n.id, detail: `${n.id} named ${outside.length > 4 ? `${outside.slice(0, 4).join(', ')} and ${outside.length - 4} more` : outside.join(', ')}; rewritten to the asked countries and queued for research` });
+  }
+  return fixes;
+}
+
+export function repairTree(nodes, question = '', model = {}) {
+  const fixes = [...narrowRegions(nodes, model.regions ?? [])];
   fixes.push(...mergeDuplicateDrivers(nodes, question));
   fixes.push(...groupCandidateDrivers(nodes));
   const { up } = ancestry(nodes);
@@ -184,7 +239,7 @@ export function auditModel(nodes, { regions = [], strategy = null } = {}) {
   const issues = [];
   for (const n of nodes) {
     if (n.id === ROOT_ID) continue;
-    const outside = regions.length ? regionsIn(textOf(n)).filter((c) => !regions.includes(c)) : [];
+    const outside = regions.length ? countriesIn(textOf(n)).filter((c) => !regions.includes(c)) : [];
     if (outside.length) issues.push({ code: 'outside-regions', nodeId: n.id, detail: `${n.id} names ${outside.length > 4 ? `${outside.slice(0, 4).join(', ')} and ${outside.length - 4} more` : outside.join(', ')}, outside the asked regions` });
     if (strategy && n.parentId === ROOT_ID && !asksForItems(n) && !/\b(?:identify|candidates?|listings?)\b/i.test(textOf(n)) && !criteriaOfText(strategy, textOf(n)).length) issues.push({ code: 'off-model', nodeId: n.id, detail: `${n.id} serves no check of the decision model` });
   }

@@ -142,3 +142,45 @@ describe('tree audit against the decision model', () => {
     expect(auditModel(nodes, modelOf({ templateId: 'taxes', brief: { regions: ['PT'] } }))).toEqual([]);
   });
 });
+
+describe('narrowing pieces to the asked countries', () => {
+  const regions = ['PT', 'ES', 'TR', 'VN'];
+
+  it('rewrites a group word to the members the user named and strikes countries outside the brief', async () => {
+    const { narrowText } = await import('../../src/research/treeaudit.mjs');
+    expect(narrowText('What coastal land parcels in the EU, Vietnam, and Turkey are available under 20,000 EUR?', regions)).toBe('What coastal land parcels in Portugal and Spain, Vietnam, and Turkey are available under 20,000 EUR?');
+    expect(narrowText('Find parcels in EU countries (France, Germany, Spain, Italy, Portugal, Greece) priced ≤20 000 EUR', regions)).toBe('Find parcels in Portugal and Spain priced ≤20 000 EUR');
+    expect(narrowText('portals for Spain, Portugal, Italy, Greece, Croatia, Turkey, and Vietnam, with URLs', regions)).toBe('portals for Spain, Portugal, Turkey, and Vietnam, with URLs');
+    expect(narrowText('Plots in Spain', [])).toBe('Plots in Spain');
+  });
+
+  it('queues a rewritten piece for research and names it from its question when the title had only foreign countries', async () => {
+    const { narrowRegions, repairTree } = await import('../../src/research/treeaudit.mjs');
+    const nodes = [
+      { id: 'Q', parentId: null, title: 'Q', question: 'q' },
+      { id: 'D16', parentId: 'Q', status: 'verified', finding: { answer: 'x' }, title: 'Specific land parcels in coastal Italy, Greece, and', question: 'Find 25+ specific land parcels in Turkey and Vietnam listed for sale under 20,000 EUR' },
+      { id: 'D2', parentId: 'Q', status: 'verified', finding: { answer: 'y' }, title: 'Climate', question: 'How many mild months in Portugal?' },
+    ];
+    const fixes = narrowRegions(nodes, regions);
+    expect(fixes).toEqual([{ code: 'narrowed-regions', nodeId: 'D16', detail: 'D16 named GR, IT; rewritten to the asked countries and queued for research' }]);
+    expect(nodes[1]).toMatchObject({ title: 'Find 25+ specific land parcels in Turkey', status: 'pending', finding: null });
+    expect(nodes[2]).toMatchObject({ status: 'verified' });
+    expect(repairTree(nodes, 'q', { regions }).filter((f: { code: string }) => f.code === 'narrowed-regions')).toEqual([]);
+  });
+
+  it('removes a leaf that researches only countries outside the brief, keeps a parent, and reads demonyms', async () => {
+    const { countriesIn, narrowRegions } = await import('../../src/research/treeaudit.mjs');
+    expect(countriesIn('Find Italian coastal raw land')).toEqual(['IT']);
+    const nodes = [
+      { id: 'Q', parentId: null, title: 'Q', question: 'q' },
+      { id: 'D1', parentId: 'Q', status: 'supported', title: 'Coastal plots', question: 'Find coastal plots in Spain' },
+      { id: 'D1.1', parentId: 'D1', status: 'supported', title: 'Italy – coastal raw land', question: 'Find Italian coastal raw land parcels' },
+      { id: 'D1.2', parentId: 'D1', status: 'supported', title: 'Greece', question: 'Find Greek land', dependsOn: [] },
+      { id: 'D2', parentId: 'Q', status: 'supported', title: 'Greek coast', question: 'Greek plots' },
+      { id: 'D2.1', parentId: 'D2', status: 'supported', title: 'Spain', question: 'Spanish plots' },
+    ];
+    const fixes = narrowRegions(nodes, regions);
+    expect(fixes.map((f: { code: string; nodeId: string }) => `${f.code}:${f.nodeId}`)).toEqual(['removed-off-scope:D1.1', 'removed-off-scope:D1.2']);
+    expect(nodes.map((n) => n.id)).toEqual(['Q', 'D1', 'D2', 'D2.1']);
+  });
+});
