@@ -5,6 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SECRET_PATTERNS } from '../src/secrets.mjs';
 
+import { parse as parseYaml } from 'yaml';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
 
@@ -47,6 +49,22 @@ const gates = {
       failures.push(`public/index.html: ${error.message}`);
     }
     return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : `${sourceModules(files).length} modules and the UI script parse` };
+  },
+
+  workflows(files) {
+    const workflows = files.filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f));
+    const failures = [];
+    for (const file of workflows) {
+      try {
+        const doc = parseYaml(fs.readFileSync(path.join(ROOT, file), 'utf8'));
+        const jobs = Object.entries(doc?.jobs ?? {});
+        if (!jobs.length) failures.push(`${file}: no jobs`);
+        for (const [name, job] of jobs) for (const [i, step] of (job?.steps ?? []).entries()) if (!step?.uses && !step?.run) failures.push(`${file}: job ${name} step ${i + 1} has neither uses nor run`);
+      } catch (error) {
+        failures.push(`${file}: ${String(error.message).split('\n')[0]}`);
+      }
+    }
+    return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : `${workflows.length} CI workflow file(s) parse, no duplicate keys` };
   },
 
   secrets(files) {
