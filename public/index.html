@@ -565,7 +565,7 @@ function showPage(name){
   if(name==="terminal")ensureTerminal();
   $("mobileTitle").textContent=name==="project"?"Research":name==="home"?"New research":name==="setup"?"Setup & keys":name==="router"?"Models & router":name==="assistant"?"App assistant":name[0].toUpperCase()+name.slice(1);
   if(name!=="project")closeInspector();
-  closeSidebar();renderProjectList();syncHash();
+  if(!STATE.booting)closeSidebar();renderProjectList();syncHash();
 }
 function syncHash(){
   const parts=[];
@@ -1332,7 +1332,7 @@ const CAND_COLS=[
   ["season","Months",r=>r.site&&r.site.climate?r.site.climate.workable:-1],
   ["hot","Hottest °C",r=>r.site&&r.site.climate?r.site.climate.hottest:Infinity],
   ["explore","Explore",r=>r.site?(r.site.beaches||0)+(r.site.viewpoints||0)+(r.site.attractions||0)+(r.site.reserves||0)+(r.site.protectedAreas||0)+(r.site.hikingRoutes||0):-1],
-  ["trend","Trend %",r=>r.fit&&r.fit.hpi!=null?r.fit.hpi:-Infinity],
+  ["trend","Real trend %",r=>r.plan&&r.plan.trend!=null?r.plan.trend:r.fit&&r.fit.hpi!=null?r.fit.hpi:-Infinity],
   ["country","Country",r=>String(r.country||"")+" "+String(r.place||"")],
 ];
 function sortedCandidates(rows){
@@ -1363,7 +1363,7 @@ function candidatesHtml(p){
   if(p.sweep)h+='<div class="small faint">Portal sweep: '+p.sweep.pagesRead+" listing page(s) read by code, no model calls · "+esc(String(p.sweep.at||"").slice(0,16).replace("T"," "))+"Z</div>";
   if(c.sites)h+='<div class="small faint">Site fit measured by code: sea distance, lakes and things to explore within 15 km (OpenStreetMap), workable glamping months 2021–2025 (Open-Meteo), housing-price trend (Eurostat), zoning words on the listing · '+c.sites.assessed+" measured, "+c.sites.unlocated+" without a location, "+c.sites.pending+" queued</div>";
   const link=r=>{const u=safeUrl(r.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(trunc(r.title,60))+"</a>":esc(trunc(r.title,60));};
-  const row=r=>{const tl=r.plan?TIER_LABEL[r.plan.tier]:null;const s=r.site,cl=s&&s.climate;return '<tr data-tier="'+esc(r.plan?r.plan.tier:"")+'"><td class="small">'+(tl?'<b style="color:'+tl[0]+'">'+tl[1]+"</b>":"–")+'</td><td class="small mono">'+(r.fit?esc(Math.round(r.fit.score*100)):"–")+"</td><td>"+link(r)+'</td><td class="small mono">'+num(r.plan&&r.plan.entry?r.plan.entry.total:null)+'</td><td class="small mono">'+num(r.value)+(r.currency&&r.currency!==r.unit&&r.price!=null?'<div class="faint">'+esc(Number(r.price).toLocaleString())+" "+esc(r.currency)+"</div>":"")+'</td><td class="small mono">'+num(r.plan?r.plan.areaM2:r.area)+'</td><td class="small mono">'+num(r.plan?r.plan.units:null)+'</td><td class="small mono">'+(s?esc(s.coastKm??">25"):"–")+'</td><td class="small mono">'+(cl?esc(cl.workable):"–")+'</td><td class="small mono">'+(cl?esc(cl.hottest):"–")+'</td><td class="small mono">'+(s?esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0)):"–")+'</td><td class="small mono">'+(r.fit&&r.fit.hpi!=null?"+"+esc(r.fit.hpi):"–")+'</td><td class="small">'+esc(r.country||"")+'<div class="faint">'+esc(trunc(r.place||"",30))+'</div></td><td class="small" style="min-width:260px">'+planCell(r)+(r.siteNote&&!r.site?'<div class="faint">'+esc(r.siteNote)+"</div>":"")+"</td></tr>";};
+  const row=r=>{const tl=r.plan?TIER_LABEL[r.plan.tier]:null;const s=r.site,cl=s&&s.climate;return '<tr data-tier="'+esc(r.plan?r.plan.tier:"")+'"><td class="small">'+(tl?'<b style="color:'+tl[0]+'">'+tl[1]+"</b>":"–")+'</td><td class="small mono">'+(r.fit?esc(Math.round(r.fit.score*100)):"–")+"</td><td>"+link(r)+'</td><td class="small mono">'+num(r.plan&&r.plan.entry?r.plan.entry.total:null)+'</td><td class="small mono">'+num(r.value)+(r.currency&&r.currency!==r.unit&&r.price!=null?'<div class="faint">'+esc(Number(r.price).toLocaleString())+" "+esc(r.currency)+"</div>":"")+'</td><td class="small mono">'+num(r.plan?r.plan.areaM2:r.area)+'</td><td class="small mono">'+num(r.plan?r.plan.units:null)+'</td><td class="small mono">'+(s?esc(s.coastKm??">25"):"–")+'</td><td class="small mono">'+(cl?esc(cl.workable):"–")+'</td><td class="small mono">'+(cl?esc(cl.hottest):"–")+'</td><td class="small mono">'+(s?esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0)):"–")+'</td><td class="small mono">'+(r.plan&&r.plan.trend!=null?esc((r.plan.trend>=0?"+":"")+r.plan.trend):r.fit&&r.fit.hpi!=null?esc(r.fit.hpi):"–")+'</td><td class="small">'+esc(r.country||"")+'<div class="faint">'+esc(trunc(r.place||"",30))+'</div></td><td class="small" style="min-width:260px">'+planCell(r)+(r.siteNote&&!r.site?'<div class="faint">'+esc(r.siteNote)+"</div>":"")+"</td></tr>";};
   const st=STATE.candSort||{key:"tier",dir:1};
   const head="<tr>"+CAND_COLS.map(([k,l])=>'<th data-csort="'+k+'" style="cursor:pointer;white-space:nowrap" title="Sort by '+esc(l)+'">'+esc(l)+(st.key===k?(st.dir>0?" ▲":" ▼"):"")+"</th>").join("")+"<th>Why it fits · potential · risks</th></tr>";
   if(c.kept.length){
@@ -1512,6 +1512,7 @@ $("allStop").addEventListener("click",async()=>{try{await api("/api/improve-all/
 
 (async function boot(){
   syncChatTab();
+  STATE.booting=true;
   try{SHARE.mine=await api("/api/whoami");}catch(e){SHARE.mine={share:null};}
   if(SHARE.mine.share)document.body.classList.add("shared");
   try{STATE.templates=await api("/api/templates");}catch(e){}
@@ -1519,9 +1520,11 @@ $("allStop").addEventListener("click",async()=>{try{await api("/api/improve-all/
   await loadStatus();
   await loadProjects();
   const hp=new URLSearchParams(location.hash.slice(1));
-  if(SHARE.mine.share&&hp.get("p")!==SHARE.mine.share){await openProject(SHARE.mine.share);}
-  else if(hp.get("p")){await openProject(hp.get("p"));if(hp.get("v"))setPane(hp.get("v")==="outline"?"tree":hp.get("v"));if(hp.get("n"))select(hp.get("n"));}
-  else showPage(hp.get("page")||"home");
+  try{
+    if(SHARE.mine.share&&hp.get("p")!==SHARE.mine.share){await openProject(SHARE.mine.share);}
+    else if(hp.get("p")){await openProject(hp.get("p"));if(hp.get("v"))setPane(hp.get("v")==="outline"?"tree":hp.get("v"));if(hp.get("n"))select(hp.get("n"));}
+    else showPage(hp.get("page")||"home");
+  }finally{STATE.booting=false;}
   if(mq.phone.matches)$("termCmdsWrap").open=false;
   window.addEventListener("hashchange",async()=>{const q=new URLSearchParams(location.hash.slice(1));if(SHARE.mine&&SHARE.mine.share&&(q.get("page")||q.get("p")!==SHARE.mine.share)){if(!STATE.project||STATE.page!=="project")await openProject(SHARE.mine.share);else syncHash();return;}if(q.get("page")&&q.get("page")!==STATE.page)showPage(q.get("page"));else if(q.get("p")&&(!STATE.project||STATE.project.id!==q.get("p")||STATE.page!=="project")){await openProject(q.get("p"));if(q.get("v"))setPane(q.get("v"));}});
   setInterval(async()=>{if(STATE.page==="setup")loadStatus();else if(STATE.page==="history")loadHistory();else if(STATE.project&&isLooping(STATE.project)){await loadStatus();renderHead();renderProjectList();}},8000);
