@@ -26,6 +26,20 @@ test('home composer fits the phone, menu opens every page without sideways scrol
   }
 });
 
+test('a menu opened while the app is still loading stays open', async ({ page }) => {
+  await page.route('**/api/projects', async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  await expect(page.locator('#sidebar')).toHaveClass(/\bon\b/);
+  await expect(page.locator('#projList')).not.toBeEmpty({ timeout: 10000 });
+  await page.waitForTimeout(300);
+  await expect(page.locator('#sidebar')).toHaveClass(/\bon\b/);
+  await page.unroute('**/api/projects');
+});
+
 test('builds a tree, opens a piece as a sheet, chats in it, runs, and finds it in History', async ({ page }) => {
   await page.goto('/');
   await page.locator('#inQuestion').fill('cars to sell 2000-4000 from DE to CZ profitable 15% min, trend detected');

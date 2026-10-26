@@ -55,7 +55,7 @@ ${constraintsText(constraints)}
 
 EXPECTED RESULT (what the user wants delivered at the end):
 ${expected || 'not stated — a decision memo'}
-${brief ? `\nCONCEPT BRIEF (built by code from the user's words; every piece must serve it, never research general background that does not change which items qualify):\n${brief}\n` : ''}
+${brief ? `\nCONCEPT BRIEF (built by code from the user's words; every piece must serve it, never research general background that does not change which items qualify):\n${brief}\n` : ''}${/Decision model/.test(brief) ? `\nBuild the tree from the decision model: one driver finds candidate listings in the named countries only; every other driver is one check of the decision model and researches the rule, threshold or local fact that check needs (law, cost, climate, distance). No driver may name a country outside the brief.\n` : ''}
 DOMAIN PLAYBOOK (${template.label}) — use as a checklist, adapt to the question:
 - typical drivers: ${template.drivers}
 - typical metrics: ${template.metrics}

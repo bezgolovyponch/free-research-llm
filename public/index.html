@@ -565,7 +565,7 @@ function showPage(name){
   if(name==="terminal")ensureTerminal();
   $("mobileTitle").textContent=name==="project"?"Research":name==="home"?"New research":name==="setup"?"Setup & keys":name==="router"?"Models & router":name==="assistant"?"App assistant":name[0].toUpperCase()+name.slice(1);
   if(name!=="project")closeInspector();
-  closeSidebar();renderProjectList();syncHash();
+  if(!STATE.booting)closeSidebar();renderProjectList();syncHash();
 }
 function syncHash(){
   const parts=[];
@@ -1318,26 +1318,80 @@ function renderGates(){
   $("gOnly").addEventListener("change",e=>{STATE.gatesOnlySelected=e.target.checked;renderGates();});
 }
 
+const TIER_LABEL={fits:["var(--gr)","Fits"],"trade-off":["var(--am)","Trade-off"],unverified:["var(--gray)","To confirm"],weak:["var(--rd)","Weak"],blocked:["var(--rd)","Blocked"]};
+const TIER_RANK={fits:0,"trade-off":1,unverified:2,weak:3,blocked:4};
+const CAND_COLS=[
+  ["tier","Tier",r=>r.plan?TIER_RANK[r.plan.tier]:9],
+  ["fit","Fit",r=>r.fit?r.fit.score:-1],
+  ["title","Listing",r=>String(r.title||"").toLowerCase()],
+  ["entry","Entry €",r=>r.plan&&r.plan.entry?r.plan.entry.total:Infinity],
+  ["price","Price €",r=>r.value??Infinity],
+  ["area","Area m²",r=>r.plan&&r.plan.areaM2!=null?r.plan.areaM2:(r.area??-1)],
+  ["units","Units",r=>r.plan&&r.plan.units!=null?r.plan.units:-1],
+  ["sea","Sea km",r=>r.site&&r.site.coastKm!=null?r.site.coastKm:Infinity],
+  ["season","Months",r=>r.site&&r.site.climate?r.site.climate.workable:-1],
+  ["hot","Hottest °C",r=>r.site&&r.site.climate?r.site.climate.hottest:Infinity],
+  ["explore","Explore",r=>r.site?(r.site.beaches||0)+(r.site.viewpoints||0)+(r.site.attractions||0)+(r.site.reserves||0)+(r.site.protectedAreas||0)+(r.site.hikingRoutes||0):-1],
+  ["trend","Real trend %",r=>r.plan&&r.plan.trend!=null?r.plan.trend:r.fit&&r.fit.hpi!=null?r.fit.hpi:-Infinity],
+  ["country","Country",r=>String(r.country||"")+" "+String(r.place||"")],
+];
+const OUT_COLS=[["opp","Opportunity",r=>r.plan&&r.plan.opportunity?-r.plan.opportunity.score:0]].concat(CAND_COLS.filter(c=>c[0]!=="tier"));
+function sortState(table){STATE.candSort=STATE.candSort||{};return STATE.candSort[table]||(table==="out"?{key:"opp",dir:1}:{key:"tier",dir:1});}
+function sortedCandidates(rows,table,cols){
+  const st=sortState(table);const col=cols.find(c=>c[0]===st.key)||cols[0];
+  const tier=table==="out"?"all":STATE.candTier||"all";
+  return rows.filter(r=>tier==="all"||(r.plan&&r.plan.tier===tier)).map((r,i)=>[r,i]).sort((a,b)=>{const x=col[2](a[0]),y=col[2](b[0]);return (x<y?-1:x>y?1:a[1]-b[1])*st.dir;}).map(([r])=>r);
+}
 function siteCell(r){
   if(!r.site)return (r.coast?"sea stated":"–")+(r.siteNote?'<div class="faint">'+esc(r.siteNote)+"</div>":"");
   const s=r.site,f=r.fit,cl=s.climate;
   return "<b>"+esc(Math.round(f.score*100))+"</b>/100 · sea "+esc(s.coastKm??"?")+" km"+(s.beachKm!=null?", beach "+esc(s.beachKm)+" km":"")+'<div class="faint">'+(cl?esc(cl.workable)+" workable months ("+esc(cl.comfortable)+" comfortable), hottest "+esc(cl.hottest)+"°C · ":"")+esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0))+" things to explore · zoning "+esc(f.zoning)+(f.pitches!=null?" · ~"+esc(f.pitches)+" pitches":"")+"</div>";
 }
+function planCell(r){
+  const pl=r.plan;if(!pl)return siteCell(r);
+  return '<div><b>'+esc(pl.verdict)+"</b></div>"+(pl.why.length?'<ul class="small" style="margin:2px 0 0 14px;padding:0">'+pl.why.map(w=>"<li>"+esc(w)+"</li>").join("")+"</ul>":"")+(pl.tradeoffs.length?'<div class="small" style="color:var(--am)">Trade-off: '+esc(pl.tradeoffs.join("; "))+"</div>":"")+(pl.risks.length?'<div class="small" style="color:var(--rd)">Risks: '+esc(pl.risks.join("; "))+"</div>":"");
+}
+function num(v,d){return v==null||v===Infinity||v===-Infinity||v===-1?"–":Number(v).toLocaleString(undefined,{maximumFractionDigits:d??0});}
 function candidatesHtml(p){
   const c=p.candidates;const b=p.brief;if(!c&&!(b&&b.kind))return"";
   let h='<div class="card" id="candidateTable"><div class="small faint">Concept brief · built by code from your words before any search</div><pre class="small" style="white-space:pre-wrap;margin:4px 0 8px">'+esc((b&&b.text)||"")+"</pre>";
   if(!c)return h+'<div class="small muted">No candidate table yet. Press ▶ Run: code reads the portals, screens every listing against the brief and lists the rest here.</div></div>';
   const why=Object.entries(c.screened||{}).sort((x,y)=>y[1]-x[1]).map(([r,n])=>esc(r)+" "+n).join(" · ");
-  h+='<div><b>Candidate table</b> · '+c.found+" found · <b>"+c.keptCount+" kept</b> · "+c.toCheckCount+" to check · "+c.screenedCount+" screened out"+(why?' <span class="small muted">('+why+")</span>":"")+"</div>";
+  const t=c.tiers;
+  h+='<div><b>Candidate table</b> · '+c.found+" found · <b>"+c.keptCount+(t?" fit every criterion":" kept")+"</b>"+(t?" · "+t["trade-off"]+" trade-offs · "+t.unverified+" to confirm · "+(t.weak||0)+" weak · "+t.blocked+" blocked":"")+" · "+c.toCheckCount+" to check · "+c.screenedCount+" screened out"+(why?' <span class="small muted">('+why+")</span>":"")+"</div>";
+  const fd=c.strategy&&c.strategy.foundation;
+  if(fd)h+='<details class="small" style="margin:4px 0" open><summary><b>Decision model</b> · '+(fd.complete?'<span style="color:var(--gr)">every part of your question has a code check</span>':'<span style="color:var(--rd)">not modelled: '+esc(fd.missing.join("; "))+"</span>")+' · a plot counts only when every check is measured and met; tree answers are background, never the verdict</summary><table class="rtable" style="margin-top:4px"><tr><th>Your words</th><th>Checked as</th><th>Measured by</th></tr>'+fd.clauses.map(cl=>"<tr><td>"+esc(cl.text)+"</td><td>"+esc(cl.criteria.map(id=>(fd.criteria.find(x=>x.id===id)||{label:id}).label).join(" · ")||"—")+'</td><td class="faint">'+esc(cl.criteria.map(id=>(fd.criteria.find(x=>x.id===id)||{measure:""}).measure).join(" · "))+"</td></tr>").join("")+"</table></details>";
+  if(c.strategy){const quoted=c.strategy.sources.filter(s=>s.quoted!==false);const ok=quoted.filter(s=>s.confirmed>0).length;h+='<details class="small" style="margin:4px 0"><summary>Strategy: '+esc(c.strategy.label)+" · "+ok+"/"+quoted.length+" sources re-read online"+(c.strategy.retrievedAt?" "+esc(String(c.strategy.retrievedAt).slice(0,16).replace("T"," "))+"Z":"")+"</summary>"+c.strategy.sources.map(s=>{const u=safeUrl(s.url);return '<div>'+(s.quoted===false?'<span class="faint" title="data service, read when measuring">◦</span>':s.confirmed>0?'<span style="color:var(--gr)">✓</span>':s.status?'<span style="color:var(--am)">?</span>':'<span style="color:var(--rd)">✗</span>')+" "+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(s.title)+"</a>":esc(s.title))+(s.quotes?' <span class="faint">'+esc(s.confirmed)+"/"+esc(s.quotes)+" quotes found</span>":"")+"</div>";}).join("")+'<div class="faint">Rules used: '+esc(Object.entries(c.strategy.rules).map(([k,v])=>k+" "+v.value+(v.currency?" "+v.currency:"")+" ("+v.source+")").join(" · "))+"</div></details>";}
   if(p.sweep)h+='<div class="small faint">Portal sweep: '+p.sweep.pagesRead+" listing page(s) read by code, no model calls · "+esc(String(p.sweep.at||"").slice(0,16).replace("T"," "))+"Z</div>";
-  const row=r=>{const u=safeUrl(r.url),s=safeUrl(r.sourceUrl);return "<tr><td>"+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(trunc(r.title,60))+"</a>":esc(trunc(r.title,60)))+'</td><td class="small"><b>'+esc(r.value!=null?Math.round(r.value).toLocaleString():"–")+" "+esc(r.unit||"")+"</b>"+(r.currency&&r.currency!==r.unit&&r.price!=null?'<div class="faint">'+esc(Number(r.price).toLocaleString())+" "+esc(r.currency)+"</div>":"")+'</td><td class="small">'+esc(r.area?Number(r.area).toLocaleString()+" "+(r.areaUnit||""):"–")+'</td><td class="small">'+esc(trunc(r.place||"",40))+(r.country?'<div class="faint">'+esc(r.country)+"</div>":"")+'</td><td class="small">'+siteCell(r)+'</td><td class="small">'+(s?'<a href="'+esc(s)+'" target="_blank" rel="noopener">'+esc(trunc(s.replace(/^https?:\/\/(www\.)?/,""),36))+"</a>":"–")+'</td><td class="small faint">'+esc((r.via||[]).join(", "))+(r.toCheck?'<div style="color:var(--am)">'+esc(r.toCheck)+"</div>":"")+"</td></tr>";};
-  const head='<tr><th>Listing</th><th>Price</th><th>Area</th><th>Place</th><th>Site fit · sea · season · explore</th><th>Found on</th><th>Read by</th></tr>';
-  if(c.sites)h+='<div class="small faint">Site fit measured by code: sea distance and things to explore within 15 km (OpenStreetMap), workable glamping months 2021–2025 (Open-Meteo), housing-price trend (Eurostat), zoning words on the listing · '+c.sites.assessed+" measured, "+c.sites.far+" too far from the sea, "+c.sites.unlocated+" without a location, "+c.sites.pending+" queued</div>";
-  if(c.kept.length)h+='<table class="rtable" style="margin-top:8px">'+head+c.kept.map(row).join("")+"</table>";
-  if(c.toCheck.length)h+='<details style="margin-top:8px"><summary class="small">'+c.toCheckCount+" pass every limit that the listing shows, but miss a price or a country</summary><table class=\"rtable\">"+head+c.toCheck.map(row).join("")+"</table></details>";
+  if(c.sites)h+='<div class="small faint">Site fit measured by code: sea distance, lakes and things to explore within 15 km (OpenStreetMap), workable glamping months 2021–2025 (Open-Meteo), housing-price trend (Eurostat), zoning words on the listing · '+c.sites.assessed+" measured, "+c.sites.unlocated+" without a location, "+c.sites.pending+" queued</div>";
+  const link=r=>{const u=safeUrl(r.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(trunc(r.title,60))+"</a>":esc(trunc(r.title,60));};
+  const row=r=>{const tl=r.plan?TIER_LABEL[r.plan.tier]:null;const s=r.site,cl=s&&s.climate;return '<tr data-tier="'+esc(r.plan?r.plan.tier:"")+'"><td class="small">'+(tl?'<b style="color:'+tl[0]+'">'+tl[1]+"</b>":"–")+'</td><td class="small mono">'+(r.fit?esc(Math.round(r.fit.score*100)):"–")+"</td><td>"+link(r)+'</td><td class="small mono">'+num(r.plan&&r.plan.entry?r.plan.entry.total:null)+'</td><td class="small mono">'+num(r.value)+(r.currency&&r.currency!==r.unit&&r.price!=null?'<div class="faint">'+esc(Number(r.price).toLocaleString())+" "+esc(r.currency)+"</div>":"")+'</td><td class="small mono">'+num(r.plan?r.plan.areaM2:r.area)+'</td><td class="small mono">'+num(r.plan?r.plan.units:null)+'</td><td class="small mono">'+(s?esc(s.coastKm??">25"):"–")+'</td><td class="small mono">'+(cl?esc(cl.workable):"–")+'</td><td class="small mono">'+(cl?esc(cl.hottest):"–")+'</td><td class="small mono">'+(s?esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0)):"–")+'</td><td class="small mono">'+(r.plan&&r.plan.trend!=null?esc((r.plan.trend>=0?"+":"")+r.plan.trend):r.fit&&r.fit.hpi!=null?esc(r.fit.hpi):"–")+'</td><td class="small">'+esc(r.country||"")+'<div class="faint">'+esc(trunc(r.place||"",30))+'</div></td><td class="small" style="min-width:260px">'+planCell(r)+(r.siteNote&&!r.site?'<div class="faint">'+esc(r.siteNote)+"</div>":"")+"</td></tr>";};
+  const headOf=(table,cols,last)=>{const st=sortState(table);return "<tr>"+cols.map(([k,l])=>'<th data-csort="'+k+'" data-ctable="'+table+'" style="cursor:pointer;white-space:nowrap" title="Sort by '+esc(l)+'">'+esc(l)+(st.key===k?(st.dir>0?" ▲":" ▼"):"")+"</th>").join("")+"<th>"+last+"</th></tr>";};
+  const head=headOf("in",CAND_COLS,"Why it fits · potential · risks");
+  if(c.kept.length){
+    const tiers=["all","fits","trade-off","unverified","weak","blocked"].filter(x=>x==="all"||!t||t[x]);
+    h+='<div class="row" style="gap:4px;margin-top:8px;flex-wrap:wrap"><span class="small faint">Show:</span>'+tiers.map(x=>'<button class="btn '+((STATE.candTier||"all")===x?"secondary":"ghost")+' sm" data-ctier="'+x+'">'+(x==="all"?"All "+c.kept.length:TIER_LABEL[x][1]+" "+t[x])+"</button>").join("")+'<span class="small faint">· click a column to sort</span></div>';
+    h+='<div class="tablewrap"><table class="rtable" id="candRows" style="margin-top:6px">'+head+sortedCandidates(c.kept,"in",CAND_COLS).map(row).join("")+"</table></div>";
+  }
+  const out=c.outside||[];
+  if(out.length){
+    const outRow=r=>{const op=r.plan&&r.plan.opportunity;const base=row(r).replace(/^<tr[^>]*><td class="small">[\s\S]*?<\/td>/,'<tr><td class="small mono"><b>'+esc(op?op.score:"–")+"</b></td>");return base.replace(/<td class="small" style="min-width:260px">[\s\S]*<\/td><\/tr>$/,'<td class="small" style="min-width:260px">'+(op?'<ul class="small" style="margin:0 0 0 14px;padding:0">'+op.reasons.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul>":"")+(r.plan&&r.plan.risks.length?'<div class="small" style="color:var(--rd)">Risks: '+esc(r.plan.risks.join("; "))+"</div>":"")+"</td></tr>");};
+    h+='<details id="outsideTable" style="margin-top:12px" open><summary><b>Outside your countries, worth a look</b> · '+out.length+' plot(s) that pass every limit except the country, ranked by opportunity: site checks met, real price trend and its 5-year continuation, scenic places with few campsites yet, entry cost. They never count toward your result.</summary><div class="tablewrap"><table class="rtable" id="outRows" style="margin-top:6px">'+headOf("out",OUT_COLS,"Why it is worth a look · risks")+sortedCandidates(out,"out",OUT_COLS).map(outRow).join("")+"</table></div></details>";
+  }
+  const oldHead='<tr><th>Listing</th><th>Price</th><th>Area</th><th>Place</th><th>Site fit · sea · season · explore</th></tr>';
+  const oldRow=r=>"<tr><td>"+link(r)+'</td><td class="small">'+num(r.value)+" "+esc(r.unit||"")+'</td><td class="small">'+esc(r.area?Number(r.area).toLocaleString()+" "+(r.areaUnit||""):"–")+'</td><td class="small">'+esc(trunc(r.place||"",40))+(r.country?'<div class="faint">'+esc(r.country)+"</div>":"")+'</td><td class="small">'+siteCell(r)+(r.toCheck?'<div style="color:var(--am)">'+esc(r.toCheck)+"</div>":"")+"</td></tr>";
+  if(c.toCheck.length)h+='<details style="margin-top:8px"><summary class="small">'+c.toCheckCount+" pass every limit that the listing shows, but miss a price or a country</summary><table class=\"rtable\">"+oldHead+c.toCheck.map(oldRow).join("")+"</table></details>";
   if((c.examples||[]).length)h+='<details style="margin-top:8px"><summary class="small">Examples of screened-out listings and why</summary>'+c.examples.map(e=>{const u=safeUrl(e.url);return '<div class="small">• '+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(trunc(e.title||u,60))+"</a>":esc(e.title))+' <span class="faint">— '+esc(e.reasons.join("; "))+"</span></div>";}).join("")+"</details>";
   return h+"</div>";
 }
+document.addEventListener("click",e=>{
+  const th=e.target.closest&&e.target.closest("th[data-csort]");
+  const tb=e.target.closest&&e.target.closest("button[data-ctier]");
+  if(!th&&!tb)return;
+  if(th){const k=th.dataset.csort,t=th.dataset.ctable||"in";const st=sortState(t);STATE.candSort[t]={key:k,dir:st.key===k?-st.dir:1};}
+  if(tb)STATE.candTier=tb.dataset.ctier;
+  renderResults();
+});
 function renderResults(){
   const p=STATE.project;const box=$("resultsBody");if(!box)return;
   const ar=p.acceptanceResult;const r=p.report;const good=p.nodes.filter(n=>["verified","supported"].includes(n.status));const weak=p.nodes.filter(n=>!["verified","supported","pending","researching"].includes(n.status));
@@ -1465,6 +1519,7 @@ $("allStop").addEventListener("click",async()=>{try{await api("/api/improve-all/
 
 (async function boot(){
   syncChatTab();
+  STATE.booting=true;
   try{SHARE.mine=await api("/api/whoami");}catch(e){SHARE.mine={share:null};}
   if(SHARE.mine.share)document.body.classList.add("shared");
   try{STATE.templates=await api("/api/templates");}catch(e){}
@@ -1472,9 +1527,11 @@ $("allStop").addEventListener("click",async()=>{try{await api("/api/improve-all/
   await loadStatus();
   await loadProjects();
   const hp=new URLSearchParams(location.hash.slice(1));
-  if(SHARE.mine.share&&hp.get("p")!==SHARE.mine.share){await openProject(SHARE.mine.share);}
-  else if(hp.get("p")){await openProject(hp.get("p"));if(hp.get("v"))setPane(hp.get("v")==="outline"?"tree":hp.get("v"));if(hp.get("n"))select(hp.get("n"));}
-  else showPage(hp.get("page")||"home");
+  try{
+    if(SHARE.mine.share&&hp.get("p")!==SHARE.mine.share){await openProject(SHARE.mine.share);}
+    else if(hp.get("p")){await openProject(hp.get("p"));if(hp.get("v"))setPane(hp.get("v")==="outline"?"tree":hp.get("v"));if(hp.get("n"))select(hp.get("n"));}
+    else showPage(hp.get("page")||"home");
+  }finally{STATE.booting=false;}
   if(mq.phone.matches)$("termCmdsWrap").open=false;
   window.addEventListener("hashchange",async()=>{const q=new URLSearchParams(location.hash.slice(1));if(SHARE.mine&&SHARE.mine.share&&(q.get("page")||q.get("p")!==SHARE.mine.share)){if(!STATE.project||STATE.page!=="project")await openProject(SHARE.mine.share);else syncHash();return;}if(q.get("page")&&q.get("page")!==STATE.page)showPage(q.get("page"));else if(q.get("p")&&(!STATE.project||STATE.project.id!==q.get("p")||STATE.page!=="project")){await openProject(q.get("p"));if(q.get("v"))setPane(q.get("v"));}});
   setInterval(async()=>{if(STATE.page==="setup")loadStatus();else if(STATE.page==="history")loadHistory();else if(STATE.project&&isLooping(STATE.project)){await loadStatus();renderHead();renderProjectList();}},8000);

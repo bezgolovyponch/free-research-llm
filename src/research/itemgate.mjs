@@ -28,10 +28,14 @@ function decodedUrl(url) {
   }
 }
 
+function hasTerm(text, term) {
+  return new RegExp(`(?:^|[^a-z])${plain(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:e?s)?(?![a-z])`).test(text);
+}
+
 export function isKind(item, kind) {
   if (!kind?.terms?.length) return true;
   const text = plain(`${item.title} ${decodedUrl(item.url)}`);
-  return kind.terms.some((term) => new RegExp(`(?:^|[^a-z])${plain(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:e?s)?(?![a-z])`).test(text));
+  return kind.terms.some((term) => hasTerm(text, term)) && !(kind.not ?? []).some((term) => hasTerm(text, term));
 }
 
 export function screenItem(item, { valueRange = null, unit = '', convert = (v) => v, kind = null } = {}) {

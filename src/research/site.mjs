@@ -1,4 +1,8 @@
 import fs from 'node:fs/promises';
+import { countryByCode, regionsIn } from './brief.mjs';
+import { areaFromText } from '../search/listings.mjs';
+
+export const GONE_STATUS = new Set([404, 410]);
 
 export const EBIKE_KM = 25;
 export const NEAR_KM = 15;
@@ -20,7 +24,8 @@ export const RURAL_PARK_MAX_PITCHES = 30;
 export const POI_SATURATION = 200;
 export const LODGING_SATURATION = 300;
 const MAX_SITES = 2000;
-export const STORE_VERSION = 2;
+export const STORE_VERSION = 4;
+const STORE_TABLES = ['sites', 'places', 'hpi', 'points', 'facts'];
 export const RETRY_STATUS = new Set([429, 502, 503, 504]);
 export const RETRY_WAITS_MS = [10000, 30000];
 const USER_AGENT = 'free-research-llm (site fit; https://github.com/bezgolovyponch/free-research-llm)';
@@ -28,7 +33,12 @@ const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 const HPI_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hpi_a';
+const HICP_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_aind';
+export const MIN_PLACE_RANK = 12;
 const EUROSTAT_CODE = { GR: 'EL' };
+export const EU_AGGREGATE = 'EU27_2020';
+const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"][name]';
+export const TITLE_PLACE_KM = 25;
 const COUNT_FILTERS = {
   viewpoints: '[tourism=viewpoint]',
   attractions: '[tourism=attraction]',
@@ -64,8 +74,18 @@ export function overpassQuery(lat, lon, coastKm = 10) {
     '[out:json][timeout:120];',
     `way(around:${coastKm * 1000},${lat},${lon})[natural=coastline];out geom;`,
     `nwr${near}[natural=beach];out center;`,
+    `nwr${near}${LAKE_FILTER};out center;`,
     ...Object.values(COUNT_FILTERS).map((f) => `nwr${near}${f};out count;`),
   ].join('');
+}
+
+export function lakeQuery(lat, lon) {
+  return `[out:json][timeout:120];nwr(around:${NEAR_KM * 1000},${lat},${lon})${LAKE_FILTER};out center;`;
+}
+
+export function parseLakes(json, lat, lon) {
+  const lakes = (json?.elements ?? []).filter((e) => e.tags?.natural === 'water' && e.tags?.name).map((e) => ({ lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  return nearestKm(lat, lon, lakes);
 }
 
 export function coastQuery(lat, lon) {
@@ -81,7 +101,7 @@ export function parseSurroundings(json, lat, lon) {
   const beaches = elements.filter((e) => e.tags?.natural === 'beach').map((b) => ({ lat: b.lat ?? b.center?.lat, lon: b.lon ?? b.center?.lon })).filter((b) => Number.isFinite(b.lat) && Number.isFinite(b.lon));
   const counts = elements.filter((e) => e.type === 'count').map((e) => Number(e.tags?.total ?? 0));
   const named = Object.fromEntries(Object.keys(COUNT_FILTERS).map((key, i) => [key, counts[i] ?? 0]));
-  return { coastKm: nearestKm(lat, lon, coastPoints(elements)), beaches: beaches.length, beachKm: nearestKm(lat, lon, beaches), ...named };
+  return { coastKm: nearestKm(lat, lon, coastPoints(elements)), beaches: beaches.length, beachKm: nearestKm(lat, lon, beaches), lakeKm: parseLakes(json, lat, lon), lakesNamed: true, ...named };
 }
 
 export function parseCoast(json, lat, lon) {
@@ -160,6 +180,28 @@ export function zoningOf(row) {
   return 'not stated';
 }
 
+export function yearly(d) {
+  const index = d?.dimension?.time?.category?.index ?? {};
+  return Object.fromEntries(Object.entries(index).filter(([, i]) => d.value?.[i] !== undefined).map(([year, i]) => [year, Number(d.value[i])]));
+}
+
+export function realChange(nominal, inflation) {
+  return round(((1 + nominal / 100) / (1 + inflation / 100) - 1) * 100, 1);
+}
+
+export function realCagr(hpi, hicp, years) {
+  if (years.length < 2) return null;
+  const factor = years.reduce((f, y) => f * ((1 + hpi[y] / 100) / (1 + hicp[y] / 100)), 1);
+  return round((factor ** (1 / years.length) - 1) * 100, 1);
+}
+
+export function trendOf(hpi, hicp) {
+  const years = Object.keys(hpi).filter((y) => hicp[y] !== undefined).sort();
+  const year = years.at(-1);
+  if (!year) return null;
+  return { change: hpi[year], inflation: hicp[year], real: realChange(hpi[year], hicp[year]), year, realCagr: realCagr(hpi, hicp, years), since: years[0] };
+}
+
 export function fitOf(row, site, { hpi = null, maxValue = null } = {}) {
   const zoning = zoningOf(row);
   const parts = {
@@ -196,6 +238,20 @@ export function pageCoordinates(html) {
   return null;
 }
 
+const GENERIC_TITLE = /\b(?:terreno|terrenos|rustic|rústic|urban|venda|vende|lote|plot|land|sale|satılık|satilik|tarla|arsa|parcela|finca|solar|quinta|perto|near|com|with|para|for|zona|sea|mar|praia|beach|vista|view|ref|id)\b/i;
+
+const ADMIN_AREA = /\b(?:region|regi[aã]o|regi[oó]n|district|distrito|province|prov[ií]ncia|county|state|condado|b[oö]lgesi|il[cç]e|t[iỉ]nh)\b/i;
+
+export function titlePlaces(title, kindTerms = []) {
+  const kind = new RegExp(`\\b(?:${kindTerms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') || 'x^'})\\b`, 'i');
+  const segments = String(title ?? '').split(/\s*[,|–—]\s*|\s+-\s+/).map((s) => s.trim());
+  return segments.filter((s) => /^\p{Lu}/u.test(s) && !/\d/.test(s) && s.split(/\s+/).length <= 4 && !GENERIC_TITLE.test(s) && !ADMIN_AREA.test(s) && !kind.test(s) && !countryByCode(s.toUpperCase()) && !regionsIn(s).length);
+}
+
+export function titlePlace(title, kindTerms = []) {
+  return titlePlaces(title, kindTerms)[0] ?? null;
+}
+
 export function shortSite(site) {
   if (!site) return null;
   const { climate, ...rest } = site;
@@ -216,8 +272,9 @@ export class SiteAssessor {
     this.file = file;
     this.now = now;
     this.sleep = sleep;
-    this.fetchJson = fetchJson ?? ((url, init) => this.httpJson(url, init));
-    this.store = { sites: {}, places: {}, hpi: {}, points: {} };
+    this.httpJsonBound = (url, init) => this.httpJson(url, init);
+    this.fetchJson = fetchJson ?? this.httpJsonBound;
+    this.store = { sites: {}, places: {}, hpi: {}, points: {}, facts: {} };
     this.loaded = !file;
     this.writing = Promise.resolve();
     this.lastGeocode = -Infinity;
@@ -234,29 +291,58 @@ export class SiteAssessor {
     }
   }
 
-  async load() {
-    if (this.loaded) return this;
+  worker() {
+    return this.file ? new SiteAssessor({ file: this.file, fetchJson: this.fetchJson === this.httpJsonBound ? null : this.fetchJson, now: this.now, sleep: this.sleep }) : null;
+  }
+
+  async readStore() {
     try {
       const parsed = JSON.parse(await fs.readFile(this.file, 'utf8'));
-      if (parsed && typeof parsed === 'object') {
-        const current = parsed.version === STORE_VERSION;
-        this.store = { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: parsed.hpi ?? {}, points: current ? parsed.points ?? {} : {} };
-      }
+      if (!parsed || typeof parsed !== 'object') return null;
+      const current = parsed.version === STORE_VERSION;
+      const looked = (entry) => String(entry?.point?.by ?? '').startsWith('place');
+      const points = Object.fromEntries(Object.entries(parsed.points ?? {}).filter(([, entry]) => current || !looked(entry)));
+      return { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: current ? parsed.hpi ?? {} : {}, points, facts: parsed.facts ?? {} };
     } catch {
-      this.store = { sites: {}, places: {}, hpi: {}, points: {} };
+      return null;
     }
+  }
+
+  merge(other) {
+    if (!other) return;
+    for (const table of STORE_TABLES) {
+      const mine = this.store[table] ?? {};
+      for (const [key, entry] of Object.entries(other[table] ?? {})) if (!mine[key] || (entry?.at ?? 0) > (mine[key]?.at ?? 0)) mine[key] = entry;
+      this.store[table] = mine;
+    }
+  }
+
+  async load() {
+    if (this.loaded) return this;
+    this.merge(await this.readStore());
     this.loaded = true;
     return this;
   }
 
+  async reload() {
+    if (!this.file) return this;
+    await this.writing;
+    this.merge(await this.readStore());
+    this.loaded = true;
+    return this;
+  }
+
+
   persist() {
     if (!this.file) return this.writing;
-    for (const table of ['sites', 'places', 'points']) {
-      const keys = Object.keys(this.store[table]);
-      for (const key of keys.slice(0, Math.max(0, keys.length - MAX_SITES))) delete this.store[table][key];
-    }
-    const body = JSON.stringify({ version: STORE_VERSION, ...this.store });
-    this.writing = this.writing.then(() => fs.writeFile(this.file, body)).catch(() => {});
+    this.writing = this.writing.then(async () => {
+      this.merge(await this.readStore());
+      for (const table of ['sites', 'places', 'points', 'facts']) {
+        const keys = Object.entries(this.store[table]).sort((a, b) => (a[1]?.at ?? 0) - (b[1]?.at ?? 0)).map(([key]) => key);
+        for (const key of keys.slice(0, Math.max(0, keys.length - MAX_SITES))) delete this.store[table][key];
+      }
+      await fs.writeFile(this.file, JSON.stringify({ version: STORE_VERSION, ...this.store }));
+    }).catch(() => {});
     return this.writing;
   }
 
@@ -279,7 +365,8 @@ export class SiteAssessor {
     const only = /^[A-Z]{2}$/.test(countryCode) ? `&countrycodes=${countryCode.toLowerCase()}` : '';
     const found = await this.fetchJson(`${NOMINATIM_URL}?format=json&limit=1${only}&q=${encodeURIComponent(query)}`);
     const hit = Array.isArray(found) ? found[0] : null;
-    const point = hit && namesRegion(hit.display_name, query) ? { lat: Number(hit.lat), lon: Number(hit.lon), by: `place "${query}"` } : null;
+    const fine = hit && (hit.place_rank === undefined || Number(hit.place_rank) >= MIN_PLACE_RANK);
+    const point = fine && namesRegion(hit.display_name, query) ? { lat: Number(hit.lat), lon: Number(hit.lon), by: `place "${query}"` } : null;
     this.store.places[key] = { at: this.now(), point };
     this.persist();
     return point;
@@ -297,18 +384,47 @@ export class SiteAssessor {
     return point;
   }
 
+  async titleConflict(row, point, brief) {
+    if (!row.country) return null;
+    const names = titlePlaces(row.title, brief?.kind?.terms ?? []).filter((n) => !String(row.place ?? '').toLowerCase().includes(n.toLowerCase())).slice(0, 2);
+    const far = [];
+    for (const name of names) {
+      const named = await this.geocode(`${name}, ${row.country}`, row.countryCode ?? '');
+      if (!named) continue;
+      const km = haversineKm(point.lat, point.lon, named.lat, named.lon);
+      if (km <= TITLE_PLACE_KM) return null;
+      far.push(`${name}, ${Math.round(km)} km`);
+    }
+    return far.length ? `the title names ${far.join(' and ')} from where the listing's map puts it` : null;
+  }
+
+  noteFacts(url, page) {
+    if (page) this.store.facts[url] = { at: this.now(), gone: GONE_STATUS.has(page.status) ? page.status : 0, area: areaFromText(page.text) };
+  }
+
+  async factsOf(row, readPage) {
+    if (row.area || this.store.facts[row.url] || !readPage || this.reads >= this.limits.pageReads) return this.store.facts[row.url] ?? null;
+    this.reads++;
+    this.noteFacts(row.url, await readPage(row.url).catch(() => null));
+    this.persist();
+    return this.store.facts[row.url] ?? null;
+  }
+
   async findPoint(row, readPage) {
     let page = null;
     if (readPage) {
       page = await readPage(row.url).catch(() => null);
+      this.noteFacts(row.url, page);
+      if (GONE_STATUS.has(page?.status)) return null;
       if (page?.coords) return { ...page.coords, by: 'listing page' };
     }
     const place = String(row.place || page?.place || '').trim();
     if (!place) return null;
-    const parts = [...new Set(place.split(/,|\s+-\s+/).map((p) => p.trim()).filter(Boolean))];
+    const country = countryByCode(row.countryCode ?? '');
+    const countryWords = new Set([row.countryCode, row.country, ...(country ? [country.name, ...country.aliases] : [])].filter(Boolean).map(fold));
+    const parts = [...new Set(place.split(/,|\s+-\s+/).map((p) => p.trim()).filter((p) => p && !countryWords.has(fold(p))))];
     for (let k = 0; k < parts.length; k++) {
       const rest = parts.slice(k).join(', ');
-      if (row.country && rest.toLowerCase() === row.country.toLowerCase()) break;
       const query = row.country && !rest.toLowerCase().includes(row.country.toLowerCase()) ? `${rest}, ${row.country}` : rest;
       const point = await this.geocode(query, row.countryCode ?? '');
       if (point) return k ? { ...point, by: `${point.by}, the nearest place found for "${place}"` } : point;
@@ -330,6 +446,21 @@ export class SiteAssessor {
     return site;
   }
 
+  async trends(rows) {
+    const codes = [...new Set(rows.map((r) => r.countryCode).filter(Boolean)), EU_AGGREGATE];
+    const trends = {};
+    for (const code of codes) trends[code] = await this.priceTrend(code);
+    return { trends, euHpi: trends[EU_AGGREGATE]?.real ?? null };
+  }
+
+  async addLakes(lat, lon, site) {
+    const post = (query) => this.fetchJson(OVERPASS_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}` });
+    const withLakes = { ...site, lakeKm: parseLakes(await post(lakeQuery(lat, lon)), lat, lon), lakesNamed: true };
+    this.store.sites[siteKey(lat, lon)] = { at: this.store.sites[siteKey(lat, lon)]?.at ?? this.now(), site: withLakes };
+    this.persist();
+    return withLakes;
+  }
+
   async priceTrend(code) {
     if (!code) return null;
     const known = this.store.hpi[code];
@@ -338,10 +469,9 @@ export class SiteAssessor {
     let value = null;
     try {
       const geo = EUROSTAT_CODE[code] ?? code;
-      const d = await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`);
-      const years = Object.entries(d?.dimension?.time?.category?.index ?? {}).sort((a, b) => b[1] - a[1]);
-      const latest = years.find(([, i]) => d.value?.[i] !== undefined);
-      value = latest ? { change: Number(d.value[latest[1]]), year: latest[0] } : null;
+      const hpi = yearly(await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`));
+      const hicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${geo}&sinceTimePeriod=2020`));
+      value = trendOf(hpi, hicp);
     } catch {
       value = null;
     }
@@ -350,66 +480,94 @@ export class SiteAssessor {
     return value;
   }
 
-  async apply(candidates, brief, { readPage = null, onProgress = () => {}, mode = 'budget' } = {}) {
-    this.limits = MODES[mode] ?? MODES.budget;
-    if (!candidates?.kept?.length) return candidates;
-    await this.load();
-    const started = this.now();
-    const maxValue = brief?.valueRange?.[1] ?? null;
-    let fresh = 0;
-    const stats = { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 };
-    const kept = [];
+
+  async measureRows(rows, brief, ctx) {
+    const { readPage, onProgress, stats, started, maxValue } = ctx;
+    const near = [];
     const far = [];
-    this.reads = 0;
-    for (const row of candidates.kept) {
+    const gone = [];
+    for (const original of rows) {
       try {
-        const point = await this.locate(row, readPage);
+        const point = await this.locate(original, readPage);
+        const facts = await this.factsOf(original, readPage);
+        if (facts?.gone) {
+          gone.push({ ...original, goneStatus: facts.gone });
+          continue;
+        }
+        const row = original.area || !facts?.area ? original : { ...original, area: facts.area, areaUnit: 'm²', areaBy: 'listing page' };
         if (point === undefined) {
           stats.pending++;
-          kept.push({ ...row, site: null, fit: null, siteNote: 'site check queued for the next pass' });
+          near.push({ ...row, site: null, fit: null, siteNote: 'site check queued for the next pass' });
           continue;
         }
         if (!point) {
           stats.unlocated++;
-          kept.push({ ...row, site: null, fit: null, siteNote: 'location not shown' });
+          near.push({ ...row, site: null, fit: null, siteNote: 'location not shown' });
           continue;
         }
         stats.located++;
         let site = this.cachedSite(point.lat, point.lon);
         if (!site) {
-          if (fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
+          if (ctx.fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
             stats.pending++;
-            kept.push({ ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
+            near.push({ ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
             continue;
           }
-          fresh++;
+          ctx.fresh++;
           site = await this.assess(point.lat, point.lon);
           onProgress(stats);
         }
         stats.assessed++;
+        if (!site.lakesNamed && ctx.fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
+          ctx.fresh++;
+          site = await this.addLakes(point.lat, point.lon, site);
+        }
+        const conflict = await this.titleConflict(row, point, brief);
         const trend = await this.priceTrend(row.countryCode);
-        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, site, { hpi: trend?.change ?? null, maxValue }) };
+        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, site, { hpi: trend?.real ?? null, maxValue }), ...(conflict ? { placeConflict: conflict } : {}) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
           far.push(assessed);
-        } else kept.push(assessed);
+        } else near.push(assessed);
       } catch (error) {
         stats.failed++;
-        kept.push({ ...row, site: null, fit: null, siteNote: `site check failed: ${String(error.message).slice(0, 80)}` });
+        near.push({ ...original, site: null, fit: null, siteNote: `site check failed: ${String(error.message).slice(0, 80)}` });
       }
     }
+    return { near, far, gone };
+  }
+
+  async apply(candidates, brief, { readPage = null, onProgress = () => {}, mode = 'budget' } = {}) {
+    this.limits = MODES[mode] ?? MODES.budget;
+    if (!candidates?.kept?.length && !candidates?.outside?.length) return candidates;
+    await this.load();
+    this.reads = 0;
+    const stats = { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 };
+    const ctx = { readPage, onProgress, stats, started: this.now(), maxValue: brief?.valueRange?.[1] ?? null, fresh: 0 };
+    const inside = await this.measureRows(candidates.kept ?? [], brief, ctx);
+    const kept = inside.near;
+    const { far, gone } = inside;
+    const outsideStats = { ...stats };
+    const beyond = await this.measureRows(candidates.outside ?? [], brief, { ...ctx, stats: outsideStats });
     kept.sort((a, b) => (b.fit?.score ?? -1) - (a.fit?.score ?? -1));
     const reason = `farther than ${EBIKE_KM} km from the sea`;
-    const screened = far.length ? { ...candidates.screened, [reason]: (candidates.screened?.[reason] ?? 0) + far.length } : candidates.screened;
-    const examples = [...(candidates.examples ?? []), ...far.slice(0, 10).map((r) => ({ title: String(r.title ?? '').slice(0, 100), url: r.url, reasons: [`${reason} (${r.site.coastKm ?? `>${EBIKE_KM}`} km)`] }))].slice(-40);
+    const removed = 'listing removed from the portal';
+    const screened = { ...candidates.screened };
+    if (far.length) screened[reason] = (screened[reason] ?? 0) + far.length;
+    if (gone.length) screened[removed] = (screened[removed] ?? 0) + gone.length;
+    const examples = [...(candidates.examples ?? []), ...gone.slice(0, 10).map((r) => ({ title: String(r.title ?? '').slice(0, 100), url: r.url, reasons: [`${removed} (HTTP ${r.goneStatus})`] })), ...far.slice(0, 10).map((r) => ({ title: String(r.title ?? '').slice(0, 100), url: r.url, reasons: [`${reason} (${r.site.coastKm ?? `>${EBIKE_KM}`} km)`] }))].slice(-40);
     return {
       ...candidates,
       kept,
-      keptCount: candidates.keptCount - far.length,
+      keptCount: (candidates.keptCount ?? 0) - far.length - gone.length,
       screened,
-      screenedCount: candidates.screenedCount + far.length,
+      screenedCount: (candidates.screenedCount ?? 0) + far.length + gone.length,
       examples,
-      sites: { ...stats, at: new Date(this.now()).toISOString() },
+      far,
+      farReason: reason,
+      outside: [...beyond.near, ...beyond.far],
+      sites: { ...stats, ...(await this.trends([...(candidates.kept ?? []), ...(candidates.outside ?? [])])), at: new Date(this.now()).toISOString() },
     };
   }
+
 }

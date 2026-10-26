@@ -2,7 +2,7 @@ import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt, withGuidance } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
-import { BLOCKING, MAX_DRIVERS, auditTree, cleanTitle, duplicateAmong, duplicateOf } from './treeaudit.mjs';
+import { BLOCKING, MAX_DRIVERS, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf } from './treeaudit.mjs';
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
 import { Mutex } from './lanes.mjs';
 import { mergeTrial, trialConflict } from './trialmerge.mjs';
@@ -153,7 +153,7 @@ function itemKeys(node) {
 }
 
 export function structuralIssues(project) {
-  return auditTree(project.nodes, project.question).filter((i) => BLOCKING.has(i.code)).map((i) => `${i.code}:${i.nodeId}`);
+  return auditTree(project.nodes, project.question, modelOf(project)).filter((i) => BLOCKING.has(i.code)).map((i) => `${i.code}:${i.nodeId}`);
 }
 
 export function cannotGain(oldNode, newNode) {
@@ -415,6 +415,7 @@ export class ProjectImprover {
     while (this.live(state)) {
       const improved = await this.whenModelsAnswer(id, state, () => this.pass(id, state));
       await this.saveCheckpoint(id, state);
+      if (this.engine.siteWarm?.get(id)?.ready) await this.rebase(id, state);
       quiet = improved ? 0 : quiet + 1;
       await state.lock.run(async () => {
         const current = await this.engine.load(id);
@@ -424,6 +425,17 @@ export class ProjectImprover {
     state.spawn = null;
     this.engine.leave(id);
     await this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
+  }
+
+  async rebase(id, state) {
+    await state.lock.run(async () => {
+      const project = await this.engine.applyWarmed(id);
+      if (!project) return;
+      const before = state.best.score;
+      state.best = state.measure(project);
+      await this.record(id, { best: state.best.score, rebased: { at: new Date(this.now()).toISOString(), from: before, to: state.best.score } });
+      this.engine.emit(project, 'improve-state', `baseline re-measured after new site measurements: ${before} → ${state.best.score}; trials compare against this`);
+    });
   }
 
   async whenModelsAnswer(id, state, step) {

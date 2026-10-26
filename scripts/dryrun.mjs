@@ -31,5 +31,8 @@ const c = report.candidates;
 if (c) console.log(`candidate table (no new page reads): ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
 if (c?.sites) {
   console.log(`\nsite fit: ${JSON.stringify(c.sites)}`);
-  for (const r of c.kept.slice(0, 25)) console.log(`  ${r.fit ? r.fit.score.toFixed(2) : ' -  '} | ${r.value ?? '?'} ${r.unit} | ${r.area ?? '?'} m² | sea ${r.site?.coastKm ?? '?'} km | ${r.site?.climate ? `${r.site.climate.workable} workable / ${r.site.climate.comfortable} comfortable months, hottest ${r.site.climate.hottest}°C` : r.siteNote ?? ''} | explore ${r.site ? r.site.beaches + r.site.viewpoints + r.site.attractions + r.site.reserves + r.site.protectedAreas + r.site.hikingRoutes : '?'} | ${r.fit?.zoning ?? ''} | ${r.country} | ${r.url}`);
+  if (c.tiers) {
+    console.log(`\ntiers: ${JSON.stringify(c.tiers)} · EU price trend ${c.sites.euHpi ?? '?'}%`);
+    for (const r of c.kept) console.log(`  [${r.plan.tier}] ${r.country} | €${r.value ?? '?'} | entry ${r.plan.entry?.total ?? '?'} | ${r.plan.areaM2 ?? '?'} m² | sea ${r.site?.coastKm ?? '?'} km | ${r.plan.verdict}\n      why: ${r.plan.why.join('; ')}${r.plan.risks.length ? `\n      risks: ${r.plan.risks.join('; ')}` : ''}\n      ${r.url}`);
+  } else for (const r of c.kept.slice(0, 25)) console.log(`  ${r.fit ? r.fit.score.toFixed(2) : ' -  '} | ${r.value ?? '?'} ${r.unit} | ${r.area ?? '?'} m² | sea ${r.site?.coastKm ?? '?'} km | ${r.site?.climate ? `${r.site.climate.workable} workable / ${r.site.climate.comfortable} comfortable months, hottest ${r.site.climate.hottest}°C` : r.siteNote ?? ''} | explore ${r.site ? r.site.beaches + r.site.viewpoints + r.site.attractions + r.site.reserves + r.site.protectedAreas + r.site.hikingRoutes : '?'} | ${r.fit?.zoning ?? ''} | ${r.country} | ${r.url}`);
 }

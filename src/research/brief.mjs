@@ -102,18 +102,39 @@ function namesOf(code) {
   return c ? [c.name, ...c.aliases] : [];
 }
 
-export function regionsIn(text) {
+function namedCountries(text) {
   const t = plain(text);
-  const codes = new Set();
-  for (const [group, pattern] of Object.entries(GROUPS)) if (pattern.test(t)) for (const [code, , , g] of COUNTRIES) if (g === group) codes.add(code);
-  for (const [code, name, aliases] of COUNTRIES) if ([name, ...aliases].some((w) => mentions(t, w))) codes.add(code);
+  return COUNTRIES.filter(([, name, aliases]) => [name, ...aliases].some((w) => mentions(t, w))).map(([code]) => code);
+}
+
+function groupsIn(text) {
+  return Object.keys(GROUPS).filter((g) => GROUPS[g].test(plain(text)));
+}
+
+function membersOf(group) {
+  return COUNTRIES.filter((row) => row[3] === group).map(([code]) => code);
+}
+
+export function openGroups(text) {
+  const named = new Set(namedCountries(text));
+  return groupsIn(text).filter((g) => !membersOf(g).some((code) => named.has(code)));
+}
+
+export function regionsIn(text) {
+  const codes = new Set(openGroups(text).flatMap(membersOf));
+  for (const code of namedCountries(text)) codes.add(code);
   return [...codes];
+}
+
+function narrowedGroups(text) {
+  const named = new Set(namedCountries(text));
+  return groupsIn(text).filter((g) => membersOf(g).some((code) => named.has(code))).map((g) => `${g} narrowed to ${membersOf(g).filter((c) => named.has(c)).map((c) => countryByCode(c).name).join(', ')}, the members you named`);
 }
 
 export function buildBrief({ question = '', acceptance = {}, constraints = {}, template = null } = {}) {
   const words = [question, acceptance?.expected, ...Object.values(constraints ?? {})].filter((v) => typeof v === 'string').join(' ');
   const regions = regionsIn(words);
-  const groups = Object.keys(GROUPS).filter((g) => GROUPS[g].test(plain(words)));
+  const groups = openGroups(words);
   const lists = Boolean(acceptance?.itemCount);
   return {
     kind: lists ? template?.itemKind ?? null : null,
@@ -122,6 +143,7 @@ export function buildBrief({ question = '', acceptance = {}, constraints = {}, t
     unit: acceptance?.unit ?? '',
     regions,
     groups,
+    narrowed: narrowedGroups(words),
     coastal: COAST.test(plain(words)),
     excludes: lists ? ['offered for rent', 'offered as a swap', 'news, blog or guide pages', 'search or category pages'] : [],
   };
@@ -135,7 +157,7 @@ export function describeBrief(brief) {
   const lines = [
     brief.kind ? `Deliver: ${brief.itemCount ?? 'a list of'} single ${brief.kind.label} listing pages for sale` : 'Deliver: a decision memo',
     brief.valueRange ? `Hard limit: price ${brief.valueRange[0]}–${brief.valueRange[1]} ${brief.unit}`.trim() : '',
-    `Where: ${where}${brief.coastal ? ' (near the sea)' : ''}`,
+    `Where: ${where}${brief.coastal ? ' (near the sea)' : ''}${brief.narrowed?.length ? ` · ${brief.narrowed.join('; ')}` : ''}`,
     brief.excludes.length ? `Exclude: ${brief.excludes.join('; ')}` : '',
   ];
   return lines.filter(Boolean).join('\n');
@@ -205,8 +227,18 @@ export function mentionsCoast(item) {
   return COAST_ON_PAGE.test(plain(`${item.title ?? ''} ${item.place ?? ''} ${item.card ?? ''} ${decodedUrl(item.url)}`));
 }
 
+export function hostCountries(url) {
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return [];
+  }
+  return COUNTRIES.filter(([code]) => namesOf(code).some((w) => /^[a-z]{5,}$/.test(plain(w)) && host.includes(plain(w)))).map(([code]) => code);
+}
+
 export function onConcept(source, brief) {
   if (!brief?.kind || !brief?.regions?.length || source?.kind === 'data' || !source?.url) return true;
   const named = textCountries(`${source.title ?? ''} ${source.snippet ?? ''} ${(source.text ?? '').slice(0, 3000)} ${decodedUrl(source.url)}`);
-  return [tldCountry(source.url), localeCountry(source.locale), ...named].some((code) => code && brief.regions.includes(code));
+  return [tldCountry(source.url), localeCountry(source.locale), ...hostCountries(source.url), ...named].some((code) => code && brief.regions.includes(code));
 }

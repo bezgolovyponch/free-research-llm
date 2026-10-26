@@ -50,12 +50,16 @@ describe('results export', () => {
     expect(csvField('-cmd')).toBe("'-cmd");
     const withTable = { ...p, candidates: { kept: [{ title: 'Terreno Aljezur', url: 'https://imo.example/a', price: 450000000, currency: 'VND', value: 15000, unit: 'EUR', area: 300, areaUnit: 'm²', place: 'Aljezur', country: 'Portugal', coast: true, sourceUrl: 'https://imo.example/r', via: ['json-ld', 'cards'], site: { coastKm: 2.5, beachKm: 3, beaches: 10, viewpoints: 12, attractions: 8, reserves: 2, protectedAreas: 4, hikingRoutes: 6, campsites: 3, lodging: 120, climate: { workable: 9, comfortable: 6, hottest: 27.5, coldest: 7 } }, fit: { score: 0.71, zoning: 'agricultural', pitches: 4 } }], toCheck: [{ title: 'No price', url: 'https://imo.example/b', price: null, currency: '', value: null, unit: 'EUR', area: null, areaUnit: '', place: '', country: '', coast: false, sourceUrl: '', via: [], toCheck: 'price not shown' }] } };
     expect(candidatesCsv(withTable).split('\r\n')).toEqual([
-      'status,title,price,currency,price in EUR,area,area unit,place,country,sea stated,url,found on,read by,missing,site fit,sea km,beach km,workable months,comfortable months,hottest month max °C,things to explore within 15 km,lodging within 15 km,zoning,pitches',
-      'kept,Terreno Aljezur,450000000,VND,15000,300,m²,Aljezur,Portugal,yes,https://imo.example/a,https://imo.example/r,json-ld cards,,0.71,2.5,3,9,6,27.5,42,120,agricultural,4',
-      'to check,No price,,,,,,,,,https://imo.example/b,,,price not shown,,,,,,,,,,',
+      'status,tier,verdict,entry cost EUR,area m²,units,lake km,why it fits,risks,legal path,title,price,currency,price in EUR,area,area unit,place,country,sea stated,url,found on,read by,missing,site fit,sea km,beach km,workable months,comfortable months,hottest month max °C,things to explore within 15 km,lodging within 15 km,zoning,pitches',
+      'kept,,,,,,,,,,Terreno Aljezur,450000000,VND,15000,300,m²,Aljezur,Portugal,yes,https://imo.example/a,https://imo.example/r,json-ld cards,,0.71,2.5,3,9,6,27.5,42,120,agricultural,4',
+      'to check,,,,,,,,,,No price,,,,,,,,,https://imo.example/b,,,price not shown,,,,,,,,,,',
       '',
     ]);
     expect(resultsJson(withTable).candidates.kept).toHaveLength(1);
+    const planned = { ...withTable, candidates: { kept: [{ ...withTable.candidates.kept[0], site: { ...withTable.candidates.kept[0].site, lakeKm: 1.2, lakesNamed: true }, plan: { tier: 'trade-off', verdict: 'trade-off with potential: lake', entry: { total: 18490 }, areaM2: 300, units: 4, why: ['sea 2.5 km', '9 workable months'], risks: ['ask the Câmara'], path: 'Rural camping park' } }], toCheck: [] } };
+    const outsideRow = { ...withTable.candidates.kept[0], title: 'Zemljište Vir', country: 'Croatia', plan: { tier: 'unverified', verdict: 'to confirm', entry: { total: 15000 }, areaM2: 1211, units: 18, why: [], risks: [], path: null, opportunity: { score: 6, reasons: ['scenic and still open: 80 things to explore, only 1 campsite'] } } };
+    expect(candidatesCsv({ ...withTable, candidates: { kept: [], toCheck: [], outside: [outsideRow] } }).split('\r\n')[1]).toMatch(/^outside your countries,unverified,to confirm,15000,1211,18,,scenic and still open: 80 things to explore\, only 1 campsite|^outside your countries,unverified,to confirm,15000,1211,18,,"scenic and still open/);
+    expect(candidatesCsv(planned).split('\r\n')[1]).toMatch(/^kept,trade-off,trade-off with potential: lake,18490,300,4,1\.2,sea 2\.5 km \| 9 workable months,ask the Câmara,Rural camping park,Terreno Aljezur,/);
     const json = resultsJson(p);
     expect(json).toMatchObject({ bestEstimate: { value: '18' }, confidence: { provisional: true, byChecks: 'low' }, actions: [{ nodeId: 'D2', action: 'research' }], items: [{ url: 'https://m.de/1' }] });
     expect(json.pieces[0].sources).toEqual([{ id: 'S1', title: 't', url: 'https://m.de/1' }]);

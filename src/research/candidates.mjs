@@ -3,10 +3,13 @@ import { countryByCode, isNewsPage, itemCountry, mentionsCoast } from './brief.m
 import { screenItem } from './itemgate.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { explorePoints } from './site.mjs';
+import { pricePerM2Medians } from './strategy.mjs';
 
 export const MAX_KEPT = 200;
 export const MAX_TO_CHECK = 100;
 export const MAX_SCREENED_EXAMPLES = 30;
+export const MAX_OUTSIDE = 150;
+const OUTSIDE_REASON = /^in .*, outside the asked regions$/;
 export const MIN_PLAUSIBLE_SHARE = 0.01;
 
 function rowsFrom(nodes) {
@@ -80,6 +83,8 @@ export function buildCandidates(nodes, brief, options = {}) {
   const toCheck = [];
   const screened = {};
   const examples = [];
+  const outside = [];
+  const market = [];
   let found = 0;
   const unique = new Map();
   for (const row of rowsFrom(nodes)) {
@@ -92,12 +97,14 @@ export function buildCandidates(nodes, brief, options = {}) {
   for (const row of unique.values()) {
     found++;
     const verdict = screenCandidate(row, brief, options);
+    if (verdict.value !== null && verdict.country.code && verdict.reasons.every((r) => /^price .* is outside|outside the asked regions$/.test(r))) market.push({ countryCode: verdict.country.code, value: verdict.value, area: row.area ?? null, areaUnit: row.areaUnit ?? '', title: row.title ?? '', place: row.place ?? '' });
     if (verdict.reasons.length) {
       for (const reason of verdict.reasons) {
         const label = reason.replace(/^price .* is outside/, 'price outside').replace(/^in .*, outside the asked regions$/, 'outside the asked regions');
         screened[label] = (screened[label] ?? 0) + 1;
       }
       if (examples.length < MAX_SCREENED_EXAMPLES) examples.push({ title: String(row.title ?? '').slice(0, 100), url: row.url, reasons: verdict.reasons });
+      if (verdict.reasons.every((r) => OUTSIDE_REASON.test(r)) && !verdict.missing.length) outside.push(publicRow(row, verdict, unit));
       continue;
     }
     (verdict.missing.length ? toCheck : kept).push(publicRow(row, verdict, unit));
@@ -108,6 +115,10 @@ export function buildCandidates(nodes, brief, options = {}) {
     kept: kept.slice(0, MAX_KEPT),
     keptCount: kept.length,
     toCheck: toCheck.slice(0, MAX_TO_CHECK),
+    outside: outside.sort((a, b) => (a.value ?? Infinity) - (b.value ?? Infinity)).slice(0, MAX_OUTSIDE),
+    outsideCount: outside.length,
+    priceMedians: pricePerM2Medians(market),
+    marketRows: market.filter((r) => r.area).length,
     toCheckCount: toCheck.length,
     screened,
     screenedCount: found - kept.length - toCheck.length,
@@ -117,10 +128,11 @@ export function buildCandidates(nodes, brief, options = {}) {
 }
 
 export function candidateDeliverables(candidates) {
-  return (candidates?.kept ?? []).map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
+  return (candidates?.kept ?? []).filter((row) => !row.plan || row.plan.tier === 'fits').map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
 }
 
 function siteText(row) {
+  if (row.plan) return ` | ${row.plan.tier}: ${row.plan.verdict} | why: ${row.plan.why.join('; ')}${row.plan.risks.length ? ` | risks: ${row.plan.risks.join('; ')}` : ''}`;
   const site = row.site;
   if (!site) return row.siteNote ? ` | ${row.siteNote}` : '';
   const season = site.climate ? ` | ${site.climate.workable} workable months (${site.climate.comfortable} comfortable), hottest month max ${site.climate.hottest}°C` : '';
@@ -133,4 +145,11 @@ export function shortlistText(candidates, limit = 15) {
   const rows = (candidates.kept ?? []).slice(0, limit).map((r) => `- ${r.title} | ${r.value ?? r.price} ${r.unit || r.currency} | ${r.area ? `${r.area} ${r.areaUnit}` : 'area n/a'} | ${r.place || r.country || 'place n/a'}${r.coast ? ' | coast stated' : ''}${siteText(r)}`);
   const ranked = candidates.sites ? `, ranked by code-measured fit (sea distance, workable months, no-AC heat, things to explore, price trend, cost, zoning)` : '';
   return [`found ${candidates.found}, kept ${candidates.keptCount}${ranked}, to check ${candidates.toCheckCount}, screened out ${candidates.screenedCount}${reasons ? ` (${reasons})` : ''}`, ...rows].join('\n');
+}
+
+export function tableVerdict(candidates, itemCount = null) {
+  const t = candidates?.tiers;
+  if (!t) return '';
+  const target = itemCount ? ` of the ${itemCount} asked` : '';
+  return `Decision model: ${t.fits} plot${t.fits === 1 ? '' : 's'}${target} fit every check; ${t['trade-off']} trade-off${t['trade-off'] === 1 ? '' : 's'} with their potential; ${t.unverified} to confirm; ${t.weak ?? 0} weak; ${t.blocked} blocked by law`;
 }

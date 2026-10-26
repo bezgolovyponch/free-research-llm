@@ -27,6 +27,6 @@ describe('previewMaintenance', () => {
     expect(report.changes.removedItems.join('\n')).toMatch(/satilik-arsa.*not a single listing page/);
     expect(report.changes.removedItems.join('\n')).toMatch(/9934411.*price 400000 EUR is outside 0–20000 EUR/);
     expect(report.itemsKept).toBe(1);
-    expect(report.candidates).toMatchObject({ found: 1, keptCount: 1, kept: [{ url: 'https://www.imovirtual.com/pt/anuncio/terreno-rustico-ID1iZBr', value: 18000 }] });
+    expect(report.candidates).toMatchObject({ found: 1, keptCount: 0, tiers: { unverified: 1 }, kept: [{ url: 'https://www.imovirtual.com/pt/anuncio/terreno-rustico-ID1iZBr', value: 18000 }] });
   });
 });

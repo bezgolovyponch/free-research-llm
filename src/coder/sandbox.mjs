@@ -7,6 +7,10 @@ import { applyEdit, countTests, editablePath } from './edits.mjs';
 
 const GATE_TIMEOUT_MS = 20 * 60 * 1000;
 
+export function isolatedEnv(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith('GIT_')));
+}
+
 function exists(file) {
   return fs.access(file).then(() => true, () => false);
 }
@@ -26,7 +30,7 @@ export function gateSummary(output) {
 function npmGate(cwd) {
   return new Promise((resolve) => {
     const win = process.platform === 'win32';
-    const child = spawn(win ? 'npm.cmd' : 'npm', ['run', '--silent', 'quality'], { cwd, shell: win, env: { ...process.env, FRL_KEYCHAIN: '0' } });
+    const child = spawn(win ? 'npm.cmd' : 'npm', ['run', '--silent', 'quality'], { cwd, shell: win, env: { ...isolatedEnv(), FRL_KEYCHAIN: '0' } });
     let output = '';
     const timer = setTimeout(() => child.kill(), GATE_TIMEOUT_MS);
     child.stdout.on('data', (d) => (output += d));
@@ -57,7 +61,7 @@ function explainFailures(cwd, gates) {
     const command = DETAIL_COMMANDS[gate];
     if (!command) continue;
     const win = process.platform === 'win32';
-    const r = spawnSync(win ? `${command[0]}.cmd` : command[0], command[1], { cwd, encoding: 'utf8', shell: win, timeout: GATE_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 });
+    const r = spawnSync(win ? `${command[0]}.cmd` : command[0], command[1], { cwd, encoding: 'utf8', shell: win, timeout: GATE_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024, env: isolatedEnv() });
     parts.push(`--- ${gate} failure detail ---\n${failureDetail(`${r.stdout ?? ''}${r.stderr ?? ''}`)}`);
   }
   return parts.join('\n');
@@ -101,7 +105,7 @@ export class CodeSandbox {
     }
     const modules = path.join(this.root, 'node_modules');
     if (await exists(modules)) await fs.symlink(modules, path.join(this.dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
-    spawnSync('git', ['init', '-q'], { cwd: this.dir });
+    spawnSync('git', ['init', '-q'], { cwd: this.dir, env: isolatedEnv() });
     await fs.copyFile(path.join(this.root, '.gitignore'), path.join(this.dir, '.gitignore')).catch(() => {});
     this.testCount = await this.countAllTests();
     return this.files;
@@ -133,7 +137,7 @@ export class CodeSandbox {
   }
 
   async gate() {
-    spawnSync('git', ['add', '-A'], { cwd: this.dir });
+    spawnSync('git', ['add', '-A'], { cwd: this.dir, env: isolatedEnv() });
     const tests = await this.countAllTests();
     if (tests < this.testCount) return { passed: false, output: `FAIL  testCount    the change removes tests (${this.testCount} before, ${tests} after); tests may be added, never removed`, summary: `FAIL  testCount    ${this.testCount} → ${tests}` };
     const result = await this.gateRunner(this.dir);

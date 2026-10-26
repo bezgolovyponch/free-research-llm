@@ -63,6 +63,7 @@ function fakeNet(opts: { coastFor?: (lat: number) => number | null; geocode?: Re
     }
     if (url.includes('eurostat')) {
       calls.push('hpi');
+      if (url.includes('prc_hicp_aind')) return { dimension: { time: { category: { index: { 2024: 0, 2025: 1 } } } }, value: { 0: 2.4, 1: 2 } };
       return { dimension: { time: { category: { index: { 2024: 0, 2025: 1 } } } }, value: { 0: 10.4, 1: 13.9 } };
     }
     throw new Error(`unexpected ${url}`);
@@ -123,6 +124,14 @@ describe('site measurements', () => {
     expect(site).toMatchObject({ coastKm: 0.6, beaches: 1, beachKm: 1.1, viewpoints: 13, attractions: 4, reserves: 2, protectedAreas: 3, hikingRoutes: 5, campsites: 2, lodging: 40 });
   });
 
+  it('finds the nearest lake or reservoir for the potential of an inland plot', async () => {
+    const { lakeQuery, parseLakes } = await import('../../src/research/site.mjs');
+    expect(lakeQuery(39.5, -8.3)).toContain('[natural=water][water~"^(lake|reservoir)$"][name]');
+    expect(overpassQuery(39.5, -8.3)).toContain('[natural=water]');
+    expect(parseLakes({ elements: [{ type: 'way', tags: { natural: 'water', water: 'reservoir', name: 'Albufeira de Castelo do Bode' }, center: { lat: 39.51, lon: -8.3 } }, { type: 'way', tags: { natural: 'water', water: 'reservoir' }, center: { lat: 39.5001, lon: -8.3 } }] }, 39.5, -8.3)).toBe(1.1);
+    expect(parseLakes({ elements: [] }, 39.5, -8.3)).toBeNull();
+  });
+
   it('ranks a plot by the business criteria, so a stunning short-season site still scores', () => {
     const site = { ...parseSurroundings(overpassAt(VIR, 0.005), VIR.lat, VIR.lon), climate: seasonOf(monthlyClimate(mediterranean)) };
     const fit = fitOf({ title: 'Poljoprivredno zemljište 240 m od uvale', value: 12110, area: 1211 }, site, { hpi: 13.9, maxValue: 20000 });
@@ -152,10 +161,14 @@ describe('SiteAssessor', () => {
     expect(out.screened[`farther than ${EBIKE_KM} km from the sea`]).toBe(2);
     expect(out.screenedCount).toBe(9);
     expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['https://famalo.example/14451']);
-    expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Vir, Croatia"', site: { coastKm: 0.6, climate: { workable: 9 } }, fit: { zoning: 'agricultural', hpi: 13.9 } });
+    expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Vir, Croatia"', site: { coastKm: 0.6, climate: { workable: 9 } }, fit: { zoning: 'agricultural', hpi: 11.7 } });
+    expect(out.sites.trends.HR).toEqual({ change: 13.9, inflation: 2, real: 11.7, year: '2025', realCagr: 9.7, since: '2024' });
+    expect(out.sites.euHpi).toBe(11.7);
     expect(out.sites).toMatchObject({ assessed: 3, located: 3, far: 2, unlocated: 0 });
     expect(out.examples.at(-1).reasons[0]).toMatch(/farther than 25 km from the sea/);
     expect(net.calls.filter((c) => /^(hr|vn|any)$/.test(c))).toEqual(['hr', 'vn']);
+    expect(out.far.map((r: { url: string }) => r.url).sort()).toEqual(['https://dot.example/3735470', 'https://imo.example/ID1j4lK']);
+    expect(out.farReason).toBe(`farther than ${EBIKE_KM} km from the sea`);
   });
 
   it('keeps every row when the brief does not ask for the sea, and marks rows it cannot locate', async () => {
@@ -186,14 +199,15 @@ describe('SiteAssessor', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-'));
     const file = path.join(dir, 'sites.json');
     const now = Date.now();
-    await fs.writeFile(file, JSON.stringify({ sites: { [siteKey(VIR.lat, VIR.lon)]: { at: now, site: { coastKm: 9 } } }, places: { 'hr|vir, croatia': { at: now, point: VIR } }, points: { 'https://x.example/1': { at: now, point: VIR } }, hpi: {} }));
+    await fs.writeFile(file, JSON.stringify({ sites: { [siteKey(VIR.lat, VIR.lon)]: { at: now, site: { coastKm: 9 } } }, places: { 'hr|vir, croatia': { at: now, point: VIR } }, points: { 'https://x.example/1': { at: now, point: { ...VIR, by: 'place "Vir, Croatia"' } }, 'https://x.example/2': { at: now, point: { ...VIR, by: 'listing page' } } }, hpi: { HR: { at: now, value: { change: 13.9, year: '2025' } } } }));
     const assessor = await new SiteAssessor({ file }).load();
     expect(assessor.store.places).toEqual({});
-    expect(assessor.store.points).toEqual({});
+    expect(Object.keys(assessor.store.points)).toEqual(['https://x.example/2']);
+    expect(assessor.store.hpi).toEqual({});
     expect(assessor.cachedSite(VIR.lat, VIR.lon)).toEqual({ coastKm: 9 });
     assessor.persist();
     await assessor.writing;
-    expect(JSON.parse(await fs.readFile(file, 'utf8')).version).toBe(2);
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).version).toBe(4);
     await fs.rm(dir, { recursive: true, force: true });
   });
 
@@ -217,10 +231,49 @@ describe('SiteAssessor', () => {
     expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Thuan Giao, Binh Duong, Vietnam"', site: { climate: { workable: 0 } } });
   });
 
+  it('refuses a country, state or province match: too coarse to measure the sea from', async () => {
+    const coarse = async (url: string) => (url.includes('nominatim') ? [{ lat: '39.0', lon: '35.0', display_name: 'Türkiye', place_rank: 4 }] : null);
+    const assessor = new SiteAssessor({ fetchJson: coarse as never, sleep: noSleep });
+    expect(await assessor.geocode('Türkiye', 'TR')).toBeNull();
+    const town = async (url: string) => (url.includes('nominatim') ? [{ lat: '39.5', lon: '-9.0', display_name: 'Famalicão, Nazaré, Leiria, Portugal', place_rank: 16 }] : null);
+    expect(await new SiteAssessor({ fetchJson: town as never, sleep: noSleep }).geocode('Famalicão, Nazaré, Portugal', 'PT')).toMatchObject({ lat: 39.5, lon: -9 });
+  });
+
+  it('turns a nominal house-price change into a real one with the same year of inflation', async () => {
+    const { realCagr, realChange, trendOf, yearly } = await import('../../src/research/site.mjs');
+    expect(realChange(41.5, 34.9)).toBe(4.9);
+    expect(realChange(5.5, 2.5)).toBe(2.9);
+    expect(trendOf({ 2024: 10, 2025: 41.5 }, { 2024: 58.5, 2025: 34.9 })).toEqual({ change: 41.5, inflation: 34.9, real: 4.9, year: '2025', realCagr: -14.7, since: '2024' });
+    expect(realCagr({ 2021: 10, 2022: 10 }, { 2021: 0, 2022: 0 }, ['2021', '2022'])).toBe(10);
+    expect(realCagr({ 2025: 5 }, { 2025: 2 }, ['2025'])).toBeNull();
+    expect(trendOf({ 2025: 5 }, { 2024: 2 })).toBeNull();
+    expect(yearly({ dimension: { time: { category: { index: { 2024: 0, 2025: 1 } } } }, value: { 1: 3.2 } })).toEqual({ 2025: 3.2 });
+  });
+
   it('falls back to the nearest larger place the geocoder knows', async () => {
     const net = fakeNet({ geocode: { 'Binh Duong, Vietnam': BINH_DUONG } });
     const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ ...table, kept: [{ ...rows[1], place: 'Chanh Nghia, Thu Dau Mot, Binh Duong' }], keptCount: 1 }, { coastal: false }, {});
     expect(out.kept[0].locatedBy).toBe('place "Binh Duong, Vietnam", the nearest place found for "Chanh Nghia, Thu Dau Mot, Binh Duong"');
+  });
+
+  it('never looks up a country code or name as a place, so a vague listing is not pinned to a village called "TR"', async () => {
+    const net = fakeNet({ geocode: { 'TR, Turkey': { lat: 41.38, lon: 33.78 }, 'Türkiye, Turkey': { lat: 39, lon: 35 } } });
+    const turkish = { title: 'Tarla', url: 'https://emlak.example/ilan/tarla-1', value: 5000, area: 1400, place: 'Dursunbey, Balıkesir, TR', country: 'Turkey', countryCode: 'TR', coast: false };
+    const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ ...table, kept: [turkish, { ...turkish, url: 'https://emlak.example/ilan/tarla-2', place: 'Türkiye' }], keptCount: 2 }, { coastal: false }, {});
+    expect(out.kept.map((r: { siteNote?: string }) => r.siteNote)).toEqual(['location not shown', 'location not shown']);
+    const asked = net.calls.filter((c) => c === 'geocode').length;
+    expect(asked).toBe(2);
+  });
+
+  it('screens out a listing the portal removed and takes a missing area from the listing page', async () => {
+    const readPage = async (url: string) => (url.endsWith('gone') ? { status: 410, text: '', coords: null } : { status: 200, text: 'Área bruta 120 m² · Área do terreno: 2 500 m²', coords: { lat: 39.02564, lon: -9.114252 } });
+    const rowsIn = [{ ...rows[2], url: 'https://imo.example/gone' }, { ...rows[2], url: 'https://imo.example/ok', area: null }];
+    const out = await new SiteAssessor({ fetchJson: fakeNet().fetchJson, sleep: noSleep }).apply({ ...table, kept: rowsIn, keptCount: 2 }, { coastal: false }, { readPage });
+    expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['https://imo.example/ok']);
+    expect(out.kept[0]).toMatchObject({ area: 2500, areaUnit: 'm²', areaBy: 'listing page' });
+    expect(out.screened['listing removed from the portal']).toBe(1);
+    expect(out.examples.some((e: { reasons: string[] }) => e.reasons[0] === 'listing removed from the portal (HTTP 410)')).toBe(true);
+    expect(out.keptCount).toBe(1);
   });
 
   it('reads each listing page once a day at most, and only a fixed number of new pages per pass', async () => {
@@ -293,5 +346,46 @@ describe('SiteAssessor', () => {
     await assessor.geocode('A, Croatia');
     await assessor.geocode('B, Croatia');
     expect(waits).toEqual([1100]);
+  });
+});
+
+describe('title and map agree', () => {
+  it('takes the place a title names, skipping generic words and numbers', async () => {
+    const { titlePlace } = await import('../../src/research/site.mjs');
+    expect(titlePlace('Terreno rústico, perto do mar, Vieira de Leiria, 290m2', ['terreno'])).toBe('Vieira de Leiria');
+    expect(titlePlace('Terreno para venda', ['terreno'])).toBeNull();
+    expect(titlePlace('Terreno Urbano | Coimbra | 20.000 €', ['terreno'])).toBe('Coimbra');
+    expect(titlePlace('Plot of land of 1,640 m² Nazaré , Centro Region , Portugal', ['plot', 'land'])).toBeNull();
+  });
+
+  it('flags a listing whose map point is far from the place its title names', async () => {
+    const LISBON = { lat: 38.7777, lon: -9.0953 };
+    const VIEIRA = { lat: 39.8722, lon: -8.9304 };
+    const net = fakeNet({ geocode: { 'Vieira de Leiria, Portugal': VIEIRA } });
+    const row = { title: 'Terreno rústico, perto do mar, Vieira de Leiria, 290m2', url: 'https://imo.example/ID1iQd5', value: 4990, area: 290, place: 'Expo Norte, Parque das Nações, Lisboa', country: 'Portugal', countryCode: 'PT', lat: LISBON.lat, lon: LISBON.lon };
+    const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ found: 1, kept: [row], keptCount: 1, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [] }, { coastal: false, kind: { terms: ['terreno'] } }, {});
+    expect(out.kept[0].placeConflict).toBe("the title names Vieira de Leiria, 123 km from where the listing's map puts it");
+    const agrees = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ found: 1, kept: [{ ...row, lat: VIEIRA.lat, lon: VIEIRA.lon }], keptCount: 1, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [] }, { coastal: false, kind: { terms: ['terreno'] } }, {});
+    expect(agrees.kept[0].placeConflict).toBeUndefined();
+  });
+});
+
+describe('two measuring instances on one cache file', () => {
+  it('keep each other\'s measurements: every write merges what is on disk, newer entries win', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-merge-'));
+    const file = path.join(dir, 'sites.json');
+    let now = 1000;
+    const a = await new SiteAssessor({ file, now: () => now }).load();
+    const b = await new SiteAssessor({ file, now: () => now }).load();
+    a.store.sites['1.00,1.00'] = { at: now, site: { coastKm: 1 } };
+    await a.persist();
+    now = 2000;
+    b.store.sites['2.00,2.00'] = { at: now, site: { coastKm: 2 } };
+    await b.persist();
+    await a.reload();
+    expect(Object.keys(a.store.sites).sort()).toEqual(['1.00,1.00', '2.00,2.00']);
+    const disk = JSON.parse(await fs.readFile(file, 'utf8'));
+    expect(Object.keys(disk.sites).sort()).toEqual(['1.00,1.00', '2.00,2.00']);
+    await fs.rm(dir, { recursive: true, force: true });
   });
 });

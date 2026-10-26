@@ -372,3 +372,17 @@ export function extractListings(source, base, { isHtml = true, recipe = null } =
   const methods = lists.filter(([, found]) => found.length).map(([method]) => method);
   return { items, methods, template: cards.template || recipe?.template || '', next: nextPageUrl(source, base, { isHtml }) || (isHtml && items.length ? pagedNext(source, base) : '') };
 }
+
+const AREA_ALL = new RegExp(AREA_TEXT.source, 'gi');
+const TO_M2 = { ha: 10000, hectare: 10000, hectares: 10000, acre: 4046.86, acres: 4046.86, 'dönüm': 1000, donum: 1000 };
+
+export function areaFromText(text) {
+  let best = null;
+  for (const m of String(text ?? '').matchAll(AREA_ALL)) {
+    const n = numberOf(m[1]);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    const m2 = Math.round(n * (TO_M2[m[2].toLowerCase()] ?? 1));
+    if (!best || m2 > best) best = m2;
+  }
+  return best;
+}

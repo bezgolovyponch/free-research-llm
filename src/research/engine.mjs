@@ -13,13 +13,14 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, describeBrief, onConcept } from './brief.mjs';
-import { buildCandidates, candidateDeliverables, shortlistText } from './candidates.mjs';
+import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
+import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
-import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree } from './treeaudit.mjs';
+import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
@@ -108,6 +109,7 @@ export class ResearchEngine {
     this.demo = demo;
     this.rates = rates;
     this.sites = sites;
+    this.siteWarm = new Map();
     this.onEvent = onEvent;
     this.listeners = new Map();
     this.running = new Set();
@@ -214,8 +216,8 @@ export class ResearchEngine {
         messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
-      repairTree(tree.nodes, project.question);
-      return { reply, tree, issues: auditTree(tree.nodes, project.question) };
+      repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
+      return { reply, tree, issues: auditTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) })) };
     };
     let { reply, tree, issues } = await ask('');
     if (issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced')) {
@@ -248,7 +250,9 @@ export class ResearchEngine {
 
   briefOf(project) {
     const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: templateById(project.templateId) });
-    project.brief = { ...brief, text: describeBrief(brief) };
+    const strategy = brief.kind ? strategyFor(project.templateId) : null;
+    const foundation = strategy ? foundationOf(strategy, project) : null;
+    project.brief = { ...brief, foundation, text: [describeBrief(brief), foundationText(foundation)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -267,6 +271,13 @@ export class ResearchEngine {
       return null;
     }
     const options = await this.itemGateOptions(project);
+    const strategy = strategyFor(project.templateId);
+    if (strategy && this.search?.readPage && !this.demo && !this.quiet.has(project.id)) {
+      project.strategyCheck = await new StrategyRetriever({ readPage: (url) => this.search.readPage(url) }).retrieve(strategy, project.strategyCheck ?? null);
+      const quoted = strategy.sources.filter((s) => s.quotes.length);
+      const confirmed = quoted.filter((s) => project.strategyCheck[s.id]?.confirmed > 0).length;
+      this.emit(project, 'candidates', `strategy "${strategy.label}": ${confirmed} of ${quoted.length} sources re-read online with their quotes found (${project.strategyCheck.at})`);
+    }
     if (sweep && this.search?.readPage) {
       const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null });
       const result = await sweeper.sweep(project, brief, options);
@@ -281,13 +292,61 @@ export class ResearchEngine {
     project.candidates = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
     if (this.sites && !this.demo) {
       const mode = sweep ? 'all' : this.quiet.has(project.id) ? 'cache' : 'budget';
+      const raw = project.candidates;
       project.candidates = await this.sites.apply(project.candidates, brief, { mode, readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
       const s = project.candidates.sites;
+      if (s?.pending) this.startSiteWarm(project.id, raw, brief);
       if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate 2021–2025, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
+    if (strategy) {
+      project.candidates = applyStrategy(project.candidates, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
+      const t = project.candidates.tiers;
+      this.emit(project, 'candidates', `strategy paths: ${t.fits} fit every criterion, ${t['trade-off']} trade-offs with their potential, ${t.unverified} to confirm, ${t.weak} weak, ${t.blocked} blocked by law`);
+    }
+    if (project.report) this.planActions(project);
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
     return c;
+  }
+
+  startSiteWarm(id, raw, brief) {
+    if (!this.sites?.file || this.siteWarm.get(id)?.running) return;
+    const worker = this.sites.worker ? this.sites.worker() : null;
+    if (!worker) return;
+    const state = { running: true, ready: false, measured: 0 };
+    this.siteWarm.set(id, state);
+    void (async () => {
+      try {
+        const out = await worker.apply(raw, brief, { mode: 'all', readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
+        state.measured = out?.sites?.assessed ?? 0;
+        state.pending = out?.sites?.pending ?? 0;
+        state.ready = true;
+        if (!this.quiet.has(id)) await this.applyWarmed(id);
+      } catch (error) {
+        state.error = String(error.message).slice(0, 120);
+      } finally {
+        state.running = false;
+      }
+    })();
+  }
+
+  takeWarmed(id) {
+    const state = this.siteWarm.get(id);
+    if (!state?.ready) return null;
+    this.siteWarm.delete(id);
+    return state;
+  }
+
+  async applyWarmed(id) {
+    const state = this.takeWarmed(id);
+    if (!state) return null;
+    await this.sites.reload();
+    const project = await this.load(id);
+    this.emit(project, 'candidates', `site fit in the background: ${state.measured} listing(s) measured${state.pending ? `, ${state.pending} still queued` : ''}; table rebuilt from the measurements`);
+    await this.collectCandidates(project);
+    await this.checkAcceptance(project);
+    await this.store.save(project);
+    return project;
   }
 
   entitiesOf(project) {
@@ -425,6 +484,7 @@ export class ResearchEngine {
     const counts = progress(project.nodes);
     project.report = {
       verdict: sanitizeVerdict(r.verdict).slice(0, 300),
+      modelVerdict: sanitizeVerdict(r.verdict).slice(0, 300),
       kind: questionKind(project),
       confidence: CONFIDENCE.includes(r.confidence) ? r.confidence : 'low',
       summary: String(r.summary ?? '').slice(0, 2500),
@@ -450,7 +510,9 @@ export class ResearchEngine {
   planActions(project) {
     if (!project.report) return null;
     const status = resultStatus(project);
-    project.report.verdict = provisionalVerdict(project.report.verdict, status).slice(0, 400);
+    const table = tableVerdict(project.candidates, project.acceptance?.itemCount ?? null);
+    const said = project.report.modelVerdict ?? project.report.verdict;
+    project.report.verdict = provisionalVerdict(table ? `${table} — model memo: ${said}` : said, status).slice(0, 600);
     project.report.status = { provisional: status.provisional, coverage: status.coverage, confidence: status.confidence, blocking: status.blocking, counts: status.counts };
     project.report.actions = status.plan.slice(0, 40);
     return status;
@@ -526,7 +588,7 @@ export class ResearchEngine {
   async regroundAndRescore(id, { sweep = false } = {}) {
     const project = await this.load(id);
     const compacted = compactProject(project);
-    const fixes = repairTree(project.nodes, project.question);
+    const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
     if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
     const regrounded = this.reground(project);
     await this.rescreenItems(project);
@@ -581,7 +643,7 @@ export class ResearchEngine {
       for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';
       const compacted = compactProject(project);
       if (compacted) this.emit(project, 'tree', `stored page text and links capped for ${compacted} source(s) to keep memory small`);
-      const fixes = repairTree(project.nodes, project.question);
+      const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       this.regrade(project);
       this.emit(project, 'phase', 'researching sub-questions in dependency order');

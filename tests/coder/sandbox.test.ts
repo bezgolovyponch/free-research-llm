@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CodeSandbox, PromoteError, diffStats, failedGates, failureDetail, gateSummary, restoreBackup } from '../../src/coder/sandbox.mjs';
+import { CodeSandbox, PromoteError, diffStats, isolatedEnv, failedGates, failureDetail, gateSummary, restoreBackup } from '../../src/coder/sandbox.mjs';
 
 async function repo() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-sbx-root-'));
@@ -15,6 +15,27 @@ async function repo() {
 }
 
 describe('CodeSandbox', () => {
+  it('runs its git and gate commands without the git variables of a calling hook, so a commit index is never written', async () => {
+    expect(isolatedEnv({ GIT_INDEX_FILE: '/repo/.git/index', GIT_DIR: '/repo/.git', PATH: '/bin', HOME: '/h' })).toEqual({ PATH: '/bin', HOME: '/h' });
+    const root = await repo();
+    const dir = path.join(root, '..', `${path.basename(root)}-env`);
+    const hookIndex = path.join(root, '..', `${path.basename(root)}-hook-index`);
+    const saved = process.env.GIT_INDEX_FILE;
+    process.env.GIT_INDEX_FILE = hookIndex;
+    try {
+      const sandbox = new CodeSandbox({ root, dir, listFiles: () => ['src/a.mjs'], gate: async () => ({ passed: true, output: '' }) });
+      await sandbox.prepare();
+      await sandbox.apply([{ file: 'src/a.mjs', search: '1', replace: '2' }]);
+      await sandbox.changed();
+      await expect(fs.access(hookIndex)).rejects.toThrow();
+      await sandbox.discard();
+    } finally {
+      if (saved === undefined) delete process.env.GIT_INDEX_FILE;
+      else process.env.GIT_INDEX_FILE = saved;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('edits a copy, runs the gate there, and touches the real app only on promote, with a backup that undoes it', async () => {
     const root = await repo();
     const dir = path.join(root, '..', `${path.basename(root)}-work`);
