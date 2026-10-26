@@ -1,5 +1,7 @@
 import { ROOT_ID } from './tree.mjs';
 import { asksForItems } from './deliverable.mjs';
+import { regionsIn } from './brief.mjs';
+import { criteriaOfText, strategyFor } from './strategy.mjs';
 
 export const CANDIDATES_TITLE = 'Candidate listings (identification)';
 
@@ -173,8 +175,24 @@ export function repairTree(nodes, question = '') {
   return fixes;
 }
 
-export function auditTree(nodes, question = '') {
+export function modelOf(project) {
+  const strategy = project?.brief?.kind ? strategyFor(project.templateId) : null;
+  return { regions: project?.brief?.kind ? project.brief.regions ?? [] : [], strategy };
+}
+
+export function auditModel(nodes, { regions = [], strategy = null } = {}) {
   const issues = [];
+  for (const n of nodes) {
+    if (n.id === ROOT_ID) continue;
+    const outside = regions.length ? regionsIn(textOf(n)).filter((c) => !regions.includes(c)) : [];
+    if (outside.length) issues.push({ code: 'outside-regions', nodeId: n.id, detail: `${n.id} names ${outside.length > 4 ? `${outside.slice(0, 4).join(', ')} and ${outside.length - 4} more` : outside.join(', ')}, outside the asked regions` });
+    if (strategy && n.parentId === ROOT_ID && !asksForItems(n) && !/\b(?:identify|candidates?|listings?)\b/i.test(textOf(n)) && !criteriaOfText(strategy, textOf(n)).length) issues.push({ code: 'off-model', nodeId: n.id, detail: `${n.id} serves no check of the decision model` });
+  }
+  return issues;
+}
+
+export function auditTree(nodes, question = '', model = {}) {
+  const issues = [...auditModel(nodes, model)];
   const kids = (id) => nodes.filter((n) => n.parentId === id);
   const drivers = kids(ROOT_ID);
   if (drivers.length > MAX_DRIVERS) issues.push({ code: 'too-many-drivers', nodeId: ROOT_ID, detail: `${drivers.length} top-level drivers (max ${MAX_DRIVERS})` });
@@ -200,7 +218,7 @@ export function auditTree(nodes, question = '') {
   return issues;
 }
 
-export const BLOCKING = new Set(['duplicate', 'restates-question', 'too-many-drivers']);
+export const BLOCKING = new Set(['duplicate', 'restates-question', 'too-many-drivers', 'outside-regions', 'off-model']);
 
 export function auditFeedback(issues) {
   return issues.length ? `The tree failed these structural checks; fix every one:\n${issues.map((i) => `- ${i.code}: ${i.detail}`).join('\n')}` : '';

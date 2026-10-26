@@ -120,3 +120,25 @@ describe('funnel grouping', () => {
   });
 });
 
+
+describe('tree audit against the decision model', () => {
+  it('flags pieces that name countries outside the brief and drivers that serve no check, and blocks the loop from adding them', async () => {
+    const { auditModel, modelOf, BLOCKING } = await import('../../src/research/treeaudit.mjs');
+    const project = { templateId: 'glamping-location', brief: { kind: { label: 'plot of land' }, regions: ['PT', 'ES', 'TR', 'VN'] } };
+    const model = modelOf(project);
+    const nodes = [
+      { id: 'Q', parentId: null, title: 'Q', question: 'plots' },
+      { id: 'D1', parentId: 'Q', title: 'Climate suitability', question: 'How many months a year are mild?' },
+      { id: 'D2', parentId: 'Q', title: 'Coastal plots in Italy, Greece', question: 'Which plots in Italy and Greece are under 20,000 EUR?' },
+      { id: 'D3', parentId: 'Q', title: 'Wine culture', question: 'What is the history of local wine?' },
+      { id: 'D4', parentId: 'Q', title: 'Candidate listings (identification)', question: 'Which plots in Portugal are for sale?' },
+      { id: 'D5', parentId: 'Q', title: 'EU land', question: 'Which EU plots are cheap?' },
+    ];
+    const issues = auditModel(nodes, model);
+    expect(issues.map((i: { code: string; nodeId: string }) => `${i.code}:${i.nodeId}`)).toEqual(['outside-regions:D2', 'off-model:D3', 'outside-regions:D5']);
+    expect(issues[0].detail).toBe('D2 names GR, IT, outside the asked regions');
+    expect(issues[2].detail).toMatch(/names AT, BE, BG, HR and 21 more/);
+    expect(BLOCKING.has('outside-regions') && BLOCKING.has('off-model')).toBe(true);
+    expect(auditModel(nodes, modelOf({ templateId: 'taxes', brief: { regions: ['PT'] } }))).toEqual([]);
+  });
+});

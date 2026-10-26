@@ -11,7 +11,7 @@ import { TEMPLATES } from './research/templates.mjs';
 import { candidatesCsv, itemsCsv, piecesCsv, resultsJson, toMarkdown } from './report.mjs';
 import { resultStatus } from './research/gaps.mjs';
 import { resultModel } from './research/result.mjs';
-import { auditTree, cleanTitle } from './research/treeaudit.mjs';
+import { auditTree, cleanTitle, modelOf } from './research/treeaudit.mjs';
 import { knowledgeRecord } from './research/knowledge.mjs';
 import { ProposalError } from './appchat.mjs';
 import { UnsupportedFileError } from './chat/media.mjs';
@@ -60,7 +60,7 @@ async function readJson(req) {
 export function withResults(project) {
   if (!project || typeof project !== 'object' || !Array.isArray(project.nodes) || typeof project.question !== 'string') return project;
   const { plan, ...status } = resultStatus(project);
-  const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question) };
+  const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question, modelOf(project)) };
   return { ...project, ...(project.sweep ? { sweep: clientSweep(project.sweep) } : {}), nodes: clientNodes(project.nodes).map((n) => (cleanTitle(n.title) !== n.title ? { ...n, title: cleanTitle(n.title) } : n)), results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
 }
 

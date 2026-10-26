@@ -20,7 +20,7 @@ import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from '.
 import { compactProject, compactSources } from './compact.mjs';
 import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
-import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree } from './treeaudit.mjs';
+import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
@@ -216,7 +216,7 @@ export class ResearchEngine {
       });
       const tree = normalizeTree(reply.data, project.question);
       repairTree(tree.nodes, project.question);
-      return { reply, tree, issues: auditTree(tree.nodes, project.question) };
+      return { reply, tree, issues: auditTree(tree.nodes, project.question, modelOf({ ...project, brief: project.brief ?? this.briefOf(project) })) };
     };
     let { reply, tree, issues } = await ask('');
     if (issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced')) {

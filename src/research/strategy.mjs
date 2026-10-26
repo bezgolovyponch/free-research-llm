@@ -39,12 +39,13 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'price', label: 'price within the budget', words: /\d[\d.,\s]*(?:eur|€|euro)|\bmax\b|budget/i, measure: 'price read from the listing, converted at ECB rates' },
     { id: 'region', label: 'in the countries you named', words: null, measure: 'country from the site address, language or listing text' },
     { id: 'sea', label: 'sea within an e-bike ride', words: /\b(?:sea|ocean|coast|beach|e-?bike)/i, measure: 'distance to the OpenStreetMap coastline from the listing location' },
-    { id: 'season', label: 'workable months a year', words: /\bmonths?\b/i, measure: 'Open-Meteo daily weather 2021–2025 at the listing' },
-    { id: 'noAc', label: 'mild: no air conditioning', words: /\bmild\b|air ?condition/i, measure: 'hottest month average daily high, Open-Meteo 2021–2025' },
+    { id: 'season', label: 'workable months a year', words: /\bmonths?\b|season|climate|weather/i, measure: 'Open-Meteo daily weather 2021–2025 at the listing' },
+    { id: 'noAc', label: 'mild: no air conditioning', words: /\bmild\b|air ?condition|temperature|heat/i, measure: 'hottest month average daily high, Open-Meteo 2021–2025' },
     { id: 'trend', label: 'strong price increase trend', words: /price increase|\btrend\b|appreciat|grow/i, measure: 'Eurostat house price index of the country vs the EU average (country level, not land)' },
-    { id: 'entry', label: 'very low entry investment', words: /entr(?:y|ance)|enterance|low invest|investment/i, measure: 'price + transfer tax + three bell tents, per country' },
+    { id: 'entry', label: 'very low entry investment', words: /entr(?:y|ance)|enterance|low invest|investment|\bcosts?\b|afford/i, measure: 'price + transfer tax + three bell tents, per country' },
     { id: 'units', label: 'room for a glamping site', words: /glamping|camp/i, measure: 'units at 40 m² on 60% of the land (Portaria 1320/2008)' },
-    { id: 'legal', label: 'a legal path to run glamping', words: /glamping|business|camp/i, measure: 'country path, foreign-buyer rules and industrial-site rule' },
+    { id: 'demand', label: 'guests nearby', words: /glamping business|demand|touris|occupan|overnight|\bADR\b/i, measure: 'campsites and lodging within 15 km (OpenStreetMap)' },
+    { id: 'legal', label: 'a legal path to run glamping', words: /glamping|business|camp|zoning|permit|regulat|legal|licen/i, measure: 'country path, foreign-buyer rules and industrial-site rule' },
   ],
   countries: {
     PT: {
@@ -87,6 +88,10 @@ export function strategyFor(templateId) {
   return STRATEGIES.find((s) => s.templates.includes(templateId)) ?? null;
 }
 
+export function criteriaOfText(strategy, text) {
+  return (strategy?.criteria ?? []).filter((c) => c.words?.test(String(text ?? ''))).map((c) => c.id);
+}
+
 export function clausesOf(question) {
   return String(question ?? '').split(/,|;|\bbut also\b|\band also\b|\bso\b/i).map((c) => c.trim()).filter((c) => c.split(/\s+/).length >= 2);
 }
@@ -101,7 +106,7 @@ export function foundationOf(strategy, project) {
     ...(months ? { minWorkableMonths: { value: Math.min(12, Number(months[1])), source: 'question' } } : {}),
     ...(km ? { ebikeKm: { value: Number(km[1]), source: 'guidance' } } : {}),
   };
-  const clauses = clausesOf(question).map((text) => ({ text, criteria: strategy.criteria.filter((c) => c.words?.test(text)).map((c) => c.id) }));
+  const clauses = clausesOf(question).map((text) => ({ text, criteria: criteriaOfText(strategy, text) }));
   const modelled = clauses.filter((c) => c.criteria.length);
   return { rules, criteria: strategy.criteria.map(({ id, label, measure }) => ({ id, label, measure })), clauses, complete: modelled.length === clauses.length, missing: clauses.filter((c) => !c.criteria.length).map((c) => c.text) };
 }

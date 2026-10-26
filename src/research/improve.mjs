@@ -2,7 +2,7 @@ import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt, withGuidance } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
-import { BLOCKING, MAX_DRIVERS, auditTree, cleanTitle, duplicateAmong, duplicateOf } from './treeaudit.mjs';
+import { BLOCKING, MAX_DRIVERS, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf } from './treeaudit.mjs';
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
 import { Mutex } from './lanes.mjs';
 import { mergeTrial, trialConflict } from './trialmerge.mjs';
@@ -153,7 +153,7 @@ function itemKeys(node) {
 }
 
 export function structuralIssues(project) {
-  return auditTree(project.nodes, project.question).filter((i) => BLOCKING.has(i.code)).map((i) => `${i.code}:${i.nodeId}`);
+  return auditTree(project.nodes, project.question, modelOf(project)).filter((i) => BLOCKING.has(i.code)).map((i) => `${i.code}:${i.nodeId}`);
 }
 
 export function cannotGain(oldNode, newNode) {
