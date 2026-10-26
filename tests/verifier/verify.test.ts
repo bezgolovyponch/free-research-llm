@@ -107,4 +107,15 @@ describe('external verifier: fail-closed verdicts', () => {
     const out = await verifier({ 'imo.example': listing(20000, 1640), 'nominatim.openstreetmap.org/reverse': () => Response.json({ address: { country_code: 'pt' } }), 'overpass-api.de': () => new Response('refused', { status: 503 }), 'maps.mail.ru': () => Response.json({ elements: [{ type: 'way', geometry: [{ lat: 39.55, lon: -9.08 }] }] }), 'archive-api.open-meteo.com': () => Response.json({ daily: daily(24, 12) }) }).verifyRow(row, obligationsOf(project));
     expect(out.checks.find((c: { check: string }) => c.check === 'sea within 20 km').status).toBe('confirmed');
   });
+
+  it('remembers the instance that answered and writes its record after every plot', async () => {
+    const asked: string[] = [];
+    const routes = { 'imo.example': listing(20000, 1640), 'nominatim.openstreetmap.org/reverse': () => Response.json({ address: { country_code: 'pt' } }), 'overpass-api.de': () => { asked.push('main'); return new Response('busy', { status: 503 }); }, 'maps.mail.ru': () => { asked.push('mirror'); return Response.json({ elements: [{ type: 'way', geometry: [{ lat: 39.55, lon: -9.08 }] }] }); }, 'archive-api.open-meteo.com': () => Response.json({ daily: daily(24, 12) }) };
+    const saved: number[] = [];
+    const v = verifier(routes);
+    const record = await v.verify({ ...project, candidates: { kept: [row, { ...row, url: 'https://imo.example/anuncio/terreno-2' }] } }, { onRow: async (r: { results: unknown[] }) => { saved.push(r.results.length); } });
+    expect(asked).toEqual(['main', 'mirror', 'mirror']);
+    expect(saved).toEqual([1, 2]);
+    expect(record.complete).toBe(true);
+  });
 });

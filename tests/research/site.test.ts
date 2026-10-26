@@ -405,4 +405,27 @@ describe('Overpass instances', () => {
     expect(asked).toEqual([OVERPASS_URLS[0], OVERPASS_URLS[1], OVERPASS_URLS[1]]);
     await expect(new SiteAssessor({ fetchJson: async () => { throw new Error('down'); }, sleep: noSleep }).overpass('q')).rejects.toThrow('down');
   });
+
+  it('rests an instance that failed for ten minutes instead of waiting on it again for every place', async () => {
+    const { OVERPASS_URLS, INSTANCE_REST_MS } = await import('../../src/research/site.mjs');
+    let now = 0;
+    const asked: string[] = [];
+    const fetchJson = async (url: string) => {
+      asked.push(url);
+      if (url === OVERPASS_URLS[1]) throw new Error('timeout');
+      if (url === OVERPASS_URLS[0] && now < 1) throw new Error('refused');
+      return { elements: [] };
+    };
+    const assessor = new SiteAssessor({ fetchJson, sleep: noSleep, now: () => now });
+    await assessor.overpass('q');
+    expect(asked).toEqual([OVERPASS_URLS[0], OVERPASS_URLS[1], OVERPASS_URLS[2]]);
+    asked.length = 0;
+    await assessor.overpass('q');
+    expect(asked).toEqual([OVERPASS_URLS[2]]);
+    now = INSTANCE_REST_MS + 5;
+    assessor.overpassAt = 0;
+    asked.length = 0;
+    await assessor.overpass('q');
+    expect(asked).toEqual([OVERPASS_URLS[0]]);
+  });
 });

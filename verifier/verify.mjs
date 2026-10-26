@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 export const PRICE_TOLERANCE = 0.02;
 export const AREA_TOLERANCE = 0.05;
 export const DEFAULT_SEA_KM = 25;
+export const INSTANCE_TIMEOUT_MS = 45000;
+export const INSTANCE_REST_MS = 10 * 60 * 1000;
 const UA = 'free-research-llm-verifier (independent check; https://github.com/bezgolovyponch/free-research-llm)';
 const NOMINATIM_REVERSE = 'https://nominatim.openstreetmap.org/reverse';
 export const OVERPASS_INSTANCES = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
@@ -142,10 +144,13 @@ export class Verifier {
     this.sleep = sleep;
     this.lastNominatim = 0;
     this.rates = null;
+    this.overpassGood = null;
+    this.overpassDown = new Map();
   }
 
   async get(url, init = {}) {
-    const res = await this.fetch(url, { ...init, headers: { 'user-agent': UA, ...(init.headers ?? {}) }, signal: AbortSignal.timeout(120000) });
+    const { timeoutMs = 120000, ...rest } = init;
+    const res = await this.fetch(url, { ...rest, headers: { 'user-agent': UA, ...(rest.headers ?? {}) }, signal: AbortSignal.timeout(timeoutMs) });
     return res;
   }
 
@@ -182,11 +187,15 @@ export class Verifier {
     const q = `[out:json][timeout:120];way(around:${radiusKm * 1000},${point.lat},${point.lon})[natural=coastline];out geom;`;
     let d = null;
     let failure = null;
-    for (const url of OVERPASS_INSTANCES) {
+    const order = [...OVERPASS_INSTANCES].sort((a, b) => Number(b === this.overpassGood) - Number(a === this.overpassGood) || (this.overpassDown.get(a) ?? 0) - (this.overpassDown.get(b) ?? 0));
+    for (const url of order) {
+      if (this.now() - (this.overpassDown.get(url) ?? -Infinity) < INSTANCE_REST_MS && url !== order.at(-1)) continue;
       try {
-        d = await this.json(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(q)}` });
+        d = await this.json(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(q)}`, timeoutMs: INSTANCE_TIMEOUT_MS });
+        this.overpassGood = url;
         break;
       } catch (error) {
+        this.overpassDown.set(url, this.now());
         failure = error;
       }
     }
@@ -248,13 +257,17 @@ export class Verifier {
     return { url: row.url, verdict: refuted.length ? 'refuted' : unconfirmed.length ? 'unconfirmed' : 'confirmed', checks };
   }
 
-  async verify(project) {
+  async verify(project, { onRow = async () => {} } = {}) {
     const ob = obligationsOf(project);
     const rows = (project.candidates?.kept ?? []).filter((r) => r.plan?.tier === 'fits');
     const inputs = crypto.createHash('sha256').update(JSON.stringify({ ob, rows: rows.map((r) => [r.url, r.price, r.currency, r.area, r.lat, r.lon]) })).digest('hex');
     const results = [];
-    for (const row of rows) results.push(await this.verifyRow(row, ob));
-    return { id: project.id, at: new Date(this.now()).toISOString(), inputs, obligations: ob, results, confirmed: results.filter((r) => r.verdict === 'confirmed').map((r) => r.url) };
+    const record = () => ({ id: project.id, at: new Date(this.now()).toISOString(), inputs, obligations: ob, results: [...results], confirmed: results.filter((r) => r.verdict === 'confirmed').map((r) => r.url), complete: results.length === rows.length });
+    for (const row of rows) {
+      results.push(await this.verifyRow(row, ob));
+      await onRow(record());
+    }
+    return record();
   }
 }
 
@@ -270,10 +283,11 @@ export async function main(argv = process.argv.slice(2)) {
   const projectsAt = argv.indexOf('--projects');
   const projectsDir = projectsAt > -1 ? argv[projectsAt + 1] : path.join(dataDir, 'projects');
   const project = JSON.parse(await fs.readFile(path.join(projectsDir, `${id}.json`), 'utf8'));
-  const record = await new Verifier().verify(project);
   const out = path.join(dataDir, 'verification');
   await fs.mkdir(out, { recursive: true });
-  await fs.writeFile(path.join(out, `${id}.json`), JSON.stringify(record, null, 1));
+  const save = (record) => fs.writeFile(path.join(out, `${id}.json`), JSON.stringify(record, null, 1));
+  const record = await new Verifier().verify(project, { onRow: save });
+  await save(record);
   await fs.appendFile(path.join(out, `${id}.jsonl`), `${JSON.stringify({ at: record.at, inputs: record.inputs, confirmed: record.confirmed.length, checked: record.results.length })}\n`);
   console.log(`verified ${record.results.length} row(s): ${record.confirmed.length} confirmed, ${record.results.filter((r) => r.verdict === 'refuted').length} refuted, ${record.results.filter((r) => r.verdict === 'unconfirmed').length} unconfirmed`);
   return 0;

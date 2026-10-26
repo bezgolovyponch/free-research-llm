@@ -29,6 +29,8 @@ const STORE_TABLES = ['sites', 'places', 'hpi', 'points', 'facts'];
 export const RETRY_STATUS = new Set([429, 502, 503, 504]);
 export const RETRY_WAITS_MS = [10000, 30000];
 const USER_AGENT = 'free-research-llm (site fit; https://github.com/bezgolovyponch/free-research-llm)';
+export const INSTANCE_TIMEOUT_MS = 45000;
+export const INSTANCE_REST_MS = 10 * 60 * 1000;
 export const OVERPASS_URLS = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
@@ -284,9 +286,10 @@ export class SiteAssessor {
 
   async httpJson(url, init = {}) {
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(url, { ...init, headers: { 'user-agent': USER_AGENT, accept: 'application/json', ...(init.headers ?? {}) }, signal: AbortSignal.timeout(150000) });
+      const { timeoutMs = 150000, noRetry = false, ...rest } = init;
+      const res = await fetch(url, { ...rest, headers: { 'user-agent': USER_AGENT, accept: 'application/json', ...(rest.headers ?? {}) }, signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) return res.json();
-      if (!RETRY_STATUS.has(res.status) || attempt >= RETRY_WAITS_MS.length) throw new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
+      if (noRetry || !RETRY_STATUS.has(res.status) || attempt >= RETRY_WAITS_MS.length) throw new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
       await this.sleep(RETRY_WAITS_MS[attempt]);
     }
   }
@@ -455,14 +458,18 @@ export class SiteAssessor {
 
   async overpass(query) {
     const start = this.overpassAt ?? 0;
+    this.overpassDown ??= new Map();
     let last = null;
     for (let i = 0; i < OVERPASS_URLS.length; i++) {
       const at = (start + i) % OVERPASS_URLS.length;
+      const url = OVERPASS_URLS[at];
+      if (i < OVERPASS_URLS.length - 1 && this.now() - (this.overpassDown.get(url) ?? -Infinity) < INSTANCE_REST_MS) continue;
       try {
-        const json = await this.fetchJson(OVERPASS_URLS[at], { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}` });
+        const json = await this.fetchJson(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}`, timeoutMs: INSTANCE_TIMEOUT_MS, noRetry: true });
         this.overpassAt = at;
         return json;
       } catch (error) {
+        this.overpassDown.set(url, this.now());
         last = error;
       }
     }
