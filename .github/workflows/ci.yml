@@ -17,6 +17,9 @@ jobs:
     name: test (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +37,7 @@ jobs:
         run: npm ci
       - name: install browsers
         timeout-minutes: 10
-        run: npx playwright install --with-deps chromium webkit
+        run: npx playwright install chromium webkit
       - name: quality gate (syntax, secrets, comments, tests-present, vitest, e2e)
         run: npm run quality
       - name: keep failure evidence
