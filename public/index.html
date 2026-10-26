@@ -1318,8 +1318,8 @@ function renderGates(){
   $("gOnly").addEventListener("change",e=>{STATE.gatesOnlySelected=e.target.checked;renderGates();});
 }
 
-const TIER_LABEL={fits:["var(--gr)","Fits"],"trade-off":["var(--am)","Trade-off"],unverified:["var(--gray)","To confirm"],blocked:["var(--rd)","Blocked"]};
-const TIER_RANK={fits:0,"trade-off":1,unverified:2,blocked:3};
+const TIER_LABEL={fits:["var(--gr)","Fits"],"trade-off":["var(--am)","Trade-off"],unverified:["var(--gray)","To confirm"],weak:["var(--rd)","Weak"],blocked:["var(--rd)","Blocked"]};
+const TIER_RANK={fits:0,"trade-off":1,unverified:2,weak:3,blocked:4};
 const CAND_COLS=[
   ["tier","Tier",r=>r.plan?TIER_RANK[r.plan.tier]:9],
   ["fit","Fit",r=>r.fit?r.fit.score:-1],
@@ -1356,7 +1356,7 @@ function candidatesHtml(p){
   if(!c)return h+'<div class="small muted">No candidate table yet. Press ▶ Run: code reads the portals, screens every listing against the brief and lists the rest here.</div></div>';
   const why=Object.entries(c.screened||{}).sort((x,y)=>y[1]-x[1]).map(([r,n])=>esc(r)+" "+n).join(" · ");
   const t=c.tiers;
-  h+='<div><b>Candidate table</b> · '+c.found+" found · <b>"+c.keptCount+(t?" fit every criterion":" kept")+"</b>"+(t?" · "+t["trade-off"]+" trade-offs · "+t.unverified+" to confirm · "+t.blocked+" blocked":"")+" · "+c.toCheckCount+" to check · "+c.screenedCount+" screened out"+(why?' <span class="small muted">('+why+")</span>":"")+"</div>";
+  h+='<div><b>Candidate table</b> · '+c.found+" found · <b>"+c.keptCount+(t?" fit every criterion":" kept")+"</b>"+(t?" · "+t["trade-off"]+" trade-offs · "+t.unverified+" to confirm · "+(t.weak||0)+" weak · "+t.blocked+" blocked":"")+" · "+c.toCheckCount+" to check · "+c.screenedCount+" screened out"+(why?' <span class="small muted">('+why+")</span>":"")+"</div>";
   const fd=c.strategy&&c.strategy.foundation;
   if(fd)h+='<details class="small" style="margin:4px 0" open><summary><b>Decision model</b> · '+(fd.complete?'<span style="color:var(--gr)">every part of your question has a code check</span>':'<span style="color:var(--rd)">not modelled: '+esc(fd.missing.join("; "))+"</span>")+' · a plot counts only when every check is measured and met; tree answers are background, never the verdict</summary><table class="rtable" style="margin-top:4px"><tr><th>Your words</th><th>Checked as</th><th>Measured by</th></tr>'+fd.clauses.map(cl=>"<tr><td>"+esc(cl.text)+"</td><td>"+esc(cl.criteria.map(id=>(fd.criteria.find(x=>x.id===id)||{label:id}).label).join(" · ")||"—")+'</td><td class="faint">'+esc(cl.criteria.map(id=>(fd.criteria.find(x=>x.id===id)||{measure:""}).measure).join(" · "))+"</td></tr>").join("")+"</table></details>";
   if(c.strategy){const quoted=c.strategy.sources.filter(s=>s.quoted!==false);const ok=quoted.filter(s=>s.confirmed>0).length;h+='<details class="small" style="margin:4px 0"><summary>Strategy: '+esc(c.strategy.label)+" · "+ok+"/"+quoted.length+" sources re-read online"+(c.strategy.retrievedAt?" "+esc(String(c.strategy.retrievedAt).slice(0,16).replace("T"," "))+"Z":"")+"</summary>"+c.strategy.sources.map(s=>{const u=safeUrl(s.url);return '<div>'+(s.quoted===false?'<span class="faint" title="data service, read when measuring">◦</span>':s.confirmed>0?'<span style="color:var(--gr)">✓</span>':s.status?'<span style="color:var(--am)">?</span>':'<span style="color:var(--rd)">✗</span>')+" "+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(s.title)+"</a>":esc(s.title))+(s.quotes?' <span class="faint">'+esc(s.confirmed)+"/"+esc(s.quotes)+" quotes found</span>":"")+"</div>";}).join("")+'<div class="faint">Rules used: '+esc(Object.entries(c.strategy.rules).map(([k,v])=>k+" "+v.value+(v.currency?" "+v.currency:"")+" ("+v.source+")").join(" · "))+"</div></details>";}
@@ -1367,7 +1367,7 @@ function candidatesHtml(p){
   const st=STATE.candSort||{key:"tier",dir:1};
   const head="<tr>"+CAND_COLS.map(([k,l])=>'<th data-csort="'+k+'" style="cursor:pointer;white-space:nowrap" title="Sort by '+esc(l)+'">'+esc(l)+(st.key===k?(st.dir>0?" ▲":" ▼"):"")+"</th>").join("")+"<th>Why it fits · potential · risks</th></tr>";
   if(c.kept.length){
-    const tiers=["all","fits","trade-off","unverified","blocked"].filter(x=>x==="all"||!t||t[x]);
+    const tiers=["all","fits","trade-off","unverified","weak","blocked"].filter(x=>x==="all"||!t||t[x]);
     h+='<div class="row" style="gap:4px;margin-top:8px;flex-wrap:wrap"><span class="small faint">Show:</span>'+tiers.map(x=>'<button class="btn '+((STATE.candTier||"all")===x?"secondary":"ghost")+' sm" data-ctier="'+x+'">'+(x==="all"?"All "+c.kept.length:TIER_LABEL[x][1]+" "+t[x])+"</button>").join("")+'<span class="small faint">· click a column to sort</span></div>';
     h+='<div class="tablewrap"><table class="rtable" id="candRows" style="margin-top:6px">'+head+sortedCandidates(c.kept).map(row).join("")+"</table></div>";
   }

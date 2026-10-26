@@ -13,7 +13,7 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, describeBrief, onConcept } from './brief.mjs';
-import { buildCandidates, candidateDeliverables, shortlistText } from './candidates.mjs';
+import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
@@ -298,8 +298,9 @@ export class ResearchEngine {
     if (strategy) {
       project.candidates = applyStrategy(project.candidates, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
       const t = project.candidates.tiers;
-      this.emit(project, 'candidates', `strategy paths: ${t.fits} fit every criterion, ${t['trade-off']} trade-offs with their potential, ${t.unverified} to confirm, ${t.blocked} blocked by law`);
+      this.emit(project, 'candidates', `strategy paths: ${t.fits} fit every criterion, ${t['trade-off']} trade-offs with their potential, ${t.unverified} to confirm, ${t.weak} weak, ${t.blocked} blocked by law`);
     }
+    if (project.report) this.planActions(project);
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
     return c;
@@ -440,6 +441,7 @@ export class ResearchEngine {
     const counts = progress(project.nodes);
     project.report = {
       verdict: sanitizeVerdict(r.verdict).slice(0, 300),
+      modelVerdict: sanitizeVerdict(r.verdict).slice(0, 300),
       kind: questionKind(project),
       confidence: CONFIDENCE.includes(r.confidence) ? r.confidence : 'low',
       summary: String(r.summary ?? '').slice(0, 2500),
@@ -465,7 +467,9 @@ export class ResearchEngine {
   planActions(project) {
     if (!project.report) return null;
     const status = resultStatus(project);
-    project.report.verdict = provisionalVerdict(project.report.verdict, status).slice(0, 400);
+    const table = tableVerdict(project.candidates, project.acceptance?.itemCount ?? null);
+    const said = project.report.modelVerdict ?? project.report.verdict;
+    project.report.verdict = provisionalVerdict(table ? `${table} — model memo: ${said}` : said, status).slice(0, 600);
     project.report.status = { provisional: status.provisional, coverage: status.coverage, confidence: status.confidence, blocking: status.blocking, counts: status.counts };
     project.report.actions = status.plan.slice(0, 40);
     return status;

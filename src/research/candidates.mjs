@@ -135,3 +135,10 @@ export function shortlistText(candidates, limit = 15) {
   const ranked = candidates.sites ? `, ranked by code-measured fit (sea distance, workable months, no-AC heat, things to explore, price trend, cost, zoning)` : '';
   return [`found ${candidates.found}, kept ${candidates.keptCount}${ranked}, to check ${candidates.toCheckCount}, screened out ${candidates.screenedCount}${reasons ? ` (${reasons})` : ''}`, ...rows].join('\n');
 }
+
+export function tableVerdict(candidates, itemCount = null) {
+  const t = candidates?.tiers;
+  if (!t) return '';
+  const target = itemCount ? ` of the ${itemCount} asked` : '';
+  return `Decision model: ${t.fits} plot${t.fits === 1 ? '' : 's'}${target} fit every check; ${t['trade-off']} trade-off${t['trade-off'] === 1 ? '' : 's'} with their potential; ${t.unverified} to confirm; ${t.weak ?? 0} weak; ${t.blocked} blocked by law`;
+}

@@ -179,7 +179,6 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const failed = checks.filter((c) => c.ok === false);
   const unknown = checks.filter((c) => c.ok === null);
   const blocked = checks.find((c) => c.id === 'legal' && c.ok === false);
-  const tier = blocked ? 'blocked' : failed.length ? 'trade-off' : unknown.length ? 'unverified' : 'fits';
   const why = [];
   if (site?.coastKm !== null && site?.coastKm !== undefined && site.coastKm <= ebike) why.push(`sea ${site.coastKm} km${site.beachKm !== null && site.beachKm !== undefined ? `, beach ${site.beachKm} km` : ''}: inside the ${ebike} km e-bike ride`);
   if (climate && climate.workable >= rules.minWorkableMonths.value) why.push(`${climate.workable} workable months a year`);
@@ -190,29 +189,72 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   if (site) why.push(`${explorePoints(site)} things to explore and ${(site.lodging ?? 0) + (site.campsites ?? 0)} places to stay within 15 km (demand)`);
   if (country?.path && !country.blocker) why.push(`path: ${country.path}`);
   const potential = [];
-  if (failed.some((c) => c.id === 'sea') && site) {
-    if (site.lakeKm !== null && site.lakeKm !== undefined && site.lakeKm <= 5) potential.push(`lake or reservoir ${site.lakeKm} km away`);
-    if (explorePoints(site) >= STRONG_EXPLORE) potential.push(`${explorePoints(site)} beaches, viewpoints, sights, reserves and trails within 15 km`);
-    if (climate && climate.workable >= rules.minWorkableMonths.value) potential.push(`${climate.workable}-month season`);
+  let draw = false;
+  if (site) {
+    if (site.lakeKm !== null && site.lakeKm !== undefined && site.lakeKm <= 5) {
+      potential.push(`lake or reservoir ${site.lakeKm} km away`);
+      draw = true;
+    }
+    if (explorePoints(site) >= STRONG_EXPLORE) {
+      potential.push(`${explorePoints(site)} beaches, viewpoints, sights, reserves and trails within 15 km`);
+      draw = true;
+    }
+    if (failed.some((c) => c.id === 'season') && site.coastKm !== null && site.coastKm !== undefined && site.coastKm <= ebike) {
+      potential.push(`sea ${site.coastKm} km: a strong short-season location`);
+      draw = true;
+    }
+    if (climate && climate.workable >= rules.minWorkableMonths.value && failed.some((c) => c.id !== 'season')) potential.push(`${climate.workable}-month season`);
     if ((site.campsites ?? 0) > 0) potential.push(`${site.campsites} campsites nearby prove camping demand`);
   }
-  if (failed.some((c) => c.id === 'season') && site?.coastKm !== null && site?.coastKm !== undefined && site.coastKm <= ebike) potential.push(`sea ${site.coastKm} km: a strong short-season location`);
+  const tier = blocked ? 'blocked' : failed.length ? (draw ? 'trade-off' : 'weak') : unknown.length ? 'unverified' : 'fits';
   const risks = [...(country?.risks ?? [])];
   if (zoning === 'agricultural' && country?.agriculturalRisk) risks.push(country.agriculturalRisk);
   if (SHARED_TITLE.test(words)) risks.push('shared title (hisseli): you buy a share, not a parcel');
   const tradeoffs = failed.filter((c) => c.id !== 'legal').map((c) => `${c.label}: no (${c.detail})`);
-  const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set(unknown.map((c) => c.detail))].join('; ')}` : potential.length ? `trade-off with potential: ${potential.join('; ')}` : `weak: ${tradeoffs.join('; ')}`;
+  const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set(unknown.map((c) => c.detail))].join('; ')}` : tier === 'trade-off' ? `trade-off with potential: ${potential.join('; ')}` : `does not fit: ${tradeoffs.join('; ')}; nothing nearby draws guests to make up for it`;
   return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };
 }
 
-export const TIER_ORDER = { fits: 0, 'trade-off': 1, unverified: 2, blocked: 3 };
+export const TIER_ORDER = { fits: 0, 'trade-off': 1, unverified: 2, weak: 3, blocked: 4 };
+export const MIN_ROWS_FOR_MEDIAN = 5;
+export const IMPLAUSIBLE_SHARE = 0.1;
+
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+export function pricePerM2Medians(rows) {
+  const by = {};
+  for (const r of rows) {
+    const m2 = areaM2(r);
+    if (!m2 || !Number.isFinite(r.value) || r.value <= 0) continue;
+    (by[r.countryCode] ??= []).push(r.value / m2);
+  }
+  return Object.fromEntries(Object.entries(by).filter(([, v]) => v.length >= MIN_ROWS_FOR_MEDIAN).map(([c, v]) => [c, median(v)]));
+}
+
+export function implausiblyCheap(row, medians) {
+  const m2 = areaM2(row);
+  const mid = medians[row.countryCode];
+  if (!m2 || !mid || !Number.isFinite(row.value)) return null;
+  const perM2 = row.value / m2;
+  return perM2 < mid * IMPLAUSIBLE_SHARE ? `€${perM2.toFixed(2)}/m² is under a tenth of the ${row.country || row.countryCode} median in this table (€${mid.toFixed(2)}/m²): check the price and area on the listing` : null;
+}
 
 export function applyStrategy(candidates, strategy, { convert = null, retrieved = null, foundation = null } = {}) {
   if (!candidates || !strategy) return candidates;
   const model = foundation ? { ...strategy, rules: foundation.rules } : strategy;
   const euHpi = candidates.sites?.euHpi ?? null;
   const trends = candidates.sites?.trends ?? null;
-  const rows = [...(candidates.kept ?? []), ...(candidates.far ?? [])].map((row) => ({ ...row, plan: planFor(row, model, { convert, euHpi, trends }) }));
+  const all = [...(candidates.kept ?? []), ...(candidates.far ?? [])];
+  const medians = pricePerM2Medians(all);
+  const rows = all.map((row) => {
+    const plan = planFor(row, model, { convert, euHpi, trends });
+    const cheap = implausiblyCheap(row, medians);
+    return { ...row, plan: cheap ? { ...plan, risks: [...plan.risks, cheap] } : plan };
+  });
   rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || (b.fit?.score ?? -1) - (a.fit?.score ?? -1));
   const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
   const { far, ...rest } = candidates;

@@ -95,4 +95,11 @@ describe('listing extraction', () => {
     expect(listingKey('https://a.example/real_estate/125161-gpt')).toBe(listingKey('https://a.example/real_estate/125161-orange-grove'));
     expect(pathTemplate('https://a.example/announces/other-real+estate-catalonia-spain/107193361/')).toBe('a.example/announces/~/*');
   });
+
+  it('reads the largest stated area of a page in square metres, hectares included', async () => {
+    const { areaFromText } = await import('../../src/search/listings.mjs');
+    expect(areaFromText('Área bruta 120 m² · Área do terreno: 2 500 m²')).toBe(2500);
+    expect(areaFromText('Terreno rústico com 2 ha')).toBe(20000);
+    expect(areaFromText('no area here')).toBeNull();
+  });
 });

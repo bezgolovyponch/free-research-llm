@@ -1,4 +1,8 @@
 import fs from 'node:fs/promises';
+import { countryByCode } from './brief.mjs';
+import { areaFromText } from '../search/listings.mjs';
+
+export const GONE_STATUS = new Set([404, 410]);
 
 export const EBIKE_KM = 25;
 export const NEAR_KM = 15;
@@ -246,7 +250,7 @@ export class SiteAssessor {
     this.now = now;
     this.sleep = sleep;
     this.fetchJson = fetchJson ?? ((url, init) => this.httpJson(url, init));
-    this.store = { sites: {}, places: {}, hpi: {}, points: {} };
+    this.store = { sites: {}, places: {}, hpi: {}, points: {}, facts: {} };
     this.loaded = !file;
     this.writing = Promise.resolve();
     this.lastGeocode = -Infinity;
@@ -271,10 +275,10 @@ export class SiteAssessor {
         const current = parsed.version === STORE_VERSION;
         const looked = (entry) => String(entry?.point?.by ?? '').startsWith('place');
         const points = Object.fromEntries(Object.entries(parsed.points ?? {}).filter(([, entry]) => current || !looked(entry)));
-        this.store = { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: current ? parsed.hpi ?? {} : {}, points };
+        this.store = { sites: parsed.sites ?? {}, places: current ? parsed.places ?? {} : {}, hpi: current ? parsed.hpi ?? {} : {}, points, facts: parsed.facts ?? {} };
       }
     } catch {
-      this.store = { sites: {}, places: {}, hpi: {}, points: {} };
+      this.store = { sites: {}, places: {}, hpi: {}, points: {}, facts: {} };
     }
     this.loaded = true;
     return this;
@@ -282,7 +286,7 @@ export class SiteAssessor {
 
   persist() {
     if (!this.file) return this.writing;
-    for (const table of ['sites', 'places', 'points']) {
+    for (const table of ['sites', 'places', 'points', 'facts']) {
       const keys = Object.keys(this.store[table]);
       for (const key of keys.slice(0, Math.max(0, keys.length - MAX_SITES))) delete this.store[table][key];
     }
@@ -329,18 +333,33 @@ export class SiteAssessor {
     return point;
   }
 
+  noteFacts(url, page) {
+    if (page) this.store.facts[url] = { at: this.now(), gone: GONE_STATUS.has(page.status) ? page.status : 0, area: areaFromText(page.text) };
+  }
+
+  async factsOf(row, readPage) {
+    if (row.area || this.store.facts[row.url] || !readPage || this.reads >= this.limits.pageReads) return this.store.facts[row.url] ?? null;
+    this.reads++;
+    this.noteFacts(row.url, await readPage(row.url).catch(() => null));
+    this.persist();
+    return this.store.facts[row.url] ?? null;
+  }
+
   async findPoint(row, readPage) {
     let page = null;
     if (readPage) {
       page = await readPage(row.url).catch(() => null);
+      this.noteFacts(row.url, page);
+      if (GONE_STATUS.has(page?.status)) return null;
       if (page?.coords) return { ...page.coords, by: 'listing page' };
     }
     const place = String(row.place || page?.place || '').trim();
     if (!place) return null;
-    const parts = [...new Set(place.split(/,|\s+-\s+/).map((p) => p.trim()).filter(Boolean))];
+    const country = countryByCode(row.countryCode ?? '');
+    const countryWords = new Set([row.countryCode, row.country, ...(country ? [country.name, ...country.aliases] : [])].filter(Boolean).map(fold));
+    const parts = [...new Set(place.split(/,|\s+-\s+/).map((p) => p.trim()).filter((p) => p && !countryWords.has(fold(p))))];
     for (let k = 0; k < parts.length; k++) {
       const rest = parts.slice(k).join(', ');
-      if (row.country && rest.toLowerCase() === row.country.toLowerCase()) break;
       const query = row.country && !rest.toLowerCase().includes(row.country.toLowerCase()) ? `${rest}, ${row.country}` : rest;
       const point = await this.geocode(query, row.countryCode ?? '');
       if (point) return k ? { ...point, by: `${point.by}, the nearest place found for "${place}"` } : point;
@@ -408,9 +427,16 @@ export class SiteAssessor {
     const kept = [];
     const far = [];
     this.reads = 0;
-    for (const row of candidates.kept) {
+    const gone = [];
+    for (const original of candidates.kept) {
       try {
-        const point = await this.locate(row, readPage);
+        const point = await this.locate(original, readPage);
+        const facts = await this.factsOf(original, readPage);
+        if (facts?.gone) {
+          gone.push({ ...original, goneStatus: facts.gone });
+          continue;
+        }
+        const row = original.area || !facts?.area ? original : { ...original, area: facts.area, areaUnit: 'm²', areaBy: 'listing page' };
         if (point === undefined) {
           stats.pending++;
           kept.push({ ...row, site: null, fit: null, siteNote: 'site check queued for the next pass' });
@@ -447,19 +473,22 @@ export class SiteAssessor {
         } else kept.push(assessed);
       } catch (error) {
         stats.failed++;
-        kept.push({ ...row, site: null, fit: null, siteNote: `site check failed: ${String(error.message).slice(0, 80)}` });
+        kept.push({ ...original, site: null, fit: null, siteNote: `site check failed: ${String(error.message).slice(0, 80)}` });
       }
     }
     kept.sort((a, b) => (b.fit?.score ?? -1) - (a.fit?.score ?? -1));
     const reason = `farther than ${EBIKE_KM} km from the sea`;
-    const screened = far.length ? { ...candidates.screened, [reason]: (candidates.screened?.[reason] ?? 0) + far.length } : candidates.screened;
-    const examples = [...(candidates.examples ?? []), ...far.slice(0, 10).map((r) => ({ title: String(r.title ?? '').slice(0, 100), url: r.url, reasons: [`${reason} (${r.site.coastKm ?? `>${EBIKE_KM}`} km)`] }))].slice(-40);
+    const removed = 'listing removed from the portal';
+    const screened = { ...candidates.screened };
+    if (far.length) screened[reason] = (screened[reason] ?? 0) + far.length;
+    if (gone.length) screened[removed] = (screened[removed] ?? 0) + gone.length;
+    const examples = [...(candidates.examples ?? []), ...gone.slice(0, 10).map((r) => ({ title: String(r.title ?? '').slice(0, 100), url: r.url, reasons: [`${removed} (HTTP ${r.goneStatus})`] })), ...far.slice(0, 10).map((r) => ({ title: String(r.title ?? '').slice(0, 100), url: r.url, reasons: [`${reason} (${r.site.coastKm ?? `>${EBIKE_KM}`} km)`] }))].slice(-40);
     return {
       ...candidates,
       kept,
-      keptCount: candidates.keptCount - far.length,
+      keptCount: candidates.keptCount - far.length - gone.length,
       screened,
-      screenedCount: candidates.screenedCount + far.length,
+      screenedCount: candidates.screenedCount + far.length + gone.length,
       examples,
       far,
       farReason: reason,

@@ -254,6 +254,26 @@ describe('SiteAssessor', () => {
     expect(out.kept[0].locatedBy).toBe('place "Binh Duong, Vietnam", the nearest place found for "Chanh Nghia, Thu Dau Mot, Binh Duong"');
   });
 
+  it('never looks up a country code or name as a place, so a vague listing is not pinned to a village called "TR"', async () => {
+    const net = fakeNet({ geocode: { 'TR, Turkey': { lat: 41.38, lon: 33.78 }, 'Türkiye, Turkey': { lat: 39, lon: 35 } } });
+    const turkish = { title: 'Tarla', url: 'https://emlak.example/ilan/tarla-1', value: 5000, area: 1400, place: 'Dursunbey, Balıkesir, TR', country: 'Turkey', countryCode: 'TR', coast: false };
+    const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ ...table, kept: [turkish, { ...turkish, url: 'https://emlak.example/ilan/tarla-2', place: 'Türkiye' }], keptCount: 2 }, { coastal: false }, {});
+    expect(out.kept.map((r: { siteNote?: string }) => r.siteNote)).toEqual(['location not shown', 'location not shown']);
+    const asked = net.calls.filter((c) => c === 'geocode').length;
+    expect(asked).toBe(2);
+  });
+
+  it('screens out a listing the portal removed and takes a missing area from the listing page', async () => {
+    const readPage = async (url: string) => (url.endsWith('gone') ? { status: 410, text: '', coords: null } : { status: 200, text: 'Área bruta 120 m² · Área do terreno: 2 500 m²', coords: { lat: 39.02564, lon: -9.114252 } });
+    const rowsIn = [{ ...rows[2], url: 'https://imo.example/gone' }, { ...rows[2], url: 'https://imo.example/ok', area: null }];
+    const out = await new SiteAssessor({ fetchJson: fakeNet().fetchJson, sleep: noSleep }).apply({ ...table, kept: rowsIn, keptCount: 2 }, { coastal: false }, { readPage });
+    expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['https://imo.example/ok']);
+    expect(out.kept[0]).toMatchObject({ area: 2500, areaUnit: 'm²', areaBy: 'listing page' });
+    expect(out.screened['listing removed from the portal']).toBe(1);
+    expect(out.examples.some((e: { reasons: string[] }) => e.reasons[0] === 'listing removed from the portal (HTTP 410)')).toBe(true);
+    expect(out.keptCount).toBe(1);
+  });
+
   it('reads each listing page once a day at most, and only a fixed number of new pages per pass', async () => {
     let reads = 0;
     const readPage = async () => { reads++; return { coords: null, place: '' }; };

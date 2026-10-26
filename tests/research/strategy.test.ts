@@ -58,6 +58,14 @@ describe('low-entry glamping strategy', () => {
     expect(plan.verdict).toMatch(/^trade-off with potential/);
   });
 
+  it('marks an inland plot with nothing nearby to draw guests as weak, not a trade-off', () => {
+    const bare = site(60, { lakeKm: null, beaches: 0, viewpoints: 2, attractions: 1, reserves: 0, protectedAreas: 0, hikingRoutes: 0, campsites: 1, climate: climate(6, 30.9) });
+    const plan = planFor({ ...nazare, site: bare }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
+    expect(plan.tier).toBe('weak');
+    expect(plan.verdict).toMatch(/^does not fit: sea within 20 km by e-bike: no \(sea 60 km\); 10\+ workable months: no .*; nothing nearby draws guests to make up for it$/);
+    expect(plan.potential).toEqual(['1 campsites nearby prove camping demand']);
+  });
+
   it('keeps a short-season seaside plot as a strong location, not a reject', () => {
     const plan = planFor({ ...nazare, site: site(0.3, { climate: climate(7, 30.2) }) }, GLAMPING_LOW_ENTRY, { convert: toEur });
     expect(plan.tier).toBe('trade-off');
@@ -88,7 +96,7 @@ describe('low-entry glamping strategy', () => {
     const table = { sites: { euHpi: 5.5 }, found: 3, kept: [{ ...nazare, url: 'a' }, { ...nazare, url: 'b', countryCode: 'VN' }], far: [far], farReason: 'farther than 25 km from the sea', screened: { 'farther than 25 km from the sea': 1, 'price outside': 4 }, screenedCount: 5, examples: [{ url: 'f', reasons: [] }] };
     const out = applyStrategy(table, GLAMPING_LOW_ENTRY, { convert: toEur, retrieved: { at: '2026-10-26T09:00:00Z', 'pt-park': { status: 200, confirmed: 3, quotes: 3 } } });
     expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['a', 'f', 'b']);
-    expect(out.tiers).toEqual({ fits: 1, 'trade-off': 1, unverified: 0, blocked: 1 });
+    expect(out.tiers).toEqual({ fits: 1, 'trade-off': 1, unverified: 0, weak: 0, blocked: 1 });
     expect(out.keptCount).toBe(1);
     expect(out.screened).toEqual({ 'price outside': 4 });
     expect(out.screenedCount).toBe(4);
@@ -157,5 +165,15 @@ describe('decision model from the user words', () => {
     expect(turkey.checks.find((c: { id: string }) => c.id === 'trend')).toMatchObject({ ok: true, detail: 'Turkey +4.9% a year after inflation vs EU +2.9% (Eurostat, housing)' });
     expect(turkey.why.join(' ')).toContain('(nominal +41.5%, inflation 34.9%, 2025)');
     expect(planFor({ ...nazare, site: null }, GLAMPING_LOW_ENTRY, { euHpi: 2.9, trends: { PT: { change: 17.6, inflation: 2.2, real: 15.1, year: '2025' } } }).verdict).not.toContain('price series');
+  });
+
+  it('flags a price per m² under a tenth of the country median as implausible', async () => {
+    const { implausiblyCheap, pricePerM2Medians } = await import('../../src/research/strategy.mjs');
+    const rows = [10, 12, 14, 16, 18].map((eurPerM2) => ({ countryCode: 'VN', country: 'Vietnam', value: eurPerM2 * 250, area: 250, areaUnit: 'm²' }));
+    const medians = pricePerM2Medians(rows);
+    expect(medians).toEqual({ VN: 14 });
+    expect(implausiblyCheap({ countryCode: 'VN', country: 'Vietnam', value: 250, area: 250, areaUnit: 'm²' }, medians)).toBe('€1.00/m² is under a tenth of the Vietnam median in this table (€14.00/m²): check the price and area on the listing');
+    expect(implausiblyCheap(rows[0], medians)).toBeNull();
+    expect(pricePerM2Medians(rows.slice(0, 4))).toEqual({});
   });
 });
