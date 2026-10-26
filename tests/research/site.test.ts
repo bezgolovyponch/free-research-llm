@@ -207,7 +207,7 @@ describe('SiteAssessor', () => {
     expect(assessor.cachedSite(VIR.lat, VIR.lon)).toEqual({ coastKm: 9 });
     assessor.persist();
     await assessor.writing;
-    expect(JSON.parse(await fs.readFile(file, 'utf8')).version).toBe(3);
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).version).toBe(4);
     await fs.rm(dir, { recursive: true, force: true });
   });
 
