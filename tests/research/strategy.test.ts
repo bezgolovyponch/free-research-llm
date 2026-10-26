@@ -50,11 +50,11 @@ describe('low-entry glamping strategy', () => {
   });
 
   it('keeps a plot far from the sea as a trade-off and defends its potential', () => {
-    const inland = { ...nazare, site: site(32, { lakeKm: 1.2, viewpoints: 30 }) };
+    const inland = { ...nazare, site: site(32, { lakeKm: 1.2, lakesNamed: true, viewpoints: 30 }) };
     const plan = planFor(inland, GLAMPING_LOW_ENTRY, { convert: toEur });
     expect(plan.tier).toBe('trade-off');
     expect(plan.tradeoffs[0]).toContain('sea 32 km');
-    expect(plan.potential).toEqual(expect.arrayContaining(['lake or reservoir 1.2 km away', '12-month season']));
+    expect(plan.potential).toEqual(expect.arrayContaining(['named lake or reservoir 1.2 km away', '12-month season']));
     expect(plan.verdict).toMatch(/^trade-off with potential/);
   });
 
@@ -171,9 +171,34 @@ describe('decision model from the user words', () => {
     const { implausiblyCheap, pricePerM2Medians } = await import('../../src/research/strategy.mjs');
     const rows = [10, 12, 14, 16, 18].map((eurPerM2) => ({ countryCode: 'VN', country: 'Vietnam', value: eurPerM2 * 250, area: 250, areaUnit: 'm²' }));
     const medians = pricePerM2Medians(rows);
-    expect(medians).toEqual({ VN: 14 });
-    expect(implausiblyCheap({ countryCode: 'VN', country: 'Vietnam', value: 250, area: 250, areaUnit: 'm²' }, medians)).toBe('€1.00/m² is under a tenth of the Vietnam median in this table (€14.00/m²): check the price and area on the listing');
+    expect(medians).toEqual({ 'VN|not stated': 14 });
+    expect(implausiblyCheap({ countryCode: 'VN', country: 'Vietnam', value: 250, area: 250, areaUnit: 'm²' }, medians)).toBe('€1.00/m² is under a tenth of the median for land in Vietnam in this table (€14.00/m²): check the price and area on the listing');
     expect(implausiblyCheap(rows[0], medians)).toBeNull();
     expect(pricePerM2Medians(rows.slice(0, 4))).toEqual({});
+  });
+
+  it('never lets anything make up for too little land, and never lets an unnamed pond count as a lake', () => {
+    const tiny = planFor({ ...nazare, area: 6, site: site(2, { lakeKm: 0.9, lakesNamed: true, viewpoints: 300 }) }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
+    expect(tiny.tier).toBe('weak');
+    expect(tiny.verdict).toContain('too little land for a glamping site');
+    const pond = planFor({ ...nazare, site: site(40, { lakeKm: 0.3, beaches: 0, viewpoints: 1, attractions: 0, hikingRoutes: 0 }) }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
+    expect(pond.tier).toBe('weak');
+  });
+
+  it('asks to confirm a listing whose title names a place far from its map point', () => {
+    const plan = planFor({ ...nazare, placeConflict: 'the title names Vieira de Leiria, 117 km from where the listing\'s map puts it' }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
+    expect(plan.tier).toBe('unverified');
+    expect(plan.verdict).toBe("to confirm: the title names Vieira de Leiria, 117 km from where the listing's map puts it");
+  });
+
+  it('turns a would-be fit with an implausible price into one to confirm, comparing land of the same zoning', () => {
+    const rural = [3, 4, 5, 6, 7].map((p, i) => ({ ...nazare, url: `r${i}`, title: 'Terreno rústico', value: p * 1000, area: 1000 }));
+    const urban = [30, 35, 40, 45, 50].map((p, i) => ({ ...nazare, url: `u${i}`, title: 'Terreno urbano', value: p * 400, area: 400 }));
+    const estoril = { ...nazare, url: 'estoril', title: 'Terreno urbano Estoril', value: 1000, area: 400 };
+    const out = applyStrategy({ sites: { euHpi: 5.5 }, kept: [...rural, ...urban, estoril], screened: {}, screenedCount: 0 }, GLAMPING_LOW_ENTRY, { convert: toEur });
+    const row = out.kept.find((r: { url: string }) => r.url === 'estoril');
+    expect(row.plan.tier).toBe('unverified');
+    expect(row.plan.verdict).toBe('to confirm: €2.50/m² is under a tenth of the median for buildable land in Portugal in this table (€37.50/m²): check the price and area on the listing');
+    expect(out.kept.find((r: { url: string }) => r.url === 'r0').plan.tier).toBe('fits');
   });
 });

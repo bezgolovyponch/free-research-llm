@@ -126,9 +126,9 @@ describe('site measurements', () => {
 
   it('finds the nearest lake or reservoir for the potential of an inland plot', async () => {
     const { lakeQuery, parseLakes } = await import('../../src/research/site.mjs');
-    expect(lakeQuery(39.5, -8.3)).toContain('[natural=water][water~"^(lake|reservoir)$"]');
+    expect(lakeQuery(39.5, -8.3)).toContain('[natural=water][water~"^(lake|reservoir)$"][name]');
     expect(overpassQuery(39.5, -8.3)).toContain('[natural=water]');
-    expect(parseLakes({ elements: [{ type: 'way', tags: { natural: 'water', water: 'reservoir' }, center: { lat: 39.51, lon: -8.3 } }] }, 39.5, -8.3)).toBe(1.1);
+    expect(parseLakes({ elements: [{ type: 'way', tags: { natural: 'water', water: 'reservoir', name: 'Albufeira de Castelo do Bode' }, center: { lat: 39.51, lon: -8.3 } }, { type: 'way', tags: { natural: 'water', water: 'reservoir' }, center: { lat: 39.5001, lon: -8.3 } }] }, 39.5, -8.3)).toBe(1.1);
     expect(parseLakes({ elements: [] }, 39.5, -8.3)).toBeNull();
   });
 
@@ -344,5 +344,25 @@ describe('SiteAssessor', () => {
     await assessor.geocode('A, Croatia');
     await assessor.geocode('B, Croatia');
     expect(waits).toEqual([1100]);
+  });
+});
+
+describe('title and map agree', () => {
+  it('takes the place a title names, skipping generic words and numbers', async () => {
+    const { titlePlace } = await import('../../src/research/site.mjs');
+    expect(titlePlace('Terreno rústico, perto do mar, Vieira de Leiria, 290m2', ['terreno'])).toBe('Vieira de Leiria');
+    expect(titlePlace('Terreno para venda', ['terreno'])).toBeNull();
+    expect(titlePlace('Terreno Urbano | Coimbra | 20.000 €', ['terreno'])).toBe('Coimbra');
+  });
+
+  it('flags a listing whose map point is far from the place its title names', async () => {
+    const LISBON = { lat: 38.7777, lon: -9.0953 };
+    const VIEIRA = { lat: 39.8722, lon: -8.9304 };
+    const net = fakeNet({ geocode: { 'Vieira de Leiria, Portugal': VIEIRA } });
+    const row = { title: 'Terreno rústico, perto do mar, Vieira de Leiria, 290m2', url: 'https://imo.example/ID1iQd5', value: 4990, area: 290, place: 'Expo Norte, Parque das Nações, Lisboa', country: 'Portugal', countryCode: 'PT', lat: LISBON.lat, lon: LISBON.lon };
+    const out = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ found: 1, kept: [row], keptCount: 1, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [] }, { coastal: false, kind: { terms: ['terreno'] } }, {});
+    expect(out.kept[0].placeConflict).toBe("the title names Vieira de Leiria, 123 km from where the listing's map puts it");
+    const agrees = await new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep }).apply({ found: 1, kept: [{ ...row, lat: VIEIRA.lat, lon: VIEIRA.lon }], keptCount: 1, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [] }, { coastal: false, kind: { terms: ['terreno'] } }, {});
+    expect(agrees.kept[0].placeConflict).toBeUndefined();
   });
 });

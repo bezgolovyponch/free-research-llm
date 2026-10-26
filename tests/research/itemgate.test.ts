@@ -44,6 +44,7 @@ describe('item gate: rentals, word ends, broken links', () => {
     const plots = templateById('glamping-location').itemKind;
     expect(isKind({ title: 'Ver foto 2016 Land Rover Range Rover Evoque 16.950', url: 'https://rd.example/cars/1' }, plots)).toBe(false);
     expect(isKind({ title: 'Terreno rústico com acesso de carro', url: 'https://imo.example/terreno-1' }, plots)).toBe(true);
+    expect(isKind({ title: 'Cemitério da Guia em Cascais- Terreno perpétuo', url: 'https://imo.example/cemiterio-da-guia-terreno-perpetuo' }, plots)).toBe(false);
     expect(isKind({ title: 'Land Rover', url: 'https://x.example/1' }, { label: 'x', terms: ['land'] })).toBe(true);
   });
 

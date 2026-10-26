@@ -36,7 +36,8 @@ const HICP_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0
 export const MIN_PLACE_RANK = 12;
 const EUROSTAT_CODE = { GR: 'EL' };
 export const EU_AGGREGATE = 'EU27_2020';
-const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"]';
+const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"][name]';
+export const TITLE_PLACE_KM = 25;
 const COUNT_FILTERS = {
   viewpoints: '[tourism=viewpoint]',
   attractions: '[tourism=attraction]',
@@ -82,7 +83,7 @@ export function lakeQuery(lat, lon) {
 }
 
 export function parseLakes(json, lat, lon) {
-  const lakes = (json?.elements ?? []).filter((e) => e.tags?.natural === 'water').map((e) => ({ lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  const lakes = (json?.elements ?? []).filter((e) => e.tags?.natural === 'water' && e.tags?.name).map((e) => ({ lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
   return nearestKm(lat, lon, lakes);
 }
 
@@ -99,7 +100,7 @@ export function parseSurroundings(json, lat, lon) {
   const beaches = elements.filter((e) => e.tags?.natural === 'beach').map((b) => ({ lat: b.lat ?? b.center?.lat, lon: b.lon ?? b.center?.lon })).filter((b) => Number.isFinite(b.lat) && Number.isFinite(b.lon));
   const counts = elements.filter((e) => e.type === 'count').map((e) => Number(e.tags?.total ?? 0));
   const named = Object.fromEntries(Object.keys(COUNT_FILTERS).map((key, i) => [key, counts[i] ?? 0]));
-  return { coastKm: nearestKm(lat, lon, coastPoints(elements)), beaches: beaches.length, beachKm: nearestKm(lat, lon, beaches), lakeKm: parseLakes(json, lat, lon), ...named };
+  return { coastKm: nearestKm(lat, lon, coastPoints(elements)), beaches: beaches.length, beachKm: nearestKm(lat, lon, beaches), lakeKm: parseLakes(json, lat, lon), lakesNamed: true, ...named };
 }
 
 export function parseCoast(json, lat, lon) {
@@ -229,6 +230,14 @@ export function pageCoordinates(html) {
   return null;
 }
 
+const GENERIC_TITLE = /\b(?:terreno|terrenos|rustic|rústic|urban|venda|vende|lote|plot|land|sale|satılık|satilik|tarla|arsa|parcela|finca|solar|quinta|perto|near|com|with|para|for|zona|sea|mar|praia|beach|vista|view|ref|id)\b/i;
+
+export function titlePlace(title, kindTerms = []) {
+  const kind = new RegExp(`\\b(?:${kindTerms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') || 'x^'})\\b`, 'i');
+  const segments = String(title ?? '').split(/\s*[,|–—]\s*|\s+-\s+/).map((s) => s.trim());
+  return segments.find((s) => /^\p{Lu}/u.test(s) && !/\d/.test(s) && s.split(/\s+/).length <= 4 && !GENERIC_TITLE.test(s) && !kind.test(s)) ?? null;
+}
+
 export function shortSite(site) {
   if (!site) return null;
   const { climate, ...rest } = site;
@@ -333,6 +342,15 @@ export class SiteAssessor {
     return point;
   }
 
+  async titleConflict(row, point, brief) {
+    const name = titlePlace(row.title, brief?.kind?.terms ?? []);
+    if (!name || !row.country || String(row.place ?? '').toLowerCase().includes(name.toLowerCase())) return null;
+    const named = await this.geocode(`${name}, ${row.country}`, row.countryCode ?? '');
+    if (!named) return null;
+    const km = haversineKm(point.lat, point.lon, named.lat, named.lon);
+    return km > TITLE_PLACE_KM ? `the title names ${name}, ${Math.round(km)} km from where the listing's map puts it` : null;
+  }
+
   noteFacts(url, page) {
     if (page) this.store.facts[url] = { at: this.now(), gone: GONE_STATUS.has(page.status) ? page.status : 0, area: areaFromText(page.text) };
   }
@@ -390,7 +408,7 @@ export class SiteAssessor {
 
   async addLakes(lat, lon, site) {
     const post = (query) => this.fetchJson(OVERPASS_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}` });
-    const withLakes = { ...site, lakeKm: parseLakes(await post(lakeQuery(lat, lon)), lat, lon) };
+    const withLakes = { ...site, lakeKm: parseLakes(await post(lakeQuery(lat, lon)), lat, lon), lakesNamed: true };
     this.store.sites[siteKey(lat, lon)] = { at: this.store.sites[siteKey(lat, lon)]?.at ?? this.now(), site: withLakes };
     this.persist();
     return withLakes;
@@ -460,15 +478,15 @@ export class SiteAssessor {
           onProgress(stats);
         }
         stats.assessed++;
+        if (!site.lakesNamed && fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
+          fresh++;
+          site = await this.addLakes(point.lat, point.lon, site);
+        }
+        const conflict = await this.titleConflict(row, point, brief);
         const trend = await this.priceTrend(row.countryCode);
-        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, site, { hpi: trend?.real ?? null, maxValue }) };
+        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, site, { hpi: trend?.real ?? null, maxValue }), ...(conflict ? { placeConflict: conflict } : {}) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
-          if (site.lakeKm === undefined && fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
-            fresh++;
-            site = await this.addLakes(point.lat, point.lon, site);
-            assessed.site = shortSite(site);
-          }
           far.push(assessed);
         } else kept.push(assessed);
       } catch (error) {
