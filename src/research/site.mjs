@@ -21,8 +21,6 @@ export const CLIMATE_YEARS = ['2021-01-01', '2025-12-31'];
 export const PITCH_M2 = 40;
 export const CAMPING_SHARE = 0.6;
 export const RURAL_PARK_MAX_PITCHES = 30;
-export const POI_SATURATION = 200;
-export const LODGING_SATURATION = 300;
 const MAX_SITES = 2000;
 export const STORE_VERSION = 4;
 const STORE_TABLES = ['sites', 'places', 'hpi', 'points', 'facts'];
@@ -50,7 +48,6 @@ const COUNT_FILTERS = {
   campsites: '[tourism~"^(camp_site|caravan_site)$"]',
   lodging: '[tourism~"^(hotel|guest_house|hostel|chalet|apartment)$"]',
 };
-export const WEIGHTS = { sea: 0.2, season: 0.2, noAc: 0.1, explore: 0.2, demand: 0.05, trend: 0.1, cost: 0.05, zoning: 0.1 };
 
 const round = (value, digits = 1) => Math.round(value * 10 ** digits) / 10 ** digits;
 
@@ -152,22 +149,6 @@ export function pitchesFor(areaM2) {
   return Math.min(RURAL_PARK_MAX_PITCHES, Math.floor((area * CAMPING_SHARE) / PITCH_M2));
 }
 
-export function seaScore(km) {
-  if (km === null || km === undefined) return 0;
-  if (km <= 3) return 1;
-  if (km <= 10) return 0.8;
-  if (km <= NEAR_KM) return 0.6;
-  if (km <= 20) return 0.4;
-  return km <= EBIKE_KM ? 0.2 : 0;
-}
-
-export function noAcScore(hottest) {
-  if (hottest <= 29) return 1;
-  return hottest <= 31 ? 0.6 : 0;
-}
-
-const saturating = (n, cap) => Math.min(1, Math.log1p(Math.max(0, n)) / Math.log1p(cap));
-
 export function explorePoints(site) {
   return (site.beaches ?? 0) + (site.viewpoints ?? 0) + (site.attractions ?? 0) + (site.reserves ?? 0) + (site.protectedAreas ?? 0) + (site.hikingRoutes ?? 0);
 }
@@ -204,20 +185,8 @@ export function trendOf(hpi, hicp) {
   return { change: hpi[year], inflation: hicp[year], real: realChange(hpi[year], hicp[year]), year, realCagr: realCagr(hpi, hicp, years), since: years[0] };
 }
 
-export function fitOf(row, site, { hpi = null, maxValue = null } = {}) {
-  const zoning = zoningOf(row);
-  const parts = {
-    sea: seaScore(site.coastKm),
-    season: site.climate ? site.climate.workable / 12 : 0,
-    noAc: site.climate ? noAcScore(site.climate.hottest) : 0,
-    explore: saturating(explorePoints(site), POI_SATURATION),
-    demand: saturating((site.lodging ?? 0) + (site.campsites ?? 0), LODGING_SATURATION),
-    trend: hpi === null ? 0.5 : Math.max(0, Math.min(1, hpi / 15)),
-    cost: maxValue && Number.isFinite(row.value) ? 1 - Math.min(1, row.value / maxValue) / 2 : 0.5,
-    zoning: zoning === 'buildable' ? 1 : zoning === 'agricultural' ? 0.5 : 0.3,
-  };
-  const score = Object.entries(WEIGHTS).reduce((s, [k, w]) => s + w * parts[k], 0);
-  return { score: round(score, 3), parts: Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, round(v, 2)])), zoning, pitches: pitchesFor(row.area), hpi };
+export function fitOf(row, { hpi = null } = {}) {
+  return { zoning: zoningOf(row), pitches: pitchesFor(row.area), hpi };
 }
 
 const NUMBER = '(-?\\d{1,3}\\.\\d{3,})';
@@ -505,7 +474,7 @@ export class SiteAssessor {
 
 
   async measureRows(rows, brief, ctx) {
-    const { readPage, onProgress, stats, started, maxValue } = ctx;
+    const { readPage, onProgress, stats, started } = ctx;
     const near = [];
     const far = [];
     const gone = [];
@@ -547,7 +516,7 @@ export class SiteAssessor {
         }
         const conflict = await this.titleConflict(row, point, brief);
         const trend = await this.priceTrend(row.countryCode);
-        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, site, { hpi: trend?.real ?? null, maxValue }), ...(conflict ? { placeConflict: conflict } : {}) };
+        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, { hpi: trend?.real ?? null }), ...(conflict ? { placeConflict: conflict } : {}) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
           far.push(assessed);
@@ -566,13 +535,12 @@ export class SiteAssessor {
     await this.load();
     this.reads = 0;
     const stats = { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 };
-    const ctx = { readPage, onProgress, stats, started: this.now(), maxValue: brief?.valueRange?.[1] ?? null, fresh: 0 };
+    const ctx = { readPage, onProgress, stats, started: this.now(), fresh: 0 };
     const inside = await this.measureRows(candidates.kept ?? [], brief, ctx);
     const kept = inside.near;
     const { far, gone } = inside;
     const outsideStats = { ...stats };
     const beyond = await this.measureRows(candidates.outside ?? [], brief, { ...ctx, stats: outsideStats });
-    kept.sort((a, b) => (b.fit?.score ?? -1) - (a.fit?.score ?? -1));
     const reason = `farther than ${EBIKE_KM} km from the sea`;
     const removed = 'listing removed from the portal';
     const screened = { ...candidates.screened };

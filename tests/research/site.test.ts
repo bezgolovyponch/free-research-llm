@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seaScore, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
+import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
 
 const VIR = { lat: 44.3, lon: 15.09 };
 const DA_NANG = { lat: 16.055, lon: 108.22, name: 'Thai Hoa, Hai Chau, Da Nang, Vietnam' };
@@ -80,13 +80,6 @@ describe('site measurements', () => {
     expect(siteKey(44.301, 15.089)).toBe('44.30,15.08');
   });
 
-  it('scores the sea by e-bike distance and nothing beyond the e-bike limit', () => {
-    expect(seaScore(0.5)).toBe(1);
-    expect(seaScore(8)).toBe(0.8);
-    expect(seaScore(EBIKE_KM)).toBe(0.2);
-    expect(seaScore(EBIKE_KM + 1)).toBe(0);
-    expect(seaScore(null)).toBe(0);
-  });
 
   it('turns daily weather into monthly means and counts workable glamping months', () => {
     const months = monthlyClimate(mediterranean);
@@ -132,14 +125,9 @@ describe('site measurements', () => {
     expect(parseLakes({ elements: [] }, 39.5, -8.3)).toBeNull();
   });
 
-  it('ranks a plot by the business criteria, so a stunning short-season site still scores', () => {
-    const site = { ...parseSurroundings(overpassAt(VIR, 0.005), VIR.lat, VIR.lon), climate: seasonOf(monthlyClimate(mediterranean)) };
-    const fit = fitOf({ title: 'Poljoprivredno zemljište 240 m od uvale', value: 12110, area: 1211 }, site, { hpi: 13.9, maxValue: 20000 });
-    expect(fit.parts).toMatchObject({ sea: 1, season: 0.75, noAc: 0.6, zoning: 0.5 });
-    expect(fit.pitches).toBe(18);
-    expect(fit.score).toBeGreaterThan(0.6);
-    const inland = fitOf({ title: 'Land', value: 15000 }, { ...site, coastKm: 60, viewpoints: 0, attractions: 0, beaches: 0, reserves: 0, protectedAreas: 0, hikingRoutes: 0 }, { hpi: null, maxValue: 20000 });
-    expect(inland.score).toBeLessThan(fit.score - 0.3);
+  it('describes a plot by measured facts only, with no hand-weighted score', () => {
+    const fit = fitOf({ title: 'Poljoprivredno zemljište 240 m od uvale', value: 12110, area: 1211 }, { hpi: 13.9 });
+    expect(fit).toEqual({ zoning: 'agricultural', pitches: 18, hpi: 13.9 });
   });
 });
 

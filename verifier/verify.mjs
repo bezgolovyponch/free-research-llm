@@ -2,15 +2,16 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { COAST_MARGIN_KM, Coastline } from './coast.mjs';
 
 export const PRICE_TOLERANCE = 0.02;
 export const AREA_TOLERANCE = 0.05;
 export const DEFAULT_SEA_KM = 25;
-export const INSTANCE_TIMEOUT_MS = 45000;
-export const INSTANCE_REST_MS = 10 * 60 * 1000;
+export const FETCH_ATTEMPTS = 3;
+export const RETRY_WAIT_MS = 3000;
+const retryable = (status) => status === 429 || status >= 500;
 const UA = 'free-research-llm-verifier (independent check; https://github.com/bezgolovyponch/free-research-llm)';
 const NOMINATIM_REVERSE = 'https://nominatim.openstreetmap.org/reverse';
-export const OVERPASS_INSTANCES = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const ECB = 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml';
 
@@ -138,14 +139,14 @@ export function compare(name, appValue, found, tolerance) {
 }
 
 export class Verifier {
-  constructor({ fetchImpl = fetch, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  constructor({ fetchImpl = fetch, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), coastline = null, cacheDir = '' } = {}) {
     this.fetch = fetchImpl;
+    this.coastline = coastline;
+    this.loadCoast = () => Coastline.load({ cacheDir, fetchImpl });
     this.now = now;
     this.sleep = sleep;
     this.lastNominatim = 0;
     this.rates = null;
-    this.overpassGood = null;
-    this.overpassDown = new Map();
   }
 
   async get(url, init = {}) {
@@ -155,9 +156,21 @@ export class Verifier {
   }
 
   async json(url, init) {
-    const res = await this.get(url, init);
-    if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
-    return res.json();
+    let failure = null;
+    for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
+      if (attempt > 1) await this.sleep(RETRY_WAIT_MS * (attempt - 1));
+      let res;
+      try {
+        res = await this.get(url, init);
+      } catch (error) {
+        failure = error;
+        continue;
+      }
+      if (res.ok) return res.json();
+      failure = new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
+      if (!retryable(res.status)) break;
+    }
+    throw failure;
   }
 
   async eurRates() {
@@ -184,25 +197,8 @@ export class Verifier {
   }
 
   async seaKm(point, radiusKm) {
-    const q = `[out:json][timeout:120];way(around:${radiusKm * 1000},${point.lat},${point.lon})[natural=coastline];out geom;`;
-    let d = null;
-    let failure = null;
-    const order = [...OVERPASS_INSTANCES].sort((a, b) => Number(b === this.overpassGood) - Number(a === this.overpassGood) || (this.overpassDown.get(a) ?? 0) - (this.overpassDown.get(b) ?? 0));
-    for (const url of order) {
-      if (this.now() - (this.overpassDown.get(url) ?? -Infinity) < INSTANCE_REST_MS && url !== order.at(-1)) continue;
-      try {
-        d = await this.json(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(q)}`, timeoutMs: INSTANCE_TIMEOUT_MS });
-        this.overpassGood = url;
-        break;
-      } catch (error) {
-        this.overpassDown.set(url, this.now());
-        failure = error;
-      }
-    }
-    if (!d) throw failure ?? new Error('no Overpass instance answered');
-    let best = Infinity;
-    for (const w of d?.elements ?? []) for (const g of w.geometry ?? []) best = Math.min(best, kmBetween(point, g));
-    return best === Infinity ? null : Math.round(best * 10) / 10;
+    if (!this.coastline) this.coastline = await this.loadCoast();
+    return this.coastline.nearestKm(point.lat, point.lon, radiusKm);
   }
 
   async months(point, rule) {
@@ -239,7 +235,8 @@ export class Verifier {
       }
       try {
         const km = await this.seaKm(point, ob.seaKm + 5);
-        checks.push({ check: `sea within ${ob.seaKm} km`, status: km !== null && km <= ob.seaKm ? 'confirmed' : 'refuted', detail: km === null ? `no coastline within ${ob.seaKm + 5} km` : `${km} km` });
+        const close = km !== null && Math.abs(km - ob.seaKm) < COAST_MARGIN_KM;
+        checks.push({ check: `sea within ${ob.seaKm} km`, status: close ? 'unconfirmed' : km !== null && km <= ob.seaKm ? 'confirmed' : 'refuted', detail: `${km === null ? `no coastline within ${ob.seaKm + 5} km` : `${km} km`} (Natural Earth 1:10m coastline${close ? `; within its ${COAST_MARGIN_KM} km precision of the limit` : ''})` });
       } catch (error) {
         checks.push({ check: `sea within ${ob.seaKm} km`, status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
       }
@@ -286,7 +283,7 @@ export async function main(argv = process.argv.slice(2)) {
   const out = path.join(dataDir, 'verification');
   await fs.mkdir(out, { recursive: true });
   const save = (record) => fs.writeFile(path.join(out, `${id}.json`), JSON.stringify(record, null, 1));
-  const record = await new Verifier().verify(project, { onRow: save });
+  const record = await new Verifier({ cacheDir: out }).verify(project, { onRow: save });
   await save(record);
   await fs.appendFile(path.join(out, `${id}.jsonl`), `${JSON.stringify({ at: record.at, inputs: record.inputs, confirmed: record.confirmed.length, checked: record.results.length })}\n`);
   console.log(`verified ${record.results.length} row(s): ${record.confirmed.length} confirmed, ${record.results.filter((r) => r.verdict === 'refuted').length} refuted, ${record.results.filter((r) => r.verdict === 'unconfirmed').length} unconfirmed`);

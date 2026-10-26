@@ -1322,7 +1322,7 @@ const TIER_LABEL={fits:["var(--gr)","Fits"],"trade-off":["var(--am)","Trade-off"
 const TIER_RANK={fits:0,"trade-off":1,unverified:2,weak:3,blocked:4};
 const CAND_COLS=[
   ["tier","Tier",r=>r.plan?TIER_RANK[r.plan.tier]:9],
-  ["fit","Fit",r=>r.fit?r.fit.score:-1],
+  ["fit","Checks met",r=>r.plan&&r.plan.share!=null?r.plan.share:-1],
   ["title","Listing",r=>String(r.title||"").toLowerCase()],
   ["entry","Entry €",r=>r.plan&&r.plan.entry?r.plan.entry.total:Infinity],
   ["price","Price €",r=>r.value??Infinity],
@@ -1345,7 +1345,7 @@ function sortedCandidates(rows,table,cols){
 function siteCell(r){
   if(!r.site)return (r.coast?"sea stated":"–")+(r.siteNote?'<div class="faint">'+esc(r.siteNote)+"</div>":"");
   const s=r.site,f=r.fit,cl=s.climate;
-  return "<b>"+esc(Math.round(f.score*100))+"</b>/100 · sea "+esc(s.coastKm??"?")+" km"+(s.beachKm!=null?", beach "+esc(s.beachKm)+" km":"")+'<div class="faint">'+(cl?esc(cl.workable)+" workable months ("+esc(cl.comfortable)+" comfortable), hottest "+esc(cl.hottest)+"°C · ":"")+esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0))+" things to explore · zoning "+esc(f.zoning)+(f.pitches!=null?" · ~"+esc(f.pitches)+" pitches":"")+"</div>";
+  return (r.plan&&r.plan.share!=null?"<b>"+esc(Math.round(r.plan.share*100))+"%</b> of checks met · ":"")+"sea "+esc(s.coastKm??"?")+" km"+(s.beachKm!=null?", beach "+esc(s.beachKm)+" km":"")+'<div class="faint">'+(cl?esc(cl.workable)+" workable months ("+esc(cl.comfortable)+" comfortable), hottest "+esc(cl.hottest)+"°C · ":"")+esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0))+" things to explore · zoning "+esc(f.zoning)+(f.pitches!=null?" · ~"+esc(f.pitches)+" pitches":"")+"</div>";
 }
 function planCell(r){
   const pl=r.plan;if(!pl)return siteCell(r);

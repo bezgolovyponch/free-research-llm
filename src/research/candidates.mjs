@@ -136,7 +136,7 @@ function siteText(row) {
   const site = row.site;
   if (!site) return row.siteNote ? ` | ${row.siteNote}` : '';
   const season = site.climate ? ` | ${site.climate.workable} workable months (${site.climate.comfortable} comfortable), hottest month max ${site.climate.hottest}°C` : '';
-  return ` | fit ${row.fit.score} | sea ${site.coastKm ?? '?'} km, beach ${site.beachKm ?? '?'} km${season} | ${explorePoints(site)} beaches, viewpoints, sights, reserves and trails within 15 km | zoning ${row.fit.zoning}${row.fit.pitches !== null ? ` | about ${row.fit.pitches} pitches` : ''}`;
+  return ` | sea ${site.coastKm ?? '?'} km, beach ${site.beachKm ?? '?'} km${season} | ${explorePoints(site)} beaches, viewpoints, sights, reserves and trails within 15 km | zoning ${row.fit.zoning}${row.fit.pitches !== null ? ` | about ${row.fit.pitches} pitches` : ''}`;
 }
 
 export function shortlistText(candidates, limit = 15) {
