@@ -9,6 +9,8 @@ import { AccessGate, newAccessToken } from './auth.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { TEMPLATES } from './research/templates.mjs';
 import { candidatesCsv, itemsCsv, piecesCsv, resultsJson, toMarkdown } from './report.mjs';
+import { resultsWorkbook } from './workbook.mjs';
+import { XLSX_TYPE } from './xlsx.mjs';
 import { resultStatus } from './research/gaps.mjs';
 import { resultModel } from './research/result.mjs';
 import { auditTree, cleanTitle, modelOf } from './research/treeaudit.mjs';
@@ -65,7 +67,7 @@ export function withResults(project) {
 }
 
 function send(res, status, body, type = 'application/json; charset=utf-8') {
-  const payload = typeof body === 'string' ? body : JSON.stringify(body);
+  const payload = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
   res.end(payload);
 }
@@ -391,12 +393,13 @@ export function createServer(app, gate = new AccessGate()) {
         res.setHeader('content-disposition', `attachment; filename="${project.id}.md"`);
         return send(res, 200, toMarkdown(project), 'text/markdown; charset=utf-8');
       }
-      const exported = url.pathname.match(/^\/api\/projects\/([\w-]+)\/(results\.json|pieces\.csv|items\.csv|candidates\.csv)$/);
+      const exported = url.pathname.match(/^\/api\/projects\/([\w-]+)\/(results\.json|results\.xlsx|pieces\.csv|items\.csv|candidates\.csv)$/);
       if (req.method === 'GET' && exported) {
         const project = await app.engine.load(exported[1]);
         const [kind, ext] = exported[2].split('.');
         res.setHeader('content-disposition', `attachment; filename="${project.id}-${kind}.${ext}"`);
         if (ext === 'json') return send(res, 200, resultsJson(project));
+        if (ext === 'xlsx') return send(res, 200, resultsWorkbook(project), XLSX_TYPE);
         const table = { pieces: piecesCsv, items: itemsCsv, candidates: candidatesCsv }[kind];
         return send(res, 200, `\ufeff${table(project)}`, 'text/csv; charset=utf-8');
       }

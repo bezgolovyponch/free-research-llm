@@ -1,7 +1,7 @@
 import { templateById } from './research/templates.mjs';
 import { ROOT_ID, childrenOf } from './research/tree.mjs';
 import { actionPlan, resultStatus } from './research/gaps.mjs';
-import { explorePoints } from './research/site.mjs';
+import { ACTION_LABEL, itemRows, piecesRows, plotRows } from './workbook.mjs';
 
 function bullets(items) {
   return items?.length ? items.map((i) => `- ${i}`).join('\n') : '- none';
@@ -29,15 +29,13 @@ function nodeSection(project, node, depth) {
   return lines.join('\n');
 }
 
-export const ACTION_LABEL = { fix: 'Fix', research: 'Research further', clarify: 'Clarify' };
-
 function cell(text) {
   return String(text ?? '').replace(/\|/g, '/').replace(/\s+/g, ' ').trim();
 }
 
 export function csvField(value) {
   const text = String(value ?? '');
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  const safe = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(?:\.\d+)?$/.test(text) ? `'${text}` : text;
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
@@ -45,38 +43,16 @@ function csv(rows) {
   return `${rows.map((r) => r.map(csvField).join(',')).join('\r\n')}\r\n`;
 }
 
-function roleOf(project, node) {
-  if (node.parentId === ROOT_ID) return 'driver';
-  return childrenOf(project.nodes, node.id).length ? 'sub-driver' : 'sub-question';
-}
-
 export function piecesCsv(project) {
-  const plan = new Map(actionPlan(project).map((a) => [a.nodeId, a]));
-  const rows = [['piece', 'title', 'role', 'grade', 'answer', 'action', 'why', 'next step', 'priority', 'moves the verdict', 'sources', 'first source']];
-  for (const n of project.nodes) {
-    const a = plan.get(n.id);
-    const web = (n.sources ?? []).filter((x) => x.url);
-    rows.push([n.id, n.title, roleOf(project, n), n.status, n.finding?.answer ?? '', a ? ACTION_LABEL[a.action] : 'Done', a?.why ?? '', a?.next ?? '', a?.priority ?? '', a?.decisive ? 'yes' : '', web.length, web[0]?.url ?? '']);
-  }
-  return csv(rows);
+  return csv(piecesRows(project));
 }
 
 export function itemsCsv(project) {
-  const items = project.acceptanceResult?.items ?? project.report?.deliverables ?? [];
-  return csv([['title', 'value', 'currency', 'url', 'piece', 'link live', 'in range'], ...items.map((i) => [i.title ?? '', i.value ?? '', i.currency ?? '', i.url ?? '', i.nodeId ?? '', i.live ?? i.alive ?? '', i.inRange ?? ''])]);
-}
-
-function siteColumns(row) {
-  const site = row.site;
-  if (!site) return ['', '', '', '', '', '', '', '', '', ''];
-  return [row.plan?.share ?? '', site.coastKm ?? '', site.beachKm ?? '', site.climate?.workable ?? '', site.climate?.comfortable ?? '', site.climate?.hottest ?? '', explorePoints(site), site.lodging ?? '', row.fit.zoning, row.fit.pitches ?? ''];
+  return csv(itemRows(project));
 }
 
 export function candidatesCsv(project) {
-  const c = project.candidates;
-  const rows = [...(c?.kept ?? []).map((r) => ['kept', r]), ...(c?.toCheck ?? []).map((r) => ['to check', r]), ...(c?.outside ?? []).map((r) => ['outside your countries', r])];
-  const plan = (r) => (r.plan ? [r.plan.tier, r.plan.verdict, r.plan.entry?.total ?? '', r.plan.areaM2 ?? '', r.plan.units ?? '', (r.site?.lakesNamed ? r.site.lakeKm ?? '' : ''), (r.plan.opportunity?.reasons ?? r.plan.why).join(' | '), r.plan.risks.join(' | '), r.plan.path ?? ''] : ['', '', '', '', '', '', '', '', '']);
-  return csv([['status', 'tier', 'verdict', 'entry cost EUR', 'area m²', 'units', 'lake km', 'why it fits', 'risks', 'legal path', 'title', 'price', 'currency', `price in ${c?.kept?.[0]?.unit || project.acceptance?.unit || 'target unit'}`, 'area', 'area unit', 'place', 'country', 'sea stated', 'url', 'found on', 'read by', 'missing', 'checks met', 'sea km', 'beach km', 'workable months', 'comfortable months', 'hottest month max °C', 'things to explore within 15 km', 'lodging within 15 km', 'zoning', 'pitches'], ...rows.map(([status, r]) => [status, ...plan(r), r.title, r.price ?? '', r.currency, r.value ?? '', r.area ?? '', r.areaUnit, r.place, r.country, r.coast ? 'yes' : '', r.url, r.sourceUrl, (r.via ?? []).join(' '), r.toCheck ?? r.siteNote ?? '', ...siteColumns(r)])]);
+  return csv(plotRows(project));
 }
 
 export function resultsJson(project) {

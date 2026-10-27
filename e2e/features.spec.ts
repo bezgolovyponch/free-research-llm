@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 async function noSideScroll(page: Page) {
@@ -65,6 +66,10 @@ test('results tab shows what was delivered and has its own chat', async ({ page 
   const json = await (await page.request.get((await page.locator('#resultsBody a', { hasText: 'Everything (.json)' }).getAttribute('href'))!)).json();
   expect(json.confidence).toHaveProperty('byChecks');
   expect(Array.isArray(json.actions)).toBe(true);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#resultsBody a', { hasText: 'All tables (.xlsx' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/-results\.xlsx$/);
+  const workbookPath = await download.path();
+  expect(readFileSync(workbookPath).subarray(0, 2).toString()).toBe('PK');
   await page.locator('.tabs .tab', { hasText: 'Chat' }).click();
   await expect(page.locator('#chatTitle')).toContainText('Results');
   await page.locator('#chatFile').setInputFiles({ name: 'quote.csv', mimeType: 'text/csv', buffer: Buffer.from('item,eur\ntransport,350\n') });

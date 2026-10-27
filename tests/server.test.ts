@@ -140,6 +140,10 @@ describe('HTTP server', () => {
     expect((await call('GET', `/api/projects/${created.id}/results.json`)).body).toMatchObject({ question: 'Should I sell used e-bikes in Brno this spring?', pieces: expect.any(Array) });
     expect((await fetch(`${base}/api/projects/${created.id}/items.csv`)).status).toBe(200);
     expect((await fetch(`${base}/api/projects/${created.id}/candidates.csv`)).headers.get('content-disposition')).toBe(`attachment; filename="${created.id}-candidates.csv"`);
+    const xlsx = await fetch(`${base}/api/projects/${created.id}/results.xlsx`);
+    expect(xlsx.headers.get('content-type')).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(xlsx.headers.get('content-disposition')).toBe(`attachment; filename="${created.id}-results.xlsx"`);
+    expect(Buffer.from(await xlsx.arrayBuffer()).subarray(0, 2).toString()).toBe('PK');
     expect(done.results.model).toMatchObject({ kind: 'decision', probability: expect.any(Number), changedSince: [] });
     expect(typeof done.report.model).toBe('string');
     expect(Array.isArray(done.results.treeAudit)).toBe(true);
