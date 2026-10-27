@@ -25,8 +25,8 @@ describe('Camping Climate Index (Ma 2021, eq. 3, Tables 3 and 4)', () => {
     expect(dailyCci({ ...fine, dew: Number.NaN })).toBeNull();
   });
 
-  it('names the categories of Table 4', () => {
-    expect([9, 7, 6, 5, 4, 3, 2, null].map(category)).toEqual(['optimal', 'optimal', 'good', 'good', 'acceptable', 'acceptable', 'unfavourable', 'unknown']);
+  it('names the categories of Table 4, with an index of exactly 3 (the adverse-weather cap) unfavourable', () => {
+    expect([9, 7, 6, 5, 4, 3.1, 3, 2, null].map(category)).toEqual(['optimal', 'optimal', 'good', 'good', 'acceptable', 'acceptable', 'unfavourable', 'unfavourable', 'unknown']);
   });
 
   it('counts optimal days per year, hot days above 34 °C, and the trend of optimal days across the years measured', () => {

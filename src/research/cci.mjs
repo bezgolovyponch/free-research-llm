@@ -47,7 +47,7 @@ export function category(cci) {
   if (cci === null || cci === undefined) return 'unknown';
   if (cci >= OPTIMAL) return 'optimal';
   if (cci >= GOOD) return 'good';
-  if (cci >= ACCEPTABLE) return 'acceptable';
+  if (cci > ACCEPTABLE) return 'acceptable';
   return 'unfavourable';
 }
 
@@ -88,9 +88,9 @@ export function climateOf(daily) {
   const perYear = Object.entries(years).filter(([, y]) => y.days >= 300).map(([year, y]) => ({ year: Number(year), optimal: y.optimal, hot: y.hot }));
   const trend = slope(perYear.map((y) => [y.year, y.optimal]));
   return {
-    workable: monthly.filter((m) => m.cci !== null && m.cci >= GOOD).length,
+    workable: monthly.filter((m) => m.cci !== null && m.cci > ACCEPTABLE).length,
+    good: monthly.filter((m) => m.cci !== null && m.cci >= GOOD).length,
     comfortable: monthly.filter((m) => m.cci !== null && m.cci >= OPTIMAL).length,
-    acceptable: monthly.filter((m) => m.cci !== null && m.cci >= ACCEPTABLE).length,
     hottest: Math.max(...known.map((m) => m.tmax)),
     coldest: Math.min(...known.map((m) => m.tmin)),
     months: monthly,

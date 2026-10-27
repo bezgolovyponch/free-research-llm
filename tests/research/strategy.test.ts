@@ -63,7 +63,7 @@ describe('low-entry glamping strategy', () => {
     const bare = site(60, { lakeKm: null, beaches: 0, viewpoints: 2, attractions: 1, reserves: 0, protectedAreas: 0, hikingRoutes: 0, campsites: 1, climate: climate(6, 30.9) });
     const plan = planFor({ ...nazare, site: bare }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
     expect(plan.tier).toBe('weak');
-    expect(plan.verdict).toMatch(/^does not fit: sea within 20 km by e-bike: no \(sea 60 km\); 10\+ camping months \(Camping Climate Index ≥ 5\): no .*; nothing nearby draws guests to make up for it$/);
+    expect(plan.verdict).toMatch(/^does not fit: sea within 20 km by e-bike: no \(sea 60 km\); 10\+ camping months \(Camping Climate Index above 3: acceptable or better, Ma 2021 Table 4\): no .*; nothing nearby draws guests to make up for it$/);
     expect(plan.potential).toEqual(['1 campsites nearby prove camping demand']);
   });
 
@@ -144,7 +144,7 @@ describe('decision model from the user words', () => {
     expect(f.clauses.find((c: { text: string }) => c.text.startsWith('with the strong price'))?.criteria).toEqual(['trend']);
     expect(f.rules.minWorkableMonths).toEqual({ value: 10, source: 'question' });
     expect(f.rules.ebikeKm).toEqual({ value: 20, source: 'guidance' });
-    expect(foundationText(f)).toContain('at least 10 camping months (Camping Climate Index ≥ 5, Ma 2021)');
+    expect(foundationText(f)).toContain('at least 10 camping months (Camping Climate Index above 3, acceptable or better, Ma 2021 Table 4)');
     expect(foundationText(f)).toContain('at most 32.2 °C, days above 34 °C shown as exceptions (no air conditioning; the perceived maximum from Fisichelli et al. 2015, cited by Ma 2021)');
   });
 

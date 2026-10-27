@@ -41,7 +41,7 @@ describe('external verifier: obligations from the user\'s own words', () => {
     const ob = obligationsOf(project);
     expect(ob).toMatchObject({ priceMin: 0, priceMax: 20000, currency: 'EUR', seaKm: 20, seaFrom: 'guidance', minMonths: 10 });
     expect(ob.regions.sort()).toEqual(['ES', 'PT', 'TR', 'VN']);
-    expect(ob.climate).toMatchObject({ campingIndex: 5, from: expect.stringMatching(/^Camping Climate Index \(Ma 2021/) });
+    expect(ob.climate).toMatchObject({ campingIndexAbove: 3, from: expect.stringMatching(/^Camping Climate Index \(Ma 2021/) });
     expect(namedCountries('plots in the EU')).toEqual([]);
     expect(obligationsOf({ question: 'plots in the EU' }).regions).toHaveLength(27);
   });
@@ -60,8 +60,8 @@ describe('external verifier: its own reading of a listing page', () => {
     expect(campingIndex({ mean: 22, dew: 12, sun: 10 * 3600, max: 26, min: 14, rain: 0, wind: 8 })).toBe(8.5);
     expect(campingIndex({ mean: 22, dew: 12, sun: 10 * 3600, max: 26, min: 14, rain: 15, wind: 8 })).toBe(3);
     expect(campingIndex({ mean: 22, dew: 12, sun: null, max: 26, min: 14 })).toBeNull();
-    expect(campingMonths(daily(24, 12), { campingIndex: 5 })).toBe(12);
-    expect(campingMonths(daily(24, 6), { campingIndex: 5 })).toBe(0);
+    expect(campingMonths(daily(24, 12), { campingIndexAbove: 3 })).toBe(12);
+    expect(campingMonths(daily(24, 6), { campingIndexAbove: 3 })).toBe(0);
     expect(compare('price', 20000, [20100], 0.02).status).toBe('confirmed');
     expect(compare('price', 20000, [26000], 0.02).status).toBe('refuted');
     expect(compare('price', 20000, [], 0.02).status).toBe('unconfirmed');

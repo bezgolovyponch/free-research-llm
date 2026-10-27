@@ -191,7 +191,7 @@ export function titlePlace(title, kindTerms = []) {
 export function shortSite(site) {
   if (!site) return null;
   const { climate, ...rest } = site;
-  return { ...rest, climate: climate ? { comfortable: climate.comfortable, workable: climate.workable, acceptable: climate.acceptable, hottest: climate.hottest, coldest: climate.coldest, cci: climate.cci ? { annual: climate.cci.annual, optimalDays: climate.cci.optimalDays, hotDays: climate.cci.hotDays, optimalTrend: climate.cci.optimalTrend, monthly: (climate.months ?? []).map((m) => m.cci) } : null } : null };
+  return { ...rest, climate: climate ? { comfortable: climate.comfortable, workable: climate.workable, good: climate.good, hottest: climate.hottest, coldest: climate.coldest, cci: climate.cci ? { annual: climate.cci.annual, optimalDays: climate.cci.optimalDays, hotDays: climate.cci.hotDays, optimalTrend: climate.cci.optimalTrend, monthly: (climate.months ?? []).map((m) => m.cci) } : null } : null };
 }
 
 const fold = (text) => String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
