@@ -15,6 +15,7 @@ import { harvestItems } from './harvest.mjs';
 import { buildBrief, describeBrief, onConcept } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
+import { applyModel, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, fitsSignature, readVerification } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
@@ -99,8 +100,10 @@ export function normalizeEstimate(raw) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null }) {
+  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null }) {
     this.verifier = verifier;
+    this.modeler = modeler;
+    this.cases = cases;
     this.verifying = new Map();
     this.onStop = onStop;
     this.laneCount = Math.min(MAX_LANES, Math.max(1, lanes));
@@ -212,6 +215,7 @@ export class ResearchEngine {
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
     await this.store.save(project);
     const template = templateById(project.templateId);
+    await this.ensureDecisionModel(project);
     const ask = async (feedback) => {
       const reply = await this.router.complete({
         purpose: 'decompose',
@@ -252,11 +256,26 @@ export class ResearchEngine {
   }
 
   briefOf(project) {
-    const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: templateById(project.templateId) });
+    const template = templateById(project.templateId);
+    const model = project.decisionModel ?? null;
+    const kind = template.itemKind ?? (model?.kind?.terms?.length ? { label: model.kind.label, terms: model.kind.terms } : null);
+    const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: { ...template, itemKind: kind } });
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
-    const foundation = strategy ? foundationOf(strategy, project) : null;
-    project.brief = { ...brief, foundation, text: [describeBrief(brief), foundationText(foundation)].filter(Boolean).join('\n') };
+    const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
+    project.brief = { ...brief, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
+  }
+
+  async ensureDecisionModel(project) {
+    if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
+    try {
+      const model = await this.modeler.build(project);
+      if (model) this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}`);
+      return model;
+    } catch (error) {
+      this.emit(project, 'decision', `decision model not built: ${String(error.message).slice(0, 160)}`);
+      return project.decisionModel ?? null;
+    }
   }
 
   onConceptOnly(project, node, sources) {
@@ -268,6 +287,7 @@ export class ResearchEngine {
   }
 
   async collectCandidates(project, { sweep = false } = {}) {
+    if (sweep || !this.quiet.has(project.id)) await this.ensureDecisionModel(project);
     const brief = this.briefOf(project);
     if (!brief.kind) {
       project.candidates = null;
@@ -289,6 +309,11 @@ export class ResearchEngine {
         const kept = (project.sweep?.pages ?? []).filter((page) => !fresh.has(page.url));
         const pages = [...compactSources(result.pages).sources, ...kept].slice(0, SWEEP_PAGES_KEPT).map((page, i) => ({ ...page, id: `P${i + 1}` }));
         project.sweep = { ...result, pages };
+        if (project.decisionModel?.kind) {
+          project.decisionModel.kind = verifyKind(project.decisionModel.kind, pages.flatMap((page) => (page.listings ?? []).map((l) => String(l.title ?? ''))));
+          const v = project.decisionModel.kind.verified;
+          if (v) this.emit(project, 'decision', `item kind "${project.decisionModel.kind.label}": ${v.matched} of ${v.titles} fetched listing titles use its words${project.decisionModel.kind.dropped?.length ? `; words no listing used were dropped: ${project.decisionModel.kind.dropped.join(', ')}` : ''}`);
+        }
         this.emit(project, 'candidates', `portal sweep: ${result.pagesRead} listing page(s) read by code (budget ${result.budget}), ${result.pages.reduce((n, p) => n + p.listings.length, 0)} new listing(s)`);
       }
     }
@@ -305,6 +330,11 @@ export class ResearchEngine {
       project.candidates = applyStrategy(project.candidates, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
       const t = project.candidates.tiers;
       this.emit(project, 'candidates', `strategy paths: ${t.fits} fit every criterion, ${t['trade-off']} trade-offs with their potential, ${t.unverified} to confirm, ${t.weak} weak, ${t.blocked} blocked by law`);
+    }
+    if (!strategy && project.decisionModel?.criteria?.length) {
+      project.candidates = applyModel(project.candidates, project.decisionModel);
+      const t = project.candidates.tiers;
+      this.emit(project, 'candidates', `decision model: ${t.fits} fit every criterion, ${t.unverified} to confirm, ${t.weak} weak`);
     }
     if (strategy && this.verifier) {
       project.candidates = applyVerification(project.candidates, await readVerification(this.verifier.dir, project.id));
@@ -642,6 +672,7 @@ export class ResearchEngine {
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables);
+    if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }
 

@@ -1,0 +1,141 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyModel, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
+import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
+
+const question = 'Find plots for a glamping site under 30000 EUR, at most 15 km from the sea, hottest month under 29 °C, with a strong price trend';
+const sample = (criteria: object[], terms = ['plot', 'terreno']) => normalizeSample({ concept: 'cheap coastal glamping land', kind: { label: 'plot of land', terms }, criteria });
+const sea = { clause: 'at most 15 km from the sea', measure: 'coastKm', op: '<=', value: 15, quote: 'at most 15 km from the sea' };
+const heat = { clause: 'hottest month under 29 °C', measure: 'hottestC', op: '<', value: 29, quote: 'under 29 °C' };
+const trend = { clause: 'with a strong price trend', measure: 'realTrendVsEu', op: '>', value: null, quote: '' };
+const site = (coastKm: number | null, hottest = 27) => ({ coastKm, climate: { workable: 11, comfortable: 8, hottest, coldest: 6 } });
+
+describe('decision model per request: criteria kept by agreement, limits only from the user or a case', () => {
+  it('keeps a criterion only when a majority of independent proposals make it (self-consistency)', () => {
+    const model = aggregate([sample([sea, heat]), sample([sea]), sample([sea, { ...heat, measure: 'coldestC' }])], { question });
+    expect(model.criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+    expect(model.agreement).toMatchObject({ samples: 3, majority: 2 });
+  });
+
+  it('takes a limit from the question only when its quote is on the question and states that number', () => {
+    expect(quoteStates(question, 'at most 15 km from the sea', 15)).toBe(true);
+    expect(quoteStates(question, 'at most 15 km from the sea', 12)).toBe(false);
+    expect(quoteStates(question, 'within 15 km of a beach', 15)).toBe(false);
+    const model = aggregate([sample([sea]), sample([{ ...sea, value: 12 }]), sample([sea])], { question });
+    expect(model.criteria[0]).toMatchObject({ measure: 'coastKm', value: 15, source: 'question', quote: 'at most 15 km from the sea' });
+  });
+
+  it('never keeps an invented number: a clause with no stated limit borrows an approved case or stays unchecked', () => {
+    const invented = { ...heat, value: 31, quote: 'mild climate' };
+    const bare = aggregate([sample([invented, trend]), sample([invented, trend]), sample([trend])], { question });
+    expect(bare.criteria.map((c: { measure: string }) => c.measure)).toEqual([]);
+    expect(bare.noLimit.map((c: { measure: string }) => c.measure)).toEqual(['hottestC', 'realTrendVsEu']);
+    const cased = aggregate([sample([trend]), sample([trend])], { question, cases: [REFERENCE_CASE] });
+    expect(cased.criteria[0]).toMatchObject({ measure: 'realTrendVsEu', value: 0, source: 'case glamping-low-entry (eurostat)' });
+  });
+
+  it('drops proposals that name no measure code can take, and lists clauses nothing tests', () => {
+    const model = aggregate([sample([sea, { measure: 'vibes', op: '>', value: 3 }]), sample([sea])], { question });
+    expect(model.criteria).toHaveLength(1);
+    expect(model.missing).toContain('Find plots for a glamping site under 30000 EUR');
+  });
+
+  it('keeps item-kind words a majority proposed, then only those that fetched listing titles use', () => {
+    const model = aggregate([sample([sea], ['plot', 'terreno', 'lote']), sample([sea], ['plot', 'terreno']), sample([sea], ['terreno', 'arsa'])], { question });
+    expect(model.kind.terms).toEqual(['plot', 'terreno']);
+    const checked = verifyKind(model.kind, ['Terreno rústico em Nazaré', 'Moradia T3', 'Terrenos à venda Coimbra']);
+    expect(checked.terms).toEqual(['terreno']);
+    expect(checked.dropped).toEqual(['plot']);
+    expect(checked.verified).toEqual({ titles: 3, matched: 2, share: 0.67 });
+    expect(verifyKind(model.kind, []).verified).toBeNull();
+  });
+
+  it('measures every listing by code: fits, to confirm when unmeasured, weak when a limit fails', () => {
+    const model = aggregate([sample([sea, heat]), sample([sea, heat])], { question });
+    expect(planByModel({ site: site(4) }, model).tier).toBe('fits');
+    expect(planByModel({ site: null }, model).tier).toBe('unverified');
+    const far = planByModel({ site: site(null) }, model);
+    expect(far.tier).toBe('weak');
+    expect(far.verdict).toContain('beyond the measured range');
+    expect(planByModel({ site: site(4, 30) }, model).checks.find((c: { id: string }) => c.id === 'hottestC')).toMatchObject({ ok: false, detail: 'hottest month average daily high: 30 °C' });
+  });
+
+  it('counts only listings that fit every criterion and ranks them first', () => {
+    const model = aggregate([sample([sea]), sample([sea])], { question });
+    const out = applyModel({ kept: [{ url: 'far', site: site(40) }, { url: 'near', site: site(2), value: 9000 }, { url: 'open', site: null }] }, model);
+    expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['near', 'open', 'far']);
+    expect(out.keptCount).toBe(1);
+    expect(out.tiers).toMatchObject({ fits: 1, unverified: 1, weak: 1 });
+  });
+
+  it('replaces a hand-chosen glamping limit when the user states one, and never with a borrowed value', () => {
+    const strategy = strategyFor('glamping-location')!;
+    const base = foundationOf(strategy, { question, guidance: '' });
+    expect(base.rules.maxHottest.source).toBe('assumption');
+    const model = aggregate([sample([sea, { ...heat, op: '<=' }]), sample([sea, { ...heat, op: '<=' }])], { question });
+    const merged = withModelRules(base, model);
+    expect(merged.rules.maxHottest).toMatchObject({ value: 29, source: 'question' });
+    expect(merged.rules.ebikeKm).toMatchObject({ value: 15, source: 'question' });
+    const borrowed = withModelRules(base, { ...model, criteria: [{ measure: 'hottestC', op: '<=', value: 25, source: 'case x' }] });
+    expect(borrowed.rules.maxHottest.source).toBe('assumption');
+    expect(modelText(model)).toContain('distance to the sea <= 15 km (question)');
+  });
+
+  it('retrieves similar approved cases and ranks them by measured utility (MemRL two-phase)', () => {
+    const cases = [
+      { id: 'a', question: 'glamping plots near the sea in Portugal', utility: 0.1, criteria: [] },
+      { id: 'b', question: 'glamping plots near the sea in Spain', utility: 0.9, criteria: [] },
+      { id: 'c', question: 'tax regimes for freelancers', utility: 1, criteria: [] },
+    ];
+    expect(rankCases('glamping plots near the sea', cases).map((c: { id: string }) => c.id)).toEqual(['b', 'a']);
+    expect(rankCases('payroll in Japan', cases.slice(0, 2))).toEqual([]);
+  });
+
+  it('stores every built model as a case and moves its utility toward the run score', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-cases-'));
+    const file = path.join(dir, 'cases.json');
+    const bank = new CaseBank({ file });
+    const model = aggregate([sample([sea]), sample([sea])], { question });
+    await bank.record('p1', question, model);
+    await bank.reward(['p1'], 1);
+    await bank.writing;
+    const again = new CaseBank({ file });
+    const [stored] = (await again.load()).cases;
+    expect(stored).toMatchObject({ id: 'p1', approved: false, uses: 1 });
+    expect(stored.utility).toBeCloseTo(UTILITY_PRIOR + 0.3 * (1 - UTILITY_PRIOR), 5);
+    expect(again.all()[0].id).toBe(REFERENCE_CASE.id);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('DecisionModeler: several independent model calls, code decides', () => {
+  const reply = (criteria: object[]) => ({ provider: 'p', data: { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria } });
+
+  it('asks several times with sampling, keeps the agreed criteria and records the case', async () => {
+    const calls: { temperature: number; purpose: string }[] = [];
+    const answers = [reply([sea, heat]), reply([sea]), null];
+    const router = { complete: async (req: { temperature: number; purpose: string }) => {
+      calls.push(req);
+      const next = answers.shift();
+      if (!next) throw new Error('quota');
+      return next;
+    } };
+    const recorded: string[] = [];
+    const cases = { retrieve: async () => [REFERENCE_CASE], record: async (id: string) => { recorded.push(id); } };
+    const project: Record<string, unknown> = { id: 'p9', question, guidance: '', acceptance: { expected: '20 plots' } };
+    const model = await new DecisionModeler({ router, cases }).build(project);
+    expect(calls).toHaveLength(3);
+    expect(calls.every((c) => c.purpose === 'decision-model' && c.temperature > 0)).toBe(true);
+    expect(model.criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+    expect(model.caseIds).toEqual([REFERENCE_CASE.id]);
+    expect(recorded).toEqual(['p9']);
+    expect(await new DecisionModeler({ router: { complete: async () => { throw new Error('no call expected'); } } }).build(project)).toBe(model);
+  });
+
+  it('keeps no model when fewer than two proposals came back', async () => {
+    const router = { complete: async () => { throw new Error('down'); } };
+    expect(await new DecisionModeler({ router }).build({ id: 'x', question })).toBeNull();
+  });
+});

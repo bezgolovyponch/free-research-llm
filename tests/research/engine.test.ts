@@ -7,6 +7,7 @@ import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { ResearchEngine, TEAM_TTL_MS } from '../../src/research/engine.mjs';
+import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
 const fakeSearch = {
@@ -283,6 +284,32 @@ describe('ResearchEngine', () => {
     expect(done.candidates.keptCount).toBe(0);
     expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);
     expect(done.log.some((l: { message: string }) => /site fit: 4 listing\(s\) measured .* 2 farther than an e-bike ride from the sea/.test(l.message))).toBe(true);
+  });
+
+  it('builds a decision model for a list research with no hand-written strategy and measures every listing by it', async () => {
+    const proposal = { concept: 'olive land near the sea', kind: { label: 'plot of land', terms: ['land', 'oikopedo'] }, criteria: [{ clause: 'at most 10 km from the sea', measure: 'coastKm', op: '<=', value: 10, quote: 'at most 10 km from the sea' }] };
+    const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
+      p.decisionModel = { ...aggregate([normalizeSample(proposal), normalizeSample(proposal)], { question: String(p.question) }), caseIds: [] };
+      return p.decisionModel;
+    } };
+    const rewards: Array<[string[], number]> = [];
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler, cases: { reward: async (ids: string[], r: number) => { rewards.push([ids, r]); } } } as never);
+    const project = await engine.createProject({ question: 'Find olive land in Greece under 50000 EUR, at most 10 km from the sea', templateId: 'generic', expected: '3 plots in Greece' });
+    project.acceptance = { ...project.acceptance, itemCount: 3, valueRange: [0, 50000], unit: 'EUR' };
+    const listing = (n: number, title: string) => ({ title, url: `https://spitogatos.gr/aggelia/${n}0000${n}`, value: 20000 + n, unit: 'EUR' });
+    project.nodes = [{ id: 'Q', parentId: null, title: 'Q', question: 'q', sources: [{ id: 'S1', url: 'https://spitogatos.gr/pwliseis', locale: 'el', listings: [listing(1, 'Land 4000 m2 Chania'), listing(2, 'Oikopedo Rethymno'), listing(3, 'Apartment Athens')] }] }];
+    engine.sites = { apply: async (c: { kept: Array<{ url: string }> }) => ({ ...c, kept: c.kept.map((r, i) => ({ ...r, site: { coastKm: i === 0 ? 3 : 40 } })) }) } as never;
+    const table = await engine.collectCandidates(project);
+    expect(project.brief.kind).toEqual({ label: 'plot of land', terms: ['land', 'oikopedo'] });
+    expect(project.brief.text).toContain('distance to the sea <= 10 km (question)');
+    expect(table.kept.map((r: { title: string }) => r.title)).toEqual(['Land 4000 m2 Chania', 'Oikopedo Rethymno']);
+    expect(table.tiers).toMatchObject({ fits: 1, weak: 1 });
+    expect(table.keptCount).toBe(1);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message === 'decision model: 1 fit every criterion, 0 to confirm, 1 weak')).toBe(true);
+    project.report = { verdict: 'v' };
+    await engine.checkAcceptance(project);
+    expect(rewards).toEqual([[[project.id], project.acceptanceResult.score]]);
   });
 
   it('searches again before any model call when no retrieved page matches the piece, and shows the model the best passages', async () => {
