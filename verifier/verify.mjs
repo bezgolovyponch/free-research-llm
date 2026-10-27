@@ -43,7 +43,7 @@ export function obligationsOf(project) {
     seaKm: km ? Number(km[1]) : DEFAULT_SEA_KM,
     seaFrom: km ? 'guidance' : 'default',
     minMonths: months ? Number(months[1]) : null,
-    climate: { campingIndex: 5, from: 'Camping Climate Index (Ma 2021, ch. 2, eq. 3, Tables 3–4): monthly mean index 5 or more' },
+    climate: { campingIndexAbove: 3, from: 'Camping Climate Index (Ma 2021, ch. 2, eq. 3, Tables 3–4): monthly mean index above 3, acceptable or better' },
   };
 }
 
@@ -145,7 +145,7 @@ export function campingMonths(daily, rule) {
     m.total += index;
     m.days++;
   });
-  return sums.filter((m) => m.days && Math.round((m.total / m.days) * 10) / 10 >= rule.campingIndex).length;
+  return sums.filter((m) => m.days && Math.round((m.total / m.days) * 10) / 10 > rule.campingIndexAbove).length;
 }
 
 export function compare(name, appValue, found, tolerance) {

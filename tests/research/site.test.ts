@@ -90,10 +90,16 @@ describe('site measurements', () => {
   });
 
 
-  it('measures camping months with the Camping Climate Index from daily weather', () => {
+  it('counts a camping month when its mean index is above 3 (acceptable or better, Ma 2021 Table 4), never a month of adverse days capped at 3', () => {
     const season = climateOf(mediterranean)!;
-    expect(season).toMatchObject({ workable: 9, comfortable: 9, acceptable: 12, hottest: 30, coldest: 5 });
+    expect(season).toMatchObject({ workable: 9, good: 9, comfortable: 9, hottest: 30, coldest: 5 });
     expect(season.months[0]).toMatchObject({ cci: 3, tmax: 12, tmin: 5, rain: 90 });
+    expect(season.months.filter((m: { cci: number }) => m.cci === 3)).toHaveLength(3);
+    const time: string[] = [];
+    for (let y = 2021; y <= 2025; y++) for (let d = 1; d <= 28; d++) time.push(`${y}-01-${String(d).padStart(2, '0')}`);
+    const mild = climateOf({ time, temperature_2m_mean: time.map(() => 14), dew_point_2m_mean: time.map(() => 8), sunshine_duration: time.map(() => 5 * 3600), temperature_2m_max: time.map(() => 19), temperature_2m_min: time.map(() => 9), precipitation_sum: time.map(() => 0), wind_speed_10m_mean: time.map(() => 5) })!;
+    expect(mild.months[0].cci).toBe(4);
+    expect(mild).toMatchObject({ workable: 1, good: 0, comfortable: 0 });
     expect(climateOf(tropical)).toMatchObject({ workable: 0, hottest: 35, cci: { hotDays: 360 } });
     expect(climateOf({ time: [] })).toBeNull();
   });
