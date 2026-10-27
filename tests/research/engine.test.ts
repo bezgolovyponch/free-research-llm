@@ -286,6 +286,28 @@ describe('ResearchEngine', () => {
     expect(done.log.some((l: { message: string }) => /site fit: 4 listing\(s\) measured .* 2 farther than an e-bike ride from the sea/.test(l.message))).toBe(true);
   });
 
+  it('keeps the last complete candidate table visible while a new one is measured, so the Results tab never shows a half-built table', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
+    const project = await engine.createProject({ question: 'Find plots for a glamping business near the sea in Portugal, 20000EUR max', templateId: 'glamping-location', expected: '2 plots in Portugal' });
+    project.acceptance = { ...project.acceptance, itemCount: 2, valueRange: [0, 20000], unit: 'EUR' };
+    project.nodes = [{ id: 'Q', parentId: null, title: 'Q', question: 'q', sources: [{ id: 'S1', url: 'https://imo.example/pt/r', locale: 'pt', listings: [{ title: 'Terreno 1', url: 'https://imo.example/pt/anuncio/terreno-1-ID1a1bc', value: 9000, unit: 'EUR' }] }] }];
+    const complete = { found: 1, kept: [], keptCount: 0, tiers: { fits: 0, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0 };
+    project.candidates = complete;
+    let release: () => void = () => {};
+    let seen: unknown = null;
+    engine.sites = { apply: async (c: object) => { seen = project.candidates; await new Promise<void>((r) => { release = r; }); return c; } } as never;
+    const pending = engine.collectCandidates(project);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seen).toBe(complete);
+    expect(project.candidates).toBe(complete);
+    release();
+    const table = await pending;
+    expect(project.candidates).toBe(table);
+    expect(table.tiers).toBeDefined();
+    expect(table.proposals).toMatchObject({ primary: [], secondary: ['https://imo.example/pt/anuncio/terreno-1-ID1a1bc'], method: expect.stringContaining('Pareto layers') });
+  });
+
   it('builds a decision model for a list research with no hand-written strategy and measures every listing by it', async () => {
     const proposal = { concept: 'olive land near the sea', kind: { label: 'plot of land', terms: ['land', 'oikopedo'] }, criteria: [{ clause: 'at most 10 km from the sea', measure: 'coastKm', op: '<=', value: 10, quote: 'at most 10 km from the sea' }] };
     const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {

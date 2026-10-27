@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { countryByCode, regionsIn } from './brief.mjs';
 import { areaFromText } from '../search/listings.mjs';
+import { CCI_DAILY_VARS, climateOf } from './cci.mjs';
 
 export const GONE_STATUS = new Set([404, 410]);
 
@@ -107,42 +108,6 @@ export function parseCoast(json, lat, lon) {
   return nearestKm(lat, lon, coastPoints(json?.elements ?? []));
 }
 
-export function monthlyClimate(daily) {
-  const months = Array.from({ length: 12 }, () => ({ tmax: [], tmin: [], rain: 0, years: new Set() }));
-  (daily?.time ?? []).forEach((day, i) => {
-    const m = months[Number(day.slice(5, 7)) - 1];
-    if (!m) return;
-    const tmax = daily.temperature_2m_max?.[i];
-    const tmin = daily.temperature_2m_min?.[i];
-    if (Number.isFinite(tmax)) m.tmax.push(tmax);
-    if (Number.isFinite(tmin)) m.tmin.push(tmin);
-    m.rain += daily.precipitation_sum?.[i] ?? 0;
-    m.years.add(day.slice(0, 4));
-  });
-  const mean = (a) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : null);
-  return months.map((m) => ({ tmax: m.tmax.length ? round(mean(m.tmax)) : null, tmin: m.tmin.length ? round(mean(m.tmin)) : null, rain: m.years.size ? Math.round(m.rain / m.years.size) : null }));
-}
-
-export function isComfortable(m) {
-  return m.tmax !== null && m.tmax >= 18 && m.tmax <= 29 && m.tmin >= 10 && m.rain <= 120;
-}
-
-export function isWorkable(m) {
-  return m.tmax !== null && m.tmax >= 14 && m.tmax <= 31 && m.tmin >= 5 && m.rain <= 200;
-}
-
-export function seasonOf(months) {
-  const known = months.filter((m) => m.tmax !== null);
-  if (!known.length) return null;
-  return {
-    comfortable: months.filter(isComfortable).length,
-    workable: months.filter(isWorkable).length,
-    hottest: Math.max(...known.map((m) => m.tmax)),
-    coldest: Math.min(...known.map((m) => m.tmin)),
-    months,
-  };
-}
-
 export function pitchesFor(areaM2) {
   const area = Number(areaM2);
   if (!Number.isFinite(area) || area <= 0) return null;
@@ -226,7 +191,7 @@ export function titlePlace(title, kindTerms = []) {
 export function shortSite(site) {
   if (!site) return null;
   const { climate, ...rest } = site;
-  return { ...rest, climate: climate ? { comfortable: climate.comfortable, workable: climate.workable, hottest: climate.hottest, coldest: climate.coldest } : null };
+  return { ...rest, climate: climate ? { comfortable: climate.comfortable, workable: climate.workable, acceptable: climate.acceptable, hottest: climate.hottest, coldest: climate.coldest, cci: climate.cci ? { annual: climate.cci.annual, optimalDays: climate.cci.optimalDays, hotDays: climate.cci.hotDays, optimalTrend: climate.cci.optimalTrend, monthly: (climate.months ?? []).map((m) => m.cci) } : null } : null };
 }
 
 const fold = (text) => String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -406,16 +371,26 @@ export class SiteAssessor {
 
   async assess(lat, lon) {
     const cached = this.cachedSite(lat, lon);
-    if (cached) return cached;
+    if (cached?.climate?.cci) return cached;
+    if (cached) {
+      cached.climate = await this.climate(lat, lon);
+      this.store.sites[siteKey(lat, lon)] = { ...this.store.sites[siteKey(lat, lon)], site: cached };
+      this.persist();
+      return cached;
+    }
     const post = (query) => this.overpass(query);
     const site = parseSurroundings(await post(overpassQuery(lat, lon)), lat, lon);
     if (site.coastKm === null) site.coastKm = parseCoast(await post(coastQuery(lat, lon)), lat, lon);
-    const [start, end] = CLIMATE_YEARS;
-    const weather = await this.fetchJson(`${CLIMATE_URL}?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&start_date=${start}&end_date=${end}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=GMT`);
-    site.climate = seasonOf(monthlyClimate(weather?.daily));
+    site.climate = await this.climate(lat, lon);
     this.store.sites[siteKey(lat, lon)] = { at: this.now(), site };
     this.persist();
     return site;
+  }
+
+  async climate(lat, lon) {
+    const [start, end] = CLIMATE_YEARS;
+    const weather = await this.fetchJson(`${CLIMATE_URL}?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&start_date=${start}&end_date=${end}&daily=${CCI_DAILY_VARS}&timezone=GMT`);
+    return climateOf(weather?.daily);
   }
 
   async trends(rows) {

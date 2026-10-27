@@ -6,7 +6,9 @@ import { BLOCKING, MAX_DRIVERS, auditTree, cleanTitle, duplicateAmong, duplicate
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
 import { Mutex } from './lanes.mjs';
 import { mergeTrial, trialConflict } from './trialmerge.mjs';
-import { gateTrace, pieceType, playbookText, typeStats } from './playbook.mjs';
+import { gateTrace, pieceType, playbookText, refusedByLedger, similarChange, typeStats } from './playbook.mjs';
+
+export { similarChange };
 
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, researching: 0 };
 const MAX_HOURS = 72;
@@ -25,10 +27,31 @@ function strings(value, max) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => String(v).trim()).filter(Boolean).slice(0, max);
 }
 
+export function resultsRubric(project) {
+  const rows = (project?.candidates?.kept ?? []).filter((r) => r.plan?.checks);
+  const target = project?.acceptance?.itemCount;
+  if (!rows.length || !target) return null;
+  const shares = rows.map((r) => (r.verified?.verdict === 'refuted' ? 0 : r.plan.share ?? 0)).sort((a, b) => b - a).slice(0, target);
+  return round(shares.reduce((sum, v) => sum + v, 0) / target);
+}
+
 export function projectScore(project, pieces = []) {
   const base = scoreProject(project, pieces);
   const acceptance = project?.acceptanceResult?.score ?? null;
-  return { ...base, acceptance, score: acceptance === null ? base.score : round(0.6 * acceptance + 0.4 * base.score) };
+  const results = resultsRubric(project);
+  const outcome = acceptance === null ? results : results === null ? acceptance : round((acceptance + results) / 2);
+  return { ...base, acceptance, results, score: outcome === null ? base.score : round(0.6 * outcome + 0.4 * base.score) };
+}
+
+export const NOISE_SAMPLES = 30;
+export const NOISE_MIN_SAMPLES = 5;
+export const NOISE_SIGMAS = 2;
+
+export function noiseFloor(samples = []) {
+  if (samples.length < NOISE_MIN_SAMPLES) return MIN_GAIN;
+  const mean = samples.reduce((s, v) => s + v, 0) / samples.length;
+  const sd = Math.sqrt(samples.reduce((s, v) => s + (v - mean) ** 2, 0) / (samples.length - 1));
+  return Math.max(MIN_GAIN, round(NOISE_SIGMAS * sd));
 }
 
 export function distinctResearches(list) {
@@ -80,11 +103,11 @@ export function allChecksPass(before, after) {
   return [...new Set([...keys(before), ...keys(after)])].every((k) => passing.has(k));
 }
 
-export function acceptsTrial(before, after, removed = []) {
-  return after > before + (removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
+export function acceptsTrial(before, after, removed = [], floor = MIN_GAIN) {
+  return after > before + Math.max(floor, removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
 }
 
-const FUTILE = new Set(['repeat', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'reverted-structure']);
+const FUTILE = new Set(['repeat', 'reverted-noise', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'reverted-structure']);
 export const REST_AFTER_FUTILE = 3;
 export const REST_HOURS = 6;
 
@@ -132,18 +155,6 @@ export function stallMessage(stall) {
 }
 
 export const REPEAT_SIMILARITY = 0.85;
-
-function changeWords(text) {
-  return new Set(String(text ?? '').toLowerCase().normalize('NFD').replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter((w) => w.length > 2 && !/^[a-z]\d[\d.]*$/.test(w)));
-}
-
-export function similarChange(a, b) {
-  const x = changeWords(a);
-  const y = changeWords(b);
-  if (!x.size || !y.size) return 0;
-  const shared = [...x].filter((w) => y.has(w)).length;
-  return shared / (x.size + y.size - shared);
-}
 
 export function repeatOf(trials = [], { nodeId, change, removedPieceId }) {
   return trials.find((t) => t.nodeId === nodeId && FUTILE.has(t.outcome) && t.outcome !== 'repeat' && ((removedPieceId && t.removedPieceId === removedPieceId) || similarChange(t.change, change) >= REPEAT_SIMILARITY)) ?? null;
@@ -529,6 +540,11 @@ export class ProjectImprover {
         await note({ ...base, change, outcome: 'repeat', score: state.best.score, detail: `same change as the ${earlier.outcome} trial at ${earlier.at}; not re-researched` });
         return { kept: false };
       }
+      const failing = removed.length ? null : refusedByLedger(snapshot.improve?.trials, snapshot.nodes, variant.type, change);
+      if (failing) {
+        await note({ ...base, change, outcome: 'repeat', score: state.best.score, detail: `like a change tested ${failing.harmful} times on ${failing.pieces.length} pieces of this type (${failing.pieces.slice(0, 4).join(', ')}) and never kept; not re-researched` });
+        return { kept: false };
+      }
       if (!touched.length) {
         await note({ ...base, change, outcome: 'no-change', score: state.best.score });
         return { kept: false };
@@ -606,13 +622,21 @@ export class ProjectImprover {
       const broken = regressions(before, after);
       if (broken.length) return await reject('reverted-regression', `breaks passing check(s): ${broken.join(', ')}`);
       if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`);
-      const score = (state.measure ?? projectScore)(after);
-      if (acceptsTrial(best.score, score.score, removed)) {
+      const measure = state.measure ?? projectScore;
+      const score = measure(after);
+      const floor = noiseFloor(current.improve?.noise);
+      if (acceptsTrial(best.score, score.score, removed, floor)) {
+        const again = measure(await this.engine.run(id, { memo: false }));
+        if (this.stopped(state)) return await reject('reverted-stopped');
+        const noise = [...(current.improve?.noise ?? []), round(again.score - score.score)].slice(-NOISE_SAMPLES);
+        await this.record(id, { noise });
+        if (!acceptsTrial(best.score, Math.min(score.score, again.score), removed, floor)) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} with nothing changed; the gain does not hold on both (noise floor ${floor})`, Math.min(score.score, again.score));
+        const kept = { ...again, score: round((score.score + again.score) / 2) };
         for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
-        state.best = score;
-        await this.record(id, { best: score.score }, { ...base, before: best.score, change, outcome: 'kept', score: score.score });
+        state.best = kept;
+        await this.record(id, { best: kept.score }, { ...base, before: best.score, change, outcome: 'kept', score: kept.score, remeasured: again.score });
         await this.engine.resynthesize(id);
-        return { kept: true, score };
+        return { kept: true, score: kept };
       }
       return await reject('reverted-whole', '', score.score);
     } catch (error) {

@@ -2,33 +2,42 @@ import { describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, monthlyClimate, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, seasonOf, siteKey, zoningOf } from '../../src/research/site.mjs';
+import { climateOf } from '../../src/research/cci.mjs';
+import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, siteKey, zoningOf } from '../../src/research/site.mjs';
 
 const VIR = { lat: 44.3, lon: 15.09 };
 const DA_NANG = { lat: 16.055, lon: 108.22, name: 'Thai Hoa, Hai Chau, Da Nang, Vietnam' };
 const BINH_DUONG = { lat: 11.0, lon: 106.65 };
 
-function daily(byMonth: (m: number) => [number, number, number]) {
+function daily(byMonth: (m: number) => [number, number, number, number]) {
   const time: string[] = [];
   const tmax: number[] = [];
   const tmin: number[] = [];
   const rain: number[] = [];
+  const tmean: number[] = [];
+  const dew: number[] = [];
+  const sun: number[] = [];
+  const wind: number[] = [];
   for (const year of [2024, 2025]) {
     for (let m = 1; m <= 12; m++) {
       for (let d = 1; d <= 30; d++) {
-        const [hi, lo, r] = byMonth(m);
+        const [hi, lo, r, hours] = byMonth(m);
         time.push(`${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
         tmax.push(hi);
         tmin.push(lo);
         rain.push(r / 30);
+        tmean.push((hi + lo) / 2);
+        dew.push(lo);
+        sun.push(hours * 3600);
+        wind.push(10);
       }
     }
   }
-  return { time, temperature_2m_max: tmax, temperature_2m_min: tmin, precipitation_sum: rain };
+  return { time, temperature_2m_max: tmax, temperature_2m_min: tmin, precipitation_sum: rain, temperature_2m_mean: tmean, dew_point_2m_mean: dew, sunshine_duration: sun, wind_speed_10m_mean: wind };
 }
 
-const mediterranean = daily((m) => (m <= 2 || m === 12 ? [12, 5, 90] : m >= 6 && m <= 8 ? [30, 20, 20] : [22, 12, 60]));
-const tropical = daily(() => [33, 24, 180]);
+const mediterranean = daily((m) => (m <= 2 || m === 12 ? [12, 5, 90, 5] : m >= 6 && m <= 8 ? [30, 20, 20, 12] : [22, 12, 60, 9]));
+const tropical = daily(() => [35, 24, 180, 6]);
 
 function overpassAt(point: { lat: number; lon: number }, coastOffset: number | null) {
   const elements = [
@@ -81,13 +90,12 @@ describe('site measurements', () => {
   });
 
 
-  it('turns daily weather into monthly means and counts workable glamping months', () => {
-    const months = monthlyClimate(mediterranean);
-    expect(months[0]).toEqual({ tmax: 12, tmin: 5, rain: 90 });
-    const season = seasonOf(months)!;
-    expect(season).toMatchObject({ workable: 9, comfortable: 6, hottest: 30, coldest: 5 });
-    expect(seasonOf(monthlyClimate(tropical))).toMatchObject({ workable: 0, hottest: 33 });
-    expect(seasonOf(monthlyClimate({ time: [] }))).toBeNull();
+  it('measures camping months with the Camping Climate Index from daily weather', () => {
+    const season = climateOf(mediterranean)!;
+    expect(season).toMatchObject({ workable: 9, comfortable: 9, acceptable: 12, hottest: 30, coldest: 5 });
+    expect(season.months[0]).toMatchObject({ cci: 3, tmax: 12, tmin: 5, rain: 90 });
+    expect(climateOf(tropical)).toMatchObject({ workable: 0, hottest: 35, cci: { hotDays: 360 } });
+    expect(climateOf({ time: [] })).toBeNull();
   });
 
   it('sizes a rural camping park from the plot area', () => {

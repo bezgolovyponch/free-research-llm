@@ -14,7 +14,7 @@ export const UTILITY_RATE = 0.3;
 export const OPS = ['<=', '>=', '<', '>'];
 
 const finite = (n) => (Number.isFinite(Number(n)) && n !== null && n !== '' ? Number(n) : undefined);
-const climateOf = (row) => (row.site ? row.site.climate ?? undefined : undefined);
+const climateOf = (row) => (row.site?.climate?.cci ? row.site.climate : undefined);
 
 export const MEASURES = {
   priceEur: { label: 'asking price', unit: 'EUR', read: (row) => finite(row.value) },
@@ -22,8 +22,10 @@ export const MEASURES = {
   coastKm: { label: 'distance to the sea', unit: 'km', read: (row) => (row.site ? row.site.coastKm ?? Infinity : undefined) },
   beachKm: { label: 'distance to a beach', unit: 'km', read: (row) => (row.site ? row.site.beachKm ?? Infinity : undefined) },
   lakeKm: { label: 'distance to a named lake or reservoir', unit: 'km', read: (row) => (row.site ? (row.site.lakesNamed ? row.site.lakeKm ?? Infinity : Infinity) : undefined) },
-  workableMonths: { label: 'workable months a year (Open-Meteo 2021–2025)', unit: 'months', read: (row) => climateOf(row)?.workable },
-  comfortableMonths: { label: 'comfortable months a year (Open-Meteo 2021–2025)', unit: 'months', read: (row) => climateOf(row)?.comfortable },
+  workableMonths: { label: 'camping months a year (Camping Climate Index ≥ 5, Open-Meteo 2021–2025)', unit: 'months', read: (row) => climateOf(row)?.workable },
+  comfortableMonths: { label: 'optimal camping months a year (Camping Climate Index ≥ 7)', unit: 'months', read: (row) => climateOf(row)?.comfortable },
+  optimalDays: { label: 'optimal camping days a year (Camping Climate Index ≥ 7)', unit: 'days', read: (row) => climateOf(row)?.cci?.optimalDays ?? undefined },
+  hotDays: { label: 'days a year above 34 °C', unit: 'days', read: (row) => climateOf(row)?.cci?.hotDays ?? undefined },
   hottestC: { label: 'hottest month average daily high', unit: '°C', read: (row) => climateOf(row)?.hottest },
   coldestC: { label: 'coldest month average daily low', unit: '°C', read: (row) => climateOf(row)?.coldest },
   explorePoints: { label: 'beaches, viewpoints, sights, reserves and trails within 15 km', unit: 'places', read: (row) => (row.site ? explorePoints(row.site) : undefined) },

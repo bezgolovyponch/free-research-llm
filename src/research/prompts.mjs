@@ -261,7 +261,7 @@ You improve ONE piece of a research model so the whole model gets closer to the 
 
 QUESTION: ${project.question}
 EXPECTED RESULT: ${project.acceptance?.expected || 'a well-supported decision memo'}
-CURRENT SCORE: ${score.score} (share of verified/supported nodes${score.acceptance !== null ? ` and expected-result checks ${score.acceptance}` : ''})
+CURRENT SCORE: ${score.score} (share of verified/supported nodes${score.acceptance !== null ? ` and expected-result checks ${score.acceptance}` : ''}${score.results !== null && score.results !== undefined ? `; results rubric ${score.results}: the share of the decision model's criteria met by the best results, refuted results count 0` : ''})
 EXPECTED-RESULT CHECKS:
 ${acceptanceBlock(project.acceptanceResult)}
 

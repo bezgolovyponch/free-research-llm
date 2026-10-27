@@ -3,7 +3,7 @@ import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, quoteFou
 
 const rules = GLAMPING_LOW_ENTRY.rules;
 const toEur = (value: number, from: string) => (from === 'GBP' ? value * 1.2 : value);
-const climate = (workable: number, hottest: number) => ({ workable, comfortable: workable - 3, hottest, coldest: 8 });
+const climate = (workable: number, hottest: number) => ({ workable, comfortable: workable - 3, hottest, coldest: 8, cci: { annual: 6.5, optimalDays: 120, hotDays: hottest > 34 ? 6 : 0, optimalTrend: 1.5, perYear: [], years: 5 } });
 const site = (coastKm: number | null, more = {}) => ({ coastKm, beachKm: coastKm, beaches: 5, viewpoints: 10, attractions: 5, reserves: 1, protectedAreas: 1, hikingRoutes: 2, campsites: 3, lodging: 40, climate: climate(12, 24), ...more });
 const nazare = { title: 'Rustic land 1,640 m² Nazaré', countryCode: 'PT', country: 'Portugal', value: 20000, area: 1640, areaUnit: 'm²', site: site(2.7), fit: { score: 0.88, hpi: 17.6 } };
 
@@ -38,11 +38,12 @@ describe('low-entry glamping strategy', () => {
     const plan = planFor(nazare, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
     expect(plan.tier).toBe('fits');
     expect(plan.why.join(' | ')).toContain('sea 2.7 km');
-    expect(plan.why.join(' | ')).toContain('12 workable months');
+    expect(plan.why.join(' | ')).toContain('12 camping months a year by the Camping Climate Index');
     expect(plan.why.join(' | ')).toContain('hottest month average high 24 °C: tents work without air conditioning');
     const hot = planFor({ ...nazare, site: site(2.7, { climate: climate(10, 34.6) }) }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
     expect(hot.why.join(' ')).not.toContain('without air conditioning');
-    expect(hot.tradeoffs.join(' ')).toContain('hottest month average max 34.6 °C');
+    expect(hot.tradeoffs.join(' ')).toContain('hottest month average high 34.6 °C (limit 32.2 °C); 6 day(s) a year above 34 °C');
+    expect(hot.risks.join(' ')).toContain('about 6 day(s) a year above 34 °C');
     expect(plan.why.join(' | ')).toContain('holds 24 units');
     expect(plan.why.join(' | ')).toContain('entry ≈ €23,785');
     expect(plan.why.join(' | ')).toContain('Rural camping park');
@@ -54,7 +55,7 @@ describe('low-entry glamping strategy', () => {
     const plan = planFor(inland, GLAMPING_LOW_ENTRY, { convert: toEur });
     expect(plan.tier).toBe('trade-off');
     expect(plan.tradeoffs[0]).toContain('sea 32 km');
-    expect(plan.potential).toEqual(expect.arrayContaining(['named lake or reservoir 1.2 km away', '12-month season']));
+    expect(plan.potential).toEqual(expect.arrayContaining(['named lake or reservoir 1.2 km away', '12-month camping season']));
     expect(plan.verdict).toMatch(/^trade-off with potential/);
   });
 
@@ -62,7 +63,7 @@ describe('low-entry glamping strategy', () => {
     const bare = site(60, { lakeKm: null, beaches: 0, viewpoints: 2, attractions: 1, reserves: 0, protectedAreas: 0, hikingRoutes: 0, campsites: 1, climate: climate(6, 30.9) });
     const plan = planFor({ ...nazare, site: bare }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
     expect(plan.tier).toBe('weak');
-    expect(plan.verdict).toMatch(/^does not fit: sea within 20 km by e-bike: no \(sea 60 km\); 10\+ workable months: no .*; nothing nearby draws guests to make up for it$/);
+    expect(plan.verdict).toMatch(/^does not fit: sea within 20 km by e-bike: no \(sea 60 km\); 10\+ camping months \(Camping Climate Index ≥ 5\): no .*; nothing nearby draws guests to make up for it$/);
     expect(plan.potential).toEqual(['1 campsites nearby prove camping demand']);
   });
 
@@ -81,7 +82,7 @@ describe('low-entry glamping strategy', () => {
     const plan = planFor({ ...nazare, site: null, area: null }, GLAMPING_LOW_ENTRY);
     expect(plan.tier).toBe('unverified');
     expect(plan.verdict).toContain('area not shown');
-    expect(plan.verdict.match(/climate not measured yet/g)).toHaveLength(1);
+    expect(plan.verdict.match(/climate not measured with the Camping Climate Index yet/g)).toHaveLength(1);
   });
 
   it('flags a Turkish shared title and the foreign-buyer project duty', () => {
@@ -143,8 +144,8 @@ describe('decision model from the user words', () => {
     expect(f.clauses.find((c: { text: string }) => c.text.startsWith('with the strong price'))?.criteria).toEqual(['trend']);
     expect(f.rules.minWorkableMonths).toEqual({ value: 10, source: 'question' });
     expect(f.rules.ebikeKm).toEqual({ value: 20, source: 'guidance' });
-    expect(foundationText(f)).toContain('at least 10 workable months');
-    expect(foundationText(f)).toContain('31 °C (no air conditioning; this limit is assumed, not taken from your words or a source)');
+    expect(foundationText(f)).toContain('at least 10 camping months (Camping Climate Index ≥ 5, Ma 2021)');
+    expect(foundationText(f)).toContain('at most 32.2 °C, days above 34 °C shown as exceptions (no air conditioning; the perceived maximum from Fisichelli et al. 2015, cited by Ma 2021)');
   });
 
   it('names the clauses it cannot check yet instead of pretending they are covered', async () => {
@@ -177,6 +178,20 @@ describe('decision model from the user words', () => {
     expect(implausiblyCheap({ countryCode: 'VN', country: 'Vietnam', value: 250, area: 250, areaUnit: 'm²' }, medians)).toMatch(/^€1\.00\/m² is a low outlier for land in Vietnam among the 5 listings found \(median €14\.00\/m²; outliers below €\d+\.\d\d\/m² by median − 2\.5 MAD\): check the price and area on the listing$/);
     expect(implausiblyCheap(rows[0], medians)).toBeNull();
     expect(pricePerM2Medians(rows.slice(0, 4))).toEqual({});
+  });
+
+  it('also compares a plot with the priced plots within 30 km when the country group is too mixed to flag it', async () => {
+    const { implausiblyCheap, localPriceStats, pricePerM2Medians } = await import('../../src/research/strategy.mjs');
+    const near = [4, 5, 5, 6, 7].map((eurPerM2, i) => ({ url: `https://imo.example/${i}`, countryCode: 'PT', country: 'Portugal', value: eurPerM2 * 1000, area: 1000, areaUnit: 'm²', lat: 38.8 + i * 0.01, lon: -9.4 }));
+    const far = [0.2, 0.3, 50, 80, 120].map((eurPerM2, i) => ({ url: `https://imo.example/far${i}`, countryCode: 'PT', country: 'Portugal', value: eurPerM2 * 1000, area: 1000, areaUnit: 'm²', lat: 41 + i * 0.01, lon: -8.6 }));
+    const sintra = { url: 'https://imo.example/sintra', countryCode: 'PT', country: 'Portugal', value: 450, area: 950, areaUnit: 'm²', lat: 38.86, lon: -9.42 };
+    const rows = [...near, ...far, sintra];
+    const medians = pricePerM2Medians(rows);
+    expect(localPriceStats(sintra, rows)).toMatchObject({ n: 5 });
+    expect(localPriceStats({ ...sintra, lat: undefined }, rows)).toBeNull();
+    expect(implausiblyCheap(sintra, medians)).toBeNull();
+    expect(implausiblyCheap(sintra, medians, rows)).toMatch(/^€0\.47\/m² is a low outlier among the 5 priced plots within 30 km \(median €5\.00\/m²; outliers below €\d+\.\d\d\/m² by median − 2\.5 MAD\): the price may be a deposit, a share or a placeholder; check it on the listing$/);
+    expect(implausiblyCheap(near[2], medians, rows)).toBeNull();
   });
 
   it('never lets anything make up for too little land, and never lets an unnamed pond count as a lake', () => {
