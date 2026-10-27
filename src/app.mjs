@@ -170,11 +170,16 @@ export class App {
     const rates = new ExchangeRates({ fetchImpl });
     this.sites = new SiteAssessor({ file: path.join(this.dataDir, 'sites.json') });
     const verificationDir = path.join(this.dataDir, 'verification');
-    const verifier = this.demo ? null : { dir: verificationDir, run: (id) => new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [path.join(ROOT_DIR, 'verifier', 'verify.mjs'), id, '--data', this.dataDir, '--projects', this.store.dir], { stdio: 'ignore' });
-      child.on('error', reject);
-      child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`verifier exited with ${code}`))));
-    }) };
+    const verifierInputs = path.join(verificationDir, 'inputs');
+    const verifier = this.demo ? null : { dir: verificationDir, run: async (id, project) => {
+      await fs.mkdir(verifierInputs, { recursive: true });
+      await fs.writeFile(path.join(verifierInputs, `${id}.json`), JSON.stringify(project));
+      await new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, [path.join(ROOT_DIR, 'verifier', 'verify.mjs'), id, '--data', this.dataDir, '--projects', verifierInputs], { stdio: 'ignore' });
+        child.on('error', reject);
+        child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`verifier exited with ${code}`))));
+      });
+    } };
     this.cases = new CaseBank({ file: path.join(this.dataDir, 'cases.json') });
     this.arms = new ArmBook({ file: path.join(this.dataDir, 'arms.json') });
     this.engine = new ResearchEngine({ arms: this.arms, modeler: this.demo ? null : new DecisionModeler({ router: this.router, cases: this.cases }), cases: this.cases, verifier, router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });

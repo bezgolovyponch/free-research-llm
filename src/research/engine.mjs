@@ -381,9 +381,10 @@ export class ResearchEngine {
     const state = { running: true, signature };
     this.verifying.set(id, state);
     this.emit(project, 'candidates', `external verifier started on ${c.verification.pending} plot(s) that fit every check: it re-reads each listing and re-measures it with its own code`);
+    const snapshot = { id, question: project.question, guidance: project.guidance, constraints: project.constraints, acceptance: project.acceptance, candidates: c };
     void (async () => {
       try {
-        await this.verifier.run(id);
+        await this.verifier.run(id, snapshot);
         const ready = this.siteWarm.get(id) ?? { running: false, ready: false, measured: 0 };
         this.siteWarm.set(id, { ...ready, ready: true, verified: true });
         if (!this.quiet.has(id)) await this.applyWarmed(id);
