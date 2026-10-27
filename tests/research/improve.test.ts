@@ -173,7 +173,7 @@ describe('ProjectImprover in parallel lanes', () => {
       proposePeak = Math.max(proposePeak, proposing);
       await new Promise((r) => setTimeout(r, 15));
       proposing -= 1;
-      return nodeId === 'Q' ? {} : { change: `sharper queries for ${nodeId}`, searchQueries: [`${nodeId} kiosk rent Brno 2026`] };
+      return nodeId === 'Q' ? {} : { change: `sharper queries for ${nodeId}`, searchQueries: [`${nodeId} kiosk rent Brno 2026`], diagnosis: `${nodeId} has no local-language query`, guided: true, type: 'sub-question|lookup|fact' };
     };
     improver.start(project.id, { hours: 0.05 });
     await new Promise((r) => setTimeout(r, 5));
@@ -188,6 +188,10 @@ describe('ProjectImprover in parallel lanes', () => {
     const outcomes = new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome));
     for (const o of outcomes) expect(['kept', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'repeat', 'conflict']).toContain(o);
     expect(saved.improve.best).toBeGreaterThanOrEqual(saved.improve.baseline);
+    const tested = saved.improve.trials.filter((t: { nodeId: string; outcome: string }) => t.nodeId !== 'Q' && !['no-change', 'repeat'].includes(t.outcome));
+    expect(tested.length).toBeGreaterThan(0);
+    expect(tested.every((t: { diagnosis: string; guided: boolean; type: string }) => t.diagnosis.endsWith('has no local-language query') && t.guided && t.type === 'sub-question|lookup|fact')).toBe(true);
+    expect(saved.improve.byType['sub-question|lookup|fact'].guided.tested).toBeGreaterThan(0);
     expect(engine.lanesFor(project.id)).toBe(2);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
