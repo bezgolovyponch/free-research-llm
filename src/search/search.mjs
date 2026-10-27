@@ -315,9 +315,12 @@ export const KEYED_SEARCH_BACKENDS = [
   ['BRAVE_API_KEY', BraveBackend],
 ];
 
+export const MIN_BROWSER_TEXT = 400;
+
 export class SearchService {
-  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000, recipes = null }) {
+  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000, recipes = null, browser = null }) {
     this.backends = backends;
+    this.browser = browser;
     this.recipes = recipes;
     this.pages = new Map();
     this.jinaKey = jinaKey;
@@ -346,20 +349,7 @@ export class SearchService {
       if (!res.ok || !/text\/(html|plain|markdown)/.test(type)) return { text: '', links: [], listings: [], next: '', status: res.status };
       const body = await res.text();
       const html = /html/.test(type);
-      const base = html ? res.url || url : listingBase;
-      const found = extractListings(body, base, { isHtml: html, recipe: this.recipes?.get(base) ?? null });
-      return {
-        text: (html ? htmlToText(body) : body.trim()).slice(0, READ_TEXT_LIMIT),
-        links: html ? extractLinks(body, base) : extractMarkdownLinks(body, base),
-        listings: found.items,
-        next: found.next,
-        template: found.template,
-        methods: found.methods,
-        locale: html ? pageLocale(body) : '',
-        coords: html ? pageCoordinates(body) : null,
-        place: pagePlace(body),
-        status: res.status,
-      };
+      return this.parsePage(body, { html, base: html ? res.url || url : listingBase, status: res.status });
     } catch {
       return { text: '', links: [], listings: [], next: '', status: 0 };
     } finally {
@@ -367,13 +357,39 @@ export class SearchService {
     }
   }
 
+  parsePage(body, { html, base, status }) {
+    const found = extractListings(body, base, { isHtml: html, recipe: this.recipes?.get(base) ?? null });
+    return {
+      text: (html ? htmlToText(body) : body.trim()).slice(0, READ_TEXT_LIMIT),
+      links: html ? extractLinks(body, base) : extractMarkdownLinks(body, base),
+      listings: found.items,
+      next: found.next,
+      template: found.template,
+      methods: found.methods,
+      locale: html ? pageLocale(body) : '',
+      coords: html ? pageCoordinates(body) : null,
+      place: pagePlace(body),
+      status,
+    };
+  }
+
   async readRaw(url) {
     const direct = await this.fetchPage(url, 'text/html,text/plain');
-    if ((direct.text.length >= 400 && direct.listings.length) || !this.jinaReader) return direct;
-    if (direct.text.length >= 400 && !this.recipes?.get(url)) return direct;
-    const viaReader = await this.fetchPage(`https://r.jina.ai/${url}`, 'text/plain', this.jinaKey ? { authorization: `Bearer ${this.jinaKey}` } : {}, url);
-    if (viaReader.text.length <= direct.text.length && viaReader.listings.length <= direct.listings.length) return direct;
-    return { ...viaReader, via: 'jina' };
+    if (direct.text.length >= 400 && direct.listings.length) return direct;
+    let best = direct;
+    if (this.jinaReader && !(direct.text.length >= 400 && !this.recipes?.get(url))) {
+      const viaReader = await this.fetchPage(`https://r.jina.ai/${url}`, 'text/plain', this.jinaKey ? { authorization: `Bearer ${this.jinaKey}` } : {}, url);
+      if (viaReader.text.length > direct.text.length || viaReader.listings.length > direct.listings.length) best = { ...viaReader, via: 'jina' };
+    }
+    if (!this.browser || best.text.length >= MIN_BROWSER_TEXT || !this.browserWanted(direct)) return best;
+    const rendered = await this.browser.read(url);
+    if (!rendered?.html || rendered.status >= 400) return best;
+    const viaBrowser = { ...this.parsePage(rendered.html, { html: true, base: rendered.url || url, status: rendered.status }), via: 'browser' };
+    return viaBrowser.text.length > best.text.length || viaBrowser.listings.length > best.listings.length ? viaBrowser : best;
+  }
+
+  browserWanted(direct) {
+    return direct.status >= 200 && direct.status < 300 && direct.text.length < MIN_BROWSER_TEXT;
   }
 
   async readPage(url) {

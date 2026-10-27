@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { BrowserReader } from './search/browser.mjs';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -441,7 +442,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       console.log('  could not save a new access token in the key store: run "node src/frl.mjs install" (it creates one), then restart');
     }
   }
-  const { app, url } = await startServer({ app: new App({ secrets: process.env.FRL_KEYCHAIN === '0' ? null : secrets, dataDir: process.env.FRL_DATA_DIR || undefined }), token: remote ? token : '' });
+  const { app, url } = await startServer({ app: new App({ secrets: process.env.FRL_KEYCHAIN === '0' ? null : secrets, dataDir: process.env.FRL_DATA_DIR || undefined, browser: process.env.FRL_BROWSER === '0' || process.env.FRL_DEMO === '1' ? null : new BrowserReader() }), token: remote ? token : '' });
   if (remote) console.log('  remote access ON: other devices need the token link from "frl url"');
   if (fromKeychain.length) console.log(`  keys from macOS Keychain: ${fromKeychain.join(', ')}`);
   const status = app.status();

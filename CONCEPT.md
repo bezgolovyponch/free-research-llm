@@ -53,6 +53,7 @@ Every research piece, not only lists, follows one rule: code ranks and filters b
 - **One page per site first.** Sources are ordered by relevance, but the best page of each site comes before a second page from the same site, so the model sees independent sources first.
 - **Several queries, fused by rank.** A piece's queries are all searched, and a page that several queries find gains score from each (reciprocal rank fusion, k = 60, as RAG-Fusion does), so pages found by more than one wording come first.
 - **One page cache.** Research, the portal sweep and the expected-result check read pages through the same cache (6 h, 300 pages). A page is fetched once, and failed reads are not kept.
+- **Pages built by JavaScript.** When a page loads (HTTP 2xx) but holds almost no text, because the site builds it in the browser, code renders it once in a headless Chromium (Playwright, `src/search/browser.mjs`): one shared browser, at most 2 pages at once, 25 s per page, closed after 2 minutes idle; `FRL_BROWSER=0` turns it off. A site that refuses automated reads (HTTP 401, 403, 429) is left alone, never retried in a browser.
 - **Whole pages.** A page the app reads itself keeps up to 40,000 characters, so a fact deep in a page (after menus and cookie notices) reaches the evidence ranking and the quote checks. Search-API snippets keep 6,000.
 
 ## Checks come from your words, not the model's
