@@ -134,14 +134,16 @@ export function summaryRows(project, exportedAt = new Date()) {
 
 export function proposalRows(project) {
   const c = project.candidates ?? {};
-  const byUrl = new Map((c.kept ?? []).map((r) => [r.url, r]));
-  const listed = [...(c.proposals?.primary ?? []).map((u) => ['primary', u]), ...(c.proposals?.secondary ?? []).map((u) => ['secondary', u])].filter(([, u]) => byUrl.has(u));
-  const rows = [['list', 'rank', 'Pareto layer', 'title', 'url', 'country', 'entry cost EUR', 'why it is proposed', 'where it stands out', 'evidence (measured)', 'misses', 'to confirm', 'risks', 'confidence']];
-  for (const [list, url] of listed) {
-    const r = byUrl.get(url);
-    const plan = r.plan;
-    const p = plan.proposal ?? {};
-    rows.push([list, num(p.rank), num(p.layer), String(r.title ?? ''), r.url, r.country ?? '', num(plan.entry?.total), p.headline ?? '', (p.standsOut ?? []).join(' | '), (plan.why ?? []).join(' | '), (plan.tradeoffs ?? []).join(' | '), (p.confirm ?? []).join(' | '), (plan.risks ?? []).join(' | '), p.confidenceText ?? '']);
+  const byUrl = new Map([...(c.kept ?? []), ...(c.outside ?? [])].map((r) => [r.url, r]));
+  const sections = c.proposals?.sections ?? [{ label: 'primary', urls: c.proposals?.primary ?? [] }, { label: 'secondary', urls: c.proposals?.secondary ?? [] }];
+  const rows = [['opportunity', 'why this opportunity', 'rank', 'Pareto layer', 'title', 'url', 'country', 'entry cost EUR', 'why it is proposed', 'where it stands out', 'evidence (measured)', 'misses', 'to confirm', 'risks', 'confidence']];
+  for (const section of sections) {
+    for (const url of section.urls.filter((u) => byUrl.has(u))) {
+      const r = byUrl.get(url);
+      const plan = r.plan;
+      const p = plan.proposal ?? {};
+      rows.push([section.label, section.why ?? '', num(p.rank), num(p.layer), String(r.title ?? ''), r.url, r.country ?? '', num(plan.entry?.total), p.headline ?? '', (p.standsOut ?? []).join(' | '), (plan.why ?? []).join(' | '), (plan.tradeoffs ?? []).join(' | '), (p.confirm ?? []).join(' | '), (plan.risks ?? []).join(' | '), p.confidenceText ?? '']);
+    }
   }
   return rows;
 }

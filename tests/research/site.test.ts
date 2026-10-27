@@ -191,6 +191,28 @@ describe('SiteAssessor', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('re-measures the climate of a cached site measured before the Camping Climate Index, once, without new map queries', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-'));
+    const file = path.join(dir, 'sites.json');
+    const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
+    const first = new SiteAssessor({ file, fetchJson: net.fetchJson, sleep: noSleep });
+    await first.apply({ ...table, kept: [rows[0]], keptCount: 1 }, brief, {});
+    await first.writing;
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    for (const entry of Object.values(stored.sites) as { site: { climate: object } }[]) entry.site.climate = { comfortable: 7, workable: 12, hottest: 24, coldest: 8 };
+    await fs.writeFile(file, JSON.stringify(stored));
+    const before = net.calls.length;
+    const second = new SiteAssessor({ file, fetchJson: net.fetchJson, sleep: noSleep });
+    const out = await second.apply({ ...table, kept: [rows[0]], keptCount: 1 }, brief, {});
+    expect(net.calls.slice(before)).toEqual(['climate']);
+    expect(out.kept[0].site.climate.cci).toMatchObject({ monthly: expect.any(Array) });
+    await second.writing;
+    const third = new SiteAssessor({ file, fetchJson: net.fetchJson, sleep: noSleep });
+    await third.apply({ ...table, kept: [rows[0]], keptCount: 1 }, brief, {});
+    expect(net.calls.length).toBe(before + 1);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('drops looked-up places and points from an older store, keeping measured sites', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-'));
     const file = path.join(dir, 'sites.json');

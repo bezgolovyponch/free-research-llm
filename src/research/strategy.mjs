@@ -84,7 +84,7 @@ export const GLAMPING_LOW_ENTRY = {
 const STRATEGIES = [GLAMPING_LOW_ENTRY];
 const INDUSTRIAL = /zona industrial|industrial zone|estaleiro|armaz[eé]m|pol[ií]gono industrial|sanayi/i;
 const SHARED_TITLE = /hisseli|hisse(?:li)? tapu|shared title|quota[- ]part/i;
-const STRONG_EXPLORE = 20;
+export const STRONG_EXPLORE = 20;
 
 export function strategyFor(templateId) {
   return STRATEGIES.find((s) => s.templates.includes(templateId)) ?? null;

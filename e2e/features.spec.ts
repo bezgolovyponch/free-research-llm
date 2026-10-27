@@ -113,7 +113,7 @@ test('candidate table: every plot says why it fits, sorts by any column and filt
   await expect(pip.locator('a', { hasText: 'Open the listing' })).toHaveAttribute('href', 'https://imo.example/anuncio/Coastal-plot-Nazare');
   await pip.locator('button[data-pipact="close"]').click();
   await expect(pip).toBeHidden();
-  const titles = () => table.locator('tr td:nth-child(3) a').allTextContents();
+  const titles = () => table.locator('tr td:nth-child(4) a').allTextContents();
   expect(await titles()).toEqual(['Coastal plot Nazare', 'Cheap plot Alenquer', 'Inland plot Tomar']);
   await table.locator('th[data-csort="entry"]').click();
   expect(await titles()).toEqual(['Inland plot Tomar', 'Cheap plot Alenquer', 'Coastal plot Nazare']);
@@ -283,47 +283,62 @@ test('share: More → Share explains the one-research link and says when remote 
   await expect(box).toBeHidden();
 });
 
-test('results: proposed and secondary results as cards, each opening a side panel that collapses, steps through results and fits a phone', async ({ page }) => {
+test('results: the sortable table is the list, opportunities filter it, and a selected row opens a docked details panel that replaces the right column and collapses', async ({ page }) => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
-  const base = await (await page.request.post('/api/projects', { data: { question: 'E2E base research for the proposal cards', autoRun: false } })).json();
+  const base = await (await page.request.post('/api/projects', { data: { question: 'E2E base research for the opportunity table', autoRun: false } })).json();
   const checks = (season: boolean | null) => [{ id: 'sea', label: 'sea within 20 km by e-bike', ok: true, detail: 'sea 2 km' }, { id: 'season', label: '10+ camping months', ok: season, detail: season === null ? 'climate not measured yet' : '11 camping months' }];
   const row = (title: string, tier: string, entry: number, proposal: object, season: boolean | null) => ({ title, url: `https://imo.example/anuncio/${title.replace(/\W+/g, '-')}`, price: entry, currency: 'EUR', value: entry, unit: 'EUR', area: 1000, areaUnit: 'm²', place: 'Mira', country: 'Portugal', countryCode: 'PT', site: { coastKm: 2, beachKm: 2, beaches: 2, viewpoints: 3, attractions: 1, reserves: 0, protectedAreas: 0, hikingRoutes: 1, campsites: 1, lodging: 9, climate: { workable: 11, comfortable: 6, hottest: 25, coldest: 9, cci: { optimalDays: 120, hotDays: 0, optimalTrend: 2, monthly: [3, 3.5, 4, 5, 6, 7, 7.5, 7.5, 6.5, 5, 4, 3] } } }, fit: { hpi: 15.1, zoning: 'agricultural' }, plan: { tier, verdict: tier, why: ['sea 2 km: inside the 20 km e-bike ride'], tradeoffs: [], potential: [], risks: ['check RAN/REN with the Câmara'], units: 15, areaM2: 1000, share: season ? 1 : 0.5, entry: { total: entry, price: entry - 3000, tax: 300, taxLabel: 'IMT 5%', tents: 2700, units: 3, excludes: 'permits' }, checks: checks(season), proposal } });
+  const fit = (title: string, rank: number, entry: number, confidence = 'measured') => row(title, 'fits', entry, { role: 'primary', opportunity: 'fits', rank, layer: 1, headline: 'Fits all 2 criteria you set', standsOut: rank === 1 ? ['lowest entry cost of the 3'] : [], confirm: [], confidence, confidenceText: confidence === 'confirmed' ? 'confirmed by the external verifier' : 'measured by the app' }, true);
   const kept = [
-    row('Mira plot A', 'fits', 4400, { role: 'primary', rank: 1, layer: 1, headline: 'Fits all 2 criteria you set, confirmed outside the app', standsOut: ['lowest entry cost of the 2'], confirm: [], confidence: 'confirmed', confidenceText: 'confirmed by the external verifier' }, true),
-    row('Mira plot B', 'fits', 6100, { role: 'primary', rank: 2, layer: 1, headline: 'Fits all 2 criteria you set', standsOut: [], confirm: [], confidence: 'measured', confidenceText: 'every criterion measured by the app; not yet confirmed outside it' }, true),
-    row('Mira plot C', 'unverified', 3900, { role: 'secondary', rank: 1, layer: 1, headline: 'Meets 1 of 2; still to confirm: 10+ camping months', standsOut: [], confirm: ['10+ camping months: climate not measured yet'], confidence: 'partial', confidenceText: 'some criteria are not met or not measured yet' }, null),
+    row('Mira plot C', 'unverified', 3900, { role: 'secondary', opportunity: 'to-confirm', rank: 1, layer: 1, headline: 'Meets 1 of 2; still to confirm: 10+ camping months', standsOut: [], confirm: ['10+ camping months: climate not measured yet'], confidence: 'partial', confidenceText: 'some criteria are not met or not measured yet' }, null),
+    fit('Mira plot B', 2, 6100),
+    fit('Mira plot A', 1, 4400, 'confirmed'),
+    fit('Mira plot D', 3, 7000),
   ];
-  const urls = kept.map((r) => r.url);
-  const id = 'e2e-proposal-cards-0001';
+  const url = (t: string) => kept.find((r) => r.title === t)!.url;
+  const id = 'e2e-opportunity-table-01';
   const { results: _results, ...stored } = base;
-  const project = { ...stored, id, question: 'E2E proposal cards', phase: 'done', brief: { kind: { label: 'plot of land', terms: ['plot'] }, regions: ['PT'], text: 'Deliver: 2 plots' }, candidates: { found: 3, kept, outside: [], keptCount: 2, tiers: { fits: 2, 'trade-off': 0, unverified: 1, weak: 0, blocked: 0 }, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [], proposals: { method: 'Pareto layers over the measured values', objectives: [{ id: 'entry', label: 'entry cost', better: 'min' }], primary: urls.slice(0, 2), secondary: urls.slice(2) } } };
+  const project = { ...stored, id, question: 'E2E opportunity table', phase: 'done', acceptance: { ...stored.acceptance, itemCount: 50 }, brief: { kind: { label: 'plot of land', terms: ['plot'] }, regions: ['PT'], text: 'Deliver: plots' }, candidates: { found: 4, kept, outside: [], keptCount: 3, tiers: { fits: 3, 'trade-off': 0, unverified: 1, weak: 0, blocked: 0 }, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [], proposals: { method: 'Pareto layers over the measured values', objectives: [{ id: 'entry', label: 'entry cost', better: 'min' }], sections: [{ id: 'fits', label: 'Fits every criterion', why: 'every criterion you set is measured and met', urls: [url('Mira plot A'), url('Mira plot B'), url('Mira plot D')] }, { id: 'to-confirm', label: 'Could fit once confirmed', why: 'nothing measured fails', urls: [url('Mira plot C')] }], primary: [], secondary: [] } } };
   await fs.writeFile(path.join(process.env.FRL_E2E_DATA_DIR!, `${id}.json`), JSON.stringify(project));
+  await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto(`/#p=${id}`);
   await page.locator('.tabs .tab', { hasText: 'Results' }).click();
-  const cards = page.locator('#proposals');
-  await expect(cards).toContainText('2 result(s) fit every criterion', { timeout: 20000 });
-  await expect(cards).toContainText('Secondary results');
-  expect(await cards.locator('.prop .t').allTextContents()).toEqual(['Mira plot A', 'Mira plot B', 'Mira plot C']);
-  await cards.locator('.prop', { hasText: 'Mira plot A' }).click();
+  await expect(page.locator('#proposals')).toContainText('3 result(s) fit every criterion', { timeout: 20000 });
+  await expect(page.locator('#proposals')).toContainText('50 is your target, not a limit');
+  const titles = () => page.locator('#candRows tr td:nth-child(4) a').allTextContents();
+  expect(await titles()).toEqual(['Mira plot A', 'Mira plot B', 'Mira plot D', 'Mira plot C']);
+  await page.locator('button[data-copp="to-confirm"]').click();
+  expect(await titles()).toEqual(['Mira plot C']);
+  await expect(page.locator('#proposals')).toContainText('Why this opportunity: nothing measured fails');
+  await page.locator('button[data-copp="all"]').click();
+  await page.locator('#candRows tr', { hasText: 'Mira plot A' }).locator('td').first().click();
   const pip = page.locator('#pip');
   await expect(pip).toContainText('confirmed by the external verifier');
-  await expect(pip).toContainText('lowest entry cost of the 2');
-  await expect(pip).toContainText('Camping Climate Index');
+  await expect(pip).toContainText('lowest entry cost of the 3');
   await expect(pip.locator('.bars i')).toHaveCount(12);
+  await expect(page.locator('#inspector')).toBeHidden();
+  const docked = (await pip.boundingBox())!;
+  expect(Math.round(docked.x + docked.width)).toBe(1400);
+  expect(docked.width).toBeGreaterThan(300);
+  expect(docked.width).toBeLessThanOrEqual(1400 * 0.34 + 1);
   await pip.locator('button[data-pipact="next"]').click();
   await expect(pip.locator('.pip-head')).toContainText('Mira plot B');
-  await pip.locator('button[data-pipact="next"]').click();
-  await expect(pip).toContainText('still to confirm: 10+ camping months');
-  await pip.locator('button[data-pipact="toggle"]').click();
-  await expect(pip.locator('.pip-body')).toBeHidden();
-  await expect(pip.locator('.pip-head')).toBeVisible();
-  await pip.locator('button[data-pipact="toggle"]').click();
+  await expect(page.locator('#candRows tr.on')).toContainText('Mira plot B');
+  await pip.locator('.pip-head button[data-pipact="toggle"]').click();
+  await expect(pip.locator('.pip-rail')).toBeVisible();
+  await expect(page.locator('#inspector')).toBeVisible();
+  await pip.locator('.pip-rail').click();
   await expect(pip.locator('.pip-body')).toBeVisible();
+  await expect(page.locator('#inspector')).toBeHidden();
   await page.setViewportSize({ width: 390, height: 800 });
-  const box = (await pip.boundingBox())!;
-  expect(Math.round(box.width)).toBe(390);
-  expect(Math.round(box.y + box.height)).toBe(800);
-  await page.locator('.tabs .tab', { hasText: 'Tree' }).click();
+  await pip.locator('.pip-head button[data-pipact="toggle"]').click();
+  await expect(pip.locator('.pip-body')).toBeHidden();
+  await page.locator('#candRows tr', { hasText: 'Mira plot C' }).locator('td').first().click();
+  await expect(pip).toContainText('still to confirm: 10+ camping months');
+  const sheet = (await pip.boundingBox())!;
+  expect(Math.round(sheet.width)).toBe(390);
+  expect(Math.round(sheet.y + sheet.height)).toBe(800);
+  await pip.locator('button[data-pipact="close"]').click();
   await expect(pip).toBeHidden();
 });

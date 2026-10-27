@@ -1,6 +1,8 @@
 import { explorePoints } from './site.mjs';
+import { STRONG_EXPLORE } from './strategy.mjs';
 
-export const SECONDARY_SHOWN = 12;
+export const NEAR_LAKE_KM = 5;
+export const LOW_ENTRY_SHARE = 0.25;
 export const TOP_QUARTER = 0.25;
 export const PROPOSAL_METHOD = 'Pareto layers over the measured values (non-dominated sorting, Deb et al. 2002): a result ranks higher only when no other result is at least as good on every measure and better on one; no hand-set weights';
 
@@ -88,32 +90,72 @@ function rankWithin(rows, objectives) {
   return [...rows].sort((a, b) => Number(confirmed(b)) - Number(confirmed(a)) || layers.get(a) - layers.get(b) || (b.plan.share ?? 0) - (a.plan.share ?? 0) || (entry.read(a) ?? Infinity) - (entry.read(b) ?? Infinity)).map((r) => ({ row: r, layer: layers.get(r) }));
 }
 
+const checkOk = (row, id) => row.plan.checks.find((c) => c.id === id)?.ok;
+
+export const OPPORTUNITIES = [
+  { id: 'fits', label: 'Fits every criterion', why: 'every criterion you set is measured and met; these count toward your result', test: (r) => r.plan.tier === 'fits' && !refuted(r) },
+  { id: 'short-season-sea', label: 'Short-season sea site', why: 'the sea is within your e-bike ride but the camping season is shorter than you asked: a summer-only site that can still earn in the season', test: (r) => r.plan.tier === 'trade-off' && checkOk(r, 'season') === false && checkOk(r, 'sea') === true },
+  { id: 'nature-draw', label: 'Nature or lake draw', why: `a named lake within ${NEAR_LAKE_KM} km or ${STRONG_EXPLORE}+ beaches, viewpoints, sights, reserves and trails within 15 km draw guests and make up for a missed criterion`, test: (r) => r.plan.tier === 'trade-off' && Boolean(r.site) && ((r.site.lakesNamed && Number.isFinite(r.site.lakeKm) && r.site.lakeKm <= NEAR_LAKE_KM) || explorePoints(r.site) >= STRONG_EXPLORE) },
+  { id: 'low-entry', label: 'Lowest entry to start', why: 'among the cheapest quarter to start (price, transfer tax and first units) with room for the first units; a test site before a bigger one', test: (r, ctx) => ['trade-off', 'unverified'].includes(r.plan.tier) && !refuted(r) && checkOk(r, 'units') !== false && entryOf(r) !== null && entryOf(r) <= ctx.lowEntry },
+  { id: 'to-confirm', label: 'Could fit once confirmed', why: 'nothing measured fails; one or more criteria could not be measured yet', test: (r) => r.plan.tier === 'unverified' && !r.plan.checks.some((c) => c.ok === false) },
+  { id: 'other-trade-off', label: 'Other trade-offs', why: 'a criterion is missed, with something nearby that makes up for it', test: (r) => r.plan.tier === 'trade-off' },
+];
+
+function entryOf(row) {
+  return finite(row.plan?.entry?.total ?? row.value);
+}
+
+function quantile(values, q) {
+  const sorted = values.filter((v) => v !== null).sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : null;
+}
+
+export function opportunityOf(row, ctx) {
+  return OPPORTUNITIES.find((o) => o.test(row, ctx)) ?? null;
+}
+
+function proposalOf(row, role, objectives) {
+  const confidence = confidenceOf(row);
+  return {
+    role: role?.role ?? null,
+    opportunity: role?.opportunity ?? null,
+    rank: role?.rank ?? null,
+    layer: role?.layer ?? null,
+    headline: headlineOf(row),
+    standsOut: role ? standsOut(row, role.group, objectives) : [],
+    confirm: row.plan.checks.filter((c) => c.ok === null).map((c) => `${c.label}: ${c.detail}`),
+    confidence: confidence.level,
+    confidenceText: confidence.text,
+  };
+}
+
+const OUTSIDE = { id: 'outside', label: 'Outside your countries', why: 'passes every limit except the country; ranked by opportunity (site checks met, real price trend, scenic places with few campsites, entry cost); never counts toward your result' };
+
 export function withProposals(candidates) {
   const kept = candidates?.kept ?? [];
   if (!kept.some((r) => r.plan?.checks)) return candidates;
   const planned = kept.filter((r) => r.plan?.checks);
   const objectives = activeObjectives(planned);
-  const primaryRows = planned.filter((r) => r.plan.tier === 'fits' && !refuted(r));
-  const secondaryPool = planned.filter((r) => ['trade-off', 'unverified'].includes(r.plan.tier));
-  const primary = rankWithin(primaryRows, objectives);
-  const secondary = rankWithin(secondaryPool, objectives).slice(0, SECONDARY_SHOWN);
-  const roles = new Map([...primary.map((x, i) => [x.row, { role: 'primary', rank: i + 1, layer: x.layer, group: primaryRows }]), ...secondary.map((x, i) => [x.row, { role: 'secondary', rank: i + 1, layer: x.layer, group: secondaryPool }])]);
-  const rows = kept.map((row) => {
-    if (!row.plan?.checks) return row;
-    const role = roles.get(row);
-    const confidence = confidenceOf(row);
-    const proposal = {
-      role: role?.role ?? null,
-      rank: role?.rank ?? null,
-      layer: role?.layer ?? null,
-      headline: headlineOf(row),
-      standsOut: role ? standsOut(row, role.group, objectives) : [],
-      confirm: row.plan.checks.filter((c) => c.ok === null).map((c) => `${c.label}: ${c.detail}`),
-      confidence: confidence.level,
-      confidenceText: confidence.text,
-    };
-    return { ...row, plan: { ...row.plan, proposal } };
-  });
-  const urlOf = (x) => x.row.url;
-  return { ...candidates, kept: rows, proposals: { method: PROPOSAL_METHOD, objectives: objectives.map((o) => ({ id: o.id, label: o.label, better: o.better })), primary: primary.map(urlOf), secondary: secondary.map(urlOf) } };
+  const ctx = { lowEntry: quantile(planned.filter((r) => !['weak', 'blocked'].includes(r.plan.tier)).map(entryOf), LOW_ENTRY_SHARE) };
+  const groups = new Map(OPPORTUNITIES.map((o) => [o.id, []]));
+  for (const row of planned) {
+    const o = opportunityOf(row, ctx);
+    if (o) groups.get(o.id).push(row);
+  }
+  const roles = new Map();
+  const sections = [];
+  for (const o of OPPORTUNITIES) {
+    const rows = groups.get(o.id);
+    if (!rows.length) continue;
+    const ranked = rankWithin(rows, objectives);
+    ranked.forEach((x, i) => roles.set(x.row, { role: o.id === 'fits' ? 'primary' : 'secondary', opportunity: o.id, rank: i + 1, layer: x.layer, group: rows }));
+    sections.push({ id: o.id, label: o.label, why: o.why, urls: ranked.map((x) => x.row.url) });
+  }
+  const rows = kept.map((row) => (row.plan?.checks ? { ...row, plan: { ...row.plan, proposal: proposalOf(row, roles.get(row), objectives) } } : row));
+  const outsideRows = (candidates.outside ?? []).filter((r) => r.plan?.checks);
+  const outsideRoles = new Map(outsideRows.map((r, i) => [r, { role: 'secondary', opportunity: OUTSIDE.id, rank: i + 1, layer: null, group: outsideRows }]));
+  const outside = (candidates.outside ?? []).map((row) => (outsideRoles.has(row) ? { ...row, plan: { ...row.plan, proposal: proposalOf(row, outsideRoles.get(row), objectives) } } : row));
+  if (outsideRows.length) sections.push({ id: OUTSIDE.id, label: OUTSIDE.label, why: OUTSIDE.why, urls: outsideRows.map((r) => r.url) });
+  const urlsOf = (id) => sections.find((x) => x.id === id)?.urls ?? [];
+  return { ...candidates, kept: rows, ...(candidates.outside ? { outside } : {}), proposals: { method: PROPOSAL_METHOD, objectives: objectives.map((o) => ({ id: o.id, label: o.label, better: o.better })), sections, primary: urlsOf('fits'), secondary: sections.filter((x) => x.id !== 'fits').flatMap((x) => x.urls) } };
 }

@@ -94,10 +94,10 @@ describe('results workbook: every table, exact links, typed numbers', () => {
     const proposed = { ...project, candidates: withProposals(project.candidates) };
     expect(resultsSheets(proposed).map((s: { name: string }) => s.name).slice(0, 3)).toEqual(['Summary', 'Proposals', 'Listings']);
     const rows = proposalRows(proposed);
-    expect(rows[0]).toEqual(['list', 'rank', 'Pareto layer', 'title', 'url', 'country', 'entry cost EUR', 'why it is proposed', 'where it stands out', 'evidence (measured)', 'misses', 'to confirm', 'risks', 'confidence']);
-    expect(rows[1].slice(0, 5)).toEqual(['primary', 1, 1, 'Terreno rústico com 1.516,54 m² em Mira', 'https://imo.example/anuncio/ID1']);
-    expect(rows[1][7]).toBe('Fits all 2 criteria you set, confirmed outside the app');
-    expect(rows[1][11]).toBe('no air conditioning needed: climate not measured yet');
+    expect(rows[0]).toEqual(['opportunity', 'why this opportunity', 'rank', 'Pareto layer', 'title', 'url', 'country', 'entry cost EUR', 'why it is proposed', 'where it stands out', 'evidence (measured)', 'misses', 'to confirm', 'risks', 'confidence']);
+    expect(rows[1].slice(0, 6)).toEqual(['Fits every criterion', expect.stringContaining('every criterion you set'), 1, 1, 'Terreno rústico com 1.516,54 m² em Mira', 'https://imo.example/anuncio/ID1']);
+    expect(rows[1][8]).toBe('Fits all 2 criteria you set, confirmed outside the app');
+    expect(rows[1][12]).toBe('no air conditioning needed: climate not measured yet');
     expect(rows.map((r: unknown[]) => r[4])).not.toContain('https://imo.example/anuncio/ID3');
   });
 });
