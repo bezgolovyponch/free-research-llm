@@ -194,6 +194,18 @@ describe('decision model from the user words', () => {
     expect(implausiblyCheap(near[2], medians, rows)).toBeNull();
   });
 
+  it('does not call the sea distance from the coastline file within its 2 km precision of the limit, and does not mark a plot weak while what draws guests is still unmeasured', () => {
+    const rough = (km: number) => ({ ...site(km), coastBy: 'Natural Earth 1:10m coastline', mapPending: true, beaches: 0, viewpoints: 0, attractions: 0, reserves: 0, protectedAreas: 0, hikingRoutes: 0, campsites: 0, lodging: 0, lakeKm: null, lakesNamed: false });
+    const near = planFor({ ...nazare, site: rough(19.2) }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
+    expect(near.checks.find((c: { id: string }) => c.id === 'sea')).toMatchObject({ ok: null, detail: 'sea about 19.2 km (Natural Earth 1:10m coastline, about ±2 km): too close to the 20 km limit to call until the map service answers' });
+    const clear = planFor({ ...nazare, site: rough(8) }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
+    expect(clear.checks.find((c: { id: string }) => c.id === 'sea')).toMatchObject({ ok: true, detail: 'sea 8 km (Natural Earth 1:10m coastline, about ±2 km)' });
+    expect(clear.why).toContain('things to explore and places to stay nearby: queued, the public map service is busy');
+    const short = planFor({ ...nazare, site: { ...rough(30), climate: climate(6, 25) } }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
+    expect(short.tier).toBe('unverified');
+    expect(short.verdict).toContain('whether something nearby makes up for it is measured when the map service answers');
+  });
+
   it('never lets anything make up for too little land, and never lets an unnamed pond count as a lake', () => {
     const tiny = planFor({ ...nazare, area: 6, site: site(2, { lakeKm: 0.9, lakesNamed: true, viewpoints: 300 }) }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5 });
     expect(tiny.tier).toBe('weak');

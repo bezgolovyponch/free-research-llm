@@ -4,6 +4,7 @@ import { areaFromText } from '../search/listings.mjs';
 import path from 'node:path';
 import { climateOf } from './cci.mjs';
 import { ClimateCells } from './climatecells.mjs';
+import { CoastFile } from './coastline.mjs';
 
 export const GONE_STATUS = new Set([404, 410]);
 
@@ -15,9 +16,9 @@ export const PAGE_READS_PER_PASS = 40;
 export const MISS_TTL_MS = 24 * 3600 * 1000;
 export const PASS_BUDGET_MS = 8 * 60 * 1000;
 export const MODES = {
-  cache: { newSites: 0, pageReads: 0, budgetMs: 0 },
-  budget: { newSites: NEW_SITES_PER_PASS, pageReads: PAGE_READS_PER_PASS, budgetMs: PASS_BUDGET_MS },
-  all: { newSites: 400, pageReads: 400, budgetMs: 60 * 60 * 1000 },
+  cache: { newSites: 0, pageReads: 0, budgetMs: 0, mapQueries: 0 },
+  budget: { newSites: NEW_SITES_PER_PASS, pageReads: PAGE_READS_PER_PASS, budgetMs: PASS_BUDGET_MS, mapQueries: NEW_SITES_PER_PASS },
+  all: { newSites: 1000, pageReads: 400, budgetMs: 60 * 60 * 1000, mapQueries: 40 },
 };
 export const GEOCODE_GAP_MS = 1100;
 export const PITCH_M2 = 40;
@@ -216,7 +217,8 @@ export function measureOrder(rows, store) {
 }
 
 export class SiteAssessor {
-  constructor({ file = '', fetchJson = null, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), climateCells = null } = {}) {
+  constructor({ file = '', fetchJson = null, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), climateCells = null, coastFile = null } = {}) {
+    this.coastFile = coastFile ?? (file ? new CoastFile({ file: path.join(path.dirname(file), 'coastline-ne10m.geojson') }) : null);
     this.file = file;
     this.now = now;
     this.sleep = sleep;
@@ -242,7 +244,7 @@ export class SiteAssessor {
   }
 
   worker() {
-    return this.file ? new SiteAssessor({ file: this.file, fetchJson: this.fetchJson === this.httpJsonBound ? null : this.fetchJson, now: this.now, sleep: this.sleep, climateCells: this.climateCells }) : null;
+    return this.file ? new SiteAssessor({ file: this.file, fetchJson: this.fetchJson === this.httpJsonBound ? null : this.fetchJson, now: this.now, sleep: this.sleep, climateCells: this.climateCells, coastFile: this.coastFile }) : null;
   }
 
   async readStore() {
@@ -382,20 +384,34 @@ export class SiteAssessor {
     return null;
   }
 
-  async assess(lat, lon) {
+  async assess(lat, lon, { map = true } = {}) {
     const cached = this.cachedSite(lat, lon);
-    if (cached?.climate?.cci) return cached;
-    if (cached) {
-      cached.climate = await this.climate(lat, lon);
-      this.store.sites[siteKey(lat, lon)] = { ...this.store.sites[siteKey(lat, lon)], site: cached };
-      this.persist();
-      return cached;
+    if (cached?.climate?.cci && !(cached.mapPending && map)) return cached;
+    const climate = cached?.climate?.cci ? cached.climate : await this.climate(lat, lon);
+    if (cached && !cached.mapPending) return this.keepSite(lat, lon, { ...cached, climate });
+    let site = null;
+    if (map) {
+      try {
+        const post = (query) => this.overpass(query);
+        site = parseSurroundings(await post(overpassQuery(lat, lon)), lat, lon);
+        if (site.coastKm === null) site.coastKm = parseCoast(await post(coastQuery(lat, lon)), lat, lon);
+      } catch (error) {
+        if (!this.coastFile) throw error;
+      }
     }
-    const post = (query) => this.overpass(query);
-    const site = parseSurroundings(await post(overpassQuery(lat, lon)), lat, lon);
-    if (site.coastKm === null) site.coastKm = parseCoast(await post(coastQuery(lat, lon)), lat, lon);
-    site.climate = await this.climate(lat, lon);
-    this.store.sites[siteKey(lat, lon)] = { at: this.now(), site };
+    if (!site) site = cached ?? (await this.siteFromCoastFile(lat, lon));
+    if (!site) throw new Error('map service busy and no coastline file');
+    return this.keepSite(lat, lon, { ...site, climate });
+  }
+
+  async siteFromCoastFile(lat, lon) {
+    const coastKm = await this.coastFile?.nearestKm(lat, lon, EBIKE_KM);
+    if (coastKm === undefined) return null;
+    return { coastKm, coastBy: 'Natural Earth 1:10m coastline', mapPending: true, beachKm: null, beaches: 0, viewpoints: 0, attractions: 0, reserves: 0, protectedAreas: 0, hikingRoutes: 0, campsites: 0, lodging: 0 };
+  }
+
+  keepSite(lat, lon, site) {
+    this.store.sites[siteKey(lat, lon)] = { at: this.store.sites[siteKey(lat, lon)]?.at ?? this.now(), site };
     this.persist();
     return site;
   }
@@ -487,18 +503,21 @@ export class SiteAssessor {
         }
         stats.located++;
         let site = this.cachedSite(point.lat, point.lon);
-        if (!site?.climate?.cci) {
+        const mapAllowed = (ctx.maps ?? 0) < (this.limits.mapQueries ?? this.limits.newSites) && this.now() - started <= this.limits.budgetMs;
+        if (!site?.climate?.cci || (site.mapPending && mapAllowed)) {
           if (ctx.fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
             stats.pending++;
             put('near', { ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
             continue;
           }
           ctx.fresh++;
-          site = await this.assess(point.lat, point.lon);
+          if (mapAllowed) ctx.maps = (ctx.maps ?? 0) + 1;
+          site = await this.assess(point.lat, point.lon, { map: mapAllowed });
           onProgress(stats);
         }
         stats.assessed++;
-        if (!site.lakesNamed && ctx.fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
+        if (site.mapPending) stats.mapPending = (stats.mapPending ?? 0) + 1;
+        if (!site.lakesNamed && !site.mapPending && ctx.fresh < this.limits.newSites && this.now() - started <= this.limits.budgetMs) {
           ctx.fresh++;
           site = await this.addLakes(point.lat, point.lon, site);
         }

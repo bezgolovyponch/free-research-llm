@@ -1,5 +1,6 @@
 import { plain } from './itemgate.mjs';
 import { PERCEIVED_MAX_C } from './cci.mjs';
+import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { zoningOf, explorePoints, haversineKm } from './site.mjs';
 
 export const STRATEGY_TTL_MS = 7 * 24 * 3600 * 1000;
@@ -157,6 +158,15 @@ function check(id, label, ok, detail) {
   return { id, label, ok, detail };
 }
 
+function seaCheck(site, ebike) {
+  const label = `sea within ${ebike} km by e-bike`;
+  if (!site) return check('sea', label, null, 'location not measured yet');
+  const rough = Boolean(site.coastBy);
+  const by = rough ? ` (${site.coastBy}, about ±${COASTLINE_PRECISION_KM} km)` : '';
+  if (rough && site.coastKm !== null && Math.abs(site.coastKm - ebike) < COASTLINE_PRECISION_KM) return check('sea', label, null, `sea about ${site.coastKm} km${by}: too close to the ${ebike} km limit to call until the map service answers`);
+  return check('sea', label, site.coastKm !== null && site.coastKm <= ebike, `sea ${site.coastKm ?? '>25'} km${by}`);
+}
+
 export function planFor(row, strategy, { convert = null, euHpi = null, trends = null } = {}) {
   const rules = strategy.rules;
   const trend = trends?.[row.countryCode] ?? null;
@@ -171,7 +181,7 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const zoning = zoningOf(row);
   const ebike = rules.ebikeKm.value;
   const checks = [
-    check('sea', `sea within ${ebike} km by e-bike`, site ? site.coastKm !== null && site.coastKm <= ebike : null, site ? `sea ${site.coastKm ?? '>25'} km` : 'location not measured yet'),
+    seaCheck(site, ebike),
     check('season', `${rules.minWorkableMonths.value}+ camping months (Camping Climate Index above 3: acceptable or better, Ma 2021 Table 4)`, climate?.cci ? climate.workable >= rules.minWorkableMonths.value : null, climate?.cci ? `${climate.workable} camping months (index above 3), ${climate.good ?? '?'} good (≥ 5), ${climate.comfortable} optimal (≥ 7), ${climate.cci.optimalDays} optimal days a year` : 'climate not measured with the Camping Climate Index yet'),
     check('noAc', 'no air conditioning needed', climate?.cci ? climate.hottest <= rules.maxHottest.value : null, climate?.cci ? `hottest month average high ${climate.hottest} °C (limit ${rules.maxHottest.value} °C); ${climate.cci.hotDays} day(s) a year above 34 °C` : 'climate not measured with the Camping Climate Index yet'),
     check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${rules.pitchM2.value} m² each on ${rules.campingShare.value * 100}% of the land` : 'area not shown'),
@@ -189,7 +199,8 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   if (units !== null && units >= rules.minUnits.value) why.push(`${Math.round(m2).toLocaleString('en-US')} m² holds ${units} units, ${rules.minUnits.value} are enough to open`);
   if (cost) why.push(`entry ≈ ${eur(cost.total)} (price ${eur(cost.price)} + ${cost.taxLabel} ${eur(cost.tax)}${cost.tents !== null ? ` + ${cost.units} bell tents ${eur(cost.tents)}` : ''}; excludes ${cost.excludes})`);
   if (hpi !== null && euHpi !== null && hpi > euHpi) why.push(`${row.country} house prices ${signed(hpi)}% a year after inflation${trend ? ` (nominal ${signed(trend.change)}%, inflation ${trend.inflation}%, ${trend.year})` : ''} vs EU ${signed(euHpi)}% (Eurostat, country level, not land)`);
-  if (site) why.push(`${explorePoints(site)} things to explore and ${(site.lodging ?? 0) + (site.campsites ?? 0)} places to stay within 15 km (demand)`);
+  if (site && !site.mapPending) why.push(`${explorePoints(site)} things to explore and ${(site.lodging ?? 0) + (site.campsites ?? 0)} places to stay within 15 km (demand)`);
+  if (site?.mapPending) why.push('things to explore and places to stay nearby: queued, the public map service is busy');
   if (country?.path && !country.blocker) why.push(`path: ${country.path}`);
   const potential = [];
   let draw = false;
@@ -210,13 +221,14 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
     if ((site.campsites ?? 0) > 0) potential.push(`${site.campsites} campsites nearby prove camping demand`);
   }
   const tooSmall = failed.some((c) => c.id === 'units');
-  const tier = blocked ? 'blocked' : tooSmall ? 'weak' : failed.length ? (draw ? 'trade-off' : 'weak') : unknown.length ? 'unverified' : 'fits';
+  const potentialUnknown = Boolean(site?.mapPending) && !draw;
+  const tier = blocked ? 'blocked' : tooSmall ? 'weak' : failed.length ? (draw ? 'trade-off' : potentialUnknown ? 'unverified' : 'weak') : unknown.length ? 'unverified' : 'fits';
   const risks = [...(country?.risks ?? [])];
   if (zoning === 'agricultural' && country?.agriculturalRisk) risks.push(country.agriculturalRisk);
   if (SHARED_TITLE.test(words)) risks.push('shared title (hisseli): you buy a share, not a parcel');
   if (climate?.cci?.hotDays >= 1) risks.push(`about ${climate.cci.hotDays} day(s) a year above 34 °C, when camping demand drops (Ma 2021): shade, fans or closing on those days`);
   const tradeoffs = failed.filter((c) => c.id !== 'legal').map((c) => `${c.label}: no (${c.detail})`);
-  const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set(unknown.map((c) => c.detail))].join('; ')}` : tier === 'trade-off' ? `trade-off with potential: ${potential.join('; ')}` : tooSmall ? `does not fit: ${tradeoffs.join('; ')}; too little land for a glamping site, which nothing nearby can make up for` : `does not fit: ${tradeoffs.join('; ')}; nothing nearby draws guests to make up for it`;
+  const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set([...unknown.map((c) => c.detail), ...(failed.length && potentialUnknown ? [`misses ${failed.map((c) => c.label).join(', ')}; whether something nearby makes up for it is measured when the map service answers`] : [])])].join('; ')}` : tier === 'trade-off' ? `trade-off with potential: ${potential.join('; ')}` : tooSmall ? `does not fit: ${tradeoffs.join('; ')}; too little land for a glamping site, which nothing nearby can make up for` : `does not fit: ${tradeoffs.join('; ')}; nothing nearby draws guests to make up for it`;
   const measured = checks.filter((c) => c.ok !== null);
   const share = measured.length ? Math.round((measured.filter((c) => c.ok).length / checks.length) * 100) / 100 : 0;
   return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, share, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };

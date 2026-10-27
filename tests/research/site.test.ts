@@ -234,6 +234,34 @@ describe('SiteAssessor', () => {
     expect(out.near[1].site).not.toBeNull();
   });
 
+  it('completes the hard checks from the coastline file and the stored climate when the map service fails, and fills the rest when it answers', async () => {
+    const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
+    let mapDown = true;
+    const fetchJson = async (url: string, init?: { body?: string }) => {
+      if (mapDown && url.includes('overpass')) throw new Error('HTTP 502 from overpass-api.de');
+      return net.fetchJson(url, init);
+    };
+    const coastFile = { nearestKm: async () => 12.3 };
+    const assessor = new SiteAssessor({ fetchJson, sleep: noSleep, coastFile: coastFile as never });
+    const row = { ...rows[0], lat: VIR.lat, lon: VIR.lon };
+    const first = await assessor.apply({ ...table, kept: [row], keptCount: 1 }, brief, {});
+    expect(first.kept[0].site).toMatchObject({ coastKm: 12.3, coastBy: 'Natural Earth 1:10m coastline', mapPending: true, climate: { cci: expect.any(Object) } });
+    expect(first.sites.mapPending).toBe(1);
+    mapDown = false;
+    const second = await assessor.apply({ ...table, kept: [row], keptCount: 1 }, brief, {});
+    expect(second.kept[0].site.mapPending).toBeUndefined();
+    expect(second.kept[0].site).toMatchObject({ coastKm: 0.6, viewpoints: 13 });
+  });
+
+  it('caps map queries per pass and gives the other plots the coastline-file distance at once', async () => {
+    const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
+    const budget = new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep, coastFile: { nearestKm: async () => 3.1 } as never });
+    budget.limits = { newSites: 5, pageReads: 0, budgetMs: 60000, mapQueries: 0 };
+    const measured = await budget.measureRows([{ ...rows[0], lat: VIR.lat, lon: VIR.lon }], brief, { readPage: null, onProgress: () => {}, stats: { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 }, started: Date.now(), fresh: 0 });
+    expect(measured.near[0].site).toMatchObject({ coastKm: 3.1, mapPending: true });
+    expect(net.calls.filter((c) => c === 'overpass')).toHaveLength(0);
+  });
+
   it('drops looked-up places and points from an older store, keeping measured sites', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-'));
     const file = path.join(dir, 'sites.json');
