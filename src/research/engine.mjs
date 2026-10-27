@@ -14,6 +14,7 @@ import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, describeBrief, onConcept } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
+import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { applyModel, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, fitsSignature, readVerification } from './verification.mjs';
@@ -573,7 +574,9 @@ export class ResearchEngine {
     const status = resultStatus(project);
     const table = tableVerdict(project.candidates, project.acceptance?.itemCount ?? null);
     const said = project.report.modelVerdict ?? project.report.verdict;
-    project.report.verdict = provisionalVerdict(table ? `${table} — model memo: ${said}` : said, status).slice(0, 600);
+    project.report.claimCheck = checkMemoClaims(project.report, project.candidates, { valueRange: project.acceptance?.valueRange ?? null, rules: project.candidates?.strategy?.rules ?? null, itemCount: project.acceptance?.itemCount ?? null });
+    const note = claimNote(project.report.claimCheck);
+    project.report.verdict = `${provisionalVerdict(table ? `${table} — model memo: ${said}` : said, status).slice(0, 600 - note.length)}${note}`;
     project.report.status = { provisional: status.provisional, coverage: status.coverage, confidence: status.confidence, blocking: status.blocking, counts: status.counts };
     project.report.actions = status.plan.slice(0, 40);
     return status;
