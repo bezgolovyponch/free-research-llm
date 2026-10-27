@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { ProjectImprover, REPEAT_SIMILARITY, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage } from '../../src/research/improve.mjs';
+import { NOISE_MIN_SAMPLES, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, noiseFloor, resultsRubric, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage } from '../../src/research/improve.mjs';
 import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -457,5 +457,58 @@ describe('a loop that cannot get stuck', () => {
     expect(saved.nodes.find((n) => n.id === 'D3')!.question).toBe('permits?');
     expect(sleeps).toEqual([300000]);
     expect(restingPieces([1, 2, 3].map((i) => ({ nodeId: 'D3', outcome: 'provider-outage', at: at(i) })), t0 + 10 * 60000).size).toBe(0);
+  });
+
+  it('keeps a change only when the gain holds on a re-measure with nothing changed, and records the noise', async () => {
+    const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [] } };
+    let saved = structuredClone(project);
+    const scores = [0.5, 0.29];
+    const engine = { load: async () => structuredClone(saved), store: { save: async (p: typeof project) => { saved = structuredClone(p); } }, emit: () => {}, resetWithAncestors: () => {}, run: async () => ({ ...structuredClone(saved), phase: 'done' }), resynthesize: async () => {} };
+    const state = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() }, measure: () => ({ score: scores.shift() }) };
+    const improver = new ProjectImprover({ engine: engine as never });
+    const trialProject = structuredClone(project);
+    trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
+    const base = { at: at(0), nodeId: 'D3', before: 0.3 };
+    expect(await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toEqual({ kept: false });
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'reverted-noise', score: 0.29, detail: expect.stringMatching(/^measured 0\.5, re-measured 0\.29 with nothing changed/) });
+    expect(saved.improve.noise).toEqual([-0.21]);
+    expect(saved.nodes.find((n) => n.id === 'D3')!.question).toBe('permits?');
+    scores.push(0.36, 0.34);
+    expect(await improver.commit('p', { snapshot: saved, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toMatchObject({ kept: true, score: { score: 0.35 } });
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'kept', score: 0.35, remeasured: 0.34 });
+  });
+
+  it('raises the bar to two standard deviations of the measured noise once there are enough samples', () => {
+    expect(noiseFloor([0.01, -0.01])).toBe(0.001);
+    const samples = Array.from({ length: NOISE_MIN_SAMPLES }, (_, i) => (i % 2 ? 0.006 : -0.006));
+    expect(noiseFloor(samples)).toBeCloseTo(0.013, 3);
+    expect(acceptsTrial(0.4, 0.405, [], noiseFloor(samples))).toBe(false);
+    expect(acceptsTrial(0.4, 0.42, [], noiseFloor(samples))).toBe(true);
+    expect(acceptsTrial(0.4, 0.402)).toBe(true);
+  });
+
+  it('scores the results by the share of criteria the best items meet, counting refuted ones as zero', () => {
+    const row = (share: number, verdict?: string) => ({ plan: { checks: [{}], share }, ...(verdict ? { verified: { verdict } } : {}) });
+    const project = { ...tree(), acceptance: { itemCount: 4 }, acceptanceResult: { score: 0.5 }, candidates: { kept: [row(1), row(1, 'refuted'), row(0.5), row(0.25), row(0.1)] } };
+    expect(resultsRubric(project)).toBe(0.463);
+    expect(resultsRubric({ ...project, acceptance: {} })).toBeNull();
+    const base = projectScore({ ...project, acceptanceResult: null, candidates: null }).score;
+    expect(projectScore(project)).toMatchObject({ acceptance: 0.5, results: 0.463 });
+    expect(projectScore(project).score).toBeCloseTo(0.6 * ((0.5 + 0.463) / 2) + 0.4 * base, 3);
+  });
+
+  it('refuses a change like one that failed on several pieces of the same type and was never kept', async () => {
+    const change = 'Add local-language real estate portal queries and direct listing URLs for rustic land';
+    const trials = ['D1.1', 'D2', 'D1.2'].map((nodeId, i) => ({ nodeId, change: `${change} ${['Portugal', 'Spain', 'Greece'][i]}`, outcome: 'reverted-whole', type: 'sub-question|lookup|fact', at: at(i) }));
+    const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials } };
+    let runs = 0;
+    let saved = structuredClone(project);
+    const engine = { load: async () => structuredClone(saved), store: { save: async (p: typeof project) => { saved = p; } }, emit: () => {}, run: async () => { runs += 1; }, researchLeaf: async () => { runs += 1; }, resetWithAncestors: () => {} };
+    const improver = new ProjectImprover({ engine: engine as never });
+    improver.propose = async () => ({ change: `${change} Turkey`, searchQueries: ['arsa satılık'], type: 'sub-question|lookup|fact' });
+    const state = { best: { score: 0.3 }, deadline: Date.now() + 60000, lock: { run: (f: () => unknown) => f() } };
+    expect(await improver.trial('p', 'D3', state)).toEqual({ kept: false });
+    expect(runs).toBe(0);
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'repeat', detail: expect.stringMatching(/^like a change tested 3 times on 3 pieces of this type \(D1\.1, D2, D1\.2\) and never kept/) });
   });
 });

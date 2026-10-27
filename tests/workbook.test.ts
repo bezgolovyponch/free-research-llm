@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRows, claimRows, exampleRows, plotRows, resultsSheets, resultsWorkbook, screenedRows, sourceRows, strategyRows, summaryRows, titleAreaM2 } from '../src/workbook.mjs';
+import { checkRows, claimRows, exampleRows, plotRows, proposalRows, resultsSheets, resultsWorkbook, screenedRows, sourceRows, strategyRows, summaryRows, titleAreaM2 } from '../src/workbook.mjs';
 import { unzip } from './helpers/unzip';
 
 const site = { coastKm: 2.6, beachKm: 2.7, lakeKm: 6.2, lakesNamed: true, beaches: 10, viewpoints: 12, attractions: 8, reserves: 2, protectedAreas: 4, hikingRoutes: 6, campsites: 16, lodging: 126, climate: { workable: 12, comfortable: 7, hottest: 24, coldest: 8 } };
@@ -87,5 +87,17 @@ describe('results workbook: every table, exact links, typed numbers', () => {
     const files = unzip(resultsWorkbook(project, new Date(Date.UTC(2026, 9, 27))));
     expect(files['xl/worksheets/_rels/sheet2.xml.rels']).toContain('https://imo.example/anuncio/ID1');
     expect(files['xl/workbook.xml']).toContain('<sheet name="Delivered items" sheetId="9" r:id="rId9"/>');
+  });
+
+  it('adds a Proposals sheet with the primary and secondary results, why each is proposed and how sure it is', async () => {
+    const { withProposals } = await import('../src/research/proposal.mjs');
+    const proposed = { ...project, candidates: withProposals(project.candidates) };
+    expect(resultsSheets(proposed).map((s: { name: string }) => s.name).slice(0, 3)).toEqual(['Summary', 'Proposals', 'Listings']);
+    const rows = proposalRows(proposed);
+    expect(rows[0]).toEqual(['list', 'rank', 'Pareto layer', 'title', 'url', 'country', 'entry cost EUR', 'why it is proposed', 'where it stands out', 'evidence (measured)', 'misses', 'to confirm', 'risks', 'confidence']);
+    expect(rows[1].slice(0, 5)).toEqual(['primary', 1, 1, 'Terreno rústico com 1.516,54 m² em Mira', 'https://imo.example/anuncio/ID1']);
+    expect(rows[1][7]).toBe('Fits all 2 criteria you set, confirmed outside the app');
+    expect(rows[1][11]).toBe('no air conditioning needed: climate not measured yet');
+    expect(rows.map((r: unknown[]) => r[4])).not.toContain('https://imo.example/anuncio/ID3');
   });
 });

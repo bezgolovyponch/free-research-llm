@@ -43,7 +43,7 @@ export function obligationsOf(project) {
     seaKm: km ? Number(km[1]) : DEFAULT_SEA_KM,
     seaFrom: km ? 'guidance' : 'default',
     minMonths: months ? Number(months[1]) : null,
-    workable: { tmaxMin: 14, tmaxMax: 31, tminMin: 5, rainMax: 200, from: 'app-defined (glamping without air conditioning)' },
+    climate: { campingIndex: 5, from: 'Camping Climate Index (Ma 2021, ch. 2, eq. 3, Tables 3–4): monthly mean index 5 or more' },
   };
 }
 
@@ -117,17 +117,35 @@ export function kmBetween(a, b) {
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 }
 
-export function workableMonths(daily, rule) {
-  const months = Array.from({ length: 12 }, () => ({ max: [], min: [], rain: 0, years: new Set() }));
+const THERMAL_SCORES = [{ from: 42, score: 0 }, { from: 34, score: 7 }, { from: 28, score: 10 }, { from: 24, score: 9 }, { from: 20, score: 8 }, { from: 16, score: 7 }, { from: 12, score: 6 }, { from: 8, score: 5 }, { from: 4, score: 4 }, { from: 2, score: 3 }];
+const SUNSHINE_SCORES = [{ from: 14, score: 10 }, { from: 12, score: 9 }, { from: 9, score: 8 }, { from: 6, score: 4 }, { from: 4, score: 2 }];
+const ADVERSE_DAY = { nightBelowC: 8, dayAboveC: 34, rainAboveMm: 10, windAboveKmh: 23, capScore: 3 };
+export const CLIMATE_DAILY = 'temperature_2m_mean,temperature_2m_max,temperature_2m_min,dew_point_2m_mean,sunshine_duration,precipitation_sum,wind_speed_10m_mean';
+
+const scoreFrom = (value, scores) => scores.find((s) => value >= s.from)?.score ?? 0;
+
+export function humidexOf(airC, dewC) {
+  const hPa = 6.11 * Math.exp(5417.753 * (1 / 273.16 - 1 / (dewC + 273.15)));
+  return airC + 0.5555 * (hPa - 10);
+}
+
+export function campingIndex(day) {
+  if (![day.mean, day.dew, day.sun, day.max, day.min].every(Number.isFinite)) return null;
+  const index = 0.5 * scoreFrom(humidexOf(day.mean, day.dew), THERMAL_SCORES) + 0.5 * scoreFrom(day.sun / 3600, SUNSHINE_SCORES);
+  const adverse = day.min < ADVERSE_DAY.nightBelowC || day.max > ADVERSE_DAY.dayAboveC || (day.rain ?? 0) > ADVERSE_DAY.rainAboveMm || (day.wind ?? 0) > ADVERSE_DAY.windAboveKmh;
+  return adverse ? Math.min(index, ADVERSE_DAY.capScore) : index;
+}
+
+export function campingMonths(daily, rule) {
+  const sums = Array.from({ length: 12 }, () => ({ total: 0, days: 0 }));
   (daily?.time ?? []).forEach((day, i) => {
-    const m = months[Number(day.slice(5, 7)) - 1];
-    if (Number.isFinite(daily.temperature_2m_max?.[i])) m.max.push(daily.temperature_2m_max[i]);
-    if (Number.isFinite(daily.temperature_2m_min?.[i])) m.min.push(daily.temperature_2m_min[i]);
-    m.rain += daily.precipitation_sum?.[i] ?? 0;
-    m.years.add(day.slice(0, 4));
+    const index = campingIndex({ mean: daily.temperature_2m_mean?.[i], dew: daily.dew_point_2m_mean?.[i], sun: daily.sunshine_duration?.[i], max: daily.temperature_2m_max?.[i], min: daily.temperature_2m_min?.[i], rain: daily.precipitation_sum?.[i], wind: daily.wind_speed_10m_mean?.[i] });
+    if (index === null) return;
+    const m = sums[Number(day.slice(5, 7)) - 1];
+    m.total += index;
+    m.days++;
   });
-  const avg = (a) => a.reduce((s, x) => s + x, 0) / a.length;
-  return months.filter((m) => m.max.length && m.min.length && avg(m.max) >= rule.tmaxMin && avg(m.max) <= rule.tmaxMax && avg(m.min) >= rule.tminMin && m.rain / m.years.size <= rule.rainMax).length;
+  return sums.filter((m) => m.days && Math.round((m.total / m.days) * 10) / 10 >= rule.campingIndex).length;
 }
 
 export function compare(name, appValue, found, tolerance) {
@@ -202,8 +220,8 @@ export class Verifier {
   }
 
   async months(point, rule) {
-    const d = await this.json(`${ARCHIVE}?latitude=${point.lat.toFixed(3)}&longitude=${point.lon.toFixed(3)}&start_date=2021-01-01&end_date=2025-12-31&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=GMT`);
-    return workableMonths(d?.daily, rule);
+    const d = await this.json(`${ARCHIVE}?latitude=${point.lat.toFixed(3)}&longitude=${point.lon.toFixed(3)}&start_date=2021-01-01&end_date=2025-12-31&daily=${CLIMATE_DAILY}&timezone=GMT`);
+    return campingMonths(d?.daily, rule);
   }
 
   async verifyRow(row, ob) {
@@ -242,10 +260,10 @@ export class Verifier {
       }
       if (ob.minMonths) {
         try {
-          const n = await this.months(point, ob.workable);
-          checks.push({ check: `${ob.minMonths}+ workable months`, status: n >= ob.minMonths ? 'confirmed' : 'refuted', detail: `${n} months by the ${ob.workable.from} rule` });
+          const n = await this.months(point, ob.climate);
+          checks.push({ check: `${ob.minMonths}+ camping months`, status: n >= ob.minMonths ? 'confirmed' : 'refuted', detail: `${n} months by the ${ob.climate.from}` });
         } catch (error) {
-          checks.push({ check: `${ob.minMonths}+ workable months`, status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
+          checks.push({ check: `${ob.minMonths}+ camping months`, status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
         }
       }
     }

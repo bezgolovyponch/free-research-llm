@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Verifier, compare, jsonLdOffers, namedCountries, numberOf, obligationsOf, pageAreas, pageCoords, textPrices, workableMonths } from '../../verifier/verify.mjs';
+import { Verifier, compare, jsonLdOffers, namedCountries, numberOf, obligationsOf, pageAreas, pageCoords, textPrices, campingIndex, campingMonths, humidexOf } from '../../verifier/verify.mjs';
 
 const project = {
   id: 'p1',
@@ -22,7 +22,7 @@ function fakeFetch(routes: Record<string, (init?: RequestInit) => Response>) {
 const daily = (tmax: number, tmin: number) => {
   const time: string[] = [];
   for (let y = 2021; y <= 2025; y++) for (let m = 1; m <= 12; m++) time.push(`${y}-${String(m).padStart(2, '0')}-15`);
-  return { time, temperature_2m_max: time.map(() => tmax), temperature_2m_min: time.map(() => tmin), precipitation_sum: time.map(() => 1) };
+  return { time, temperature_2m_max: time.map(() => tmax), temperature_2m_min: time.map(() => tmin), temperature_2m_mean: time.map(() => (tmax + tmin) / 2), dew_point_2m_mean: time.map(() => 10), sunshine_duration: time.map(() => 10 * 3600), precipitation_sum: time.map(() => 1), wind_speed_10m_mean: time.map(() => 10) };
 };
 
 describe('external verifier: scope', () => {
@@ -41,7 +41,7 @@ describe('external verifier: obligations from the user\'s own words', () => {
     const ob = obligationsOf(project);
     expect(ob).toMatchObject({ priceMin: 0, priceMax: 20000, currency: 'EUR', seaKm: 20, seaFrom: 'guidance', minMonths: 10 });
     expect(ob.regions.sort()).toEqual(['ES', 'PT', 'TR', 'VN']);
-    expect(ob.workable.from).toMatch(/^app-defined/);
+    expect(ob.climate).toMatchObject({ campingIndex: 5, from: expect.stringMatching(/^Camping Climate Index \(Ma 2021/) });
     expect(namedCountries('plots in the EU')).toEqual([]);
     expect(obligationsOf({ question: 'plots in the EU' }).regions).toHaveLength(27);
   });
@@ -56,7 +56,12 @@ describe('external verifier: its own reading of a listing page', () => {
     expect(textPrices('Preço 20 000 € · antes 25.000 €')).toEqual([{ price: 20000, currency: 'EUR' }, { price: 25000, currency: 'EUR' }]);
     expect(pageAreas('Área do terreno: 1 640 m² ou 2 ha')).toEqual([1640, 20000]);
     expect(pageCoords('{"latitude": 39.5368, "longitude": -9.0829}')).toEqual({ lat: 39.5368, lon: -9.0829 });
-    expect(workableMonths(daily(24, 12), { tmaxMin: 14, tmaxMax: 31, tminMin: 5, rainMax: 200 })).toBe(12);
+    expect(humidexOf(20, 10)).toBeCloseTo(21.3, 1);
+    expect(campingIndex({ mean: 22, dew: 12, sun: 10 * 3600, max: 26, min: 14, rain: 0, wind: 8 })).toBe(8.5);
+    expect(campingIndex({ mean: 22, dew: 12, sun: 10 * 3600, max: 26, min: 14, rain: 15, wind: 8 })).toBe(3);
+    expect(campingIndex({ mean: 22, dew: 12, sun: null, max: 26, min: 14 })).toBeNull();
+    expect(campingMonths(daily(24, 12), { campingIndex: 5 })).toBe(12);
+    expect(campingMonths(daily(24, 6), { campingIndex: 5 })).toBe(0);
     expect(compare('price', 20000, [20100], 0.02).status).toBe('confirmed');
     expect(compare('price', 20000, [26000], 0.02).status).toBe('refuted');
     expect(compare('price', 20000, [], 0.02).status).toBe('unconfirmed');
@@ -80,7 +85,7 @@ describe('external verifier: fail-closed verdicts', () => {
   it('confirms a row only when every obligation is confirmed from primary sources', async () => {
     const out = await verifier({ 'imo.example': listing(20000, 1640), ...world(2) }).verifyRow(row, obligationsOf(project));
     expect(out.verdict).toBe('confirmed');
-    expect(out.checks.map((c: { check: string; status: string }) => `${c.check}:${c.status}`)).toEqual(['listing online:confirmed', 'price on the page:confirmed', 'price within the limit:confirmed', 'area on the page:confirmed', 'location source:confirmed', 'in the asked countries:confirmed', 'sea within 20 km:confirmed', '10+ workable months:confirmed']);
+    expect(out.checks.map((c: { check: string; status: string }) => `${c.check}:${c.status}`)).toEqual(['listing online:confirmed', 'price on the page:confirmed', 'price within the limit:confirmed', 'area on the page:confirmed', 'location source:confirmed', 'in the asked countries:confirmed', 'sea within 20 km:confirmed', '10+ camping months:confirmed']);
   });
 
   it('refutes a row whose page shows another price, another country, or no sea nearby', async () => {

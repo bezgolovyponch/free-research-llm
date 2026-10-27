@@ -1,3 +1,4 @@
+import { withProposals } from './proposal.mjs';
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
@@ -321,29 +322,29 @@ export class ResearchEngine {
         this.emit(project, 'candidates', `portal sweep: ${result.pagesRead} listing page(s) read by code (budget ${result.budget}), ${result.pages.reduce((n, p) => n + p.listings.length, 0)} new listing(s)`);
       }
     }
-    project.candidates = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
+    let table = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
     if (this.sites && !this.demo) {
       const mode = sweep ? 'all' : this.quiet.has(project.id) ? 'cache' : 'budget';
-      const raw = project.candidates;
-      project.candidates = await this.sites.apply(project.candidates, brief, { mode, readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
-      const s = project.candidates.sites;
+      const raw = table;
+      table = await this.sites.apply(table, brief, { mode, readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
+      const s = table.sites;
       if (s?.pending) this.startSiteWarm(project.id, raw, brief);
       if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate 2021–2025, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
     if (strategy) {
-      project.candidates = applyStrategy(project.candidates, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
-      const t = project.candidates.tiers;
+      table = applyStrategy(table, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
+      const t = table.tiers;
       this.emit(project, 'candidates', `strategy paths: ${t.fits} fit every criterion, ${t['trade-off']} trade-offs with their potential, ${t.unverified} to confirm, ${t.weak} weak, ${t.blocked} blocked by law`);
     }
     if (!strategy && project.decisionModel?.criteria?.length) {
-      project.candidates = applyModel(project.candidates, project.decisionModel);
-      const t = project.candidates.tiers;
+      table = applyModel(table, project.decisionModel);
+      const t = table.tiers;
       this.emit(project, 'candidates', `decision model: ${t.fits} fit every criterion, ${t.unverified} to confirm, ${t.weak} weak`);
     }
-    if (strategy && this.verifier) {
-      project.candidates = applyVerification(project.candidates, await readVerification(this.verifier.dir, project.id));
-      this.startVerification(project);
-    }
+    if (strategy && this.verifier) table = applyVerification(table, await readVerification(this.verifier.dir, project.id));
+    table = withProposals(table);
+    project.candidates = table;
+    if (strategy && this.verifier) this.startVerification(project);
     if (project.report) this.planActions(project);
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);

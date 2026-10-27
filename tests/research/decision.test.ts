@@ -10,7 +10,7 @@ const sample = (criteria: object[], terms = ['plot', 'terreno']) => normalizeSam
 const sea = { clause: 'at most 15 km from the sea', measure: 'coastKm', op: '<=', value: 15, quote: 'at most 15 km from the sea' };
 const heat = { clause: 'hottest month under 29 °C', measure: 'hottestC', op: '<', value: 29, quote: 'under 29 °C' };
 const trend = { clause: 'with a strong price trend', measure: 'realTrendVsEu', op: '>', value: null, quote: '' };
-const site = (coastKm: number | null, hottest = 27) => ({ coastKm, climate: { workable: 11, comfortable: 8, hottest, coldest: 6 } });
+const site = (coastKm: number | null, hottest = 27) => ({ coastKm, climate: { workable: 11, comfortable: 8, hottest, coldest: 6, cci: { annual: 6, optimalDays: 100, hotDays: 0, optimalTrend: 0 } } });
 
 describe('decision model per request: criteria kept by agreement, limits only from the user or a case', () => {
   it('keeps a criterion only when a majority of independent proposals make it (self-consistency)', () => {
@@ -73,13 +73,13 @@ describe('decision model per request: criteria kept by agreement, limits only fr
   it('replaces a hand-chosen glamping limit when the user states one, and never with a borrowed value', () => {
     const strategy = strategyFor('glamping-location')!;
     const base = foundationOf(strategy, { question, guidance: '' });
-    expect(base.rules.maxHottest.source).toBe('assumption');
+    expect(base.rules.maxHottest.source).toBe('ma2021');
     const model = aggregate([sample([sea, { ...heat, op: '<=' }]), sample([sea, { ...heat, op: '<=' }])], { question });
     const merged = withModelRules(base, model);
     expect(merged.rules.maxHottest).toMatchObject({ value: 29, source: 'question' });
     expect(merged.rules.ebikeKm).toMatchObject({ value: 15, source: 'question' });
     const borrowed = withModelRules(base, { ...model, criteria: [{ measure: 'hottestC', op: '<=', value: 25, source: 'case x' }] });
-    expect(borrowed.rules.maxHottest.source).toBe('assumption');
+    expect(borrowed.rules.maxHottest.source).toBe('ma2021');
     expect(modelText(model)).toContain('distance to the sea <= 15 km (question)');
   });
 

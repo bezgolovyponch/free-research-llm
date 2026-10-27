@@ -105,8 +105,14 @@ test('candidate table: every plot says why it fits, sorts by any column and filt
   await expect(table).toContainText('Coastal plot Nazare', { timeout: 20000 });
   await expect(page.locator('#candidateTable')).toContainText('every part of your question has a code check');
   await expect(page.locator('#candidateTable')).toContainText('1/1 sources re-read online');
-  await expect(table).toContainText('sea 2.7 km: inside the 20 km e-bike ride');
-  await expect(table).toContainText('Risks: ask the Câmara');
+  await table.locator('tr', { hasText: 'Coastal plot Nazare' }).locator('td').first().click();
+  const pip = page.locator('#pip');
+  await expect(pip).toBeVisible();
+  await expect(pip).toContainText('sea 2.7 km: inside the 20 km e-bike ride');
+  await expect(pip).toContainText('ask the Câmara');
+  await expect(pip.locator('a', { hasText: 'Open the listing' })).toHaveAttribute('href', 'https://imo.example/anuncio/Coastal-plot-Nazare');
+  await pip.locator('button[data-pipact="close"]').click();
+  await expect(pip).toBeHidden();
   const titles = () => table.locator('tr td:nth-child(3) a').allTextContents();
   expect(await titles()).toEqual(['Coastal plot Nazare', 'Cheap plot Alenquer', 'Inland plot Tomar']);
   await table.locator('th[data-csort="entry"]').click();
@@ -275,4 +281,49 @@ test('share: More → Share explains the one-research link and says when remote 
   await expect(page.locator('#chatScopes [data-scope="app"]')).toHaveCount(1);
   await page.locator('#shareClose').click();
   await expect(box).toBeHidden();
+});
+
+test('results: proposed and secondary results as cards, each opening a side panel that collapses, steps through results and fits a phone', async ({ page }) => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const base = await (await page.request.post('/api/projects', { data: { question: 'E2E base research for the proposal cards', autoRun: false } })).json();
+  const checks = (season: boolean | null) => [{ id: 'sea', label: 'sea within 20 km by e-bike', ok: true, detail: 'sea 2 km' }, { id: 'season', label: '10+ camping months', ok: season, detail: season === null ? 'climate not measured yet' : '11 camping months' }];
+  const row = (title: string, tier: string, entry: number, proposal: object, season: boolean | null) => ({ title, url: `https://imo.example/anuncio/${title.replace(/\W+/g, '-')}`, price: entry, currency: 'EUR', value: entry, unit: 'EUR', area: 1000, areaUnit: 'm²', place: 'Mira', country: 'Portugal', countryCode: 'PT', site: { coastKm: 2, beachKm: 2, beaches: 2, viewpoints: 3, attractions: 1, reserves: 0, protectedAreas: 0, hikingRoutes: 1, campsites: 1, lodging: 9, climate: { workable: 11, comfortable: 6, hottest: 25, coldest: 9, cci: { optimalDays: 120, hotDays: 0, optimalTrend: 2, monthly: [3, 3.5, 4, 5, 6, 7, 7.5, 7.5, 6.5, 5, 4, 3] } } }, fit: { hpi: 15.1, zoning: 'agricultural' }, plan: { tier, verdict: tier, why: ['sea 2 km: inside the 20 km e-bike ride'], tradeoffs: [], potential: [], risks: ['check RAN/REN with the Câmara'], units: 15, areaM2: 1000, share: season ? 1 : 0.5, entry: { total: entry, price: entry - 3000, tax: 300, taxLabel: 'IMT 5%', tents: 2700, units: 3, excludes: 'permits' }, checks: checks(season), proposal } });
+  const kept = [
+    row('Mira plot A', 'fits', 4400, { role: 'primary', rank: 1, layer: 1, headline: 'Fits all 2 criteria you set, confirmed outside the app', standsOut: ['lowest entry cost of the 2'], confirm: [], confidence: 'confirmed', confidenceText: 'confirmed by the external verifier' }, true),
+    row('Mira plot B', 'fits', 6100, { role: 'primary', rank: 2, layer: 1, headline: 'Fits all 2 criteria you set', standsOut: [], confirm: [], confidence: 'measured', confidenceText: 'every criterion measured by the app; not yet confirmed outside it' }, true),
+    row('Mira plot C', 'unverified', 3900, { role: 'secondary', rank: 1, layer: 1, headline: 'Meets 1 of 2; still to confirm: 10+ camping months', standsOut: [], confirm: ['10+ camping months: climate not measured yet'], confidence: 'partial', confidenceText: 'some criteria are not met or not measured yet' }, null),
+  ];
+  const urls = kept.map((r) => r.url);
+  const id = 'e2e-proposal-cards-0001';
+  const { results: _results, ...stored } = base;
+  const project = { ...stored, id, question: 'E2E proposal cards', phase: 'done', brief: { kind: { label: 'plot of land', terms: ['plot'] }, regions: ['PT'], text: 'Deliver: 2 plots' }, candidates: { found: 3, kept, outside: [], keptCount: 2, tiers: { fits: 2, 'trade-off': 0, unverified: 1, weak: 0, blocked: 0 }, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [], proposals: { method: 'Pareto layers over the measured values', objectives: [{ id: 'entry', label: 'entry cost', better: 'min' }], primary: urls.slice(0, 2), secondary: urls.slice(2) } } };
+  await fs.writeFile(path.join(process.env.FRL_E2E_DATA_DIR!, `${id}.json`), JSON.stringify(project));
+  await page.goto(`/#p=${id}`);
+  await page.locator('.tabs .tab', { hasText: 'Results' }).click();
+  const cards = page.locator('#proposals');
+  await expect(cards).toContainText('2 result(s) fit every criterion', { timeout: 20000 });
+  await expect(cards).toContainText('Secondary results');
+  expect(await cards.locator('.prop .t').allTextContents()).toEqual(['Mira plot A', 'Mira plot B', 'Mira plot C']);
+  await cards.locator('.prop', { hasText: 'Mira plot A' }).click();
+  const pip = page.locator('#pip');
+  await expect(pip).toContainText('confirmed by the external verifier');
+  await expect(pip).toContainText('lowest entry cost of the 2');
+  await expect(pip).toContainText('Camping Climate Index');
+  await expect(pip.locator('.bars i')).toHaveCount(12);
+  await pip.locator('button[data-pipact="next"]').click();
+  await expect(pip.locator('.pip-head')).toContainText('Mira plot B');
+  await pip.locator('button[data-pipact="next"]').click();
+  await expect(pip).toContainText('still to confirm: 10+ camping months');
+  await pip.locator('button[data-pipact="toggle"]').click();
+  await expect(pip.locator('.pip-body')).toBeHidden();
+  await expect(pip.locator('.pip-head')).toBeVisible();
+  await pip.locator('button[data-pipact="toggle"]').click();
+  await expect(pip.locator('.pip-body')).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 800 });
+  const box = (await pip.boundingBox())!;
+  expect(Math.round(box.width)).toBe(390);
+  expect(Math.round(box.y + box.height)).toBe(800);
+  await page.locator('.tabs .tab', { hasText: 'Tree' }).click();
+  await expect(pip).toBeHidden();
 });

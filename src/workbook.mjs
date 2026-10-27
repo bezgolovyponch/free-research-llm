@@ -132,6 +132,20 @@ export function summaryRows(project, exportedAt = new Date()) {
   return rows;
 }
 
+export function proposalRows(project) {
+  const c = project.candidates ?? {};
+  const byUrl = new Map((c.kept ?? []).map((r) => [r.url, r]));
+  const listed = [...(c.proposals?.primary ?? []).map((u) => ['primary', u]), ...(c.proposals?.secondary ?? []).map((u) => ['secondary', u])].filter(([, u]) => byUrl.has(u));
+  const rows = [['list', 'rank', 'Pareto layer', 'title', 'url', 'country', 'entry cost EUR', 'why it is proposed', 'where it stands out', 'evidence (measured)', 'misses', 'to confirm', 'risks', 'confidence']];
+  for (const [list, url] of listed) {
+    const r = byUrl.get(url);
+    const plan = r.plan;
+    const p = plan.proposal ?? {};
+    rows.push([list, num(p.rank), num(p.layer), String(r.title ?? ''), r.url, r.country ?? '', num(plan.entry?.total), p.headline ?? '', (p.standsOut ?? []).join(' | '), (plan.why ?? []).join(' | '), (plan.tradeoffs ?? []).join(' | '), (p.confirm ?? []).join(' | '), (plan.risks ?? []).join(' | '), p.confidenceText ?? '']);
+  }
+  return rows;
+}
+
 export function screenedRows(project) {
   const c = project.candidates ?? {};
   return [['reason', 'listings'], ...Object.entries(c.screened ?? {}).sort((x, y) => y[1] - x[1])];
@@ -183,6 +197,7 @@ export function resultsSheets(project, exportedAt = new Date()) {
   const sheets = [
     { name: 'Summary', rows: summaryRows(project, exportedAt) },
     ...(project.candidates ? [
+      ...(project.candidates.proposals ? [{ name: 'Proposals', rows: proposalRows(project) }] : []),
       { name: 'Listings', rows: plotRows(project) },
       { name: 'Decision checks', rows: checkRows(project) },
       { name: 'Screened out', rows: screenedRows(project) },

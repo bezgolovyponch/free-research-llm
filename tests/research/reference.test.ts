@@ -13,7 +13,7 @@ const strategy = strategyFor(reference.templateId)!;
 const foundation = foundationOf(strategy, reference);
 const model = { ...strategy, rules: foundation.rules };
 const toEur = (value: number, from: string) => (from === 'GBP' ? value * 1.2 : value);
-const climate = (workable: number, hottest: number) => ({ workable, comfortable: workable - 3, hottest, coldest: 8 });
+const climate = (workable: number, hottest: number) => ({ workable, comfortable: workable - 3, hottest, coldest: 8, cci: { annual: 6.5, optimalDays: 120, hotDays: hottest > 34 ? 6 : 0, optimalTrend: 1.5, perYear: [], years: 5 } });
 const site = (coastKm: number | null, more = {}) => ({ coastKm, beachKm: coastKm, beaches: 5, viewpoints: 10, attractions: 5, reserves: 1, protectedAreas: 1, hikingRoutes: 2, campsites: 3, lodging: 40, climate: climate(12, 24), ...more });
 const trends = { PT: { change: 17.6, inflation: 2.2, real: 15.1, year: '2025', realCagr: 8, since: '2020' }, HR: { change: 13.9, inflation: 4, real: 9.5, year: '2025', realCagr: 6, since: '2020' }, EU27_2020: { real: 2.9, realCagr: 2 } };
 const plot = { title: 'Terreno rústico 1,640 m² Nazaré', url: 'https://imo.example/anuncio/terreno-ID1a', countryCode: 'PT', country: 'Portugal', value: 20000, area: 1640, areaUnit: 'm²', site: site(2.7), fit: { score: 0.9 } };
@@ -40,7 +40,7 @@ describe('reference case: low-entry glamping plots (every note the user gave on 
 
   it(`N4 ${note('N4')}`, () => {
     const why = plan(plot).why.join(' | ');
-    for (const part of ['sea 2.7 km', '12 workable months', 'without air conditioning', 'holds 24 units', 'entry ≈', 'after inflation', 'path:']) expect(why).toContain(part);
+    for (const part of ['sea 2.7 km', '12 camping months a year by the Camping Climate Index', 'without air conditioning', 'holds 24 units', 'entry ≈', 'after inflation', 'path:']) expect(why).toContain(part);
   });
 
   it(`N6 ${note('N6')}`, () => {
@@ -77,7 +77,7 @@ describe('reference case: low-entry glamping plots (every note the user gave on 
 
   it(`N12 ${note('N12')} · N13 ${note('N13')}`, () => {
     expect(foundation.rules.minWorkableMonths).toEqual({ value: 10, source: 'question' });
-    expect(foundation.rules.maxHottest).toEqual({ value: 31, source: 'assumption' });
+    expect(foundation.rules.maxHottest).toEqual({ value: 32.2, source: 'ma2021' });
     expect(foundation.rules.ebikeKm).toEqual({ value: 20, source: 'guidance' });
   });
 

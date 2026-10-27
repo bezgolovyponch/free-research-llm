@@ -1,5 +1,6 @@
 import { plain } from './itemgate.mjs';
-import { zoningOf, explorePoints } from './site.mjs';
+import { PERCEIVED_MAX_C } from './cci.mjs';
+import { zoningOf, explorePoints, haversineKm } from './site.mjs';
 
 export const STRATEGY_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -21,6 +22,7 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'tent', title: 'Boutique Camping: 5m Bell Tent Pro (shop data, GBP)', url: 'https://boutiquecamping.com/products/bell-tent-pro-5m.json', quotes: ['"price":"729.00"', '"price_currency":"GBP"'] },
     { id: 'units', title: 'TouchStay: glamping startup costs example (three units)', url: 'https://touchstay.com/blog/unlocking-glamping-profits', quotes: ['a glamping site with three luxury yurts'] },
     { id: 'eurostat', title: 'Eurostat house price index, annual rate of change (prc_hpi_a)', url: 'https://ec.europa.eu/eurostat/databrowser/view/prc_hpi_a/default/table', quotes: [] },
+    { id: 'ma2021', title: 'Ma 2021: Camping Climate Index, validated on camping occupancy (University of Arkansas dissertation, ch. 2, eq. 3, Tables 3–4; p. 45 cites a perceived maximum of 32.2 °C, Fisichelli et al. 2015)', url: 'https://scholarworks.uark.edu/etd/4409', quotes: [] },
   ],
   rules: {
     minUnits: { value: 3, source: 'units' },
@@ -30,7 +32,7 @@ export const GLAMPING_LOW_ENTRY = {
     ruralMaxUnits: { value: 30, source: 'pt-rural' },
     tent: { value: 729, currency: 'GBP', source: 'tent' },
     minWorkableMonths: { value: 10, source: 'question' },
-    maxHottest: { value: 31, source: 'assumption' },
+    maxHottest: { value: PERCEIVED_MAX_C, source: 'ma2021' },
     ebikeKm: { value: 20, source: 'guidance' },
     trendAboveEu: { value: true, source: 'eurostat' },
   },
@@ -39,8 +41,8 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'price', label: 'price within the budget', words: /\d[\d.,\s]*(?:eur|€|euro)|\bmax\b|budget/i, measure: 'price read from the listing, converted at ECB rates' },
     { id: 'region', label: 'in the countries you named', words: null, measure: 'country from the site address, language or listing text' },
     { id: 'sea', label: 'sea within an e-bike ride', words: /\b(?:sea|ocean|coast|beach|e-?bike)/i, measure: 'distance to the OpenStreetMap coastline from the listing location' },
-    { id: 'season', label: 'workable months a year', words: /\bmonths?\b|season|climate|weather/i, measure: 'Open-Meteo daily weather 2021–2025 at the listing' },
-    { id: 'noAc', label: 'mild: no air conditioning', words: /\bmild\b|air ?condition|temperature|heat/i, measure: 'hottest month average daily high, Open-Meteo 2021–2025' },
+    { id: 'season', label: 'camping months a year', words: /\bmonths?\b|season|climate|weather/i, measure: 'Camping Climate Index (Ma 2021) from Open-Meteo daily weather 2021–2025 at the listing: months with a mean index of 5 or more' },
+    { id: 'noAc', label: 'mild: no air conditioning', words: /\bmild\b|air ?condition|temperature|heat/i, measure: 'hottest month average daily high at most 32.2 °C (perceived maximum, Fisichelli et al. 2015, cited by Ma 2021), days above 34 °C counted as exceptions' },
     { id: 'trend', label: 'strong price increase trend', words: /price increase|\btrend\b|appreciat|grow/i, measure: 'Eurostat house price index of the country vs the EU average (country level, not land)' },
     { id: 'entry', label: 'very low entry investment', words: /entr(?:y|ance)|enterance|low invest|investment|\bcosts?\b|afford/i, measure: 'price + transfer tax + three bell tents, per country' },
     { id: 'units', label: 'room for a glamping site', words: /glamping|camp/i, measure: 'units at 40 m² on 60% of the land (Portaria 1320/2008)' },
@@ -114,7 +116,7 @@ export function foundationOf(strategy, project) {
 export function foundationText(foundation) {
   if (!foundation) return '';
   const r = foundation.rules;
-  const lines = [`Decision model (code checks every listing against it; a listing counts only when every check is measured and met): sea within ${r.ebikeKm.value} km by e-bike; at least ${r.minWorkableMonths.value} workable months; hottest month at most ${r.maxHottest.value} °C (no air conditioning${r.maxHottest.source === 'assumption' ? '; this limit is assumed, not taken from your words or a source' : ''}); room for ${r.minUnits.value}+ units; a legal path for the buyer; country price trend above the EU average; entry cost = price + transfer tax + ${r.minUnits.value} bell tents.`];
+  const lines = [`Decision model (code checks every listing against it; a listing counts only when every check is measured and met): sea within ${r.ebikeKm.value} km by e-bike; at least ${r.minWorkableMonths.value} camping months (Camping Climate Index ≥ 5, Ma 2021); hottest month average high at most ${r.maxHottest.value} °C, days above 34 °C shown as exceptions (no air conditioning${r.maxHottest.source === 'assumption' ? '; this limit is assumed, not taken from your words or a source' : r.maxHottest.source === 'ma2021' ? '; the perceived maximum from Fisichelli et al. 2015, cited by Ma 2021' : ''}); room for ${r.minUnits.value}+ units; a legal path for the buyer; country price trend above the EU average; entry cost = price + transfer tax + ${r.minUnits.value} bell tents.`];
   if (foundation.missing.length) lines.push(`Not modelled yet (no code check): ${foundation.missing.join('; ')}`);
   return lines.join('\n');
 }
@@ -170,8 +172,8 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const ebike = rules.ebikeKm.value;
   const checks = [
     check('sea', `sea within ${ebike} km by e-bike`, site ? site.coastKm !== null && site.coastKm <= ebike : null, site ? `sea ${site.coastKm ?? '>25'} km` : 'location not measured yet'),
-    check('season', `${rules.minWorkableMonths.value}+ workable months`, climate ? climate.workable >= rules.minWorkableMonths.value : null, climate ? `${climate.workable} workable months (${climate.comfortable} comfortable)` : 'climate not measured yet'),
-    check('noAc', 'no air conditioning needed', climate ? climate.hottest <= rules.maxHottest.value : null, climate ? `hottest month average max ${climate.hottest} °C` : 'climate not measured yet'),
+    check('season', `${rules.minWorkableMonths.value}+ camping months (Camping Climate Index ≥ 5)`, climate?.cci ? climate.workable >= rules.minWorkableMonths.value : null, climate?.cci ? `${climate.workable} camping months (index ≥ 5), ${climate.comfortable} optimal (≥ 7), ${climate.cci.optimalDays} optimal days a year` : 'climate not measured with the Camping Climate Index yet'),
+    check('noAc', 'no air conditioning needed', climate?.cci ? climate.hottest <= rules.maxHottest.value : null, climate?.cci ? `hottest month average high ${climate.hottest} °C (limit ${rules.maxHottest.value} °C); ${climate.cci.hotDays} day(s) a year above 34 °C` : 'climate not measured with the Camping Climate Index yet'),
     check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${rules.pitchM2.value} m² each on ${rules.campingShare.value * 100}% of the land` : 'area not shown'),
     check('trend', 'real price trend above the EU average', hpi === null || euHpi === null ? null : hpi > euHpi, hpi === null ? `no official price series for ${row.country || 'this country'} in the model` : `${row.country} ${signed(hpi)}% a year after inflation vs EU ${euHpi === null ? '?' : `${signed(euHpi)}%`} (Eurostat, housing)`),
     check('location', 'the listing location is consistent', row.placeConflict ? null : true, row.placeConflict ?? 'map point and title agree'),
@@ -182,8 +184,8 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const blocked = checks.find((c) => c.id === 'legal' && c.ok === false);
   const why = [];
   if (site?.coastKm !== null && site?.coastKm !== undefined && site.coastKm <= ebike) why.push(`sea ${site.coastKm} km${site.beachKm !== null && site.beachKm !== undefined ? `, beach ${site.beachKm} km` : ''}: inside the ${ebike} km e-bike ride`);
-  if (climate && climate.workable >= rules.minWorkableMonths.value) why.push(`${climate.workable} workable months a year`);
-  if (climate && climate.hottest <= rules.maxHottest.value) why.push(`hottest month average high ${climate.hottest} °C: tents work without air conditioning`);
+  if (climate?.cci && climate.workable >= rules.minWorkableMonths.value) why.push(`${climate.workable} camping months a year by the Camping Climate Index (${climate.comfortable} optimal, ${climate.cci.optimalDays} optimal days a year${climate.cci.optimalTrend !== null ? `, trend ${climate.cci.optimalTrend >= 0 ? '+' : ''}${climate.cci.optimalTrend} optimal days a year 2021–2025` : ''})`);
+  if (climate?.cci && climate.hottest <= rules.maxHottest.value) why.push(`hottest month average high ${climate.hottest} °C: tents work without air conditioning${climate.cci.hotDays ? ` (about ${climate.cci.hotDays} day(s) a year above 34 °C)` : ''}`);
   if (units !== null && units >= rules.minUnits.value) why.push(`${Math.round(m2).toLocaleString('en-US')} m² holds ${units} units, ${rules.minUnits.value} are enough to open`);
   if (cost) why.push(`entry ≈ ${eur(cost.total)} (price ${eur(cost.price)} + ${cost.taxLabel} ${eur(cost.tax)}${cost.tents !== null ? ` + ${cost.units} bell tents ${eur(cost.tents)}` : ''}; excludes ${cost.excludes})`);
   if (hpi !== null && euHpi !== null && hpi > euHpi) why.push(`${row.country} house prices ${signed(hpi)}% a year after inflation${trend ? ` (nominal ${signed(trend.change)}%, inflation ${trend.inflation}%, ${trend.year})` : ''} vs EU ${signed(euHpi)}% (Eurostat, country level, not land)`);
@@ -204,7 +206,7 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
       potential.push(`sea ${site.coastKm} km: a strong short-season location`);
       draw = true;
     }
-    if (climate && climate.workable >= rules.minWorkableMonths.value && failed.some((c) => c.id !== 'season')) potential.push(`${climate.workable}-month season`);
+    if (climate?.cci && climate.workable >= rules.minWorkableMonths.value && failed.some((c) => c.id !== 'season')) potential.push(`${climate.workable}-month camping season`);
     if ((site.campsites ?? 0) > 0) potential.push(`${site.campsites} campsites nearby prove camping demand`);
   }
   const tooSmall = failed.some((c) => c.id === 'units');
@@ -212,6 +214,7 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const risks = [...(country?.risks ?? [])];
   if (zoning === 'agricultural' && country?.agriculturalRisk) risks.push(country.agriculturalRisk);
   if (SHARED_TITLE.test(words)) risks.push('shared title (hisseli): you buy a share, not a parcel');
+  if (climate?.cci?.hotDays >= 1) risks.push(`about ${climate.cci.hotDays} day(s) a year above 34 °C, when camping demand drops (Ma 2021): shade, fans or closing on those days`);
   const tradeoffs = failed.filter((c) => c.id !== 'legal').map((c) => `${c.label}: no (${c.detail})`);
   const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set(unknown.map((c) => c.detail))].join('; ')}` : tier === 'trade-off' ? `trade-off with potential: ${potential.join('; ')}` : tooSmall ? `does not fit: ${tradeoffs.join('; ')}; too little land for a glamping site, which nothing nearby can make up for` : `does not fit: ${tradeoffs.join('; ')}; nothing nearby draws guests to make up for it`;
   const measured = checks.filter((c) => c.ok !== null);
@@ -270,20 +273,40 @@ export function pricePerM2Medians(rows) {
     if (!m2 || !Number.isFinite(r.value) || r.value <= 0) continue;
     (by[priceGroup(r)] ??= []).push(Math.log(r.value / m2));
   }
-  return Object.fromEntries(Object.entries(by).filter(([, v]) => v.length >= MIN_ROWS_FOR_MEDIAN).map(([group, logs]) => {
-    const mid = median(logs);
-    return [group, { median: Math.exp(mid), logMedian: mid, logMad: median(logs.map((x) => Math.abs(x - mid))), n: logs.length }];
-  }));
+  return Object.fromEntries(Object.entries(by).filter(([, v]) => v.length >= MIN_ROWS_FOR_MEDIAN).map(([group, logs]) => [group, logStats(logs)]));
 }
 
-export function implausiblyCheap(row, medians) {
-  const m2 = areaM2(row);
-  const stats = medians[priceGroup(row)];
-  if (!m2 || !stats || !Number.isFinite(row.value) || row.value <= 0) return null;
-  const perM2 = row.value / m2;
+export const LOCAL_KM = 30;
+
+const located = (row) => Number.isFinite(row.lat) && Number.isFinite(row.lon);
+
+function logStats(logs) {
+  const mid = median(logs);
+  return { median: Math.exp(mid), logMedian: mid, logMad: median(logs.map((x) => Math.abs(x - mid))), n: logs.length };
+}
+
+export function localPriceStats(row, rows, km = LOCAL_KM) {
+  if (!located(row)) return null;
+  const logs = rows.filter((o) => o !== row && o.url !== row.url && located(o) && areaM2(o) && Number.isFinite(o.value) && o.value > 0 && haversineKm(row.lat, row.lon, o.lat, o.lon) <= km).map((o) => Math.log(o.value / areaM2(o)));
+  return logs.length >= MIN_ROWS_FOR_MEDIAN ? logStats(logs) : null;
+}
+
+function lowOutlier(perM2, stats) {
   const floor = stats.logMedian - MAD_THRESHOLD * MAD_CONSISTENCY * stats.logMad;
+  return Math.log(perM2) < floor ? floor : null;
+}
+
+export function implausiblyCheap(row, medians, rows = []) {
+  const m2 = areaM2(row);
+  if (!m2 || !Number.isFinite(row.value) || row.value <= 0) return null;
+  const perM2 = row.value / m2;
   const zoning = zoningOf(row);
-  return Math.log(perM2) < floor ? `€${perM2.toFixed(2)}/m² is a low outlier for ${zoning === 'not stated' ? '' : `${zoning} `}land in ${row.country || row.countryCode} among the ${stats.n} listings found (median €${stats.median.toFixed(2)}/m²; outliers below €${Math.exp(floor).toFixed(2)}/m² by median − 2.5 MAD): check the price and area on the listing` : null;
+  const stats = medians[priceGroup(row)];
+  const floor = stats ? lowOutlier(perM2, stats) : null;
+  if (floor !== null) return `€${perM2.toFixed(2)}/m² is a low outlier for ${zoning === 'not stated' ? '' : `${zoning} `}land in ${row.country || row.countryCode} among the ${stats.n} listings found (median €${stats.median.toFixed(2)}/m²; outliers below €${Math.exp(floor).toFixed(2)}/m² by median − 2.5 MAD): check the price and area on the listing`;
+  const local = localPriceStats(row, rows);
+  const near = local ? lowOutlier(perM2, local) : null;
+  return near !== null ? `€${perM2.toFixed(2)}/m² is a low outlier among the ${local.n} priced plots within ${LOCAL_KM} km (median €${local.median.toFixed(2)}/m²; outliers below €${Math.exp(near).toFixed(2)}/m² by median − 2.5 MAD): the price may be a deposit, a share or a placeholder; check it on the listing` : null;
 }
 
 export function applyStrategy(candidates, strategy, { convert = null, retrieved = null, foundation = null } = {}) {
@@ -295,7 +318,7 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   const medians = { ...pricePerM2Medians(all), ...(candidates.priceMedians ?? {}) };
   const rows = all.map((row) => {
     const plan = planFor(row, model, { convert, euHpi, trends });
-    const cheap = implausiblyCheap(row, medians);
+    const cheap = implausiblyCheap(row, medians, all);
     if (!cheap) return { ...row, plan };
     const doubtful = ['fits', 'trade-off'].includes(plan.tier);
     return { ...row, plan: { ...plan, risks: [...plan.risks, cheap], ...(doubtful ? { tier: 'unverified', verdict: `to confirm: ${cheap}` } : {}) } };
