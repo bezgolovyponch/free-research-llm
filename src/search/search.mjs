@@ -42,6 +42,16 @@ export function keywords(textValue) {
   return [...new Set(tokens(textValue))];
 }
 
+export const RRF_K = 60;
+
+export function rrfScore(rank) {
+  return 1 / (RRF_K + rank + 1);
+}
+
+export function fuseByRank(entries) {
+  return entries.map((e, i) => ({ e, i })).sort((a, b) => b.e.rrf - a.e.rrf || a.i - b.i).map(({ e }) => e);
+}
+
 export function isRelevant(result, query) {
   const wanted = keywords(query);
   if (!wanted.length) return true;
@@ -419,20 +429,28 @@ export class SearchService {
   async search(queries, { maxSources = 6, exclude = [], wanted = [], entities = [], usedDomains = {}, names = [] } = {}) {
     const seen = new Set(exclude);
     const collected = [];
+    const fused = new Map();
     this.lastErrors = [];
     for (const query of queries.filter(Boolean)) {
       for (const backend of this.rotation()) {
         try {
           const results = await backend.search(query, this.resultsPerQuery);
           this.health.set(backend.id, { ok: true, at: new Date(this.now()).toISOString(), results: results.length });
-          for (const r of results) {
-            if (!r.url || seen.has(r.url)) continue;
+          for (const [rank, r] of results.entries()) {
+            if (!r.url || exclude.includes(r.url)) continue;
+            if (fused.has(r.url)) {
+              fused.get(r.url).rrf += rrfScore(rank);
+              continue;
+            }
+            if (seen.has(r.url)) continue;
             if (!isRelevant(r, query)) {
               this.lastErrors.push(`${backend.id}: dropped off-topic "${String(r.title).slice(0, 40)}"`);
               continue;
             }
             seen.add(r.url);
-            collected.push({ ...r, provider: backend.id, query, fullText: Boolean(backend.fullText) });
+            const entry = { ...r, provider: backend.id, query, fullText: Boolean(backend.fullText), rrf: rrfScore(rank) };
+            fused.set(r.url, entry);
+            collected.push(entry);
           }
           if (results.length) break;
         } catch (error) {
@@ -443,7 +461,7 @@ export class SearchService {
       }
       if (collected.length >= maxSources * 3) break;
     }
-    const sources = selectDiverse(collected, { max: maxSources, wanted, entities, usedDomains, names });
+    const sources = selectDiverse(fuseByRank(collected), { max: maxSources, wanted, entities, usedDomains, names });
     if (this.fetchPages) {
       await Promise.all(sources.slice(0, 5).map(async (s) => {
         const page = await this.readPage(s.url);

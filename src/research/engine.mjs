@@ -100,10 +100,11 @@ export function normalizeEstimate(raw) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null }) {
+  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null }) {
     this.verifier = verifier;
     this.modeler = modeler;
     this.cases = cases;
+    this.arms = arms;
     this.verifying = new Map();
     this.onStop = onStop;
     this.laneCount = Math.min(MAX_LANES, Math.max(1, lanes));
@@ -302,7 +303,7 @@ export class ResearchEngine {
       this.emit(project, 'candidates', `strategy "${strategy.label}": ${confirmed} of ${quoted.length} sources re-read online with their quotes found (${project.strategyCheck.at})`);
     }
     if (sweep && this.search?.readPage) {
-      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null });
+      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null, arms: this.arms });
       const result = await sweeper.sweep(project, brief, options);
       if (result) {
         const fresh = new Set(result.pages.map((page) => page.url));
@@ -314,6 +315,8 @@ export class ResearchEngine {
           const v = project.decisionModel.kind.verified;
           if (v) this.emit(project, 'decision', `item kind "${project.decisionModel.kind.label}": ${v.matched} of ${v.titles} fetched listing titles use its words${project.decisionModel.kind.dropped?.length ? `; words no listing used were dropped: ${project.decisionModel.kind.dropped.join(', ')}` : ''}`);
         }
+        const best = (result.arms ?? []).filter((a) => a.listings > 0).slice(0, 3);
+        if (result.arms?.length) this.emit(project, 'candidates', `portal order by Thompson sampling on measured yield: ${result.arms.length} portal(s) read, ${result.arms.filter((a) => a.useful).length} gave new listings within the limits${best.length ? ` (best: ${best.map((a) => `${hostOf(a.url)} ${a.listings}`).join(', ')})` : ''}`);
         this.emit(project, 'candidates', `portal sweep: ${result.pagesRead} listing page(s) read by code (budget ${result.budget}), ${result.pages.reduce((n, p) => n + p.listings.length, 0)} new listing(s)`);
       }
     }

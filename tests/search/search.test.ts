@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, PAGE_CACHE_SIZE, PAGE_CACHE_TTL_MS, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, pageLocale } from '../../src/search/search.mjs';
+import { BraveBackend, ExaBackend, FirecrawlBackend, JinaSearchBackend, LangSearchBackend, LinkupBackend, PAGE_CACHE_SIZE, PAGE_CACHE_TTL_MS, SearchService, SerperBackend, TavilyBackend, WikipediaBackend, pageLocale, fuseByRank, rrfScore } from '../../src/search/search.mjs';
 import { SiteRecipes } from '../../src/search/recipes.mjs';
 import { htmlToText } from '../../src/search/html.mjs';
 import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
@@ -70,6 +70,16 @@ describe('search', () => {
     now = 2 * 60 * 60 * 1000;
     expect(service.rotation().map((b) => b.id)).toContain('broken');
     expect(service.rotation().at(-1).id).toBe('wiki');
+  });
+
+  it('fuses the result lists of several queries by reciprocal rank, so a page several queries find ranks first (RAG-Fusion)', async () => {
+    const lists: Record<string, string[]> = { q1: ['https://a.example/1', 'https://b.example/2', 'https://c.example/3'], q2: ['https://d.example/4', 'https://c.example/3'] };
+    const backend = { id: 'fake', search: async (q: string) => (lists[q] ?? []).map((url) => ({ url, title: `glamping plots ${q}`, snippet: 'glamping plots for sale' })) };
+    const service = new SearchService({ backends: [backend], fetchPages: false });
+    const out = await service.search(['q1', 'q2'], { maxSources: 4 });
+    expect(out[0].url).toBe('https://c.example/3');
+    expect(rrfScore(0)).toBeCloseTo(1 / 61, 10);
+    expect(fuseByRank([{ rrf: 0.1 }, { rrf: 0.3 }, { rrf: 0.1 }]).map((e: { rrf: number }) => e.rrf)).toEqual([0.3, 0.1, 0.1]);
   });
 
   it('skips excluded URLs', async () => {
