@@ -2,27 +2,13 @@ import { ROOT_ID, childrenOf } from './research/tree.mjs';
 import { actionPlan } from './research/gaps.mjs';
 import { explorePoints } from './research/site.mjs';
 import { workbook } from './xlsx.mjs';
+import { localNumber } from './research/memocheck.mjs';
 
 export const ACTION_LABEL = { fix: 'Fix', research: 'Research further', clarify: 'Clarify' };
 export const AREA_TOLERANCE = 0.05;
 
 const yesNo = (ok) => (ok === true ? 'yes' : ok === false ? 'no' : 'not measured');
 const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
-
-const GROUPED = (sep) => new RegExp(`^\\d{1,3}(?:\\${sep}\\d{3})+$`);
-
-export function localNumber(text) {
-  const t = String(text ?? '').replace(/\s/g, '');
-  if (!/^\d[\d.,]*$/.test(t)) return null;
-  const dot = t.lastIndexOf('.');
-  const comma = t.lastIndexOf(',');
-  let normal = t;
-  if (dot >= 0 && comma >= 0) normal = comma > dot ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
-  else if (comma >= 0) normal = GROUPED(',').test(t) ? t.replace(/,/g, '') : t.replace(',', '.');
-  else if (dot >= 0 && GROUPED('.').test(t)) normal = t.replace(/\./g, '');
-  const n = Number(normal);
-  return Number.isFinite(n) ? n : null;
-}
 
 export function titleAreaM2(title) {
   const m = String(title ?? '').match(/(\d[\d.,\s]*\d|\d)\s*(m²|m2|mt2|metros|ha|hectares?|dönüm|donum)(?![a-z])/i);
@@ -126,6 +112,7 @@ export function summaryRows(project, exportedAt = new Date()) {
     ['expected result', project.acceptance?.expected ?? ''],
     ['exported at (UTC)', exportedAt.toISOString()],
     ['verdict', project.report?.verdict ?? ''],
+    ['memo numbers matching the verified record', project.report?.claimCheck?.checked ? `${project.report.claimCheck.supported} of ${project.report.claimCheck.checked} (${project.report.claimCheck.contradicted.length} contradicted, ${project.report.claimCheck.unverifiable.length} not checkable)` : ''],
     ['expected result score', a ? Math.round(a.score * 100) / 100 : ''],
     ...(a?.checks ?? []).map((k) => [`  ${k.label}`, Math.round(k.value * 100) / 100]),
     ['listings found', num(c.found)],
@@ -166,6 +153,11 @@ export function strategyRows(project) {
   return [['id', 'title', 'url', 'quotes', 'quotes found when re-read', 'HTTP status'], ...sources.map((s) => [s.id, s.title, s.url, num(s.quotes), num(s.confirmed), num(s.status)])];
 }
 
+export function claimRows(project) {
+  const check = project.report?.claimCheck;
+  return [['where', 'claim', 'value', 'kind', 'result against the verified record'], ...(check?.claims ?? []).map((c) => [c.where, c.text, c.value, c.kind, c.status])];
+}
+
 export function itemRows(project) {
   const items = project.acceptanceResult?.items ?? project.report?.deliverables ?? [];
   return [['title', 'value', 'currency', 'url', 'piece', 'link live', 'in range'], ...items.map((i) => [i.title ?? '', num(i.value), i.currency ?? '', i.url ?? '', i.nodeId ?? '', i.live ?? i.alive ?? '', i.inRange ?? ''])];
@@ -199,6 +191,7 @@ export function resultsSheets(project, exportedAt = new Date()) {
     { name: 'Pieces', rows: piecesRows(project) },
     { name: 'Sources', rows: sourceRows(project) },
     ...(project.candidates?.strategy?.sources?.length ? [{ name: 'Strategy sources', rows: strategyRows(project) }] : []),
+    ...(project.report?.claimCheck?.checked ? [{ name: 'Memo claims', rows: claimRows(project) }] : []),
     { name: 'Delivered items', rows: itemRows(project) },
   ];
   return sheets;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRows, exampleRows, localNumber, plotRows, resultsSheets, resultsWorkbook, screenedRows, sourceRows, strategyRows, summaryRows, titleAreaM2 } from '../src/workbook.mjs';
+import { checkRows, claimRows, exampleRows, plotRows, resultsSheets, resultsWorkbook, screenedRows, sourceRows, strategyRows, summaryRows, titleAreaM2 } from '../src/workbook.mjs';
 import { unzip } from './helpers/unzip';
 
 const site = { coastKm: 2.6, beachKm: 2.7, lakeKm: 6.2, lakesNamed: true, beaches: 10, viewpoints: 12, attractions: 8, reserves: 2, protectedAreas: 4, hikingRoutes: 6, campsites: 16, lodging: 126, climate: { workable: 12, comfortable: 7, hottest: 24, coldest: 8 } };
@@ -28,8 +28,7 @@ const project = {
 };
 
 describe('results workbook: every table, exact links, typed numbers', () => {
-  it('reads areas written the local way', () => {
-    expect(['1.516,54', '1,516.54', '1.500', '2,5', '12.000.000', 'abc'].map(localNumber)).toEqual([1516.54, 1516.54, 1500, 2.5, 12000000, null]);
+  it('reads the area a listing title states', () => {
     expect(titleAreaM2('Terreno rústico com 1.516,54 m² em Leitões')).toBe(1517);
     expect(titleAreaM2('2 ha of land')).toBe(20000);
     expect(titleAreaM2('Tarla 3 dönüm')).toBe(3000);
@@ -80,6 +79,10 @@ describe('results workbook: every table, exact links, typed numbers', () => {
 
   it('packs all tables into one workbook, leaving out listing sheets for a memo research', () => {
     expect(resultsSheets(project).map((s: { name: string }) => s.name)).toEqual(['Summary', 'Listings', 'Decision checks', 'Screened out', 'Screened examples', 'Pieces', 'Sources', 'Strategy sources', 'Delivered items']);
+    const checked = { ...project, report: { ...project.report, claimCheck: { checked: 2, supported: 1, contradicted: [{}], unverifiable: [], claims: [{ where: 'key numbers', text: 'Verified Plots Found: 16 plots', value: 16, kind: 'count', status: 'contradicted' }, { where: 'summary', text: '€1,700', value: 1700, kind: 'eur', status: 'supported' }] } } };
+    expect(resultsSheets(checked).map((s: { name: string }) => s.name)).toContain('Memo claims');
+    expect(claimRows(checked)[1]).toEqual(['key numbers', 'Verified Plots Found: 16 plots', 16, 'count', 'contradicted']);
+    expect(Object.fromEntries(summaryRows(checked))['memo numbers matching the verified record']).toBe('1 of 2 (1 contradicted, 0 not checkable)');
     expect(resultsSheets({ ...project, candidates: null }).map((s: { name: string }) => s.name)).toEqual(['Summary', 'Pieces', 'Sources', 'Delivered items']);
     const files = unzip(resultsWorkbook(project, new Date(Date.UTC(2026, 9, 27))));
     expect(files['xl/worksheets/_rels/sheet2.xml.rels']).toContain('https://imo.example/anuncio/ID1');
