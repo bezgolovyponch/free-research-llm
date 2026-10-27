@@ -245,7 +245,7 @@ function specsText(specs = []) {
 
 const SPEC_RULE = `"spec": machine checks taken ONLY from the DESIRED OUTPUT: {"mustMention":[only words the DESIRED OUTPUT explicitly demands (\"must mention X\", quoted words); topic words are not must-mentions],"needsNumber":true|false,"valueRange":[min,max] or null,"unit":"","itemCount":number of linked items wanted or null,"minGrade":"supported"|"verified"}. Code stores it as a regression test for this piece and re-checks it after every run and every loop change.`;
 
-export function variantPrompt({ project, node, score, trials, stall = null }) {
+export function variantPrompt({ project, node, score, trials, stall = null, playbook = '', trace = [] }) {
   const isRoot = node.id === 'Q';
   const drivers = project.nodes.filter((n) => n.parentId === 'Q').map((n) => `${n.id} [${n.status}] ${n.question}`).join('\n');
   const sources = (node.sources ?? []).filter((s) => s.url).slice(0, 8).map((s) => `${s.id} ${s.title} <${s.url}> (${(s.links ?? []).length} links)`).join('\n') || 'none';
@@ -269,19 +269,21 @@ ${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural chang
 method: ${node.method} · metric: ${node.metric} ${node.unit} · queries: ${node.searchQueries.join(' | ')} · direct pages: ${(node.sourceUrls ?? []).join(' ') || 'none'}
 instructions: ${node.instructions || 'none'}
 answer: ${node.finding?.answer ?? 'none'}
-failed checks: ${(node.verification?.failures ?? []).join(' | ') || 'none'}
-reviewer: ${(node.critique?.issues ?? []).join(' | ') || 'none'}
+gate trace (what failed, the reviewer's objections and the gaps it reported):
+${trace.length ? trace.map((t) => `- ${t}`).join('\n') : '- none'}
 desired outputs the user set (regression checks; a change that breaks a passing one is reverted): ${specsText(node.specs)}
 sources it found:
 ${sources}
 
 Propose ONE change to this piece: a sharper question, better search queries (local language helps), exact public pages to read directly (sourceUrls), a different method, extra instructions, or a split into 2-3 smaller pieces ("split").`}
 
-ALREADY TRIED (do not repeat; code refuses a repeat without testing it):
+${playbook ? `${playbook}\n\n` : ''}ALREADY TRIED (do not repeat; code refuses a repeat without testing it):
 ${tried}${refused}${stalled}
 
+First diagnose: which gate or expected-result check keeps the score down, and why, from the trace above. Then propose the change that answers that diagnosis.
+
 Reply with only the fields you change. JSON shape:
-{"change":"one sentence: what and why","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup","instructions":"","split":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"add":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"remove":[""]}`,
+{"diagnosis":"one sentence: the failing check and its cause","change":"one sentence: what and why","question":"","searchQueries":[""],"sourceUrls":[""],"method":"lookup","instructions":"","split":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"add":[{"title":"","question":"","method":"lookup","searchQueries":[""],"sourceUrls":[""]}],"remove":[""]}`,
     },
   ];
 }

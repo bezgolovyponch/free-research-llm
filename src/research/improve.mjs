@@ -6,6 +6,7 @@ import { BLOCKING, MAX_DRIVERS, auditTree, cleanTitle, duplicateAmong, duplicate
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
 import { Mutex } from './lanes.mjs';
 import { mergeTrial, trialConflict } from './trialmerge.mjs';
+import { gateTrace, pieceType, playbookText, typeStats } from './playbook.mjs';
 
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, researching: 0 };
 const MAX_HOURS = 72;
@@ -379,6 +380,7 @@ export class ProjectImprover {
     const improve = { trials: [], ...(project.improve ?? {}), ...patch };
     if (trial) trial = { ...trial, scoreDelta: round(trial.score - trial.before) };
     if (trial) improve.trials = [...improve.trials, trial].slice(-MAX_TRIALS_KEPT);
+    if (trial) improve.byType = typeStats(improve.trials, project.nodes);
     project.improve = improve;
     if ('active' in patch) appendAppMessage(project, loopSummary(improve, !patch.active));
     if (patch.stall?.stalled && !wasStalled) {
@@ -387,7 +389,7 @@ export class ProjectImprover {
     }
     if (trial?.outcome === 'kept') appendAppMessage(project, `Kept a change on ${trial.nodeId}: ${trial.change}. Score ${trial.before} → ${trial.score}.`);
     if ('active' in patch) this.engine.emit(project, 'improve-state', patch.active ? `self-improving loop started for ${improve.hours} h` : `self-improving loop ended: ${patch.stopReason ?? patch.error ?? 'stopped'} · baseline ${improve.baseline} → best ${improve.best}`);
-    if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}`, { nodeId: trial.nodeId });
+    if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}${trial.diagnosis ? ` · diagnosis: ${trial.diagnosis}` : ''}${trial.guided ? ' · guided by kept changes or verified pieces of its type' : ''}`, { nodeId: trial.nodeId });
     await this.engine.store.save(project);
     return improve;
   }
@@ -504,8 +506,9 @@ export class ProjectImprover {
   async propose(project, nodeId, best) {
     const node = nodeId === ROOT_ID ? { id: ROOT_ID } : project.nodes.find((n) => n.id === nodeId);
     const trials = (project.improve?.trials ?? []).filter((t) => t.nodeId === nodeId);
-    const reply = await this.engine.router.complete({ purpose: 'improve', tier: 'deep', messages: withGuidance(variantPrompt({ project, node, score: best, trials, stall: stallCheck(project, this.now()) }), project.guidance) });
-    return reply.data ?? {};
+    const playbook = playbookText(project, node);
+    const reply = await this.engine.router.complete({ purpose: 'improve', tier: 'deep', messages: withGuidance(variantPrompt({ project, node, score: best, trials, stall: stallCheck(project, this.now()), playbook: playbook.text, trace: nodeId === ROOT_ID ? [] : gateTrace(node) }), project.guidance) });
+    return { ...(reply.data ?? {}), guided: playbook.lessons + playbook.demos > 0, type: pieceType(node) };
   }
 
   async trial(id, nodeId, state) {
@@ -515,6 +518,7 @@ export class ProjectImprover {
     try {
       const variant = await this.propose(snapshot, nodeId, state.best);
       const change = String(variant.change ?? 'variant').slice(0, 240);
+      Object.assign(base, { type: variant.type, guided: variant.guided, ...(variant.diagnosis ? { diagnosis: String(variant.diagnosis).slice(0, 240) } : {}) });
       const project = structuredClone(snapshot);
       if (this.stopped(state)) return { kept: false };
       const touched = applyVariant(project, nodeId, variant);
