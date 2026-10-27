@@ -99,8 +99,9 @@ export function normalizeEstimate(raw) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null }) {
+  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, arms = null }) {
     this.verifier = verifier;
+    this.arms = arms;
     this.verifying = new Map();
     this.onStop = onStop;
     this.laneCount = Math.min(MAX_LANES, Math.max(1, lanes));
@@ -282,13 +283,15 @@ export class ResearchEngine {
       this.emit(project, 'candidates', `strategy "${strategy.label}": ${confirmed} of ${quoted.length} sources re-read online with their quotes found (${project.strategyCheck.at})`);
     }
     if (sweep && this.search?.readPage) {
-      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null });
+      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null, arms: this.arms });
       const result = await sweeper.sweep(project, brief, options);
       if (result) {
         const fresh = new Set(result.pages.map((page) => page.url));
         const kept = (project.sweep?.pages ?? []).filter((page) => !fresh.has(page.url));
         const pages = [...compactSources(result.pages).sources, ...kept].slice(0, SWEEP_PAGES_KEPT).map((page, i) => ({ ...page, id: `P${i + 1}` }));
         project.sweep = { ...result, pages };
+        const best = (result.arms ?? []).filter((a) => a.listings > 0).slice(0, 3);
+        if (result.arms?.length) this.emit(project, 'candidates', `portal order by Thompson sampling on measured yield: ${result.arms.length} portal(s) read, ${result.arms.filter((a) => a.useful).length} gave new listings within the limits${best.length ? ` (best: ${best.map((a) => `${hostOf(a.url)} ${a.listings}`).join(', ')})` : ''}`);
         this.emit(project, 'candidates', `portal sweep: ${result.pagesRead} listing page(s) read by code (budget ${result.budget}), ${result.pages.reduce((n, p) => n + p.listings.length, 0)} new listing(s)`);
       }
     }

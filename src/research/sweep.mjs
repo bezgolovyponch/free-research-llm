@@ -64,8 +64,10 @@ export function portalPages(nodes, brief, extra = []) {
 }
 
 export class CandidateSweeper {
-  constructor({ search, recipes = null, budget = PAGE_BUDGET, perSite = PAGES_PER_SITE, seeds = seedPortals }) {
+  constructor({ search, recipes = null, budget = PAGE_BUDGET, perSite = PAGES_PER_SITE, seeds = seedPortals, arms = null, rng = Math.random }) {
     this.search = search;
+    this.arms = arms;
+    this.rng = rng;
     this.seeds = seeds;
     this.recipes = recipes;
     this.budget = budget;
@@ -75,14 +77,17 @@ export class CandidateSweeper {
   async sweep(project, brief, options = {}, onPage = () => {}) {
     if (!brief?.kind || !this.search?.readPage) return null;
     const target = Math.ceil((brief.itemCount ?? 20) * 1.5);
-    const starts = roundRobin(portalPages(project.nodes, brief, [...this.seeds(brief), ...(this.recipes?.verifiedSearchPages?.() ?? [])]), (p) => p.country);
+    await this.arms?.load?.();
+    const found = portalPages(project.nodes, brief, [...this.seeds(brief), ...(this.recipes?.verifiedSearchPages?.() ?? [])]);
+    const starts = roundRobin(this.arms ? this.arms.order(found, this.rng) : found, (p) => p.country);
+    const yields = new Map();
     const visited = new Set();
     const pages = [];
     const read = new Set();
     const keys = new Set();
     let left = this.budget;
     const keptNow = () => buildCandidates([...project.nodes, { id: 'sweep', sources: pages }], brief, options).keptCount;
-    const visit = async (url, from) => {
+    const visit = async (url, from, arm) => {
       if (!url || read.has(url) || left <= 0) return null;
       read.add(url);
       left--;
@@ -91,6 +96,9 @@ export class CandidateSweeper {
       fresh.forEach((l) => keys.add(listingKey(l.url)));
       const record = { id: `P${pages.length + 1}`, kind: 'web', url, from, title: `${hostOf(url)} listings`, domain: hostOf(url), locale: page.locale ?? '', text: String(page.text ?? '').slice(0, STORED_PAGE_TEXT), links: [], listings: fresh, status: page.status ?? 0 };
       pages.push(record);
+      const kept = fresh.length ? buildCandidates([{ id: 'sweep', sources: [record] }], brief, options).keptCount : 0;
+      const y = yields.get(arm) ?? { useful: 0, empty: 0, listings: 0 };
+      yields.set(arm, kept > 0 ? { ...y, useful: y.useful + 1, listings: y.listings + kept } : { ...y, empty: y.empty + 1 });
       onPage(record);
       return page;
     };
@@ -100,13 +108,15 @@ export class CandidateSweeper {
       if (skipped(start)) continue;
       visited.add(start.country);
       const reserved = starts.slice(index + 1).filter((s) => s.seed || !visited.has(s.country)).length;
-      const first = await visit(start.url, start.seed ? `seed portal for ${start.country}` : 'portal page already read');
+      const first = await visit(start.url, start.seed ? `seed portal for ${start.country}` : 'portal page already read', start.url);
       if (!first?.listings?.length) continue;
       const filtered = brief.valueRange ? priceFilterUrl(first.links, start.url, brief.valueRange[1]) : '';
-      let page = filtered ? (await visit(filtered, `price filter found on ${hostOf(start.url)}`)) ?? first : first;
+      let page = filtered ? (await visit(filtered, `price filter found on ${hostOf(start.url)}`, start.url)) ?? first : first;
       if (!page?.listings?.length) page = first;
-      for (let n = 1; n < this.perSite && page?.next && left > reserved && (start.seed || keptNow() < target); n++) page = await visit(page.next, 'next page link');
+      for (let n = 1; n < this.perSite && page?.next && left > reserved && (start.seed || keptNow() < target); n++) page = await visit(page.next, 'next page link', start.url);
     }
-    return { pages, pagesRead: pages.length, budget: this.budget, at: new Date().toISOString() };
+    for (const [url, y] of yields) this.arms?.record(url, y);
+    const arms = [...yields].map(([url, y]) => ({ url, ...y, draw: starts.find((s) => s.url === url)?.draw ?? null })).sort((a, b) => b.listings - a.listings);
+    return { pages, pagesRead: pages.length, budget: this.budget, at: new Date().toISOString(), arms };
   }
 }

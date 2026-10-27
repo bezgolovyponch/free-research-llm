@@ -44,6 +44,7 @@ import { KeyChecker } from './keycheck.mjs';
 import { LinkVerifier, RouterAdmin } from './llm/admin.mjs';
 import { KEY_GUIDES, guidesText } from './llm/guides.mjs';
 import { accessLinks, lanAddresses } from './service.mjs';
+import { ArmBook } from './research/arms.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -172,7 +173,8 @@ export class App {
       child.on('error', reject);
       child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`verifier exited with ${code}`))));
     }) };
-    this.engine = new ResearchEngine({ verifier, router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
+    this.arms = new ArmBook({ file: path.join(this.dataDir, 'arms.json') });
+    this.engine = new ResearchEngine({ arms: this.arms, verifier, router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
     this.improver = new ProjectImprover({ engine: this.engine, checkpoint: async (id, resume) => this.handoffs.write(await this.engine.load(id), { reason: 'loop running (checkpoint for a crash or power cut)', resume }) });
     this.suggester = new SubIssueSuggester({ engine: this.engine });
     this.port = Number(env.PORT || 4600);
