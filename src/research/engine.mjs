@@ -329,7 +329,7 @@ export class ResearchEngine {
       table = await this.sites.apply(table, brief, { mode, readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
       const s = table.sites;
       if (s?.pending) this.startSiteWarm(project.id, raw, brief);
-      if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate 2021–2025, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
+      if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate from 2025 daily weather per 0.25° cell, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
     if (strategy) {
       table = applyStrategy(table, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });

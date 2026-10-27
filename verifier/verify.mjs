@@ -120,6 +120,14 @@ export function kmBetween(a, b) {
 const THERMAL_SCORES = [{ from: 42, score: 0 }, { from: 34, score: 7 }, { from: 28, score: 10 }, { from: 24, score: 9 }, { from: 20, score: 8 }, { from: 16, score: 7 }, { from: 12, score: 6 }, { from: 8, score: 5 }, { from: 4, score: 4 }, { from: 2, score: 3 }];
 const SUNSHINE_SCORES = [{ from: 14, score: 10 }, { from: 12, score: 9 }, { from: 9, score: 8 }, { from: 6, score: 4 }, { from: 4, score: 2 }];
 const ADVERSE_DAY = { nightBelowC: 8, dayAboveC: 34, rainAboveMm: 10, windAboveKmh: 23, capScore: 3 };
+export const CLIMATE_YEAR = 2025;
+export const CLIMATE_CELL_DEG = 0.25;
+
+export function climateCell({ lat, lon }) {
+  const centre = (x) => Math.round((Math.floor(x / CLIMATE_CELL_DEG) * CLIMATE_CELL_DEG + CLIMATE_CELL_DEG / 2) * 1000) / 1000;
+  return { lat: centre(lat), lon: centre(lon) };
+}
+
 export const CLIMATE_DAILY = 'temperature_2m_mean,temperature_2m_max,temperature_2m_min,dew_point_2m_mean,sunshine_duration,precipitation_sum,wind_speed_10m_mean';
 
 const scoreFrom = (value, scores) => scores.find((s) => value >= s.from)?.score ?? 0;
@@ -159,6 +167,8 @@ export function compare(name, appValue, found, tolerance) {
 export class Verifier {
   constructor({ fetchImpl = fetch, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), coastline = null, cacheDir = '' } = {}) {
     this.fetch = fetchImpl;
+    this.climateFile = cacheDir ? path.join(cacheDir, `climate-${CLIMATE_YEAR}.json`) : '';
+    this.climateCells = null;
     this.coastline = coastline;
     this.loadCoast = () => Coastline.load({ cacheDir, fetchImpl });
     this.now = now;
@@ -219,10 +229,27 @@ export class Verifier {
     return this.coastline.nearestKm(point.lat, point.lon, radiusKm);
   }
 
-  async months(point, rule) {
-    const d = await this.json(`${ARCHIVE}?latitude=${point.lat.toFixed(3)}&longitude=${point.lon.toFixed(3)}&start_date=2021-01-01&end_date=2025-12-31&daily=${CLIMATE_DAILY}&timezone=GMT`);
-    return campingMonths(d?.daily, rule);
+  async cellDaily(point) {
+    if (!this.climateCells) {
+      try {
+        this.climateCells = this.climateFile ? JSON.parse(await fs.readFile(this.climateFile, 'utf8')) : {};
+      } catch {
+        this.climateCells = {};
+      }
+    }
+    const cell = climateCell(point);
+    const key = `${cell.lat},${cell.lon}`;
+    if (this.climateCells[key]) return this.climateCells[key];
+    const d = await this.json(`${ARCHIVE}?latitude=${cell.lat}&longitude=${cell.lon}&start_date=${CLIMATE_YEAR}-01-01&end_date=${CLIMATE_YEAR}-12-31&daily=${CLIMATE_DAILY}&timezone=GMT`);
+    this.climateCells[key] = d?.daily ?? null;
+    if (this.climateFile && this.climateCells[key]) await fs.writeFile(this.climateFile, JSON.stringify(this.climateCells));
+    return this.climateCells[key];
   }
+
+  async months(point, rule) {
+    return campingMonths(await this.cellDaily(point), rule);
+  }
+
 
   async verifyRow(row, ob) {
     const checks = [];

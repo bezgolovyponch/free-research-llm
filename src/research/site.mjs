@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import { countryByCode, regionsIn } from './brief.mjs';
 import { areaFromText } from '../search/listings.mjs';
-import { CCI_DAILY_VARS, climateOf } from './cci.mjs';
+import path from 'node:path';
+import { climateOf } from './cci.mjs';
+import { ClimateCells } from './climatecells.mjs';
 
 export const GONE_STATUS = new Set([404, 410]);
 
@@ -18,7 +20,6 @@ export const MODES = {
   all: { newSites: 400, pageReads: 400, budgetMs: 60 * 60 * 1000 },
 };
 export const GEOCODE_GAP_MS = 1100;
-export const CLIMATE_YEARS = ['2021-01-01', '2025-12-31'];
 export const PITCH_M2 = 40;
 export const CAMPING_SHARE = 0.6;
 export const RURAL_PARK_MAX_PITCHES = 30;
@@ -32,7 +33,6 @@ export const INSTANCE_TIMEOUT_MS = 45000;
 export const INSTANCE_REST_MS = 10 * 60 * 1000;
 export const OVERPASS_URLS = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 const HPI_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hpi_a';
 const HICP_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_aind';
 export const MIN_PLACE_RANK = 12;
@@ -203,13 +203,26 @@ export function namesRegion(displayName, query) {
   return fold(displayName).includes(region);
 }
 
+export function measureOrder(rows, store) {
+  const priority = (row) => {
+    const point = Number.isFinite(row.lat) && Number.isFinite(row.lon) ? row : store.points?.[row.url]?.point;
+    if (point) {
+      if (store.sites?.[siteKey(point.lat, point.lon)]?.site?.climate?.cci) return 0;
+      return row.coast === true ? 1 : 2;
+    }
+    return row.coast === true ? 3 : 4;
+  };
+  return rows.map((row, i) => [priority(row), i]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(([, i]) => i);
+}
+
 export class SiteAssessor {
-  constructor({ file = '', fetchJson = null, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  constructor({ file = '', fetchJson = null, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), climateCells = null } = {}) {
     this.file = file;
     this.now = now;
     this.sleep = sleep;
     this.httpJsonBound = (url, init) => this.httpJson(url, init);
     this.fetchJson = fetchJson ?? this.httpJsonBound;
+    this.climateCells = climateCells ?? new ClimateCells({ file: file ? path.join(path.dirname(file), 'climate-cells.json') : '', fetchJson: (url) => this.fetchJson(url), now, sleep });
     this.store = { sites: {}, places: {}, hpi: {}, points: {}, facts: {} };
     this.loaded = !file;
     this.writing = Promise.resolve();
@@ -229,7 +242,7 @@ export class SiteAssessor {
   }
 
   worker() {
-    return this.file ? new SiteAssessor({ file: this.file, fetchJson: this.fetchJson === this.httpJsonBound ? null : this.fetchJson, now: this.now, sleep: this.sleep }) : null;
+    return this.file ? new SiteAssessor({ file: this.file, fetchJson: this.fetchJson === this.httpJsonBound ? null : this.fetchJson, now: this.now, sleep: this.sleep, climateCells: this.climateCells }) : null;
   }
 
   async readStore() {
@@ -388,9 +401,7 @@ export class SiteAssessor {
   }
 
   async climate(lat, lon) {
-    const [start, end] = CLIMATE_YEARS;
-    const weather = await this.fetchJson(`${CLIMATE_URL}?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&start_date=${start}&end_date=${end}&daily=${CCI_DAILY_VARS}&timezone=GMT`);
-    return climateOf(weather?.daily);
+    return climateOf(await this.climateCells.daily(lat, lon));
   }
 
   async trends(rows) {
@@ -450,26 +461,28 @@ export class SiteAssessor {
 
   async measureRows(rows, brief, ctx) {
     const { readPage, onProgress, stats, started } = ctx;
-    const near = [];
-    const far = [];
-    const gone = [];
-    for (const original of rows) {
+    const slots = new Array(rows.length);
+    for (const index of measureOrder(rows, this.store)) {
+      const original = rows[index];
+      const put = (kind, row) => {
+        slots[index] = [kind, row];
+      };
       try {
         const point = await this.locate(original, readPage);
         const facts = await this.factsOf(original, readPage);
         if (facts?.gone) {
-          gone.push({ ...original, goneStatus: facts.gone });
+          put('gone', { ...original, goneStatus: facts.gone });
           continue;
         }
         const row = original.area || !facts?.area ? original : { ...original, area: facts.area, areaUnit: 'm²', areaBy: 'listing page' };
         if (point === undefined) {
           stats.pending++;
-          near.push({ ...row, site: null, fit: null, siteNote: 'site check queued for the next pass' });
+          put('near', { ...row, site: null, fit: null, siteNote: 'site check queued for the next pass' });
           continue;
         }
         if (!point) {
           stats.unlocated++;
-          near.push({ ...row, site: null, fit: null, siteNote: 'location not shown' });
+          put('near', { ...row, site: null, fit: null, siteNote: 'location not shown' });
           continue;
         }
         stats.located++;
@@ -477,7 +490,7 @@ export class SiteAssessor {
         if (!site?.climate?.cci) {
           if (ctx.fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
             stats.pending++;
-            near.push({ ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
+            put('near', { ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
             continue;
           }
           ctx.fresh++;
@@ -494,14 +507,15 @@ export class SiteAssessor {
         const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, { hpi: trend?.real ?? null }), ...(conflict ? { placeConflict: conflict } : {}) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
-          far.push(assessed);
-        } else near.push(assessed);
+          put('far', assessed);
+        } else put('near', assessed);
       } catch (error) {
         stats.failed++;
-        near.push({ ...original, site: null, fit: null, siteNote: `site check failed: ${String(error.message).slice(0, 80)}` });
+        put('near', { ...original, site: null, fit: null, siteNote: `site check failed: ${String(error.message).slice(0, 80)}` });
       }
     }
-    return { near, far, gone };
+    const of = (kind) => slots.filter((slot) => slot?.[0] === kind).map(([, row]) => row);
+    return { near: of('near'), far: of('far'), gone: of('gone') };
   }
 
   async apply(candidates, brief, { readPage = null, onProgress = () => {}, mode = 'budget' } = {}) {
