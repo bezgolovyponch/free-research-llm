@@ -114,11 +114,11 @@ export class ProviderFactory {
 }
 
 
-export function buildSearch({ env, fetchImpl, recipes = null }) {
+export function buildSearch({ env, fetchImpl, recipes = null, browser = null }) {
   const backends = KEYED_SEARCH_BACKENDS.filter(([name]) => env[name]).map(([name, Backend]) => new Backend({ apiKey: env[name], fetchImpl }));
   if (env.SEARXNG_URL) backends.push(new SearxngBackend({ baseURL: env.SEARXNG_URL, fetchImpl }));
   if (env.FRL_WIKIPEDIA !== '0') backends.push(new WikipediaBackend({ fetchImpl, lang: env.FRL_WIKIPEDIA_LANG || 'en' }));
-  return new SearchService({ backends, fetchImpl, fetchPages: env.FRL_FETCH_PAGES !== '0', jinaReader: env.FRL_JINA_READER !== '0', jinaKey: env.JINA_API_KEY || '', recipes });
+  return new SearchService({ backends, fetchImpl, fetchPages: env.FRL_FETCH_PAGES !== '0', jinaReader: env.FRL_JINA_READER !== '0', jinaKey: env.JINA_API_KEY || '', recipes, browser });
 }
 
 const HISTORY_EVENT = /^(created|report|acceptance|improve-state|error):|^phase:(done|stopped|tree ready)/;
@@ -150,8 +150,9 @@ function readBuild() {
 }
 
 export class App {
-  constructor({ env = process.env, fetchImpl = fetch, dataDir, logDir, providers, search, secrets = null } = {}) {
+  constructor({ env = process.env, fetchImpl = fetch, dataDir, logDir, providers, search, secrets = null, browser = null } = {}) {
     this.secrets = secrets;
+    this.browser = browser;
     this.build = readBuild();
     this.dataDir = dataDir ?? path.join(ROOT_DIR, 'data');
     this.env = env;
@@ -163,7 +164,7 @@ export class App {
     this.outcomes = new OutcomeBook({ file: path.join(this.dataDir, 'outcomes.json') });
     this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), onLedger: (row) => this.logs.append('model-calls', row), outcomes: this.outcomes });
     this.recipes = new SiteRecipes({ file: path.join(this.dataDir, 'recipes.json') });
-    this.search = search ?? buildSearch({ env, fetchImpl, recipes: this.recipes });
+    this.search = search ?? buildSearch({ env, fetchImpl, recipes: this.recipes, browser: this.browser });
     this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects'), isBusy: (id) => Boolean(this.engine?.running.has(id) || this.improver?.isActive(id)) });
     this.handoffs = new HandoffWriter({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'handoff') });
     const rates = new ExchangeRates({ fetchImpl });
@@ -406,6 +407,7 @@ export class App {
     if (this.watchTimer) clearInterval(this.watchTimer);
     this.terminal.closeAll();
     await this.improver.shutdown();
+    await this.browser?.close();
     for (const id of [...this.engine.running]) {
       if (this.improver.isActive(id)) continue;
       this.engine.cancel(id);
@@ -530,7 +532,7 @@ export class App {
 
   async reloadKeys() {
     const changed = this.secrets ? await this.secrets.refresh(this.env) : [];
-    this.search = buildSearch({ env: { ...this.env, ...this.sessionSearchEnv }, fetchImpl: this.fetchImpl, recipes: this.recipes });
+    this.search = buildSearch({ env: { ...this.env, ...this.sessionSearchEnv }, fetchImpl: this.fetchImpl, recipes: this.recipes, browser: this.browser });
     this.engine.search = this.search;
     this.factory.env = this.env;
     await this.refreshProviders();
@@ -542,7 +544,7 @@ export class App {
   async setKey(providerId, key, baseURL) {
     if (SEARCH_KEYS.some((k) => k.env === providerId)) {
       this.sessionSearchEnv[providerId] = String(key ?? '').trim();
-      this.search = buildSearch({ env: { ...this.env, ...this.sessionSearchEnv }, fetchImpl: this.fetchImpl, recipes: this.recipes });
+      this.search = buildSearch({ env: { ...this.env, ...this.sessionSearchEnv }, fetchImpl: this.fetchImpl, recipes: this.recipes, browser: this.browser });
       this.engine.search = this.search;
       return this.router.status();
     }

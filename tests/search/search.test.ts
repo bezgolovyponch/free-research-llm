@@ -214,5 +214,22 @@ describe('relevance on every engine', () => {
     const sources = await service.search(['Brno population 2025']);
     expect(sources.map((s) => s.url)).toEqual(['https://wpr.example/czechia/brno']);
   });
+
+  it('renders a page in the headless browser only when it loads but its content needs JavaScript, never to get past a refusal', async () => {
+    const page = `<html><body><h1>Terrenos</h1><p>${'Terreno rústico com vista mar. '.repeat(30)}</p></body></html>`;
+    const shell = async () => new Response('<html><body><div id="app"></div><script src="/app.js"></script></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    const reads: string[] = [];
+    const browser = { read: async (url: string) => { reads.push(url); return { status: 200, html: page, url }; } };
+    const out = await new SearchService({ fetchImpl: shell as never, browser, jinaReader: false }).readPage('https://portal.example/terrenos');
+    expect(out).toMatchObject({ via: 'browser', status: 200 });
+    expect(out.text).toContain('Terreno rústico com vista mar.');
+    expect(reads).toEqual(['https://portal.example/terrenos']);
+    const refused = async () => new Response('Forbidden', { status: 403, headers: { 'content-type': 'text/html' } });
+    expect((await new SearchService({ fetchImpl: refused as never, browser, jinaReader: false }).readPage('https://portal.example/blocked')).status).toBe(403);
+    const open = async () => new Response(page, { status: 200, headers: { 'content-type': 'text/html' } });
+    expect((await new SearchService({ fetchImpl: open as never, browser, jinaReader: false }).readPage('https://portal.example/open')).via).toBeUndefined();
+    expect(reads).toHaveLength(1);
+    expect((await new SearchService({ fetchImpl: shell as never, jinaReader: false }).readPage('https://portal.example/terrenos')).via).toBeUndefined();
+  });
 });
 
