@@ -81,4 +81,12 @@ describe('candidate table', () => {
     expect(lines[0]).toContain('kept 3, ranked by code-measured fit');
     expect(lines[1]).toBe('- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated | sea 2.5 km, beach 3 km | 9 workable months (6 comfortable), hottest month max 27.5°C | 16 beaches, viewpoints, sights, reserves and trails within 15 km | zoning agricultural | about 30 pitches');
   });
+
+  it('keeps every listing that passes the brief up to 1,000, so plots past the 50 asked for are measured and shown too', () => {
+    const listings = Array.from({ length: 450 }, (_, i) => ({ title: `Terreno rústico ${i}`, url: `https://imo.example/pt/anuncio/terreno-${i}-ID9${String(i).padStart(4, '0')}`, value: 5000 + i, unit: 'EUR', area: 1000, place: 'Mira' }));
+    const out = buildCandidates([{ id: 'D1', sources: [{ id: 'S1', url: 'https://imo.example/pt/resultados', locale: 'pt', text: '', listings }] }], brief, { convert });
+    expect(out.keptCount).toBe(450);
+    expect(out.kept).toHaveLength(450);
+  });
 });
+

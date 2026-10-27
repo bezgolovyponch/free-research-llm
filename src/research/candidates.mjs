@@ -5,7 +5,7 @@ import { listingKey } from '../search/listings.mjs';
 import { explorePoints } from './site.mjs';
 import { pricePerM2Medians } from './strategy.mjs';
 
-export const MAX_KEPT = 200;
+export const MAX_KEPT = 1000;
 export const MAX_TO_CHECK = 100;
 export const MAX_SCREENED_EXAMPLES = 30;
 export const MAX_OUTSIDE = 150;

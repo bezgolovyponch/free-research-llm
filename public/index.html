@@ -104,30 +104,30 @@
   .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
   .spacer{flex:1}
   .muted{color:var(--dim)} .faint{color:var(--faint)} .small{font-size:12px}
-  .props{display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:8px; margin-top:8px}
-  .prop{border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:var(--panel); cursor:pointer; text-align:left; color:var(--txt); font:inherit; display:flex; flex-direction:column; gap:4px; min-width:0}
-  .prop:hover,.prop.on{border-color:var(--bl); background:color-mix(in srgb, var(--bl) 6%, var(--panel))}
-  .prop .t{font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  .prop .m{display:flex; flex-wrap:wrap; gap:4px 10px; font-size:12px; color:var(--dim)}
   .conf{display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:1px 8px; border:1px solid currentColor}
-  #candRows tr[data-url]{cursor:pointer}
-  #candRows tr[data-url]:hover td,#candRows tr.on td{background:color-mix(in srgb, var(--bl) 6%, var(--panel))}
-  #pip{position:fixed; right:16px; bottom:16px; width:min(400px,calc(100vw - 32px)); max-height:min(78vh,760px); display:none; flex-direction:column; background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); z-index:60; overflow:hidden}
+  #candRows tr[data-url],#outRows tr[data-url]{cursor:pointer}
+  #candRows tr[data-url]:hover td,#candRows tr.on td,#outRows tr[data-url]:hover td,#outRows tr.on td{background:color-mix(in srgb, var(--bl) 8%, var(--panel))}
+  #pip{display:none; flex:0 0 min(var(--insp),34vw); width:min(var(--insp),34vw); flex-direction:column; min-height:0; background:var(--panel); border-left:1px solid var(--line)}
   #pip.show{display:flex}
-  #pip .pip-head{display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid var(--line); background:var(--panel2); cursor:pointer; min-width:0}
+  #workspace.res-detail #inspector{display:none}
+  #pip .pip-head{display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid var(--line); background:var(--panel2); min-width:0}
   #pip .pip-head .t{flex:1 1 auto; min-width:0; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-  #pip .pip-head button{flex:0 0 auto; border:1px solid var(--line); background:var(--panel); color:var(--txt); border-radius:8px; min-width:32px; height:30px; cursor:pointer; font:inherit}
-  #pip .pip-body{overflow:auto; padding:10px 12px 14px; font-size:13px}
-  #pip.mini .pip-body{display:none}
+  #pip button.pb{flex:0 0 auto; border:1px solid var(--line); background:var(--panel); color:var(--txt); border-radius:8px; min-width:32px; height:30px; cursor:pointer; font:inherit}
+  #pip .pip-body{overflow:auto; padding:10px 12px 14px; font-size:13px; flex:1 1 auto; min-height:0}
+  #pip.mini{flex-basis:40px; width:40px}
+  #pip.mini .pip-head,#pip.mini .pip-body{display:none}
+  #pip .pip-rail{display:none; flex:1 1 auto; border:0; background:var(--panel2); color:var(--dim); cursor:pointer; font:inherit; font-weight:700; writing-mode:vertical-rl; padding:12px 0}
+  #pip.mini .pip-rail{display:block}
   #pip .pip-body h3{font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--faint); margin:12px 0 4px}
   #pip .ck{display:grid; grid-template-columns:18px minmax(0,1fr); gap:6px; padding:3px 0; border-top:1px solid var(--line)}
   #pip .bars{display:grid; grid-template-columns:repeat(12,1fr); gap:2px; align-items:end; height:46px; margin-top:4px}
   #pip .bars i{display:block; border-radius:2px 2px 0 0; min-height:2px}
   #pip .bars-l{display:grid; grid-template-columns:repeat(12,1fr); gap:2px; font-size:10px; color:var(--faint); text-align:center}
-  @media (min-width:1181px){ #pip{right:calc(var(--insp) + 16px)} }
   @media (max-width:820px){
-    #pip{right:0; left:0; bottom:0; width:100%; max-height:62vh; border-radius:14px 14px 0 0}
-    .props{grid-template-columns:1fr}
+    #pip{position:fixed; left:0; right:0; bottom:0; width:100%; flex-basis:auto; max-height:55vh; border-left:0; border-top:1px solid var(--line); border-radius:14px 14px 0 0; box-shadow:var(--shadow); z-index:60}
+    #pip.mini{width:100%; flex-basis:auto}
+    #pip.mini .pip-head{display:flex}
+    #pip.mini .pip-rail{display:none}
   }
   .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:16px; margin-bottom:12px}
   .notice{border-radius:8px; padding:10px 12px; margin-bottom:12px; background:var(--panel2); border-left:3px solid var(--am)}
@@ -464,12 +464,12 @@
           <div class="pane on split" id="pane-tree"><div class="treegrid"><div class="treecol"><div class="treebar" id="treeBar"></div><div id="outline"></div></div><div class="piececol"><div class="tablewrap"><table id="pieceTable" class="rtable"></table></div><div id="pieceReport"></div></div></div></div>
           <div class="pane" id="pane-map"><div id="mapWrap"><svg id="cloud" xmlns="http://www.w3.org/2000/svg"></svg><div id="mapTools"><span class="small" id="mapSelInfo"></span><button class="btn secondary sm" id="btnMapSel" aria-pressed="false">Select pieces</button><button class="btn secondary sm" id="btnFit">Fit</button></div></div></div>
           <div class="pane" id="pane-results"><div class="pane-inner" id="resultsBody"></div></div>
-          <div id="pip" role="dialog" aria-label="Result details"></div>
           <div class="pane" id="pane-report"><div class="pane-inner" id="reportBody"></div></div>
           <div class="pane split" id="pane-sources"><div class="treegrid"><div class="treecol" id="srcTree"></div><div class="piececol" id="sourceList"></div></div></div>
           <div class="pane" id="pane-gates"><div class="pane-inner" id="gatesBody"></div></div>
           <div class="pane" id="pane-chat"></div>
         </div>
+        <aside id="pip" aria-label="Result details"></aside>
         <aside id="inspector" data-mode="details" aria-label="Selected piece">
           <div id="inspHead">
             <div class="seg" id="inspTabs"><button data-mode="details" class="on">Piece details</button><button data-mode="chat">Chat</button></div>
@@ -1347,7 +1347,10 @@ function renderGates(){
 
 const TIER_LABEL={fits:["var(--gr)","Fits"],"trade-off":["var(--am)","Trade-off"],unverified:["var(--gray)","To confirm"],weak:["var(--rd)","Weak"],blocked:["var(--rd)","Blocked"]};
 const TIER_RANK={fits:0,"trade-off":1,unverified:2,weak:3,blocked:4};
+function oppOrder(r){const pr=STATE.project&&STATE.project.candidates&&STATE.project.candidates.proposals;const pp=r.plan&&r.plan.proposal;if(!pr||!pr.sections||!pp||!pp.opportunity)return 1e9;const i=pr.sections.findIndex(x=>x.id===pp.opportunity);return (i<0?99:i)*1e5+(pp.rank||0);}
+function oppLabel(r){const pr=STATE.project&&STATE.project.candidates&&STATE.project.candidates.proposals;const pp=r.plan&&r.plan.proposal;const x=pr&&pr.sections&&pp&&pr.sections.find(y=>y.id===pp.opportunity);return x?x.label:"";}
 const CAND_COLS=[
+  ["oppo","Opportunity · rank",oppOrder],
   ["tier","Tier",r=>r.plan?TIER_RANK[r.plan.tier]:9],
   ["fit","Checks met",r=>r.plan&&r.plan.share!=null?r.plan.share:-1],
   ["title","Listing",r=>String(r.title||"").toLowerCase()],
@@ -1362,12 +1365,12 @@ const CAND_COLS=[
   ["trend","Real trend %",r=>r.plan&&r.plan.trend!=null?r.plan.trend:r.fit&&r.fit.hpi!=null?r.fit.hpi:-Infinity],
   ["country","Country",r=>String(r.country||"")+" "+String(r.place||"")],
 ];
-const OUT_COLS=[["opp","Opportunity",r=>r.plan&&r.plan.opportunity?-r.plan.opportunity.score:0]].concat(CAND_COLS.filter(c=>c[0]!=="tier"));
-function sortState(table){STATE.candSort=STATE.candSort||{};return STATE.candSort[table]||(table==="out"?{key:"opp",dir:1}:{key:"tier",dir:1});}
+const OUT_COLS=[["opp","Opportunity",r=>r.plan&&r.plan.opportunity?-r.plan.opportunity.score:0]].concat(CAND_COLS.filter(c=>c[0]!=="tier"&&c[0]!=="oppo"));
+function sortState(table){STATE.candSort=STATE.candSort||{};return STATE.candSort[table]||(table==="out"?{key:"opp",dir:1}:{key:STATE.project&&STATE.project.candidates&&STATE.project.candidates.proposals?"oppo":"tier",dir:1});}
 function sortedCandidates(rows,table,cols){
   const st=sortState(table);const col=cols.find(c=>c[0]===st.key)||cols[0];
-  const tier=table==="out"?"all":STATE.candTier||"all";
-  return rows.filter(r=>tier==="all"||(r.plan&&r.plan.tier===tier)).map((r,i)=>[r,i]).sort((a,b)=>{const x=col[2](a[0]),y=col[2](b[0]);return (x<y?-1:x>y?1:a[1]-b[1])*st.dir;}).map(([r])=>r);
+  const tier=table==="out"?"all":STATE.candTier||"all";const opp=table==="out"?"all":STATE.candOpp||"all";
+  return rows.filter(r=>(tier==="all"||(r.plan&&r.plan.tier===tier))&&(opp==="all"||(r.plan&&r.plan.proposal&&r.plan.proposal.opportunity===opp))).map((r,i)=>[r,i]).sort((a,b)=>{const x=col[2](a[0]),y=col[2](b[0]);return (x<y?-1:x>y?1:a[1]-b[1])*st.dir;}).map(([r])=>r);
 }
 function siteCell(r){
   if(!r.site)return (r.coast?"sea stated":"–")+(r.siteNote?'<div class="faint">'+esc(r.siteNote)+"</div>":"");
@@ -1394,7 +1397,7 @@ function candidatesHtml(p){
   if(p.sweep)h+='<div class="small faint">Portal sweep: '+p.sweep.pagesRead+" listing page(s) read by code, no model calls · "+esc(String(p.sweep.at||"").slice(0,16).replace("T"," "))+"Z</div>";
   if(c.sites)h+='<div class="small faint">Site fit measured by code: sea distance, lakes and things to explore within 15 km (OpenStreetMap), workable glamping months 2021–2025 (Open-Meteo), housing-price trend (Eurostat), zoning words on the listing · '+c.sites.assessed+" measured, "+c.sites.unlocated+" without a location, "+c.sites.pending+" queued</div>";
   const link=r=>{const u=safeUrl(r.url);return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(trunc(r.title,60))+"</a>":esc(trunc(r.title,60));};
-  const row=r=>{const tl=r.plan?TIER_LABEL[r.plan.tier]:null;const s=r.site,cl=s&&s.climate;return '<tr data-tier="'+esc(r.plan?r.plan.tier:"")+'" data-url="'+esc(r.url||"")+'"'+(STATE.pip&&STATE.pip.url===r.url?' class="on"':"")+'><td class="small">'+(tl?'<b style="color:'+tl[0]+'">'+tl[1]+"</b>":"–")+'</td><td class="small mono">'+(r.plan&&r.plan.share!=null?esc(Math.round(r.plan.share*100))+"%":"–")+"</td><td>"+link(r)+'</td><td class="small mono">'+num(r.plan&&r.plan.entry?r.plan.entry.total:null)+'</td><td class="small mono">'+num(r.value)+(r.currency&&r.currency!==r.unit&&r.price!=null?'<div class="faint">'+esc(Number(r.price).toLocaleString())+" "+esc(r.currency)+"</div>":"")+'</td><td class="small mono">'+num(r.plan?r.plan.areaM2:r.area)+'</td><td class="small mono">'+num(r.plan?r.plan.units:null)+'</td><td class="small mono">'+(s?esc(s.coastKm??">25"):"–")+'</td><td class="small mono">'+(cl?esc(cl.workable):"–")+'</td><td class="small mono">'+(cl?esc(cl.hottest):"–")+'</td><td class="small mono">'+(s?esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0)):"–")+'</td><td class="small mono">'+(r.plan&&r.plan.trend!=null?esc((r.plan.trend>=0?"+":"")+r.plan.trend):r.fit&&r.fit.hpi!=null?esc(r.fit.hpi):"–")+'</td><td class="small">'+esc(r.country||"")+'<div class="faint">'+esc(trunc(r.place||"",30))+'</div></td><td class="small" style="min-width:220px">'+(r.plan?"<b>"+esc(trunc(r.plan.proposal?r.plan.proposal.headline:r.plan.verdict,120))+'</b> <span class="faint">details ›</span>':planCell(r))+(r.siteNote&&!r.site?'<div class="faint">'+esc(r.siteNote)+"</div>":"")+"</td></tr>";};
+  const row=r=>{const tl=r.plan?TIER_LABEL[r.plan.tier]:null;const s=r.site,cl=s&&s.climate;return '<tr data-tier="'+esc(r.plan?r.plan.tier:"")+'" data-url="'+esc(r.url||"")+'"'+(STATE.pip&&STATE.pip.url===r.url?' class="on"':"")+'><td class="small">'+(r.plan&&r.plan.proposal&&r.plan.proposal.opportunity?esc(oppLabel(r))+(r.plan.proposal.rank?' <span class="mono faint">#'+esc(r.plan.proposal.rank)+"</span>":""):"–")+'</td><td class="small">'+(tl?'<b style="color:'+tl[0]+'">'+tl[1]+"</b>":"–")+'</td><td class="small mono">'+(r.plan&&r.plan.share!=null?esc(Math.round(r.plan.share*100))+"%":"–")+"</td><td>"+link(r)+'</td><td class="small mono">'+num(r.plan&&r.plan.entry?r.plan.entry.total:null)+'</td><td class="small mono">'+num(r.value)+(r.currency&&r.currency!==r.unit&&r.price!=null?'<div class="faint">'+esc(Number(r.price).toLocaleString())+" "+esc(r.currency)+"</div>":"")+'</td><td class="small mono">'+num(r.plan?r.plan.areaM2:r.area)+'</td><td class="small mono">'+num(r.plan?r.plan.units:null)+'</td><td class="small mono">'+(s?esc(s.coastKm??">25"):"–")+'</td><td class="small mono">'+(cl?esc(cl.workable):"–")+'</td><td class="small mono">'+(cl?esc(cl.hottest):"–")+'</td><td class="small mono">'+(s?esc((s.beaches||0)+(s.viewpoints||0)+(s.attractions||0)+(s.reserves||0)+(s.protectedAreas||0)+(s.hikingRoutes||0)):"–")+'</td><td class="small mono">'+(r.plan&&r.plan.trend!=null?esc((r.plan.trend>=0?"+":"")+r.plan.trend):r.fit&&r.fit.hpi!=null?esc(r.fit.hpi):"–")+'</td><td class="small">'+esc(r.country||"")+'<div class="faint">'+esc(trunc(r.place||"",30))+'</div></td><td class="small" style="min-width:220px">'+(r.plan?"<b>"+esc(trunc(r.plan.proposal?r.plan.proposal.headline:r.plan.verdict,120))+'</b> <span class="faint">details ›</span>':planCell(r))+(r.siteNote&&!r.site?'<div class="faint">'+esc(r.siteNote)+"</div>":"")+"</td></tr>";};
   const headOf=(table,cols,last)=>{const st=sortState(table);return "<tr>"+cols.map(([k,l])=>'<th data-csort="'+k+'" data-ctable="'+table+'" style="cursor:pointer;white-space:nowrap" title="Sort by '+esc(l)+'">'+esc(l)+(st.key===k?(st.dir>0?" ▲":" ▼"):"")+"</th>").join("")+"<th>"+last+"</th></tr>";};
   const head=headOf("in",CAND_COLS,"Proposal · click a row for the full reasoning");
   if(c.kept.length){
@@ -1404,7 +1407,7 @@ function candidatesHtml(p){
   }
   const out=c.outside||[];
   if(out.length){
-    const outRow=r=>{const op=r.plan&&r.plan.opportunity;const base=row(r).replace(/^<tr[^>]*><td class="small">[\s\S]*?<\/td>/,'<tr><td class="small mono"><b>'+esc(op?op.score:"–")+"</b></td>");return base.replace(/<td class="small" style="min-width:220px">[\s\S]*<\/td><\/tr>$/,'<td class="small" style="min-width:260px">'+(op?'<ul class="small" style="margin:0 0 0 14px;padding:0">'+op.reasons.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul>":"")+(r.plan&&r.plan.risks.length?'<div class="small" style="color:var(--rd)">Risks: '+esc(r.plan.risks.join("; "))+"</div>":"")+"</td></tr>");};
+    const outRow=r=>{const op=r.plan&&r.plan.opportunity;const base=row(r).replace(/^(<tr[^>]*>)<td class="small">[\s\S]*?<\/td><td class="small">[\s\S]*?<\/td>/,'$1<td class="small mono"><b>'+esc(op?op.score:"–")+"</b></td>");return base.replace(/<td class="small" style="min-width:220px">[\s\S]*<\/td><\/tr>$/,'<td class="small" style="min-width:260px">'+(op?'<ul class="small" style="margin:0 0 0 14px;padding:0">'+op.reasons.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul>":"")+(r.plan&&r.plan.risks.length?'<div class="small" style="color:var(--rd)">Risks: '+esc(r.plan.risks.join("; "))+"</div>":"")+"</td></tr>");};
     h+='<details id="outsideTable" style="margin-top:12px" open><summary><b>Outside your countries, worth a look</b> · '+out.length+' plot(s) that pass every limit except the country, ranked by opportunity: site checks met, real price trend and its 5-year continuation, scenic places with few campsites yet, entry cost. They never count toward your result.</summary><div class="tablewrap"><table class="rtable" id="outRows" style="margin-top:6px">'+headOf("out",OUT_COLS,"Why it is worth a look · risks")+sortedCandidates(out,"out",OUT_COLS).map(outRow).join("")+"</table></div></details>";
   }
   const oldHead='<tr><th>Listing</th><th>Price</th><th>Area</th><th>Place</th><th>Site fit · sea · season · explore</th></tr>';
@@ -1416,24 +1419,22 @@ function candidatesHtml(p){
 const CONF_LABEL={confirmed:["var(--gr)","confirmed outside the app"],measured:["var(--bl)","measured by the app"],partial:["var(--am)","partly measured"],refuted:["var(--rd)","refuted"]};
 const MONTHS=["J","F","M","A","M","J","J","A","S","O","N","D"];
 function rowByUrl(p,url){const c=p&&p.candidates;return c?(c.kept||[]).concat(c.outside||[]).find(r=>r.url===url)||null:null;}
-function pipList(p){const c=p.candidates||{};const pr=c.proposals;const rows=sortedCandidates(c.kept||[],"in",CAND_COLS).map(r=>r.url);if(!pr)return rows;const first=pr.primary.concat(pr.secondary);return first.concat(rows.filter(u=>!first.includes(u)));}
+function pipList(p,url){const c=p.candidates||{};const out=c.outside||[];if(out.some(r=>r.url===url))return sortedCandidates(out,"out",OUT_COLS).map(r=>r.url);return sortedCandidates(c.kept||[],"in",CAND_COLS).map(r=>r.url);}
 function confBadge(pp){const c=pp&&CONF_LABEL[pp.confidence];return c?'<span class="conf" style="color:'+c[0]+'">'+c[1]+"</span>":"";}
-function propCard(p,url){
-  const r=rowByUrl(p,url);if(!r||!r.plan)return"";const pp=r.plan.proposal||{};const tl=TIER_LABEL[r.plan.tier]||["var(--gray)",r.plan.tier];const s=r.site,cl=s&&s.climate;
-  return '<button class="prop'+(STATE.pip&&STATE.pip.url===url?" on":"")+'" data-pip="'+esc(url)+'"><div class="row" style="gap:6px"><b class="mono">#'+esc(pp.rank??"–")+'</b><b style="color:'+tl[0]+'">'+esc(tl[1])+"</b>"+confBadge(pp)+'</div><div class="t">'+esc(r.title||r.url)+'</div><div class="small muted">'+esc(trunc(pp.headline||r.plan.verdict,140))+'</div><div class="m"><span>entry €'+num(r.plan.entry?r.plan.entry.total:r.value)+"</span>"+(s?"<span>sea "+esc(s.coastKm??">25")+" km</span>":"")+(cl?"<span>"+esc(cl.workable)+" months</span>":"")+"<span>"+esc(r.country||"")+"</span></div>"+((pp.standsOut||[]).length?'<div class="small" style="color:var(--gr)">'+esc(pp.standsOut.slice(0,2).join(" · "))+"</div>":"")+"</button>";
-}
 function proposalsHtml(p){
-  const pr=p.candidates&&p.candidates.proposals;if(!pr)return"";
-  let h='<div class="card" id="proposals"><div class="small faint">Proposal · ranked by code from measured values, no model opinion</div><div class="verdict" style="font-size:20px">'+(pr.primary.length?pr.primary.length+" result(s) fit every criterion":"No result fits every criterion yet")+"</div>";
-  h+='<details class="small faint" style="margin-top:4px"><summary>How these are ranked</summary>'+esc(pr.method)+". Measures used: "+esc(pr.objectives.map(o=>o.label+" ("+(o.better==="max"?"higher":"lower")+" is better)").join(", "))+". Confirmed results come first; refuted results are never proposed.</details>";
-  if(pr.primary.length)h+='<h2 style="margin-top:10px">Proposed</h2><div class="props">'+pr.primary.map(u=>propCard(p,u)).join("")+"</div>";
-  if(pr.secondary.length)h+='<h2 style="margin-top:14px">Secondary results · trade-offs and results to confirm</h2><p class="small muted">Each misses one criterion that something nearby makes up for, or a measurement is still missing. They never count toward your result.</p><div class="props">'+pr.secondary.map(u=>propCard(p,u)).join("")+"</div>";
-  return h+'<p class="small faint" style="margin-top:8px">Click a result to open it in the side panel. The full table with sorting and filters is below; its rows open the panel too.</p></div>';
+  const pr=p.candidates&&p.candidates.proposals;if(!pr||!pr.sections)return"";
+  const fits=(pr.sections.find(x=>x.id==="fits")||{urls:[]}).urls.length;const target=p.acceptance&&p.acceptance.itemCount;const cur=STATE.candOpp||"all";
+  let h='<div class="card" id="proposals"><div class="small faint">Proposal · business opportunities grouped and ranked by code from measured values, no model opinion</div><div class="verdict" style="font-size:20px">'+(fits?fits+" result(s) fit every criterion":"No result fits every criterion yet")+"</div>"+(target?'<div class="small muted">'+esc(target)+" is your target, not a limit: every result is in the table below.</div>":"");
+  h+='<div class="row" style="gap:4px;flex-wrap:wrap;margin-top:8px"><span class="small faint">Opportunity:</span><button class="btn '+(cur==="all"?"secondary":"ghost")+' sm" data-copp="all">All</button>'+pr.sections.map(x=>'<button class="btn '+(cur===x.id?"secondary":"ghost")+' sm" data-copp="'+esc(x.id)+'" title="'+esc(x.why)+'">'+esc(x.label)+" "+x.urls.length+"</button>").join("")+"</div>";
+  const sel=pr.sections.find(x=>x.id===cur);
+  if(sel)h+='<p class="small muted" style="margin-top:6px">Why this opportunity: '+esc(sel.why)+"</p>";
+  h+='<details class="small faint" style="margin-top:4px"><summary>How these are grouped and ranked</summary>Each result goes to the first opportunity it matches, in the order of the buttons. Inside each: '+esc(pr.method)+". Measures used: "+esc(pr.objectives.map(o=>o.label+" ("+(o.better==="max"?"higher":"lower")+" is better)").join(", "))+". Confirmed results come first; refuted results are never proposed.</details>";
+  return h+'<p class="small faint" style="margin-top:6px">Select a row in the table to see why it is proposed, every criterion, climate, costs and risks in the panel on the right.</p></div>';
 }
-function pipPrefs(){try{return JSON.parse(localStorage.getItem("frl.pip")||"{}");}catch{return{};}}
-function savePipPrefs(v){try{localStorage.setItem("frl.pip",JSON.stringify(v));}catch{}}
-function markPip(url){document.querySelectorAll("[data-pip],#candRows tr[data-url]").forEach(el=>el.classList.toggle("on",(el.dataset.pip||el.dataset.url)===url));}
-function openPip(url){STATE.pip={url,mini:mq.phone.matches?!!pipPrefs().mini:false};renderPip();markPip(url);}
+mq.phone.addEventListener("change",()=>renderPip());
+mq.narrow.addEventListener("change",()=>renderPip());
+function markPip(url){document.querySelectorAll("#candRows tr[data-url],#outRows tr[data-url]").forEach(el=>el.classList.toggle("on",el.dataset.url===url));}
+function openPip(url){STATE.pip={url,mini:false};renderPip();markPip(url);}
 function climateBars(cl){
   const m=cl&&cl.cci&&cl.cci.monthly;if(!m||m.length!==12)return"";
   const col=v=>v>=7?"var(--gr)":v>=5?"var(--tl)":v>=3?"var(--am)":"var(--rd)";
@@ -1442,11 +1443,12 @@ function climateBars(cl){
 function renderPip(){
   const el=$("pip");if(!el)return;const p=STATE.project;const sel=STATE.pip;
   const r=p&&sel&&sel.url?rowByUrl(p,sel.url):null;
-  if(!r||STATE.pane!=="results"){el.classList.remove("show");return;}
+  const body=$("resultsBody");const ws=$("workspace");
+  if(!r||STATE.pane!=="results"){el.classList.remove("show");if(ws)ws.classList.remove("res-detail");if(body)body.style.paddingBottom="";return;}
   const pl=r.plan||{};const pp=pl.proposal||{};const tl=TIER_LABEL[pl.tier]||["var(--gray)","–"];const s=r.site,cl=s&&s.climate;const u=safeUrl(r.url);const src=safeUrl(r.sourceUrl);
-  const list=pipList(p);const i=list.indexOf(r.url);
-  el.classList.add("show");el.classList.toggle("mini",!!sel.mini);
-  let b='<div class="pip-head" data-pipact="toggle"><b style="color:'+tl[0]+'">'+(pp.rank?"#"+esc(pp.rank)+" ":"")+esc(tl[1])+'</b><span class="t">'+esc(r.title||r.url)+'</span><button data-pipact="prev" title="Previous result"'+(i<=0?" disabled":"")+'>‹</button><button data-pipact="next" title="Next result"'+(i<0||i>=list.length-1?" disabled":"")+'>›</button><button data-pipact="toggle" title="'+(sel.mini?"Expand":"Collapse")+'">'+(sel.mini?"▴":"▾")+'</button><button data-pipact="close" title="Close">×</button></div><div class="pip-body">';
+  const list=pipList(p,r.url);const i=list.indexOf(r.url);
+  el.classList.add("show");el.classList.toggle("mini",!!sel.mini);if(ws)ws.classList.toggle("res-detail",!sel.mini&&!mq.phone.matches);
+  let b='<button class="pip-rail" data-pipact="toggle" title="Show the details again">‹ Details · '+esc(trunc(r.title||"",40))+'</button><div class="pip-head"><b style="color:'+tl[0]+'">'+(pp.rank?"#"+esc(pp.rank)+" ":"")+esc(tl[1])+'</b><span class="t">'+esc(r.title||r.url)+'</span><button class="pb" data-pipact="prev" title="Previous result"'+(i<=0?" disabled":"")+'>‹</button><button class="pb" data-pipact="next" title="Next result"'+(i<0||i>=list.length-1?" disabled":"")+'>›</button><button class="pb" data-pipact="toggle" title="'+(sel.mini?"Expand":"Collapse")+'">'+(mq.phone.matches?(sel.mini?"▴":"▾"):"›")+'</button><button class="pb" data-pipact="close" title="Close">×</button></div><div class="pip-body">';
   b+=(u?'<a class="btn sm" href="'+esc(u)+'" target="_blank" rel="noopener">Open the listing ↗</a> ':"")+(src?'<a class="small" href="'+esc(src)+'" target="_blank" rel="noopener">page it was found on</a>':"");
   b+='<div style="margin-top:8px;font-weight:700">'+esc(pp.headline||pl.verdict||"")+"</div>"+(pp.confidenceText?'<div class="small" style="margin-top:2px">'+confBadge(pp)+" "+esc(pp.confidenceText)+"</div>":"");
   b+='<div class="small muted" style="margin-top:6px">€'+num(r.value)+(pl.areaM2?" · "+num(pl.areaM2)+" m²":"")+(pl.units!=null?" · "+esc(pl.units)+" units":"")+" · "+esc([r.place,r.country].filter(Boolean).join(", "))+"</div>";
@@ -1462,18 +1464,21 @@ function renderPip(){
   if(r.verified)b+='<h3>External verifier</h3><div style="color:'+(r.verified.verdict==="confirmed"?"var(--gr)":r.verified.verdict==="refuted"?"var(--rd)":"var(--am)")+'">'+esc(r.verified.verdict)+((r.verified.failed||[]).length?": "+esc(r.verified.failed.join("; ")):"")+"</div>";
   if(pl.path)b+="<h3>Legal path</h3><div>"+esc(pl.path)+"</div>";
   el.innerHTML=b+"</div>";
+  if(body)body.style.paddingBottom=mq.phone.matches?(el.offsetHeight+24)+"px":"";
 }
 document.addEventListener("click",e=>{
   const act=e.target.closest&&e.target.closest("[data-pipact]");
   if(act){
     const sel=STATE.pip;if(!sel)return;const a=act.dataset.pipact;e.stopPropagation();
     if(a==="close"){STATE.pip=null;renderPip();markPip(null);return;}
-    if(a==="toggle"){sel.mini=!sel.mini;savePipPrefs({mini:sel.mini});renderPip();return;}
-    const list=pipList(STATE.project);const i=list.indexOf(sel.url);const n=list[a==="prev"?i-1:i+1];if(n){sel.url=n;renderPip();markPip(n);}return;
+    if(a==="toggle"){sel.mini=!sel.mini;renderPip();return;}
+    const list=pipList(STATE.project,sel.url);const i=list.indexOf(sel.url);const n=list[a==="prev"?i-1:i+1];if(n){sel.url=n;renderPip();markPip(n);}return;
   }
-  const t=e.target.closest&&e.target.closest("[data-pip],#candRows tr[data-url]");
-  if(!t||e.target.closest("a,th,button[data-ctier]"))return;
-  openPip(t.dataset.pip||t.dataset.url);
+  const co=e.target.closest&&e.target.closest("button[data-copp]");
+  if(co){STATE.candOpp=co.dataset.copp;renderResults();return;}
+  const t=e.target.closest&&e.target.closest("#candRows tr[data-url],#outRows tr[data-url]");
+  if(!t||e.target.closest("a,th"))return;
+  openPip(t.dataset.url);
 });
 document.addEventListener("click",e=>{
   const th=e.target.closest&&e.target.closest("th[data-csort]");

@@ -474,7 +474,7 @@ export class SiteAssessor {
         }
         stats.located++;
         let site = this.cachedSite(point.lat, point.lon);
-        if (!site) {
+        if (!site?.climate?.cci) {
           if (ctx.fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
             stats.pending++;
             near.push({ ...row, lat: point.lat, lon: point.lon, site: null, fit: null, siteNote: 'site check queued for the next pass' });
