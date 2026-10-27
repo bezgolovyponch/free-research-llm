@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Verifier, compare, jsonLdOffers, namedCountries, numberOf, obligationsOf, pageAreas, pageCoords, textPrices, campingIndex, campingMonths, humidexOf } from '../../verifier/verify.mjs';
+import { Verifier, compare, jsonLdOffers, namedCountries, numberOf, obligationsOf, pageAreas, pageCoords, textPrices, campingIndex, campingMonths, humidexOf, climateCell } from '../../verifier/verify.mjs';
 
 const project = {
   id: 'p1',
@@ -155,3 +155,26 @@ describe('external verifier: fail-closed verdicts', () => {
   });
 
 });
+
+describe('external verifier: one recent year of daily weather per 0.25 degree cell, fetched once by the verifier itself', () => {
+  it('snaps nearby plots to one cell and stores its 2025 weather for later runs', async () => {
+    const fsp = await import('node:fs/promises');
+    const os = await import('node:os');
+    expect(climateCell({ lat: 40.18764, lon: -8.68305 })).toEqual({ lat: 40.125, lon: -8.625 });
+    expect(climateCell({ lat: 40.2, lon: -8.6 })).toEqual({ lat: 40.125, lon: -8.625 });
+    expect(climateCell({ lat: 40.5, lon: -8.6 })).toEqual({ lat: 40.625, lon: -8.625 });
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'frl-verifier-'));
+    const urls: string[] = [];
+    const fetchImpl = async (url: string) => { urls.push(url); return Response.json({ daily: daily(24, 12) }); };
+    const first = new Verifier({ fetchImpl: fetchImpl as never, sleep: async () => {}, now: () => 0, cacheDir: dir });
+    expect(await first.months({ lat: 40.18764, lon: -8.68305 }, { campingIndexAbove: 3 })).toBe(12);
+    expect(await first.months({ lat: 40.2, lon: -8.6 }, { campingIndexAbove: 3 })).toBe(12);
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain('latitude=40.125&longitude=-8.625&start_date=2025-01-01&end_date=2025-12-31');
+    const second = new Verifier({ fetchImpl: fetchImpl as never, sleep: async () => {}, now: () => 0, cacheDir: dir });
+    expect(await second.months({ lat: 40.19, lon: -8.65 }, { campingIndexAbove: 3 })).toBe(12);
+    expect(urls).toHaveLength(1);
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+});
+

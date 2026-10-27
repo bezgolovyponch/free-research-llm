@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { climateOf } from '../../src/research/cci.mjs';
-import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, fitOf, haversineKm, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, siteKey, zoningOf } from '../../src/research/site.mjs';
+import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, measureOrder, fitOf, haversineKm, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, siteKey, zoningOf } from '../../src/research/site.mjs';
 
 const VIR = { lat: 44.3, lon: 15.09 };
 const DA_NANG = { lat: 16.055, lon: 108.22, name: 'Thai Hoa, Hai Chau, Da Nang, Vietnam' };
@@ -197,7 +197,7 @@ describe('SiteAssessor', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  it('re-measures the climate of a cached site measured before the Camping Climate Index, once, without new map queries', async () => {
+  it('re-measures the climate of a cached site measured before the Camping Climate Index from the stored weather cell, with no new map or weather queries', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-site-'));
     const file = path.join(dir, 'sites.json');
     const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
@@ -210,13 +210,28 @@ describe('SiteAssessor', () => {
     const before = net.calls.length;
     const second = new SiteAssessor({ file, fetchJson: net.fetchJson, sleep: noSleep });
     const out = await second.apply({ ...table, kept: [rows[0]], keptCount: 1 }, brief, {});
-    expect(net.calls.slice(before)).toEqual(['climate']);
+    expect(net.calls.slice(before)).toEqual([]);
     expect(out.kept[0].site.climate.cci).toMatchObject({ monthly: expect.any(Array) });
     await second.writing;
     const third = new SiteAssessor({ file, fetchJson: net.fetchJson, sleep: noSleep });
     await third.apply({ ...table, kept: [rows[0]], keptCount: 1 }, brief, {});
-    expect(net.calls.length).toBe(before + 1);
+    expect(net.calls.length).toBe(before);
     await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('measures the most promising plots first without changing which rows come back or their order', async () => {
+    const store = { points: { 'https://p.example/2': { point: { lat: 40.1, lon: -8.6 } }, 'https://p.example/3': { point: { lat: 41.1, lon: -8.6 } } }, sites: { [siteKey(40.1, -8.6)]: { site: { climate: { cci: {} } } } } };
+    const rows = [{ url: 'https://p.example/0' }, { url: 'https://p.example/1', coast: true }, { url: 'https://p.example/2' }, { url: 'https://p.example/3', coast: true }, { url: 'https://p.example/4', lat: 39, lon: -9 }];
+    expect(measureOrder(rows, store)).toEqual([2, 3, 4, 1, 0]);
+    const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
+    const assessor = new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep });
+    assessor.limits = { newSites: 1, pageReads: 0, budgetMs: 60000 };
+    const first = { title: 'Terreno', url: 'https://p.example/first', lat: 45.2, lon: 14.6, value: 5000, area: 2000 };
+    const late = { title: 'Terreno junto ao mar', url: 'https://p.example/late', lat: VIR.lat, lon: VIR.lon, value: 5000, area: 2000, coast: true };
+    const out = await assessor.measureRows([first, late], { coastal: false }, { readPage: null, onProgress: () => {}, stats: { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 }, started: Date.now(), fresh: 0 });
+    expect(out.near.map((r: { url: string }) => r.url)).toEqual(['https://p.example/first', 'https://p.example/late']);
+    expect(out.near[0].siteNote).toBe('site check queued for the next pass');
+    expect(out.near[1].site).not.toBeNull();
   });
 
   it('drops looked-up places and points from an older store, keeping measured sites', async () => {
