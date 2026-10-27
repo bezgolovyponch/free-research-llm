@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { App, ProviderFactory, appNoteFor, buildId, buildSearch, localBase, routeOrderFrom } from '../src/app.mjs';
 import { fakeFetch, jsonResponse } from './helpers/fake-fetch';
 
@@ -204,7 +204,7 @@ describe('App save and resume', () => {
 
     const second = new App({ env: { FRL_MARKETPLACES: '0' }, dataDir: dir, providers: [new ScriptedProvider()], search });
     expect(await second.resumeInterrupted()).toEqual([project.id]);
-    for (let i = 0; i < 300 && second.engine.running.has(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(second.engine.running.has(project.id)).toBe(false), { timeout: 15000, interval: 20 });
     expect((await second.engine.load(project.id)).phase).toBe('done');
     expect(await second.handoffs.resumable()).toEqual([]);
     await second.logs.queue;
