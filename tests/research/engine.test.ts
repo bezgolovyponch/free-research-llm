@@ -648,4 +648,18 @@ describe('external verifier from the engine', () => {
     engine.startVerification(project);
     expect(runs).toBe(1);
   });
+
+  it('hands the verifier the table being built, not the project file that is saved later', async () => {
+    const { applyVerification } = await import('../../src/research/verification.mjs');
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find plots near the sea in Portugal, 20000EUR max', expected: '2 plots', autoRun: false });
+    const seen: { id: string; candidates: { kept: { url: string }[] }; question: string }[] = [];
+    engine.verifier = { dir: '/nonexistent', run: async (_id: string, snapshot: never) => { seen.push(snapshot); } } as never;
+    engine.collectCandidates = (async () => null) as never;
+    project.candidates = applyVerification({ tiers: { fits: 1 }, keptCount: 1, kept: [{ url: 'https://imo.example/anuncio/fit-ID1', plan: { tier: 'fits' } }] }, null);
+    engine.startVerification(project);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ id: project.id, question: project.question, candidates: { kept: [{ url: 'https://imo.example/anuncio/fit-ID1' }] } });
+  });
 });
