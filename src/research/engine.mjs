@@ -26,6 +26,7 @@ import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
 import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
+import { captureBaseline, championChallenger, lineageFor, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
@@ -485,6 +486,10 @@ export class ResearchEngine {
 
   async researchLeaf(project, node, hint) {
     node.status = 'researching';
+    let champion = null;
+    if (SETTLED.has(node.status) && node.finding) {
+      champion = { finding: node.finding, verification: node.verification };
+    }
     this.emit(project, 'node', `${node.id}: searching sources`, { nodeId: node.id });
     node.sources = await this.gatherSources(project, node);
     if (node.ownerOnly && !node.sources.length) {
@@ -513,12 +518,32 @@ export class ResearchEngine {
       const critique = retryAnyway ? null : await this.critique(node, finding, shown, reply.provider);
       const verification = retryAnyway ? mechanical : verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
+      if (champion) {
+        const decision = championChallenger(champion, { finding, verification }, { noiseFloor: researchNoiseFloor(node) });
+        if (!decision.accept) {
+          node.finding = champion.finding;
+          node.verification = champion.verification;
+          node.status = champion.verification?.grade ?? node.status;
+          node.championKept = true;
+          this.emit(project, 'node', `${node.id}: challenger kept — ${decision.reason}`, { nodeId: node.id });
+        }
+      }
+      if (SETTLED.has(verification.grade)) {
+        this.monitorSettle(project, node);
+      }
       this.router.recordOutcome?.({ provider: reply.provider, purpose: 'research', passed: verification.grade === 'verified' || verification.grade === 'supported' });
       this.emit(project, 'node', `${node.id}: ${verification.grade} (attempt ${attempt}, ${tier} tier, ${reply.provider})`, { nodeId: node.id });
       if (!needsEscalation(verification)) return;
       failures = [...verification.failures, ...(critique?.issues ?? [])];
       if (attempt < MAX_ATTEMPTS) this.emit(project, 'escalate', `${node.id}: checks failed, searching the gaps and escalating to deep tier`, { nodeId: node.id });
     }
+  }
+
+  monitorSettle(project, node) {
+    if (!node.drift?.baseline) captureBaseline(node);
+    lineageFor(node, { previous: node.lineage });
+    const sample = recordSample(node);
+    if (sample) this.emit(project, 'node', `${node.id}: drift sample recorded (score ${sample.score})`, { nodeId: node.id });
   }
 
   async rollup(project, node) {
@@ -716,6 +741,7 @@ export class ResearchEngine {
       const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       this.regrade(project);
+      this.monitorPass(project);
       this.emit(project, 'phase', 'researching sub-questions in dependency order');
       await this.store.save(project);
       const byId = new Map(project.nodes.map((n) => [n.id, n]));
@@ -871,6 +897,16 @@ export class ResearchEngine {
       for (let up = byId.get(node.parentId); up; up = byId.get(up.parentId)) Object.assign(up, { status: 'pending', finding: null, verification: null, critique: null, error: null });
     }
     if (changed.length) this.emit(project, 'edit', `re-graded with the stricter answer check: ${changed.join(', ')} (now weak)`);
+    return changed;
+  }
+
+  monitorPass(project) {
+    const changed = regradeSettled(project.nodes, {
+      isLeaf: (nodes, n) => isLeaf(nodes, n),
+      isSettled: (n) => SETTLED.has(n.status),
+      downgradeTo: 'pending',
+    });
+    if (changed.length) this.emit(project, 'edit', `drift detected, re-researching: ${changed.map((c) => `${c.nodeId} (${c.drift})`).join(', ')}`);
     return changed;
   }
 
