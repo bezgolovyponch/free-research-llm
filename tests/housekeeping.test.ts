@@ -70,6 +70,18 @@ describe('TempSweeper', () => {
     expect((await logs.read('model-calls')).at(-1)).toMatchObject({ i: 50 });
   });
 
+  it('trims llama.out the same way as server.out, so a growing GPU log does not accumulate', async () => {
+    const dir = await dataDir();
+    const logs = new EventLog({ dir: path.join(dir, 'logs') });
+    await fs.writeFile(path.join(dir, 'logs', 'llama.out'), Array.from({ length: 50 }, (_, i) => `llama ${i}`).join('\n'));
+    const sweeper = new TempSweeper({ dataDir: dir, logs, projectExists: async () => true, limits: { ...SWEEP_DEFAULTS, llamaOutMaxBytes: 100, llamaOutKeepLines: 3 } });
+
+    const report = await sweeper.sweep();
+
+    expect(report.trimmedLogs).toEqual(['llama.out']);
+    expect(await fs.readFile(path.join(dir, 'logs', 'llama.out'), 'utf8')).toBe('llama 47\nllama 48\nllama 49');
+  });
+
   it('runs on schedule immediately and stops cleanly', async () => {
     const dir = await dataDir();
     const sweeper = new TempSweeper({ dataDir: dir, logs: new EventLog({ dir: path.join(dir, 'logs') }), projectExists: async () => true });

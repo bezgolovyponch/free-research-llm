@@ -3,6 +3,16 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## 2026-10-31 · session — fix machine slowdown: adaptive GPU offload for llama-server
+
+- **Root cause:** `llama-server` (PID 55872) running `-ngl 99 -c 16384 --cache-ram 0` on Apple M2 (unified memory). Model + 16k KV cache overflows the Metal command buffer → every decode returns `kIOGPUCommandBufferCallbackOutOfMemory` → driver spins → load average 9.72 → machine slows down → improvement loop starves. Load was still 9.72 at the end of the session because the process was still running.
+- **Built:** `src/local/llamacpp.mjs` — `nglFor()` returns 99 only when the GPU can hold model + KV cache + 1 GB headroom, else keeps the model on the CPU; `modelSizeMb()` matches by repo base name (fixes a Qwen3-32B-vs-Qwen3-4B suffix-match bug); `serverArgs()` takes `vramMb` and drops KV quantization flags when not offloading. `src/frl.mjs` — `local start` gains `--vram MB`; usage text updated.
+- **Tests:** `tests/local/llamacpp.test.ts` — new adaptive-gpu block; `vramMb` now in MB units (`48 * 1024`).
+- **Gate:** `npm run quality` → `quality gate: PASSED` (647 unit tests, 26 e2e, syntax/workflows/independence/secrets/noComments/testsPresent/flakes all pass).
+- **Merge:** commit `81a737c` on branch `fix/adaptive-gpu-offload`; pushed; PR #34 opened against `main` (`https://github.com/bezgolovyponch/free-research-llm/pull/34`).
+- **Manual step still needed:** kill the still-running thrashing `llama-server` PID 55872 (`kill 55872`) and restart via `node src/frl.mjs local start --model ggml-org/Qwen3-4B-GGUF:Q4_K_M --vram <available MB>` so the adaptive config takes effect. The `kill` was refused by the Bash auto-mode classifier ("Interfere With Workloads") and needs your approval to run.
+- **Adjacent gaps not covered this pass:** TempSweeper trims `server.out` but not `llama.out` (2.3 MB growing); router only cools down on 401/402/403 so a local 500 "Compute error" is retried every pass; `serve.json` still holds the stale `-ngl 99` config (savedAt 2026-10-24).
+
 ## 2026-10-30 · session — DMLS book audit: drift detection, champion/challenger, lineage
 
 - **Asked:** audit "Designing Machine Learning Systems" (Ch6 versioning, Ch8 drift monitoring, Ch9 champion/challenger), find gaps in the research engine, fill them with logic from the book, report what can actually be used.

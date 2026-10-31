@@ -13,6 +13,8 @@ export const SWEEP_DEFAULTS = Object.freeze({
   logKeepLines: 20000,
   serverOutMaxBytes: 1024 * 1024,
   serverOutKeepLines: 2000,
+  llamaOutMaxBytes: 5 * 1024 * 1024,
+  llamaOutKeepLines: 20000,
 });
 
 export function sweepHoursFrom(env) {
@@ -49,6 +51,7 @@ export class TempSweeper {
     report.orphanLogs = await this.sweepOrphanLogs(now);
     report.trimmedLogs = await this.logs.compact({ maxBytes: this.limits.logMaxBytes, keepLines: this.limits.logKeepLines });
     if (await this.trimServerOut()) report.trimmedLogs.push('server.out');
+    if (await this.trimLlamaOut()) report.trimmedLogs.push('llama.out');
     return report;
   }
 
@@ -99,6 +102,15 @@ export class TempSweeper {
     if (!stat || stat.size <= this.limits.serverOutMaxBytes) return false;
     const lines = (await fs.readFile(file, 'utf8')).split('\n');
     await fs.writeFile(file, lines.slice(-this.limits.serverOutKeepLines).join('\n'));
+    return true;
+  }
+
+  async trimLlamaOut() {
+    const file = path.join(this.logs.dir, 'llama.out');
+    const stat = await fs.stat(file).catch(() => null);
+    if (!stat || stat.size <= this.limits.llamaOutMaxBytes) return false;
+    const lines = (await fs.readFile(file, 'utf8')).split('\n');
+    await fs.writeFile(file, lines.slice(-this.limits.llamaOutKeepLines).join('\n'));
     return true;
   }
 
