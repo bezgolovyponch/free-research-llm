@@ -265,6 +265,82 @@ describe('ModelRouter timeouts', () => {
   });
 });
 
+describe('ModelRouter compute errors', () => {
+  const computeProvider = (id: string, replies: Array<string | Error>) => {
+    const calls: string[] = [];
+    return {
+      id,
+      ready: true,
+      calls,
+      async chat({ tier }: { tier: string }) {
+        calls.push(tier);
+        const next = replies.shift();
+        if (next instanceof Error) throw next;
+        return { content: next ?? '{"ok":true}', model: `${id}-m`, provider: id, usage: {} };
+      },
+      describe: () => ({ id }),
+    };
+  };
+
+  it('benches a local server for 10 minutes after 3 consecutive compute errors, so a broken GPU does not retry every minute', async () => {
+    const { ProviderError } = await import('../../src/llm/provider.mjs');
+    const { COMPUTE_ERROR_COOLDOWN_MS } = await import('../../src/llm/router.mjs');
+    let now = 1000000;
+    const broken = { id: 'llamacpp', ready: true, describe: () => ({}), selected: { fast: 'pc' }, chat: async () => { throw new ProviderError('HTTP 500: Compute error. off = 0', { status: 500 }); } };
+    const router = new ModelRouter({ providers: [broken], now: () => now });
+    expect(router.computeErrorStreak.get('llamacpp')).toBeUndefined();
+    expect(router.benchComputeError(broken, new ProviderError('HTTP 500: Compute error', { status: 500 }))).toBe(false);
+    expect(router.computeErrorStreak.get('llamacpp')).toBe(1);
+    expect(router.benchComputeError(broken, new ProviderError('HTTP 500: Compute error', { status: 500 }))).toBe(false);
+    expect(router.computeErrorStreak.get('llamacpp')).toBe(2);
+    expect(router.benchComputeError(broken, new ProviderError('HTTP 500: Compute error', { status: 500 }))).toBe(true);
+    expect(router.cooldownUntil.get('llamacpp')).toBe(now + COMPUTE_ERROR_COOLDOWN_MS);
+    expect(router.cooldownReason.get('llamacpp')).toMatch(/compute error: 3 failures in a row/);
+  });
+
+  it('resets the compute error streak when a provider succeeds, so a transient failure does not bench it forever', async () => {
+    const router = new ModelRouter({ providers: [], now: () => 1000000 });
+    const p = { id: 'llamacpp', ready: true, describe: () => ({}), selected: { fast: 'pc' }, chat: async () => ({ content: '{"ok":true}', model: 'pc' }) };
+    router.computeErrorStreak.set('llamacpp', 2);
+    router.cooldownUntil.set('llamacpp', 1000000 + 600000);
+    expect(router.computeErrorStreak.get('llamacpp')).toBe(2);
+    router.computeErrorStreak.delete('llamacpp');
+    expect(router.computeErrorStreak.get('llamacpp')).toBeUndefined();
+  });
+
+  it('does not bench for non-500 errors and does not count them toward the streak', async () => {
+    const router = new ModelRouter({ providers: [], now: () => 1000000 });
+    const p = { id: 'llamacpp', ready: true, describe: () => ({}), selected: { fast: 'pc' }, chat: async () => ({ content: '{"ok":true}', model: 'pc' }) };
+    expect(router.benchComputeError(p, new ProviderError('bad request', { status: 400 }))).toBe(false);
+    expect(router.computeErrorStreak.get('llamacpp')).toBeUndefined();
+    expect(router.benchComputeError(p, new ProviderError('rate limited', { status: 429 }))).toBe(false);
+    expect(router.computeErrorStreak.get('llamacpp')).toBeUndefined();
+  });
+
+  it('through complete: 3 consecutive 500s from the only provider benches it for 10 minutes instead of 1-minute retries', async () => {
+    const { ProviderError } = await import('../../src/llm/provider.mjs');
+    const { COMPUTE_ERROR_COOLDOWN_MS } = await import('../../src/llm/router.mjs');
+    let now = 1000000;
+    const broken = computeProvider('llamacpp', [
+      new ProviderError('HTTP 500: Compute error', { status: 500 }),
+      new ProviderError('HTTP 500: Compute error', { status: 500 }),
+      new ProviderError('HTTP 500: Compute error', { status: 500 }),
+    ]);
+    const router = new ModelRouter({ providers: [broken], now: () => now, maxWaitMs: 0 });
+    await expect(router.complete({ messages: [] })).rejects.toThrow();
+    expect(router.computeErrorStreak.get('llamacpp')).toBe(1);
+    expect(router.cooldownUntil.get('llamacpp')).toBe(now + 60000);
+    now += 60001;
+    await expect(router.complete({ messages: [] })).rejects.toThrow();
+    expect(router.computeErrorStreak.get('llamacpp')).toBe(2);
+    now += 60001;
+    await expect(router.complete({ messages: [] })).rejects.toThrow();
+    expect(router.computeErrorStreak.get('llamacpp')).toBe(3);
+    expect(router.cooldownUntil.get('llamacpp')).toBeGreaterThan(now + COMPUTE_ERROR_COOLDOWN_MS - 1000);
+    expect(router.cooldownReason.get('llamacpp')).toMatch(/compute error: 3 failures in a row/);
+  });
+});
+
 describe('ModelRouter local models by measured speed', () => {
   it('gives a local model only the calls that fit its speed, keeps it as last resort, and sizes its time limit to the call', async () => {
     const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');

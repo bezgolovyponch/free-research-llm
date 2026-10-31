@@ -28,6 +28,7 @@ import { clientNodes, clientSweep } from './research/compact.mjs';
 import { HeapGuard } from './heapguard.mjs';
 import { pcSetupCommand, pcSetupScript } from './local/pcsetup.mjs';
 import { ensureLocalModel } from './local/autostart.mjs';
+import { InstanceLock } from './instancelock.mjs';
 import os from 'node:os';
 
 const MAX_BODY = 32 * 1024 * 1024;
@@ -428,6 +429,14 @@ export async function startServer({ app = new App(), port = Number(process.env.P
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const dataDir = process.env.FRL_DATA_DIR || path.join(ROOT_DIR, 'data');
+  await fs.mkdir(dataDir, { recursive: true });
+  const instance = new InstanceLock({ file: path.join(dataDir, 'server.lock') });
+  const claim = await instance.acquire({ host: process.env.HOST || '127.0.0.1', supervised: process.env.FRL_SUPERVISED === '1' });
+  if (!claim.acquired) {
+    console.log(`  another app server (pid ${claim.holder.pid}, started ${claim.holder.startedAt}) already uses ${dataDir}; two servers would run the same loop twice and share one rate limit. Use "node src/frl.mjs restart", or stop pid ${claim.holder.pid} first.`);
+    process.exit(1);
+  }
   const local = process.env.FRL_LOCAL_AUTOSTART === '0' ? { started: false } : await ensureLocalModel({ root: ROOT_DIR }).catch(() => ({ started: false }));
   if (local.started) console.log(`  local model restarted on port ${local.port} (pid ${local.pid}); it is ready once loaded`);
   const secrets = new KeychainSecrets();
@@ -458,6 +467,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     await app.shutdown();
     void app.logs.append('history', { type: 'session', message: `app stopped (${signal}); state saved` });
     await app.logs.queue;
+    await instance.release();
     process.exit(0);
   };
   app.onRestart = () => void stop('restart requested');

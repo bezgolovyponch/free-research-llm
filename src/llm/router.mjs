@@ -14,6 +14,7 @@ export const LOCAL_BUDGET_S = { synthesize: 300, decompose: 300 };
 export const LOCAL_DEFAULT_BUDGET_S = 100;
 export const TIMEOUTS_BEFORE_BENCH = 2;
 export const TIMEOUT_BENCH_MS = 10 * 60 * 1000;
+export const COMPUTE_ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 const TIMED_OUT = /unreachable: timed out/;
 const BAD_KEY_MS = 6 * 3600 * 1000;
 const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
@@ -43,6 +44,7 @@ export class ModelRouter {
     this.cooldownUntil = new Map();
     this.inflight = new Map();
     this.timeoutStreak = new Map();
+    this.computeErrorStreak = new Map();
     this.cooldownReason = new Map();
     this.ledger = [];
     this.calls = 0;
@@ -189,6 +191,20 @@ export class ModelRouter {
     this.cooldownReason.set(provider.id, reason);
   }
 
+  benchComputeError(provider, error) {
+    if (error.status < 500) {
+      this.computeErrorStreak.delete(provider.id);
+      return false;
+    }
+    const streak = (this.computeErrorStreak.get(provider.id) ?? 0) + 1;
+    this.computeErrorStreak.set(provider.id, streak);
+    if (streak < 3) return false;
+    const until = this.now() + COMPUTE_ERROR_COOLDOWN_MS;
+    this.cooldownUntil.set(provider.id, until);
+    this.cooldownReason.set(provider.id, `compute error: ${streak} failures in a row; tried again in ${Math.round(COMPUTE_ERROR_COOLDOWN_MS / 60000)} min`);
+    return true;
+  }
+
   shortestCooldownMs() {
     const time = this.now();
     const waits = this.providers.filter((p) => p.ready).map((p) => (this.cooldownUntil.get(p.id) ?? 0) - time);
@@ -216,6 +232,7 @@ export class ModelRouter {
           const data = json ? extractJson(reply.content) : null;
           this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms: this.now() - started, tokens: reply.usage?.total_tokens ?? null });
           this.timeoutStreak.delete(provider.id);
+          this.computeErrorStreak.delete(provider.id);
           return { ...reply, data };
         } catch (error) {
           this.record({ purpose, tier, provider: provider.id, ok: false, ms: this.now() - started, error: error.message.slice(0, 200) });
@@ -223,6 +240,7 @@ export class ModelRouter {
           if (error instanceof ProviderError) {
             if (this.switchModel(provider, model, error)) break;
             if (this.benchSlow(provider, error)) break;
+            if (this.benchComputeError(provider, error)) break;
             if (error.retryable || [401, 402, 403].includes(error.status)) this.coolDown(provider, error);
             break;
           }

@@ -32,3 +32,18 @@ describe('truncated replies', () => {
     expect(() => extractJson('{"deci')).toThrow(JsonExtractError);
   });
 });
+
+describe('reasoning blocks', () => {
+  it('reads the JSON after a closed <thought> block that contains braces', () => {
+    const reply = '<thought>* Task: ROLLUP. Use {"draft": 1} as a shape</thought>\n{"summary": "ok", "items": [1]}';
+    expect(extractJson(reply)).toEqual({ summary: 'ok', items: [1] });
+  });
+
+  it('reads the JSON after a <think> block', () => {
+    expect(extractJson('<think>plan {a}</think>```json\n{"a": 2}\n```')).toEqual({ a: 2 });
+  });
+
+  it('fails a reply that is only an unfinished reasoning block, quoting the original reply', () => {
+    expect(() => extractJson('<thought>* Task: ROLLUP. {"half": ')).toThrow(/not valid JSON: <thought>/);
+  });
+});

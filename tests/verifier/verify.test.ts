@@ -135,10 +135,11 @@ describe('external verifier: fail-closed verdicts', () => {
     expect(out.verdict).toBe('refuted');
   });
 
-  it('checks only the rows the app calls fits and records what it saw', async () => {
-    const record = await verifier({ 'imo.example': listing(20000, 1640), ...world(2) }).verify({ ...project, candidates: { kept: [row, { ...row, url: 'https://imo.example/anuncio/terreno-2', plan: { tier: 'trade-off' } }] } });
-    expect(record.results).toHaveLength(1);
-    expect(record.confirmed).toEqual([row.url]);
+  it('checks fits first, then trade-offs and rows still to confirm, never weak or blocked rows, and records what it saw', async () => {
+    const as = (n: number, tier: string) => ({ ...row, url: `https://imo.example/anuncio/terreno-${n}`, plan: { tier } });
+    const record = await verifier({ 'imo.example': listing(20000, 1640), ...world(2) }).verify({ ...project, candidates: { kept: [as(2, 'unverified'), as(3, 'weak'), as(4, 'trade-off'), row, as(5, 'blocked')] } });
+    expect(record.results.map((r: { url: string }) => r.url)).toEqual([row.url, as(4, '').url, as(2, '').url]);
+    expect(record.confirmed).toEqual([row.url, as(4, '').url, as(2, '').url]);
     expect(record.inputs).toMatch(/^[0-9a-f]{64}$/);
   });
 

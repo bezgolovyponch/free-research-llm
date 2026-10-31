@@ -1,5 +1,12 @@
 export class JsonExtractError extends Error {}
 
+const REASONING_BLOCK = /<(think|thought|thinking|reasoning)>[\s\S]*?<\/\1>/gi;
+const UNCLOSED_REASONING = /^\s*<(?:think|thought|thinking|reasoning)>[\s\S]*$/i;
+
+export function withoutReasoning(text) {
+  return text.replace(REASONING_BLOCK, '').replace(UNCLOSED_REASONING, '').trim();
+}
+
 function stripFences(text) {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   return fenced ? fenced[1] : text;
@@ -67,7 +74,8 @@ export function closeTruncatedJson(text) {
 
 export function extractJson(text) {
   if (text && typeof text === 'object') return text;
-  const raw = String(text ?? '').trim();
+  const original = String(text ?? '').trim();
+  const raw = withoutReasoning(original);
   const candidates = [raw, stripFences(raw), balancedObject(stripFences(raw)), balancedObject(raw)].filter(Boolean);
   for (const candidate of candidates) {
     for (const attempt of [candidate, withoutTrailingCommas(candidate)]) {
@@ -85,10 +93,10 @@ export function extractJson(text) {
       const parsed = JSON.parse(withoutTrailingCommas(closed));
       if (parsed && typeof parsed === 'object') return Object.assign(parsed, { _truncated: true });
     } catch {
-      return failExtract(raw);
+      return failExtract(original);
     }
   }
-  return failExtract(raw);
+  return failExtract(original);
 }
 
 function failExtract(raw) {
