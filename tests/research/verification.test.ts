@@ -35,7 +35,8 @@ describe('external verification on the app side', () => {
       { url: 'y', verdict: 'confirmed', checks: [] },
     ] };
     const out2 = applyVerification(tradeOff, rec2);
-    expect(candidateDeliverables(out2).map((x) => x.url)).toEqual(['x', 'y']);
+    expect(candidateDeliverables(out2).map((x) => x.url)).toEqual(['x']);
+    expect(out2.kept.find((r: { url: string }) => r.url === 'y').verified).toBeUndefined();
   });
 
   it('knows when the set of rows to verify changed, so the verifier runs again only then', () => {

@@ -28,7 +28,7 @@ export function applyVerification(candidates, record) {
   const byUrl = new Map((record?.results ?? []).map((r) => [r.url, r]));
   const kept = candidates.kept.map((row) => {
     const result = byUrl.get(row.url);
-    if (!result && !verifiable(row)) return row;
+    if (!verifiable(row)) return row;
     const failed = (result?.checks ?? []).filter((c) => c.status !== 'confirmed' && c.check !== 'location source').map((c) => `${c.check}: ${c.status} (${c.detail})`);
     return { ...row, verified: result ? { verdict: result.verdict, failed, at: record.at } : { verdict: 'pending', failed: [], at: null } };
   });
