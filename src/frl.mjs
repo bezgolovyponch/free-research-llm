@@ -447,7 +447,8 @@ const commands = {
       if (!current) return need();
       const helpers = parseHelpers(flag('helpers'));
       const port = Number(flag('port', SERVER_PORT));
-      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split'), parallel: Number(flag('parallel', 1)), kv: flag('kv', '') });
+      const vramMb = Number(flag('vram', 0));
+      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split'), parallel: Number(flag('parallel', 1)), kv: flag('kv', ''), vramMb });
       await secrets.write('LLAMACPP_BASE_URL', `http://127.0.0.1:${port}/v1`).catch(() => {});
       await rememberServe(ROOT, { server: current.server, args, port });
       if (args.includes('--background') || process.argv.includes('--background')) {
@@ -487,7 +488,7 @@ const commands = {
       const speed = speedOf(reply);
       return console.log(speed ? `prefill (reading): ${speed.prefillPerSecond} tokens/s over ${speed.promptTokens} tokens · decode (writing): ${speed.decodePerSecond} tokens/s` : 'no timings in the reply');
     }
-    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N per request] [--parallel N] [--kv q8_0] [--split a,b] [--background] | helper --host LAN-IP [--port 50052] | pc <other PC address> | status | bench');
+    console.log('usage: node src/frl.mjs local install [vulkan|cuda|cpu|metal] | models [--vram GB] | start --model REPO[:QUANT] [--helpers host:port,...] [--ctx N per request] [--parallel N] [--kv q8_0] [--vram MB] [--split a,b] [--background] | helper --host LAN-IP [--port 50052] | pc <other PC address> | status | bench');
   },
 
   async logs() {

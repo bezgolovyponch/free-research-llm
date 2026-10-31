@@ -3,7 +3,16 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
-## 2026-10-20 · session 16 — tree audit (structural gate), diverse piece chat
+## 2026-10-30 · session — DMLS book audit: drift detection, champion/challenger, lineage
+
+- **Asked:** audit "Designing Machine Learning Systems" (Ch6 versioning, Ch8 drift monitoring, Ch9 champion/challenger), find gaps in the research engine, fill them with logic from the book, report what can actually be used.
+- **Built:** `src/research/monitor.mjs` (new) — `numericSignature`, `summaryStats`, `ksTest` (two-sample KS), `slidingWindows`, `driftScore`, `captureBaseline`/`recordSample`/`driftCheck`, `lineageFor`/`findingBasis` (SHA-1 basis hash + parentId + capturedAt), `findingQuality`, `researchNoiseFloor`, `championChallenger`, `regradeSettled`. 21 tests in `tests/research/monitor.test.ts`, all pass.
+- **Integrated into `src/research/engine.mjs`:** `researchLeaf` captures baseline on first settle, runs champion/challenger on re-research (keeps champion unless gain ≥ noise floor), records drift sample with `championKept` flag; `monitorSettle` records lineage + drift sample on every settle; `monitorPass` runs `regradeSettled(..., downgradeTo: 'pending')` in `run()` so drifted settled leaves are re-researched the same run.
+- **Gate:** `node scripts/quality.mjs` — 646 unit tests + 26 e2e pass; syntax, workflows, independence, secrets, noComments, testsPresent, flakes all pass → `quality gate: PASSED`.
+- **Report:** `reports/dmls-audit-2026-10-30.md` — gap mapping (Ch6/Ch8/Ch9 → engine gaps), usable now (drift detection, champion/challenger, lineage/versioning, noise floor), partial/needs care, not implemented, recommendation, verification.
+- **Witness (S7):** read-only run against `cars-to-sell-2000-4000-from-de-t-c97b3f` (19 settled nodes with findings): baselines + drift samples captured for all numeric findings, 0 spurious downgrades, 19/19 champion-kept simulations correctly reject a weaker challenger, noise floors learned (~0.001). No project data written.
+- **Open (follow-ups):** slide `slidingWindows` into `driftCheck`, add a re-research counter guard in `monitorPass`, feature-level monitoring, test-in-production canary, model store — deliberately out of scope for this change.
+
 
 - **Asked:** the tree levels are wrong (screenshot). Audit the decomposition engine and use verification harnesses on it. Make the piece chat more diverse and fix its UI.
 - **Audit of the glamping-plot tree:**

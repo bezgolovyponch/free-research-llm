@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { LlamaCppInstaller, MODELS, aliasFor, assetNames, helperArgs, isPrivateHost, parseHelpers, pickAssets, recommendModel, serverArgs, speedOf } from '../../src/local/llamacpp.mjs';
+import { LlamaCppInstaller, MODELS, aliasFor, assetNames, helperArgs, isPrivateHost, nglFor, parseHelpers, pickAssets, recommendModel, serverArgs, speedOf } from '../../src/local/llamacpp.mjs';
 
 describe('llama.cpp on this computer', () => {
   it('picks the official build for Windows (Vulkan by default, CUDA with its runtime), macOS and Linux', () => {
@@ -17,14 +17,24 @@ describe('llama.cpp on this computer', () => {
   });
 
   it('builds the server command: whole model on the GPU, localhost only, named after the model, helpers over RPC', () => {
-    expect(serverArgs({ model: 'ggml-org/gpt-oss-20b-GGUF', helpers: ['192.168.1.20:50052'] })).toEqual(['-hf', 'ggml-org/gpt-oss-20b-GGUF', '-ngl', '99', '-c', '32768', '-np', '2', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'gpt-oss-20b', '--rpc', '192.168.1.20:50052']);
-    expect(serverArgs({ model: 'C:\\models\\Qwen3-14B-Q4_K_M.gguf', split: '3,1' })).toEqual(expect.arrayContaining(['-m', 'C:\\models\\Qwen3-14B-Q4_K_M.gguf', '-a', 'Qwen3-14B-Q4_K_M', '-ts', '3,1']));
+    expect(serverArgs({ model: 'ggml-org/gpt-oss-20b-GGUF', helpers: ['192.168.1.20:50052'], vramMb: 48 * 1024 })).toEqual(['-hf', 'ggml-org/gpt-oss-20b-GGUF', '-ngl', '99', '-c', '32768', '-np', '2', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'gpt-oss-20b', '--rpc', '192.168.1.20:50052']);
+    expect(serverArgs({ model: 'C:\\models\\Qwen3-14B-Q4_K_M.gguf', split: '3,1', vramMb: 48 * 1024 })).toEqual(expect.arrayContaining(['-m', 'C:\\models\\Qwen3-14B-Q4_K_M.gguf', '-a', 'Qwen3-14B-Q4_K_M', '-ts', '3,1']));
     expect(aliasFor('ggml-org/Qwen3-32B-GGUF:Q4_K_M')).toBe('Qwen3-32B');
     expect(() => serverArgs({})).toThrow(/choose a model/);
-    expect(serverArgs({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', ctx: 16384, parallel: 1, kv: 'q8_0' })).toEqual(['-hf', 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', '-ngl', '99', '-c', '16384', '-np', '1', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'Qwen3-4B']);
+    expect(serverArgs({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', ctx: 16384, parallel: 1, kv: 'q8_0', vramMb: 48 * 1024 })).toEqual(['-hf', 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', '-ngl', '99', '-c', '16384', '-np', '1', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'Qwen3-4B']);
     expect(() => serverArgs({ model: 'x', kv: 'q2' })).toThrow(/--kv takes/);
     expect(parseHelpers(' 192.168.1.20:50052 , mac.local:50052')).toEqual(['192.168.1.20:50052', 'mac.local:50052']);
     expect(() => parseHelpers('192.168.1.20')).toThrow(/host:port/);
+  });
+
+  it('keeps a model on the CPU when its GPU cannot hold it and its KV cache, so the machine does not thrash', () => {
+    expect(nglFor({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', vramMb: 0, ctx: 16384 })).toBe(0);
+    expect(nglFor({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', vramMb: 4096, ctx: 16384 })).toBe(0);
+    expect(nglFor({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', vramMb: 8192, ctx: 4096 })).toBe(99);
+    expect(nglFor({ model: 'ggml-org/gpt-oss-20b-GGUF', vramMb: 48 * 1024, ctx: 16384 })).toBe(99);
+    expect(nglFor({ model: 'ggml-org/Qwen3-32B-GGUF:Q4_K_M', vramMb: 24 * 1024, ctx: 16384 })).toBe(0);
+    expect(nglFor({ model: 'unknown-model', vramMb: 0 })).toBe(99);
+    expect(serverArgs({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', ctx: 16384, parallel: 1, kv: 'q8_0' })).toEqual(['-hf', 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', '-ngl', '0', '-c', '16384', '-np', '1', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'Qwen3-4B']);
   });
 
   it('lets a helper device listen only on a private or Tailscale address, because the RPC server has no password', () => {
