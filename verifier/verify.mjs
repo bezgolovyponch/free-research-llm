@@ -9,6 +9,7 @@ export const AREA_TOLERANCE = 0.05;
 export const DEFAULT_SEA_KM = 25;
 export const FETCH_ATTEMPTS = 3;
 export const RETRY_WAIT_MS = 3000;
+const CHECK_ORDER = { fits: 0, 'trade-off': 1, unverified: 2 };
 const retryable = (status) => status === 429 || status >= 500;
 const UA = 'free-research-llm-verifier (independent check; https://github.com/bezgolovyponch/free-research-llm)';
 const NOMINATIM_REVERSE = 'https://nominatim.openstreetmap.org/reverse';
@@ -301,7 +302,7 @@ export class Verifier {
 
   async verify(project, { onRow = async () => {} } = {}) {
     const ob = obligationsOf(project);
-    const rows = (project.candidates?.kept ?? []).filter((r) => r.plan?.tier === 'fits');
+    const rows = (project.candidates?.kept ?? []).filter((r) => Object.hasOwn(CHECK_ORDER, r.plan?.tier ?? '')).sort((a, b) => CHECK_ORDER[a.plan.tier] - CHECK_ORDER[b.plan.tier]);
     const inputs = crypto.createHash('sha256').update(JSON.stringify({ ob, rows: rows.map((r) => [r.url, r.price, r.currency, r.area, r.lat, r.lon]) })).digest('hex');
     const results = [];
     const record = () => ({ id: project.id, at: new Date(this.now()).toISOString(), inputs, obligations: ob, results: [...results], confirmed: results.filter((r) => r.verdict === 'confirmed').map((r) => r.url), complete: results.length === rows.length });

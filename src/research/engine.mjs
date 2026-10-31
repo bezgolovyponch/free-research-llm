@@ -18,7 +18,7 @@ import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } f
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { applyModel, modelText, verifyKind, withModelRules } from './decision.mjs';
-import { applyVerification, fitsSignature, readVerification } from './verification.mjs';
+import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
@@ -377,11 +377,11 @@ export class ResearchEngine {
     const id = project.id;
     const c = project.candidates;
     if (!c?.verification?.pending || this.verifying.get(id)?.running) return;
-    const signature = fitsSignature(c);
+    const signature = verifiableSignature(c);
     if (this.verifying.get(id)?.signature === signature) return;
     const state = { running: true, signature };
     this.verifying.set(id, state);
-    this.emit(project, 'candidates', `external verifier started on ${c.verification.pending} plot(s) that fit every check: it re-reads each listing and re-measures it with its own code`);
+    this.emit(project, 'candidates', `external verifier started on ${c.verification.pending} plot(s) that fit, are trade-offs or still to confirm (fits first): it re-reads each listing and re-measures it with its own code`);
     const snapshot = { id, question: project.question, guidance: project.guidance, constraints: project.constraints, acceptance: project.acceptance, candidates: c };
     void (async () => {
       try {
