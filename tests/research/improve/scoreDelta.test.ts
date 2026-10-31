@@ -38,6 +38,8 @@ async function removalLoop(verifyAfter: (nodes: Node[]) => void) {
   let clock = 0;
   const improver = new ProjectImprover({ engine, now: () => (clock += 1000), sleep: async () => {} });
   improver.propose = async (_p: unknown, nodeId: string) => (nodeId === 'Q' ? { change: 'drop D4', remove: ['D4'] } : {});
+  const realTrial = improver.trial.bind(improver);
+  improver.trial = (id: string, nodeId: string, state: unknown) => (nodeId === 'Q' ? realTrial(id, nodeId, state) : Promise.resolve({ kept: false }));
   improver.start(created.id, { hours: 0.004 });
   for (let i = 0; i < 500 && improver.isActive(created.id); i++) await new Promise((r) => setTimeout(r, 10));
   const saved = await engine.load(created.id);

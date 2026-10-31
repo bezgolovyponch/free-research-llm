@@ -3,6 +3,18 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-10-31 (6) · the loop tries the whole question last
+
+Asked: a full-cycle pass on the review suggestions: fix, test, merge, audit, fix again.
+
+- **Problem (review suggestion 3):** the whole question (Q) was first in every loop pass. A Q trial re-rolls the whole research, so it was the most-tried target (12 trials, 3 kept in the 2026-10-23 review) and consumed trials that piece-level changes would have used better.
+- **Change:** `improvementTargets` now lists pieces first, by weakness and priority, and Q last. Q keeps its single slot per pass (`tried` set), so a pass still reaches it when pieces are exhausted or resting.
+- **Tests:** `tests/research/improve.test.ts` updated to the new order. `tests/research/improve/scoreDelta.test.ts` (removal record) now stubs piece trials so the removal trial is the only one that runs. It had depended on Q running first: with Q last, piece trials raise the baseline and the removal is correctly reverted, so the test was not measuring the removal in the old form.
+- **Gate:** 694 unit tests pass; e2e fails in this sandbox for the environment reason (WebKit missing, Chromium build mismatch). The Chromium project passes 13 of 13 when run with the installed browser via a temporary config.
+- **Audit (separate read-only session, PR #43):** no concept blocker. Should-fix: with Q last, a deadline inside a pass could end the loop before Q got any trial. Fixed: `nextTarget` makes Q due after `ROOT_EVERY` (3) piece trials in a pass, once per pass, and falls back to Q when every piece is tried, resting or claimed. Tests: `tests/research/improve/nextTarget.test.ts` (6 cases). The audit could not run vitest (plan mode); this run did: 43 improve tests pass.
+- **Audit note, accepted:** a Q trial can run after pieces were kept in the same pass, so a Q removal is judged against the raised baseline. A removal that drops an improved piece is reverted, not lost.
+- **Open:** whether Q should run every pass at all is a product choice; this change only orders it and bounds how long it can wait.
+
 ## Session 2026-10-31 (5) · PR #42 review: synthetic row removed from the cadastral path
 
 - **Defect found in review:** `src/research/engine.mjs` inserted a row with an empty URL, built from a parcel node's finding, into the counted candidate table and raised `found` and `keptCount`. A counted row must come from a listing page the app read (CONCEPT.md step 6). Removed the block; the parcel finding stays in the piece report and memo, not the table.
