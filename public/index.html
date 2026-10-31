@@ -1369,8 +1369,8 @@ const OUT_COLS=[["opp","Opportunity",r=>r.plan&&r.plan.opportunity?-r.plan.oppor
 function sortState(table){STATE.candSort=STATE.candSort||{};return STATE.candSort[table]||(table==="out"?{key:"opp",dir:1}:{key:STATE.project&&STATE.project.candidates&&STATE.project.candidates.proposals?"oppo":"tier",dir:1});}
 function sortedCandidates(rows,table,cols){
   const st=sortState(table);const col=cols.find(c=>c[0]===st.key)||cols[0];
-  const tier=table==="out"?"all":STATE.candTier||"all";const opp=table==="out"?"all":STATE.candOpp||"all";
-  return rows.filter(r=>(tier==="all"||(r.plan&&r.plan.tier===tier))&&(opp==="all"||(r.plan&&r.plan.proposal&&r.plan.proposal.opportunity===opp))).map((r,i)=>[r,i]).sort((a,b)=>{const x=col[2](a[0]),y=col[2](b[0]);return (x<y?-1:x>y?1:a[1]-b[1])*st.dir;}).map(([r])=>r);
+  const tier=table==="out"?"all":STATE.candTier||"all";const opp=table==="out"?"all":STATE.candOpp||"all";const country=table==="out"?"all":STATE.candCountry||"all";
+  return rows.filter(r=>(tier==="all"||(r.plan&&r.plan.tier===tier))&&(opp==="all"||(r.plan&&r.plan.proposal&&r.plan.proposal.opportunity===opp))&&(country==="all"||r.country===country)).map((r,i)=>[r,i]).sort((a,b)=>{const x=col[2](a[0]),y=col[2](b[0]);return (x<y?-1:x>y?1:a[1]-b[1])*st.dir;}).map(([r])=>r);
 }
 function siteCell(r){
   if(!r.site)return (r.coast?"sea stated":"–")+(r.siteNote?'<div class="faint">'+esc(r.siteNote)+"</div>":"");
@@ -1403,6 +1403,8 @@ function candidatesHtml(p){
   if(c.kept.length){
     const tiers=["all","fits","trade-off","unverified","weak","blocked"].filter(x=>x==="all"||!t||t[x]);
     h+='<div class="row" style="gap:4px;margin-top:8px;flex-wrap:wrap"><span class="small faint">Show:</span>'+tiers.map(x=>'<button class="btn '+((STATE.candTier||"all")===x?"secondary":"ghost")+' sm" data-ctier="'+x+'">'+(x==="all"?"All "+c.kept.length:TIER_LABEL[x][1]+(t?" "+t[x]:""))+"</button>").join("")+'<span class="small faint">· click a column to sort</span></div>';
+    const countries=[...new Set((c.kept||[]).concat(c.outside||[]).map(r=>r.country).filter(Boolean))].sort();
+    if(countries.length>1)h+='<div class="row" style="gap:4px;margin-top:6px;flex-wrap:wrap"><span class="small faint">Country:</span>'+["all"].concat(countries).map(x=>'<button class="btn '+((STATE.candCountry||"all")===x?"secondary":"ghost")+' sm" data-ccountry="'+esc(x)+'">'+(x==="all"?"All":x)+"</button>").join("")+'<span class="small faint">· click a column to sort</span></div>';
     h+='<div class="tablewrap"><table class="rtable" id="candRows" style="margin-top:6px">'+head+sortedCandidates(c.kept,"in",CAND_COLS).map(row).join("")+"</table></div>";
   }
   const out=c.outside||[];
@@ -1476,6 +1478,8 @@ document.addEventListener("click",e=>{
   }
   const co=e.target.closest&&e.target.closest("button[data-copp]");
   if(co){STATE.candOpp=co.dataset.copp;renderResults();return;}
+  const cc=e.target.closest&&e.target.closest("button[data-ccountry]");
+  if(cc){STATE.candCountry=cc.dataset.ccountry;renderResults();return;}
   const t=e.target.closest&&e.target.closest("#candRows tr[data-url],#outRows tr[data-url]");
   if(!t||e.target.closest("a,th"))return;
   openPip(t.dataset.url);
