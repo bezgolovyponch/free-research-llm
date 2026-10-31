@@ -110,6 +110,15 @@ export function acceptsTrial(before, after, removed = [], floor = MIN_GAIN) {
 
 const FUTILE = new Set(['repeat', 'reverted-noise', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'reverted-structure']);
 export const REST_AFTER_FUTILE = 3;
+export const ROOT_EVERY = 3;
+
+export function nextTarget(targets, { tried = new Set(), resting = new Set(), root = ROOT_ID, piecesThisPass = 0 } = {}) {
+  const free = (t) => targets.includes(t) && !tried.has(t) && !resting.has(t);
+  if (piecesThisPass >= ROOT_EVERY && free(root)) return root;
+  const piece = targets.find((t) => t !== root && free(t));
+  if (piece) return piece;
+  return free(root) ? root : undefined;
+}
 export const REST_HOURS = 6;
 
 export function restEnds(trials = []) {
@@ -487,7 +496,8 @@ export class ProjectImprover {
         const current = await this.engine.load(id);
         const targets = improvementTargets(current, state.scope ?? [], state.exclude ?? []).filter((t) => !tried.has(t) && !claimed.has(t));
         const resting = restingPieces(current.improve?.trials, this.now());
-        const nodeId = targets.find((t) => !resting.has(t)) ?? (tried.size ? undefined : restRotation(targets, current.improve?.trials));
+        const piecesThisPass = [...tried].filter((t) => t !== ROOT_ID).length;
+        const nodeId = nextTarget(targets, { tried, resting, piecesThisPass }) ?? (tried.size ? undefined : restRotation(targets, current.improve?.trials));
         if (!nodeId) return;
         tried.add(nodeId);
         claimed.add(nodeId);
