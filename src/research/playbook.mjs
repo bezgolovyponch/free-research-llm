@@ -81,7 +81,7 @@ export function gateTrace(node) {
   return [...new Set([...(node.verification?.failures ?? []), ...checks]), ...(node.critique?.issues ?? []).map((i) => `reviewer: ${i}`), ...(node.finding?.gaps ?? []).map((g) => `gap: ${g}`)].slice(0, 10);
 }
 
-export function playbookText(project, node) {
+export function playbookText(project, node, { principles = [] } = {}) {
   const type = pieceType(node);
   const lessons = frontier(project.improve?.trials, project.nodes, type).filter((l) => l.nodeId !== node.id).slice(0, FRONTIER_SHOWN);
   const demos = node.id === ROOT_ID ? [] : demonstrations(project, node);
@@ -89,8 +89,10 @@ export function playbookText(project, node) {
   if (lessons.length) lines.push(`CHANGES THAT RAISED THE MEASURED SCORE ON OTHER PIECES OF THIS TYPE (best one per piece; adapt one if it fits this piece):\n${lessons.map((l) => `- ${l.nodeId} +${l.gain}: ${l.change}${l.diagnosis ? ` (diagnosis: ${l.diagnosis})` : ''}`).join('\n')}`);
   const failing = ledger(project.improve?.trials, project.nodes, type).filter((b) => b.helpful === 0 && b.harmful >= 2).slice(0, LEDGER_SHOWN);
   if (failing.length) lines.push(`CHANGES THAT FAILED ON PIECES OF THIS TYPE AND WERE NEVER KEPT (code refuses a change like these once it failed ${HARMFUL_LIMIT} times on 2+ pieces; propose a different kind of evidence):\n${failing.map((b) => `- tested ${b.harmful} times on ${b.pieces.length} piece(s), 0 kept: ${b.change}`).join('\n')}`);
+  const shared = principles.slice(0, FRONTIER_SHOWN);
+  if (shared.length) lines.push(`PRINCIPLES LEARNED IN OTHER RESEARCHES OF THIS TYPE (gate-decided outcomes; weigh them, the gates still decide):\n${shared.map((p) => `- ${p.statement}`).join('\n')}`);
   if (demos.length) lines.push(`VERIFIED PIECES OF THIS TYPE (their queries and pages passed every gate):\n${demos.map((d) => `- ${d.id}: ${d.question} · queries: ${d.searchQueries.join(' | ') || 'none'}${d.sourceUrls.length ? ` · pages: ${d.sourceUrls.join(' ')}` : ''}`).join('\n')}`);
-  return { text: lines.join('\n\n'), lessons: lessons.length, demos: demos.length, failing: failing.length };
+  return { text: lines.join('\n\n'), lessons: lessons.length, demos: demos.length, failing: failing.length, principles: shared.length };
 }
 
 export function typeStats(trials = [], nodes = []) {
