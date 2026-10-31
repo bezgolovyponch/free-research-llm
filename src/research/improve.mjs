@@ -189,7 +189,7 @@ export function improvementTargets(project, scope = [], exclude = []) {
   const leaves = project.nodes
     .filter((n) => ids.has(n.id) && isLeaf(project.nodes, n) && canGain(project, n))
     .sort((a, b) => (GRADE_RANK[a.status] ?? 0) - (GRADE_RANK[b.status] ?? 0) || b.impact * b.uncertainty - a.impact * a.uncertainty);
-  return [...(exclude.includes(ROOT_ID) ? [] : [ROOT_ID]), ...leaves.map((n) => n.id)];
+  return [...leaves.map((n) => n.id), ...(exclude.includes(ROOT_ID) ? [] : [ROOT_ID])];
 }
 
 function nodeFields(raw, id, parentId) {

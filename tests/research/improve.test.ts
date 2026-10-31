@@ -29,15 +29,16 @@ describe('improve helpers', () => {
     expect(projectScore(project).score).toBeCloseTo(0.6 * 0.5 + 0.4 * projectScore({ ...project, acceptanceResult: null }).score, 3);
   });
 
-  it('targets the structure first, then the weakest, highest-priority leaves', () => {
-    expect(improvementTargets(tree())).toEqual(['Q', 'D2', 'D1.1']);
+  it('targets the weakest, highest-priority pieces first, and the whole question last (a root trial re-rolls the whole research)', () => {
+    expect(improvementTargets(tree())).toEqual(['D2', 'D1.1', 'Q']);
   });
 
   it('limits the loop to the focus of the ticked pieces minus what the user excluded, and scores only that', () => {
     const p = tree();
     expect([...inScope(p.nodes, ['D1'])]).toEqual(['D1', 'D2', 'D1.1', 'D1.2']);
     expect(improvementTargets(p, ['D1'], ['Q'])).toEqual(['D2', 'D1.1']);
-    expect(improvementTargets(p, ['D1'])[0]).toBe('Q');
+    expect(improvementTargets(p, ['D1']).at(-1)).toBe('Q');
+    expect(improvementTargets(p, ['D1']).filter((id) => id === 'Q')).toHaveLength(1);
     expect(improvementTargets(p, ['ghost'], ['Q'])).toEqual([]);
     const only = ['Q', 'D1', 'D2', 'D1.1'];
     expect(scopeScore(p, ['D1.2'], [], only)).toMatchObject({ score: 1, nodes: 1, specs: null });
@@ -61,9 +62,9 @@ describe('improvementTargets', () => {
   it('skips verified pieces that cannot gain, keeps verified pieces that deliver items while the expected result is unmet', () => {
     const leaf = (id: string, status: string, items = 0) => ({ id, parentId: 'D1', status, impact: 3, uncertainty: 3, dependsOn: [], finding: { items: Array.from({ length: items }, (_, i) => ({ url: `https://x.example/${id}/${i}` })) } });
     const project = { nodes: [{ id: 'D1', parentId: 'Q', status: 'supported', dependsOn: [] }, leaf('D1.1', 'weak'), leaf('D1.2', 'verified'), leaf('D1.3', 'verified', 4), leaf('D1.4', 'supported')], acceptanceResult: { score: 0.13 } };
-    expect(improvementTargets(project as never)).toEqual(['Q', 'D1.1', 'D1.4', 'D1.3']);
-    expect(improvementTargets({ ...project, acceptanceResult: { score: 1 } } as never)).toEqual(['Q', 'D1.1', 'D1.4']);
-    expect(improvementTargets({ ...project, acceptanceResult: null } as never)).toEqual(['Q', 'D1.1', 'D1.4']);
+    expect(improvementTargets(project as never)).toEqual(['D1.1', 'D1.4', 'D1.3', 'Q']);
+    expect(improvementTargets({ ...project, acceptanceResult: { score: 1 } } as never)).toEqual(['D1.1', 'D1.4', 'Q']);
+    expect(improvementTargets({ ...project, acceptanceResult: null } as never)).toEqual(['D1.1', 'D1.4', 'Q']);
   });
 });
 
@@ -360,7 +361,7 @@ describe('loop focus for selected pieces', () => {
   it('drops the pieces the user excluded from the highlighted path, including the request', () => {
     expect([...inScope(nodes, ['D1.2'], ['D2', 'D1.3'])].sort()).toEqual(['D1', 'D1.1', 'D1.2', 'D1.2.1', 'D3']);
     const project = { nodes: nodes.map((n) => ({ ...n, status: 'weak', impact: 1, uncertainty: 1 })) };
-    expect(improvementTargets(project, ['D1.2'])[0]).toBe('Q');
+    expect(improvementTargets(project, ['D1.2']).at(-1)).toBe('Q');
     expect(improvementTargets(project, ['D1.2'], ['Q', 'D3'])).not.toContain('Q');
     expect(improvementTargets(project, ['D1.2'], ['Q', 'D3']).sort()).toEqual(['D1.1', 'D1.2.1', 'D1.3']);
   });
