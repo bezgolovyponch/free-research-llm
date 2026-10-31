@@ -3,6 +3,19 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-10-31 (4) · analysis as lead instance: cross-research lessons
+
+Asked: "conduct analysis as a leading instance above all the resolutions and apply improvements so the system learns for further work, with principles and logic expansion".
+
+- **Analysis (what the system already learned from, and where memory stopped):**
+  - Learning that exists: loop trials feed a per-research playbook (`src/research/playbook.mjs`: frontier of kept changes, ledger of failed kinds, demonstrations); CaseBank utility rewards decision-model cases (`src/research/decision.mjs`); ArmBook Thompson sampling for portal yields (`src/research/arms.mjs`); router Beta posteriors per provider and purpose (`src/llm/outcomes.mjs`).
+  - Gap found: the playbook read only `project.improve.trials`. A new research started blind to which change kinds had worked, or failed, on the same kind of piece in earlier researches, so every research relearned the same lessons.
+- **Built:** `src/research/lessons.mjs`. Every gate-decided trial (kept or reverted) is stored in `data/lessons.json` (cap 2000, deduplicated). Principles are derived only when a change kind has at least 3 tests (`PRINCIPLE_MIN_TESTS`): "helps" at keep rate ≥ 0.5, "does not help" at 0, otherwise "mixed". The proposer sees them as **PRINCIPLES LEARNED IN OTHER RESEARCHES** (`playbookText(…, { principles })`), excluding the current research.
+- **Design boundary:** lessons change what the proposer is told, never what is accepted. Keep, revert and refusal still come only from the gates. A cross-research refusal rule was deliberately not added, because a refusal learned in one research would then bind others without their own tests.
+- **Tests:** `tests/research/lessons.test.ts` (5 cases, including restart persistence and the cap); playbook and improve suites unchanged and passing. Gate: 673 unit tests pass; e2e fails in this sandbox for the same reason as before (WebKit missing, Chromium build mismatch).
+- **Witness (S7):** not run on live data. This sandbox has no `data/` research set, so the change is verified by unit tests only. The first live witness is the next loop run on the Mac: `data/lessons.json` should appear after the first trial, and the proposer prompt should then carry the principles section once any change kind reaches 3 tests.
+- **Still open:** principles are not yet shown in the App chat or the Results tab; the cross-research refusal question needs the user's decision; the e2e environment problem is unchanged.
+
 ## Session 2026-10-31 (3) · drift re-research cap, per-tier timeouts, CRLF scripts
 
 Asked: "access free research llm, retrieve unmerged changes and requirements, get them done"; then commit and push; then merge when tested.
