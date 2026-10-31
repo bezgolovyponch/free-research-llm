@@ -95,7 +95,7 @@ export function extractMarkdownLinks(markdown, base) {
   return rankLinks(links, base);
 }
 
-async function fetchJson(fetchImpl, url, init = {}, timeoutMs = 10000) {
+export async function fetchJson(fetchImpl, url, init = {}, timeoutMs = 10000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

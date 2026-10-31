@@ -46,6 +46,21 @@ export const TEMPLATES = [
     decisionRule: 'Judge each plot by its all-in cost (purchase price + preparation to glamping-ready) and its suitability after that work, not by its raw state; rank by risk-adjusted payback; GO only if the base case beats the target and the permit path for both the works and the units is realistic.',
   },
   {
+    id: 'cadastral-deep-research',
+    label: 'Cadastral / land-registry deep research',
+    example: 'What is the cadastral status, boundaries, ownership, zoning and price per m² of this parcel in Türkiye/Portugal/Spain, and is it safe to buy for a rural camping site?',
+    fields: [
+      { key: 'parcel', label: 'Parcel reference', placeholder: 'e.g. cadastral reference, address or map point' },
+      { key: 'country', label: 'Country', placeholder: 'e.g. TR, PT, ES' },
+      { key: 'use', label: 'Intended use', placeholder: 'e.g. rural camping / glamping' },
+    ],
+    drivers: 'cadastral record existence and reference; parcel boundaries and surface; ownership and title status (single owner, shared title, encumbrance); zoning and permitted use; recent comparable price per m²; foreign-buyer and protected-area constraints.',
+    metrics: 'cadastral reference, boundary elements, surface m², title status, zoning, price per m², comparable count',
+    sources: 'official cadastral / land-registry public queries, the open-source Overpass template for parcel boundaries, the municipality zoning plan, comparable listings',
+    decisionRule: 'A parcel is safe to buy only when a cadastral record exists, boundaries are mapped, the title is clear (no shared title, no encumbrance), zoning permits the use and a comparable price per m² exists. Name the piece ids each gate rests on.',
+    itemKind: { label: 'parcel of land', terms: ['parcel', 'land', 'terreno', 'arsa', 'tarla', 'plot', 'terrain', 'lote', 'finca', 'solar'], not: ['rover', 'evoque', 'vehicle', 'motorhome', 'cemetery'] },
+  },
+  {
     id: 'taxes',
     label: 'Taxes (structure, liability, optimisation)',
     example: 'As an IT freelancer in Czech Republic earning €70,000/year, is the flat-rate tax (paušální daň), lump-sum expenses or an s.r.o. company cheaper in 2026, including social and health insurance?',
@@ -83,6 +98,7 @@ export function templateById(id) {
 export function suggestTemplate(question) {
   const q = String(question ?? '').toLowerCase();
   if (/glamp|camp|cabin|hotel|guesthouse|airbnb|occupancy|hospitality|holiday (home|rental)/.test(q)) return 'glamping-location';
+  if (/cadastral|land-registry|land registry|parcel|tapu|kadastre|cadastre|catastro|land title|title deed|hisseli|safe to buy|is this (plot|land|parcel)/.test(q)) return 'cadastral-deep-research';
   if (/\btax|vat|dph|deduct|s\.r\.o|llc|self-employ|freelanc|social (insurance|security)|payroll/.test(q)) return 'taxes';
   if (/compet|rival|\bvs\.?\b|versus|strateg|action plan|go[- ]to[- ]market|positioning|differentiat|outperform|beat\b/.test(q)) return 'competitive-strategy';
   if (/market size|how big|tam|sam|som|break even|break-even/.test(q)) return 'market-sizing';

@@ -1,6 +1,7 @@
 import { plain } from './itemgate.mjs';
 import { PERCEIVED_MAX_C } from './cci.mjs';
 import { COASTLINE_PRECISION_KM } from './coastline.mjs';
+import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
 import { zoningOf, explorePoints, haversineKm } from './site.mjs';
 
 export const STRATEGY_TTL_MS = 7 * 24 * 3600 * 1000;
@@ -81,8 +82,26 @@ export const GLAMPING_LOW_ENTRY = {
     },
   },
 };
+export const CADASTRAL_STRATEGY = {
+  id: 'cadastral-deep-research',
+  templates: ['cadastral-deep-research'],
+  label: 'Cadastral / land-registry deep research: is this parcel safe to buy?',
+  checkedAt: '2026-10-31',
+  gates: CADASTRAL_GATES.map((g) => g.id),
+  sources: [
+    { id: 'overpass-template', title: 'OpenStreetMap Overpass API parcel & boundary query (open-source template)', url: 'https://overpass-api.de/api/interpreter', quotes: [] },
+    { id: 'cpd-public', title: 'Portugal Caderneta Predial / land registry public query', url: 'https://www.cm-lisboa.pt/', quotes: [] },
+    { id: 'catastro-public', title: 'Spain Catastro parcel reference and surface', url: 'https://www.sede.catastro.gob.es/', quotes: [] },
+    { id: 'tapu-public', title: 'Türkiye TAPU ve Kadastro public parcel query', url: 'https://gm-tkbm.tkgm.gov.tr/', quotes: [] },
+  ],
+  countries: {
+    PT: { path: 'Caderneta predial + registo predial (municipality + land registry)', taxLabel: 'IMT 5% (rural) or 6.5% (urban) + stamp duty 0.8%', sources: ['cpd-public'] },
+    ES: { path: 'Catastro parcel reference + nota simple for ownership', taxLabel: 'ITP varies by region', sources: ['catastro-public'] },
+    TR: { path: 'Tapu & Kadastro public parcel query; ownership needs e-Devlet', taxLabel: 'title-deed fee 2% paid by the buyer', sources: ['tapu-public'] },
+  },
+};
 
-const STRATEGIES = [GLAMPING_LOW_ENTRY];
+const STRATEGIES = [GLAMPING_LOW_ENTRY, CADASTRAL_STRATEGY];
 const INDUSTRIAL = /zona industrial|industrial zone|estaleiro|armaz[eé]m|pol[ií]gono industrial|sanayi/i;
 const SHARED_TITLE = /hisseli|hisse(?:li)? tapu|shared title|quota[- ]part/i;
 export const STRONG_EXPLORE = 20;
@@ -321,8 +340,28 @@ export function implausiblyCheap(row, medians, rows = []) {
   return near !== null ? `€${perM2.toFixed(2)}/m² is a low outlier among the ${local.n} priced plots within ${LOCAL_KM} km (median €${local.median.toFixed(2)}/m²; outliers below €${Math.exp(near).toFixed(2)}/m² by median − 2.5 MAD): the price may be a deposit, a share or a placeholder; check it on the listing` : null;
 }
 
+export function applyCadastralStrategy(candidates, strategy, { retrieved = null } = {}) {
+  const rows = (candidates.kept ?? []).map((row) => ({ ...row, plan: cadastralPlan(row) }));
+  rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || b.plan.share - a.plan.share);
+  const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
+  return {
+    ...candidates,
+    kept: rows,
+    keptCount: tiers.fits,
+    tiers,
+    strategy: {
+      id: strategy.id,
+      label: strategy.label,
+      gates: strategy.gates,
+      sources: strategy.sources.map(({ id, title, url }) => ({ id, title, url, quoted: false, ...(retrieved?.[id] ?? {}) })),
+      retrievedAt: retrieved?.at ?? null,
+    },
+  };
+}
+
 export function applyStrategy(candidates, strategy, { convert = null, retrieved = null, foundation = null } = {}) {
   if (!candidates || !strategy) return candidates;
+  if (strategy.gates) return applyCadastralStrategy(candidates, strategy, { retrieved });
   const model = foundation ? { ...strategy, rules: foundation.rules } : strategy;
   const euHpi = candidates.sites?.euHpi ?? null;
   const trends = candidates.sites?.trends ?? null;
