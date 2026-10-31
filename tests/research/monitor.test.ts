@@ -193,6 +193,28 @@ describe('findingBasis / lineageFor', () => {
 });
 
 describe('regradeSettled', () => {
+  it('stops re-researching a leaf after the drift re-research limit', () => {
+    const drifted = () => ({
+      id: 'D1',
+      parentId: 'Q',
+      status: 'verified',
+      finding: { answer: 'x', claims: [{ text: '100', value: 100 }] },
+      drift: {
+        baseline: { at: 't0', values: [100], stats: summaryStats([100]) },
+        samples: [{ at: 't1', values: [100, 100, 1000], stats: summaryStats([100, 100, 1000]), test: { D: 0.33, p: 0.01, significant: true }, score: 0.48 }],
+      },
+    });
+    const node = drifted();
+    const opts = { isLeaf: () => true, isSettled: (n: { status: string }) => n.status === 'verified', downgradeTo: 'pending' };
+    for (let run = 1; run <= 2; run++) {
+      expect(regradeSettled([node], opts).length).toBe(1);
+      node.status = 'verified';
+    }
+    expect(node.driftResearches).toBe(2);
+    expect(regradeSettled([node], opts)).toEqual([]);
+    expect(node.status).toBe('verified');
+  });
+
   it('downgrades a settled leaf with significant drift to weak', () => {
     const makeNode = (status: string) => ({
       id: 'D1',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
-import { ModelRouter, NoModelAvailableError, estimateTokens, nextUtcMidnight } from '../../src/llm/router.mjs';
+import { ModelRouter, NoModelAvailableError, estimateTokens, nextUtcMidnight, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -17,6 +17,14 @@ function provider(id: string, replies: Array<string | Error>) {
     describe: () => ({ id }),
   };
 }
+
+describe('tierTimeoutMs', () => {
+  it('gives fast calls a shorter timeout than deep calls', () => {
+    expect(tierTimeoutMs('fast')).toBe(45000);
+    expect(tierTimeoutMs('deep')).toBe(90000);
+    expect(tierTimeoutMs('vision')).toBeUndefined();
+  });
+});
 
 describe('ModelRouter', () => {
   it('fails over on 429 and cools the provider down', async () => {

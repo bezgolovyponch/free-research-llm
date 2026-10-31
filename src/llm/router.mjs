@@ -9,6 +9,10 @@ const DEFAULT_COOLDOWN_MS = 60000;
 export const SLOW_FACTOR = 4;
 export const SLOW_FLOOR_MS = 20000;
 const MIN_TIMED_CALLS = 3;
+export const TIER_TIMEOUT_MS = { fast: 45000, deep: 90000 };
+export function tierTimeoutMs(tier) {
+  return TIER_TIMEOUT_MS[tier];
+}
 export const EXPECTED_OUTPUT_TOKENS = { synthesize: 1500, decompose: 1500, research: 800, improve: 500, suggest: 600, critique: 300, rollup: 400, 'decision-model': 700 };
 export const LOCAL_BUDGET_S = { synthesize: 300, decompose: 300 };
 export const LOCAL_DEFAULT_BUDGET_S = 100;
@@ -227,7 +231,7 @@ export class ModelRouter {
         const model = provider.selected?.[tier] ?? provider.selected?.fast;
         this.inflight.set(provider.id, (this.inflight.get(provider.id) ?? 0) + 1);
         try {
-          const reply = await provider.chat({ messages: attemptMessages, tier, json, temperature, timeoutMs: provider.timeoutFor?.(estimateTokens(attemptMessages), EXPECTED_OUTPUT_TOKENS[purpose] ?? 500) });
+          const reply = await provider.chat({ messages: attemptMessages, tier, json, temperature, timeoutMs: provider.timeoutFor?.(estimateTokens(attemptMessages), EXPECTED_OUTPUT_TOKENS[purpose] ?? 500) ?? tierTimeoutMs(tier) });
           this.calls++;
           const data = json ? extractJson(reply.content) : null;
           this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms: this.now() - started, tokens: reply.usage?.total_tokens ?? null });

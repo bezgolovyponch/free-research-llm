@@ -9,6 +9,7 @@ export const KS_ALPHA = 0.05;
 export const RESEARCH_NOISE_FLOOR = 0.05;
 export const MAX_DRIFT_SAMPLES = 24;
 export const MAX_VERSIONS = 20;
+export const MAX_DRIFT_RESEARCHES = 2;
 
 const NUMBER_RE = /(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])/g;
 const VERSION_STAMP = /^[0-9a-f]{12}@/;
@@ -222,6 +223,8 @@ export function regradeSettled(nodes, { isLeaf, isSettled, now = Date.now, downg
     if (!isSettled(node)) continue;
     const drift = driftCheck(node);
     if (!drift || drift.score < DRIFT_DOWNGRADE) continue;
+    if ((node.driftResearches ?? 0) >= MAX_DRIFT_RESEARCHES) continue;
+    node.driftResearches = (node.driftResearches ?? 0) + 1;
     node.status = downgradeTo;
     node.verification = { ...(node.verification ?? {}), grade: downgradeTo, drift };
     changed.push({ nodeId: node.id, drift: drift.score, reason: drift.summary, at: new Date(now()).toISOString() });
