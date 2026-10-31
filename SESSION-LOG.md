@@ -3,6 +3,17 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-10-31 (3) · drift re-research cap, per-tier timeouts, CRLF scripts
+
+Asked: "access free research llm, retrieve unmerged changes and requirements, get them done"; then commit and push; then merge when tested.
+
+- **Unmerged work check:** 27 feature branches were already merged into main (0 commits ahead). The 15 `recovered/*` branches held stash-style commits whose patches are already in main; the one real patch (`recovered/portals-thompson`) was merged as PR #22. No open PRs were found by the REST check (GraphQL is blocked in Claude Code sessions).
+- **Drift re-research cap (PR #38, merged `90e7319`):** a settled leaf whose drift never cleared was re-researched on every run, because the baseline was never reset. `regradeSettled` now allows two drift re-research passes per leaf (`MAX_DRIFT_RESEARCHES`, `node.driftResearches`). Test: `tests/research/monitor.test.ts`.
+- **Per-tier call timeouts (PR #38):** fast calls time out at 45 s and deep calls at 90 s, down from a flat 120 s (`TIER_TIMEOUT_MS`, `tierTimeoutMs` in `src/llm/router.mjs`). Local timeouts still come from `timeoutFor`. Test: `tests/llm/router.test.ts`.
+- **CRLF `.cmd` scripts (PR #39, merged `5803743`):** `keys.cmd` and `start.cmd` were stored with CRLF blobs while `.gitattributes` expects LF, so git reported them modified on every checkout. Renormalized with `git add --renormalize`; content unchanged.
+- **Gate:** `npm run quality` passed every gate except e2e, which fails here because WebKit is not installed and the Chromium build is `-1243` where the config expects `-1248`. CI passed on Node 22 and 24 for both PRs before merge.
+- **Still open:** e2e cannot run in this sandbox; the review suggestions (one loop per set of free keys, Teammate Stop affecting only that teammate's lane, Q trials once per pass, removing the free-model coder, removing the SambaNova preset, documentation sprawl) need product decisions before any change.
+
 ## Session 2026-10-31 (2) · two servers on one data folder, Gemini reasoning replies, verifier stalled at 0 fits
 
 Asked: "access free llm research and audit last changes, find core deployment and process issue, engine failures, etc., fix and push, merge".
