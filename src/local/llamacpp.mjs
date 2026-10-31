@@ -76,12 +76,30 @@ const KV_TYPES = new Set(['f16', 'q8_0', 'q4_0']);
 export const PROMPT_CACHE_MIB = 0;
 export const SLEEP_IDLE_SECONDS = 300;
 
-export function serverArgs({ model, helpers = [], port = SERVER_PORT, ctx = 16384, split = '', parallel = 2, kv = '', cacheRam = PROMPT_CACHE_MIB, sleepIdle = SLEEP_IDLE_SECONDS }) {
+export const KV_MB_PER_TOKEN = 0.5;
+export const GPU_OVERHEAD_MB = 1024;
+
+export function modelSizeMb(model) {
+  if (!model) return null;
+  const base = String(model).split(':')[0].split('/').pop();
+  const found = MODELS.find((m) => m.hf.split(':')[0].split('/').pop() === base);
+  return found ? found.size * 1024 : null;
+}
+
+export function nglFor({ model, vramMb = 0, ctx = 4096 } = {}) {
+  const sizeMb = modelSizeMb(model);
+  if (!sizeMb) return 99;
+  const kvMb = Math.round(ctx * KV_MB_PER_TOKEN);
+  return vramMb > 0 && vramMb >= sizeMb + kvMb + GPU_OVERHEAD_MB ? 99 : 0;
+}
+
+export function serverArgs({ model, helpers = [], port = SERVER_PORT, ctx = 16384, split = '', parallel = 2, kv = '', cacheRam = PROMPT_CACHE_MIB, sleepIdle = SLEEP_IDLE_SECONDS, vramMb = 0 }) {
   if (!model) throw new Error('choose a model, e.g. --model ggml-org/gpt-oss-20b-GGUF');
   if (kv && !KV_TYPES.has(kv)) throw new Error(`--kv takes one of ${[...KV_TYPES].join(', ')}`);
   const source = /\.gguf$/i.test(model) ? ['-m', model] : ['-hf', model];
   const slots = Math.max(1, Math.floor(Number(parallel) || 1));
-  return [...source, '-ngl', '99', '-c', String(ctx * slots), '-np', String(slots), ...(kv ? ['-fa', 'on', '-ctk', kv, '-ctv', kv] : []), '--cache-ram', String(cacheRam), ...(sleepIdle > 0 ? ['--sleep-idle-seconds', String(sleepIdle)] : []), '--host', '127.0.0.1', '--port', String(port), '-a', aliasFor(model), ...(helpers.length ? ['--rpc', helpers.join(',')] : []), ...(split ? ['-ts', split] : [])];
+  const ngl = nglFor({ model, vramMb, ctx: ctx * slots });
+  return [...source, '-ngl', String(ngl), '-c', String(ctx * slots), '-np', String(slots), ...(kv && ngl ? ['-fa', 'on', '-ctk', kv, '-ctv', kv] : []), '--cache-ram', String(cacheRam), ...(sleepIdle > 0 ? ['--sleep-idle-seconds', String(sleepIdle)] : []), '--host', '127.0.0.1', '--port', String(port), '-a', aliasFor(model), ...(helpers.length ? ['--rpc', helpers.join(',')] : []), ...(split ? ['-ts', split] : [])];
 }
 
 export function helperArgs({ host, port = HELPER_PORT, cache = true }) {
