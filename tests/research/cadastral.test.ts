@@ -67,3 +67,19 @@ describe('cadastralExplain', () => {
     expect(e.trade.join(' ')).toContain('encumbrance');
   });
 });
+
+describe('cadastral strategy adds no rows of its own', () => {
+  it('leaves kept rows and counts untouched when no listing was read', async () => {
+    const { applyStrategy, CADASTRAL_STRATEGY } = await import('../../src/research/strategy.mjs');
+    const out = applyStrategy({ kept: [], found: 0, keptCount: 0 }, CADASTRAL_STRATEGY);
+    expect(out.kept).toEqual([]);
+    expect(out.found).toBe(0);
+    expect(out.keptCount).toBe(0);
+  });
+
+  it('never returns a counted row without a listing link', async () => {
+    const { applyStrategy, CADASTRAL_STRATEGY } = await import('../../src/research/strategy.mjs');
+    const out = applyStrategy({ kept: [{ id: 'x', url: 'https://example.test/parcel', title: 'p', price: 1 }], found: 1, keptCount: 1 }, CADASTRAL_STRATEGY);
+    expect(out.kept.every((r) => typeof r.url === 'string' && r.url.length > 0)).toBe(true);
+  });
+});

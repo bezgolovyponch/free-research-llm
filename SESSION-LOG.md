@@ -3,6 +3,13 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-10-31 (5) · PR #42 review: synthetic row removed from the cadastral path
+
+- **Defect found in review:** `src/research/engine.mjs` inserted a row with an empty URL, built from a parcel node's finding, into the counted candidate table and raised `found` and `keptCount`. A counted row must come from a listing page the app read (CONCEPT.md step 6). Removed the block; the parcel finding stays in the piece report and memo, not the table.
+- **Tests:** `tests/research/cadastral.test.ts` adds two cases: the cadastral strategy leaves kept rows and counts unchanged when no listing was read, and every counted row keeps a non-empty URL. Note: these guard the strategy function; the engine block itself was deleted, so they do not reproduce the original injection on their own.
+- **Gate:** 694 unit tests pass; e2e fails in this sandbox for the same environment reason as before.
+- **Worker session** `session_01XUYXfwhrpybfFL6TrgfNba` was interrupted before it pushed; this fix was made directly on the PR branch.
+
 ## Session 2026-10-31 (4) · analysis as lead instance: cross-research lessons
 
 Asked: "conduct analysis as a leading instance above all the resolutions and apply improvements so the system learns for further work, with principles and logic expansion".

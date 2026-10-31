@@ -332,18 +332,6 @@ export class ResearchEngine {
       if (s?.pending) this.startSiteWarm(project.id, raw, brief);
       if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate from 2025 daily weather per 0.25° cell, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
-    if (strategy?.gates) {
-      const parcelNode = project.nodes.find((n) => n.id !== ROOT_ID && n.finding) ?? project.nodes.find((n) => n.finding);
-      if (parcelNode) {
-        const row = { id: parcelNode.id, title: project.question.slice(0, 160), url: '', finding: parcelNode.finding, nodeId: parcelNode.id, via: ['tree'] };
-        table = {
-          ...table,
-          kept: [row, ...(table.kept ?? [])],
-          found: table.found + 1,
-          keptCount: (table.kept ?? []).length + 1,
-        };
-      }
-    }
     if (strategy) {
       table = applyStrategy(table, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
       const t = table.tiers;
