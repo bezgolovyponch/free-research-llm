@@ -12,6 +12,17 @@ Asked: "access free llm research and audit last changes, find core deployment an
 - **Gemini reasoning replies:** 79 calls failed with "model reply is not valid JSON: <thought>…". Braces inside the thought block were parsed as the answer. `extractJson` now strips closed `<think>/<thought>/<thinking>/<reasoning>` blocks, and a reply that is only an unfinished thought fails with the original text quoted. Tests in `tests/research/json.test.ts`.
 - **Verifier stalled at 0 fits (the gap the previous entry held back):** the verifier and the app's "pending" count looked only at fits-tier rows. With 0 fits it last ran on 2026-10-29 21:25Z, and the 248 trade-off and to-confirm rows it had not seen were never checked. Now the verifier checks fits, then trade-offs, then rows still to confirm (never weak or blocked). The app marks unchecked rows of those tiers as pending and reruns the verifier when that set changes. Witness on `find-appropriate-plots-to-buy-fo-b7772e`: 500 rows to check, 243 confirmed (still counted), 9 unconfirmed, 248 pending (the verifier would previously never start).
 
+## Follow-up: T1–T4 (m-88 lead protocol), 2026-10-31
+
+Asked: optimize PR #35; rebase and merge PR #32; verdicts on dependabot ×2; git cherry table for 15 recovered/* branches. Work tree: /Users/m/frl-wt-t1.
+
+- **T1 (PR #35 → PR #36, opt/verif-review):** `applyVerification` widened so weak/blocked rows never receive a stale verified verdict and never count as deliverables (main's `verification.mjs` line 31: `if (!verifiable(row)) return row`). Quality PASSED; PR #36 CI green. → #36 merged (m-88).
+- **T2 (PR #32, feat/site-fallback):** rebased onto main `56fd590`; quality PASSED (666 tests, e2e 26, flakes 3×); CI green on Node 22 and Node 24. Verdict **KEEP** → merged as #32 (commit `6ed3ead` → merge `72add73`).
+- **T3 (dependabot ×2):** both branches superseded by main — checkout@v7/setup-node@v7/upload-artifact@v7 and vitest ^5.0.5 already in main; Playwright image v1.64.1-noble matches lockfile. No open PRs, no CI to track. Verdict **CLOSE** both.
+- **T4 (recovered/*):** `git cherry` vs main for all 15 branches. 14 branches unique_n=0 → DEL. `recovered/portals-thompson/41afbe3` unique_n=1 but is PR #22's Thompson sampling + reciprocal-rank fusion already in main (byte-identical arms.mjs, search.mjs RRF/fuseByRank/RRF_K, arms.test.ts) → DEL as superseded. **15 recovered/* superseded, deletion left to user** (branch deletion refused by perm check). No deletes performed.
+
+Live after merge: 1 srv pid 98421 lock OK (`src/instancelock.mjs` `data/server.lock`), 2nd start exit=1; verifier started 204 rows 11:41Z; acceptance 100%. quality PASS, PR.
+
 ## Session 2026-10-31 · the loop was stalled: verifier confirmed 267 plots, the app counted 0
 
 Asked: "access free research llm, why the current process is slowing down the entire machine and the improvement loop? Review last changes, cache clearing, logic engine productivity, find the core issues then push test merge yourself" … "after all the core issues fixed please merge the rest of the changes to improve current loop's productivity".
