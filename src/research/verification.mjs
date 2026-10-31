@@ -23,8 +23,8 @@ export function applyVerification(candidates, record) {
   if (!candidates?.tiers) return candidates;
   const byUrl = new Map((record?.results ?? []).map((r) => [r.url, r]));
   const kept = candidates.kept.map((row) => {
-    if (row.plan?.tier !== 'fits') return row;
     const result = byUrl.get(row.url);
+    if (!result && row.plan?.tier !== 'fits') return row;
     const failed = (result?.checks ?? []).filter((c) => c.status !== 'confirmed' && c.check !== 'location source').map((c) => `${c.check}: ${c.status} (${c.detail})`);
     return { ...row, verified: result ? { verdict: result.verdict, failed, at: record.at } : { verdict: 'pending', failed: [], at: null } };
   });

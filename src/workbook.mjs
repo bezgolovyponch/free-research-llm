@@ -45,7 +45,7 @@ export function plotRows(project) {
     const m2 = num(plan.areaM2);
     const inTitle = titleAreaM2(r.title);
     const matches = inTitle === null || m2 === '' ? '' : Math.abs(inTitle - m2) / Math.max(inTitle, m2) <= AREA_TOLERANCE ? 'yes' : 'NO: check the listing';
-    const counted = plan.tier === 'fits' && (!r.verified || r.verified.verdict === 'confirmed') && list === 'your countries';
+    const counted = (r.verified?.verdict === 'confirmed' || (!c.verification && plan.tier === 'fits')) && list === 'your countries';
     const byId = new Map((plan.checks ?? []).map((k) => [k.id, k]));
     return [
       list,

@@ -128,7 +128,7 @@ export function buildCandidates(nodes, brief, options = {}) {
 }
 
 export function candidateDeliverables(candidates) {
-  return (candidates?.kept ?? []).filter((row) => !row.plan || (row.plan.tier === 'fits' && (!candidates.verification || row.verified?.verdict === 'confirmed'))).map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
+  return (candidates?.kept ?? []).filter((row) => !row.plan || row.verified?.verdict === 'confirmed' || (!candidates.verification && row.plan.tier === 'fits')).map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
 }
 
 function siteText(row) {

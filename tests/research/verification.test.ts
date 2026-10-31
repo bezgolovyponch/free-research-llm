@@ -25,6 +25,19 @@ describe('external verification on the app side', () => {
     expect(applyVerification({ kept: [] }, record)).toEqual({ kept: [] });
   });
 
+  it('counts verifier-confirmed rows as deliverables even when they are not fits-tier', () => {
+    const out = applyVerification(table, record);
+    const d = candidateDeliverables(out);
+    expect(d.map((x) => x.url)).toEqual(['a']);
+    const tradeOff = { ...table, kept: [row('x', 'trade-off'), row('y', 'weak')] };
+    const rec2 = { at: record.at, results: [
+      { url: 'x', verdict: 'confirmed', checks: [] },
+      { url: 'y', verdict: 'confirmed', checks: [] },
+    ] };
+    const out2 = applyVerification(tradeOff, rec2);
+    expect(candidateDeliverables(out2).map((x) => x.url)).toEqual(['x', 'y']);
+  });
+
   it('knows when the set of fits changed, so the verifier runs again only then', () => {
     expect(fitsOf(table)).toEqual(['a', 'b', 'c']);
     expect(fitsSignature(table)).toBe(fitsSignature({ kept: [...table.kept].reverse() }));
