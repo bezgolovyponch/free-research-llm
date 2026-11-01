@@ -123,7 +123,7 @@ export function buildSearch({ env, fetchImpl, recipes = null, browser = null }) 
 }
 
 const HISTORY_EVENT = /^(created|report|acceptance|improve-state|error):|^phase:(done|stopped|tree ready)/;
-const RUNNING_PHASES = new Set(['decomposing', 'researching', 'synthesizing']);
+const INTERRUPTIBLE_PHASES = new Set(['decomposing', 'researching', 'synthesizing', 'building-tree']);
 const PLATFORM_NAMES = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
 
 export function appNoteFor(event, project) {
@@ -498,7 +498,7 @@ export class App {
   async settleStale() {
     const settled = [];
     for (const p of await this.store.list()) {
-      if (!RUNNING_PHASES.has(p.phase) || this.engine.running.has(p.id) || this.improver.isActive(p.id)) continue;
+      if (!INTERRUPTIBLE_PHASES.has(p.phase) || this.engine.running.has(p.id) || this.improver.isActive(p.id)) continue;
       try {
         const project = await this.engine.load(p.id);
         project.phase = 'cancelled';

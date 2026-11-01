@@ -83,6 +83,7 @@ test('builds a tree, opens a piece as a sheet, chats in it, runs, and finds it i
   await expect(page.locator('#inspector')).not.toHaveClass(/\bon\b/);
 
   await page.locator('#btnRun').click();
+  await expect(page.locator('#phasePill')).toContainText('done', { timeout: 40000 });
   await page.locator('.tabs .tab', { hasText: 'Report' }).click();
   await expect(page.locator('#reportBody .verdict')).toContainText('GO-IF', { timeout: 40000 });
   await noSideScroll(page);

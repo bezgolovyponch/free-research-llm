@@ -147,6 +147,18 @@ describe('ResearchEngine', () => {
     expect(built.acceptance).toMatchObject({ expected: '5 links', itemCount: 5, urlsLive: true, locked: true });
   });
 
+  it('marks a tree-only build as building the tree, not as a research run, and ends it tree-ready', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Which Czech city is best for a small bakery?' });
+    const phases: string[] = [];
+    const save = engine.store.save.bind(engine.store);
+    engine.store.save = async (p: { phase: string }) => { phases.push(p.phase); return save(p as never); };
+    const built = await engine.buildTree(project.id);
+    expect(phases).toContain('building-tree');
+    expect(phases).not.toContain('decomposing');
+    expect(built.phase).toBe('tree-ready');
+  });
+
   it('researches independent pieces in parallel lanes, adds a lane when a teammate joins, and gives the same result as one lane', async () => {
     const slow = new ScriptedProvider();
     let live = 0;

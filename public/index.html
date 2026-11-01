@@ -570,7 +570,7 @@
 <script>
 "use strict";
 const STATUS_COLOR={verified:"var(--gr)",supported:"var(--tl)",weak:"var(--am)",unsupported:"var(--rd)",failed:"var(--rd)",researching:"var(--bl)",pending:"var(--gray)"};
-const RUNNING_PHASES=["decomposing","researching","synthesizing"];
+const RUNNING_PHASES=["decomposing","researching","synthesizing"];const BUSY_PHASES=[...RUNNING_PHASES,"building-tree"];
 const STATE={checked:new Set(),excluded:new Set(),mapSelect:false,templates:[],status:null,projects:[],project:null,selected:"Q",templateId:"auto",csv:null,es:null,view:null,drawQueued:false,pane:"tree",page:"home"};
 const $=(id)=>document.getElementById(id);
 const esc=(s)=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -808,7 +808,7 @@ function renderProjectList(){
   const groups=groupProjects(STATE.projects,$("projFilter").value);
   const cur=STATE.page==="project"&&STATE.project?STATE.project.id:"";
   const item=(p)=>{
-    const busy=RUNNING_PHASES.includes(p.phase)||(STATE.status&&(STATE.status.improving||[]).includes(p.id));
+    const busy=BUSY_PHASES.includes(p.phase)||(STATE.status&&(STATE.status.improving||[]).includes(p.id));
     const d=p.createdAt?new Date(p.createdAt):null;const started=d?d.getDate()+" "+["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"):"";
     return '<button class="pitem'+(p.id===cur?" on":"")+'" data-open="'+esc(p.id)+'" title="'+(busy?"active":"not active")+'"><span class="dot'+(busy?" pulse":"")+'" style="background:'+(busy?"var(--bl)":"var(--gray)")+';margin-top:5px" aria-label="'+(busy?"active":"not active")+'"></span><span style="flex:1;min-width:0"><span class="t">'+esc(p.question)+'</span><span class="m">'+esc(started)+" · "+(p.nodes||0)+" nodes</span></span></button>";
   };
@@ -845,12 +845,12 @@ function renderHead(){
   $("projTitle").textContent=p.question;
   const a=p.acceptance||{};const ar=p.acceptanceResult;
   $("projExpected").innerHTML=a.expected?"Expected: "+esc(a.expected)+(ar?' · <b style="color:'+(ar.score>=0.999?"var(--gr)":ar.score>0?"var(--am)":"var(--rd)")+'">'+Math.round(ar.score*100)+"% met</b>":""):'<span class="faint">No expected result yet: More → Edit expected result</span>';
-  const color=looping||running?"var(--bl)":p.phase==="done"?"var(--gr)":p.phase==="error"?"var(--rd)":"var(--gray)";
-  $("phasePill").innerHTML='<i class="'+(looping||running?"pulse":"")+'" style="background:'+color+'"></i>'+(looping?"improving":esc(p.phase))+(mq.phone.matches&&ns.length?" · "+fin+"/"+ns.length:"")+(p.demo?" · demo":"");
+  const building=p.phase==="building-tree";const color=looping||running||building?"var(--bl)":p.phase==="done"?"var(--gr)":p.phase==="error"?"var(--rd)":"var(--gray)";
+  $("phasePill").innerHTML='<i class="'+(looping||running||building?"pulse":"")+'" style="background:'+color+'"></i>'+(looping?"improving":building?"building tree":esc(p.phase))+(mq.phone.matches&&ns.length?" · "+fin+"/"+ns.length:"")+(p.demo?" · demo":"");
   $("progBar").style.width=(ns.length?Math.round(100*fin/ns.length):0)+"%";
   $("progText").textContent=fin+"/"+ns.length+" researched";
   const joined=iJoined(p);
-  $("btnRun").disabled=STATE.runLock&&Date.now()<STATE.runLock;
+  $("btnRun").disabled=building||(STATE.runLock&&Date.now()<STATE.runLock);
   $("btnRun").textContent=running||looping?(joined?"✓ Joined · Leave":"⚡ Join")+(p.lanes?" ("+p.lanes+" lanes)":""):"▶ Run";
   $("btnRun").classList.toggle("secondary",joined&&(running||looping));$("btnRun").classList.toggle("primary",!(joined&&(running||looping)));
   $("btnRun").title=running||looping?(joined?"You are working on this research with one lane. Click to give it back":"Adds one lane for this browser: more pieces at once. One lane per browser"):"Research every piece that is not done yet";
@@ -984,7 +984,7 @@ function renderOutline(){
   const walk=(id,depth)=>kids(id).map(n=>row(n,depth)+walk(n.id,depth+1)).join("");
   const root='<button class="orow root'+(STATE.selected==="Q"?" on":"")+'" data-node="Q"><span class="dot" style="background:'+(p.report?"var(--gr)":"var(--acc)")+'"></span><span class="body"><span class="q">Whole research</span>'+(p.report?'<span class="a"><b>'+esc(p.report.verdict)+"</b></span>":'<span class="a">'+esc(p.decision||p.question)+"</span>")+'</span><span class="id">Q</span></button>';
   const legend='<div class="legend">'+[["verified","var(--gr)"],["supported","var(--tl)"],["weak","var(--am)"],["unsupported","var(--rd)"],["running","var(--bl)"],["pending","var(--gray)"]].map(([k,c])=>'<span><i class="dot" style="background:'+c+'"></i>'+k+"</span>").join("")+"</div>";
-  $("outline").innerHTML=p.nodes.length?root+walk("Q",1)+legend:'<div class="card"><b>'+(RUNNING_PHASES.includes(p.phase)?"Decomposing the question…":"No tree yet.")+'</b><p class="small muted" style="margin-top:4px">'+(RUNNING_PHASES.includes(p.phase)?"The issue tree appears here in a moment.":"Press ▶ Run to decompose and research.")+"</p></div>";
+  $("outline").innerHTML=p.nodes.length?root+walk("Q",1)+legend:'<div class="card"><b>'+(BUSY_PHASES.includes(p.phase)?"Decomposing the question…":"No tree yet.")+'</b><p class="small muted" style="margin-top:4px">'+(BUSY_PHASES.includes(p.phase)?"The issue tree appears here in a moment.":"Press ▶ Run to decompose and research.")+"</p></div>";
   $("outline").querySelectorAll("[data-node]").forEach(b=>b.addEventListener("click",()=>select(b.dataset.node,"details")));
   $("outline").querySelectorAll("[data-check]").forEach(c=>c.addEventListener("change",()=>{if(c.checked){STATE.checked.add(c.dataset.check);STATE.excluded.delete(c.dataset.check);}else STATE.checked.delete(c.dataset.check);if(!STATE.checked.size)STATE.excluded.clear();renderTreeBar();renderLoopBox();}));
   renderTreeBar();
