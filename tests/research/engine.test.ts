@@ -360,6 +360,31 @@ describe('ResearchEngine', () => {
     expect(research.indexOf('https://answer.example/c')).toBeLessThan(research.indexOf('https://bikes.example/a'));
   });
 
+  it('runs the corrective search when no pages were retrieved at all, before any model call', async () => {
+    const queries: string[][] = [];
+    const prompts: string[] = [];
+    const emptySearch = {
+      ...fakeSearch,
+      async search(q: string[]) {
+        queries.push(q);
+        if (queries.length === 1) return [];
+        return [{ kind: 'web', title: 'Answer', url: 'https://answer.example/c', domain: 'answer.example', snippet: 's', text: `${q.join(' ')} documented here` }];
+      },
+    };
+    const scripted = new ScriptedProvider();
+    const provider = { id: 'demo', ready: true, describe: () => scripted.describe(), async chat(args: { messages: Array<{ content: string }> }) { prompts.push(args.messages.at(-1)!.content); return scripted.chat(args as never); } };
+    const { engine } = engineWith(provider, emptySearch, 1);
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    const built = await engine.buildTree(project.id);
+    const leaf = built.nodes.find((n: { id: string }) => !built.nodes.some((m: { parentId: string }) => m.parentId === n.id));
+    await engine.researchLeaf(built, leaf, '');
+    expect(built.log.some((l: { message: string }) => l.message === `${leaf.id}: retrieved pages do not match the question; searching again before any model call`)).toBe(true);
+    expect(queries[1]).toContain(leaf.question);
+    expect(leaf.sources.map((s: { url: string }) => s.url)).toContain('https://answer.example/c');
+    const research = prompts.find((p) => p.includes(TASK_MARKERS.research))!;
+    expect(research).not.toContain('NO SOURCES were retrieved');
+  });
+
   it('remembers joined browsers on the research, forgets one that leaves or is not seen for a day, and rejoins the rest', async () => {
     const { engine } = engineWith(new ScriptedProvider());
     const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });

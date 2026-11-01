@@ -504,7 +504,8 @@ export class ResearchEngine {
     }
     this.emit(project, 'node', `${node.id}: ${node.sources.length} source(s) from ${new Set(node.sources.filter((x) => x.url).map((x) => hostOf(x.url))).size} site(s), analysing`, { nodeId: node.id });
     let failures = [];
-    if (this.rankSources(project, node).verdict === 'incorrect') await this.correctiveSearch(project, node);
+    const retrieval = this.rankSources(project, node);
+    if (retrieval.verdict === 'incorrect' || retrieval.verdict === 'none') await this.correctiveSearch(project, node);
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const tier = attempt === 1 ? 'fast' : 'deep';
       if (attempt > 1) await this.searchGaps(project, node);
@@ -527,7 +528,7 @@ export class ResearchEngine {
           node.verification = champion.verification;
           node.status = champion.verification?.grade ?? node.status;
           node.championKept = true;
-          this.emit(project, 'node', `${node.id}: challenger kept — ${decision.reason}`, { nodeId: node.id });
+          this.emit(project, 'node', `${node.id}: previous finding kept — ${decision.reason}`, { nodeId: node.id });
         }
       }
       if (SETTLED.has(verification.grade)) {
