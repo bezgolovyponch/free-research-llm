@@ -499,7 +499,7 @@ describe('Overpass instances', () => {
 
 describe('price trend: retried with full-jitter backoff until the source answers (AWS SDK standard retry)', () => {
   const json = (rows: number[]) => ({ dimension: { time: { category: { index: { '2020': 0, '2021': 1, '2022': 2, '2023': 3, '2024': 4 } } } }, value: Object.fromEntries(rows.map((v, i) => [String(i), v])) });
-  type Assessor = { priceTrend(code: string): Promise<{ real: number } | null>; trendGaps(codes: string[]): { missing: string[]; due: string[] }; store: { hpi: Record<string, { failures?: number; retryAt?: number; value?: unknown }> } };
+  type Assessor = { writing: Promise<unknown>; priceTrend(code: string): Promise<{ real: number } | null>; trendGaps(codes: string[]): { missing: string[]; due: string[] }; store: { hpi: Record<string, { failures?: number; retryAt?: number; value?: unknown }> } };
 
   it('waits a random share of a doubling window, never above the cap', () => {
     expect(backoffMs(0, { random: () => 0 })).toBe(0);
@@ -545,6 +545,7 @@ describe('price trend: retried with full-jitter backoff until the source answers
     expect(assessor.store.hpi.PT).toMatchObject({ value: got });
     expect(assessor.store.hpi.PT.retryAt).toBeUndefined();
     expect(assessor.trendGaps(['PT']).missing).not.toContain('PT');
+    await assessor.writing;
     await fs.rm(dir, { recursive: true, force: true });
   });
 
