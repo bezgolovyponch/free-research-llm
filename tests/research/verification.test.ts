@@ -25,7 +25,7 @@ describe('external verification on the app side', () => {
     expect(applyVerification({ kept: [] }, record)).toEqual({ kept: [] });
   });
 
-  it('counts verifier-confirmed rows as deliverables even when they are not fits-tier', () => {
+  it('counts a verifier-confirmed row as a deliverable only while it still fits every check', () => {
     const out = applyVerification(table, record);
     const d = candidateDeliverables(out);
     expect(d.map((x) => x.url)).toEqual(['a']);
@@ -35,8 +35,11 @@ describe('external verification on the app side', () => {
       { url: 'y', verdict: 'confirmed', checks: [] },
     ] };
     const out2 = applyVerification(tradeOff, rec2);
-    expect(candidateDeliverables(out2).map((x) => x.url)).toEqual(['x']);
+    expect(candidateDeliverables(out2).map((x) => x.url)).toEqual([]);
     expect(out2.kept.find((r: { url: string }) => r.url === 'y').verified).toBeUndefined();
+    const fits = { ...table, kept: [row('z', 'fits')] };
+    const out3 = applyVerification(fits, { at: record.at, results: [{ url: 'z', verdict: 'confirmed', checks: [] }] });
+    expect(candidateDeliverables(out3).map((x) => x.url)).toEqual(['z']);
   });
 
   it('knows when the set of rows to verify changed, so the verifier runs again only then', () => {

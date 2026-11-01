@@ -3,6 +3,7 @@ import { actionPlan } from './research/gaps.mjs';
 import { explorePoints } from './research/site.mjs';
 import { workbook } from './xlsx.mjs';
 import { localNumber } from './research/memocheck.mjs';
+import { countsTowardResult } from './research/candidates.mjs';
 
 export const ACTION_LABEL = { fix: 'Fix', research: 'Research further', clarify: 'Clarify' };
 export const AREA_TOLERANCE = 0.05;
@@ -45,7 +46,7 @@ export function plotRows(project) {
     const m2 = num(plan.areaM2);
     const inTitle = titleAreaM2(r.title);
     const matches = inTitle === null || m2 === '' ? '' : Math.abs(inTitle - m2) / Math.max(inTitle, m2) <= AREA_TOLERANCE ? 'yes' : 'NO: check the listing';
-    const counted = (r.verified?.verdict === 'confirmed' || (!c.verification && plan.tier === 'fits')) && list === 'your countries';
+    const counted = countsTowardResult(r, c) && list === 'your countries';
     const byId = new Map((plan.checks ?? []).map((k) => [k.id, k]));
     return [
       list,
