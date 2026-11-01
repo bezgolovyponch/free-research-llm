@@ -4,7 +4,8 @@ import { toNumber } from './calc.mjs';
 const MAX_REJECTED = 20;
 const SEARCH_TITLE = /\b(?:search|results|listings)\b/i;
 const SWAP = /(?:\btrade\b|\bswap\b|\btroca\b|\bpermuta|\btakas\b|\bechange\b)/i;
-const RENTAL = /(?:arrend|alug|alquil|kiralik|for[ -]rent|to[ -]rent|\brent(?:al|ing)?\b|a[ -]louer|\blouer\b|\bverhuur|\bmiete)/i;
+const RENTAL = /(?:arrend|alug|alquil|kiralik|for[ -]rent|to[ -]rent|\brent(?:al|ing)?\b|a[ -]louer|\blouer\b|\bverhuur|\bmiete|pron[aá]j[eé]m|pronajm|\bn[aá]jem\b|\bwynaj[eę]m)/i;
+const WANTED = /(?:\bkoup[ií]m\b|\bhled[aá]m\b|\bpopt[aá]v[aá]m\b|\bkupi[eę]\b|\bszukam\b|\bwanted\b|\blooking for\b)/i;
 
 function priceOf(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -45,6 +46,7 @@ export function screenItem(item, { valueRange = null, unit = '', convert = (v) =
   const offer = `${item.title ?? ''} ${decodedUrl(item.url)}`;
   if (kind && RENTAL.test(offer)) reasons.push('offered for rent, not for sale');
   if (kind && SWAP.test(offer)) reasons.push('offered as a swap, not for sale');
+  if (kind && WANTED.test(offer)) reasons.push('a wanted ad, not an offer');
   const raw = priceOf(item.value);
   if (valueRange && raw !== null) {
     const wanted = currencyOf(unit);

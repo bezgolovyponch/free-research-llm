@@ -31,6 +31,14 @@ describe('item gate: rentals, word ends, broken links', () => {
     expect(screenItem({ title: 'Land', url: 'https://goswap.org/listing/trade-75k-costa-rica-land-for-40-cruising-sailboat-monohull-14136' }, options).reasons).toContain('offered as a swap, not for sale');
   });
 
+  it('refuses Czech and Polish rentals and wanted ads, which are not plots for sale', () => {
+    const cz = { ...options, kind: { label: 'plot of land', terms: ['pozemek', 'pozemku', 'dzialka'] } };
+    expect(screenItem({ title: 'Pronájem: Hala, pozemek, Týniště n. Orl.', url: 'https://reality.bazos.cz/inzerat/225716435/pronajem-hala-pozemek.php' }, cz).reasons).toContain('offered for rent, not for sale');
+    expect(screenItem({ title: 'Działka na wynajem', url: 'https://www.otodom.pl/pl/oferta/dzialka-ID4abcd' }, cz).reasons).toContain('offered for rent, not for sale');
+    expect(screenItem({ title: 'Koupím pozemek na chatu, Českolipsko', url: 'https://inzerce2.cz/inzerat-111217/koupim-koupim-pozemek-na-chatu-ceskolipsko' }, cz).reasons).toContain('a wanted ad, not an offer');
+    expect(screenItem({ title: 'Prodej pozemku s nájemcem 800 m²', url: 'https://www.sreality.cz/detail/prodej/pozemek/zahrada/obora-obora-/2274426956' }, cz).ok).toBe(true);
+  });
+
   it('matches a land word only as a whole word, plural allowed', () => {
     const vn = { label: 'plot of land', terms: ['dat', 'land', 'terreno'] };
     expect(screenItem({ title: 'Delhi in July', url: 'https://en.climate-data.org/asia/india/delhi/delhi-967662/' }, { kind: vn }).reasons).toContain('not a plot of land');

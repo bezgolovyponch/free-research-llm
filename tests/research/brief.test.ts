@@ -18,7 +18,7 @@ describe('concept brief', () => {
       'Deliver: 50 single plot of land listing pages for sale',
       'Hard limit: price 0–20000 EUR',
       'Where: EU (27 countries), Turkey, Vietnam (near the sea)',
-      'Exclude: offered for rent; offered as a swap; news, blog or guide pages; search or category pages',
+      'Exclude: offered for rent; offered as a swap; wanted ads; news, blog or guide pages; search or category pages',
     ].join('\n'));
   });
 

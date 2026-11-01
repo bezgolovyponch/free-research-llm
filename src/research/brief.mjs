@@ -160,7 +160,7 @@ export function buildBrief({ question = '', acceptance = {}, constraints = {}, t
     groups,
     narrowed: narrowedGroups(words),
     coastal: COAST.test(plain(words)),
-    excludes: lists ? ['offered for rent', 'offered as a swap', 'news, blog or guide pages', 'search or category pages'] : [],
+    excludes: lists ? ['offered for rent', 'offered as a swap', 'wanted ads', 'news, blog or guide pages', 'search or category pages'] : [],
   };
 }
 
