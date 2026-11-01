@@ -331,7 +331,7 @@ export class ResearchEngine {
       const s = table.sites;
       const gaps = this.sites.trendGaps ? this.sites.trendGaps([...(table.kept ?? []), ...(table.outside ?? [])].map((r) => r.countryCode)) : { missing: [], due: [] };
       if (s?.pending || gaps.due.length) this.startSiteWarm(project.id, raw, brief);
-      if (gaps.missing.length) this.emit(project, 'candidates', `price trend still missing for ${gaps.missing.join(', ')}: ${gaps.due.length ? `fetching ${gaps.due.join(', ')} again in the background` : 'waiting for the next retry'}, with growing waits until the source answers`);
+      if (gaps.missing.length) this.emit(project, 'candidates', `price trend still missing for ${gaps.missing.join(', ')}: ${gaps.due.length ? `fetching ${gaps.due.join(', ')} again in the background` : 'next try when its wait ends and the table is rebuilt (a run, a loop pass or a page refresh)'}; each failure doubles the longest wait, up to 6 h`);
       if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate from 2025 daily weather per 0.25° cell, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
     if (strategy) {
