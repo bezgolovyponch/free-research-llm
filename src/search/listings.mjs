@@ -11,7 +11,7 @@ const URL_KEYS = ['url', 'href', 'link', 'permalink', 'canonicalUrl', 'detailUrl
 const PRICE_KEY = /^(?:total_?price|price|prices|offers?|amount|sale_?price|asking_?price|price_?value|list_?price)$/i;
 const AREA_KEY = /^(?:area|area_?in_?square_?meters|terrain_?area_?in_?square_?meters|land_?area|plot_?size|size|surface|sqm|square_?meters|floor_?size|lot_?size)$/i;
 const PLACE_KEY = /^(?:city|town|locality|address_?locality|region|address_?region|district|municipality|location|address|place|full_?name)$/i;
-const AREA_TEXT = /(\d{1,3}(?:[ ., ]\d{3})+|\d+(?:[.,]\d+)?)\s?(m²|m2|sqm|sq\.?\s?m|ha\b|hectares?|acres?|dönüm|donum)/i;
+const AREA_TEXT = /(\d{1,3}(?:[ ., ]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d+)?)\s?(m²|m2|sqm|sq\.?\s?m|ha\b|hectares?|acres?|dönüm|donum)/i;
 const NEXT_TEXT = /^(?:next|next page|seguinte|próxima|proxima|siguiente|suivant|weiter|nächste|successiva|avanti|sonraki|ileri|tiếp|trang sau|›|»|→|>)$/i;
 const PAGE_PARAM = /([?&](?:page|pagina|pag|p|sayfa|trang)=)(\d+)/i;
 const PAGE_PATH = /(\/(?:page|pagina|pag|sayfa|trang)[/-]?)(\d+)(\/?)$/i;

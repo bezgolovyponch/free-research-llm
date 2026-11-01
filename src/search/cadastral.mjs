@@ -103,24 +103,32 @@ export const CADASTRAL_GATES = [
   { id: 'pricePerM2Known', label: 'recent comparable price per m² exists for the same zone' },
 ];
 
+const TITLE_NOT_READ = 'title not read: only the land-registry extract shows it (tapu kaydı, nota simple, certidão permanente)';
+const FOREST_USE = /orman|forest/i;
+
 export function cadastralCheck(row, gateId) {
   const finding = row.finding ?? {};
-  const hasRecord = Boolean(finding.parcelRef || finding.cadastralRef);
+  const record = row.cadastre ?? null;
+  const ref = record ? `${record.registry} ${record.place} ${record.ada ? `${record.ada}/` : ''}${record.parsel}` : '';
+  const claimed = finding.parcelRef || finding.cadastralRef;
   switch (gateId) {
     case 'parcelExists':
-      return { id: 'parcelExists', ok: hasRecord ? true : null, detail: hasRecord ? `cadastral reference ${finding.parcelRef}` : 'no cadastral reference found — not measured yet' };
+      if (record) return { id: 'parcelExists', ok: true, detail: `official record ${ref}` };
+      return { id: 'parcelExists', ok: null, detail: claimed ? `reference ${claimed} is only stated by a page; not found in a public registry yet` : 'no cadastral reference found — not measured yet' };
     case 'boundariesMapped':
-      return { id: 'boundariesMapped', ok: finding.boundaryCount && finding.boundaryCount > 0 ? true : null, detail: finding.boundaryCount ? `${finding.boundaryCount} boundary elements mapped` : 'boundaries not mapped — not measured yet' };
+      return { id: 'boundariesMapped', ok: record ? true : null, detail: record ? `boundary polygon on ${ref}` : 'boundaries not read from a registry — not measured yet' };
     case 'ownershipClear':
       if (finding.sharedTitle === true) return { id: 'ownershipClear', ok: false, detail: 'shared title (hisseli): buys a share, not a parcel' };
       if (finding.encumbrance === true) return { id: 'ownershipClear', ok: false, detail: 'encumbrance on title' };
-      return { id: 'ownershipClear', ok: hasRecord ? true : null, detail: hasRecord ? 'title shows a single clear owner' : 'ownership status not yet verified' };
+      return { id: 'ownershipClear', ok: null, detail: TITLE_NOT_READ };
     case 'zoningAllows':
       if (finding.zoning === 'industrial') return { id: 'zoningAllows', ok: false, detail: 'industrial zone: camping/glamping must be distant from insalubrious industry' };
       if (finding.protected === true) return { id: 'zoningAllows', ok: false, detail: 'protected area' };
-      return { id: 'zoningAllows', ok: hasRecord ? true : null, detail: hasRecord ? 'zoning permits the intended use' : 'zoning not yet read' };
+      if (FOREST_USE.test(record?.landUse ?? '')) return { id: 'zoningAllows', ok: false, detail: `official land use on ${ref}: forest (${record.landUse})` };
+      return { id: 'zoningAllows', ok: null, detail: record?.landUse ? `official land use ${record.landUse}; zoning for camping still to confirm with the municipality` : 'zoning not yet read' };
     case 'surfaceKnown':
-      return { id: 'surfaceKnown', ok: Number.isFinite(finding.surfaceM2) ? true : null, detail: finding.surfaceM2 ? `${finding.surfaceM2} m²` : 'surface not stated — not measured yet' };
+      if (Number.isFinite(record?.areaM2)) return { id: 'surfaceKnown', ok: true, detail: `${Math.round(record.areaM2)} m² on ${ref}` };
+      return { id: 'surfaceKnown', ok: null, detail: finding.surfaceM2 ? `${finding.surfaceM2} m² stated by a page, not on a registry record` : 'surface not stated — not measured yet' };
     case 'pricePerM2Known':
       return { id: 'pricePerM2Known', ok: Number.isFinite(finding.pricePerM2) ? true : null, detail: finding.pricePerM2 ? `€${finding.pricePerM2.toFixed(2)}/m² comparable` : 'no comparable price per m² yet' };
     default: return { id: gateId, ok: null, detail: 'gate not measured yet' };

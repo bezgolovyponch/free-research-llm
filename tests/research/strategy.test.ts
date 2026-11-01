@@ -92,6 +92,17 @@ describe('low-entry glamping strategy', () => {
     expect(plan.areaM2).toBe(5000);
   });
 
+  it('adds the official parcel record as evidence or risk without changing the tier, so the registry advises and never gates', () => {
+    const base = { ...nazare, countryCode: 'TR', country: 'Turkey', title: 'Satılık tarla 506 m²', area: 506, areaUnit: 'm²' };
+    const without = planFor(base, GLAMPING_LOW_ENTRY, { convert: toEur });
+    const shared = planFor({ ...base, cadastre: { registry: 'TKGM', place: 'Çaltıbozkır', ada: '105', parsel: '556', areaM2: 2085.58, landUse: 'Tarla' } }, GLAMPING_LOW_ENTRY, { convert: toEur });
+    expect(shared.tier).toBe(without.tier);
+    expect(shared.risks.join(' ')).toContain('likely a shared title (hisseli)');
+    const matching = planFor({ ...base, cadastre: { registry: 'TKGM', place: 'Tekke', ada: '217', parsel: '2', areaM2: 520, landUse: 'Tarla' } }, GLAMPING_LOW_ENTRY, { convert: toEur });
+    expect(matching.why.join(' ')).toContain('official record TKGM Tekke 217/2: 520 m² (Tarla), matches the listing');
+    expect(matching.tier).toBe(without.tier);
+  });
+
   it('merges far rows back, counts only full fits as kept and moves them out of the screened count', () => {
     const far = { ...nazare, url: 'f', site: site(40) };
     const table = { sites: { euHpi: 5.5 }, found: 3, kept: [{ ...nazare, url: 'a' }, { ...nazare, url: 'b', countryCode: 'VN' }], far: [far], farReason: 'farther than 25 km from the sea', screened: { 'farther than 25 km from the sea': 1, 'price outside': 4 }, screenedCount: 5, examples: [{ url: 'f', reasons: [] }] };

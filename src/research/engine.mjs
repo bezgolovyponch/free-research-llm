@@ -103,7 +103,7 @@ export function normalizeEstimate(raw) {
 }
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, sites = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null }) {
+  constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null }) {
     this.verifier = verifier;
     this.modeler = modeler;
     this.cases = cases;
@@ -119,6 +119,7 @@ export class ResearchEngine {
     this.demo = demo;
     this.rates = rates;
     this.sites = sites;
+    this.parcels = parcels;
     this.siteWarm = new Map();
     this.onEvent = onEvent;
     this.listeners = new Map();
@@ -334,6 +335,11 @@ export class ResearchEngine {
       const gaps = this.sites.trendGaps ? this.sites.trendGaps([...(table.kept ?? []), ...(table.outside ?? [])].map((r) => r.countryCode)) : { missing: [], due: [] };
       if (s?.pending || gaps.due.length) this.startSiteWarm(project.id, raw, brief);
       if (gaps.missing.length) this.emit(project, 'candidates', `price trend still missing for ${gaps.missing.join(', ')}: ${gaps.due.length ? `fetching ${gaps.due.join(', ')} again in the background` : 'next try when its wait ends and the table is rebuilt (a run, a loop pass or a page refresh)'}; each failure doubles the longest wait, up to 6 h`);
+      if (this.parcels) {
+        table = await this.parcels.apply(table, { mode });
+        const c = table.parcels;
+        if (c) this.emit(project, 'candidates', `official parcel records: ${c.matched} of ${c.eligible} listing(s) matched a land-registry parcel by the number the listing states, ${c.missed} state no parcel number or none matched, ${c.pending} still to look up`);
+      }
       if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate from 2025 daily weather per 0.25° cell, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
     if (strategy) {
