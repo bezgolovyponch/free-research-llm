@@ -50,7 +50,7 @@ export function cadastralExplain(row) {
 
 export function cadastralPlan(row) {
   const fields = cadastralFinding(row.finding ?? {});
-  const checks = CADASTRAL_GATES.map((g) => ({ ...cadastralCheck({ finding: fields }, g.id), label: g.label }));
+  const checks = CADASTRAL_GATES.map((g) => ({ ...cadastralCheck({ finding: fields, cadastre: row.cadastre }, g.id), label: g.label }));
   const failed = checks.filter((c) => c.ok === false);
   const unknown = checks.filter((c) => c.ok === null);
   const tier = failed.length ? 'weak' : unknown.length ? 'unverified' : 'fits';

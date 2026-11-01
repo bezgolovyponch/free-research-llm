@@ -27,9 +27,11 @@ describe('cadastralResearchPlan', () => {
 describe('cadastralGateVerdict', () => {
   const row = (finding: Record<string, unknown>) => ({ finding });
 
-  it('fits when every gate passes', () => {
-    const row1 = row({ parcelRef: '33/1234', boundaryCount: 4, surfaceM2: 5000, pricePerM2: 47.5, zoning: 'agricultural' });
-    expect(cadastralGateVerdict(row1).tier).toBe('fits');
+  it('stays to confirm on a full set of claims plus a registry record, because the title and zoning are never read from a free source', () => {
+    const row1 = { ...row({ parcelRef: '33/1234', boundaryCount: 4, surfaceM2: 5000, pricePerM2: 47.5, zoning: 'agricultural' }), cadastre: { registry: 'TKGM', place: 'Tekke', ada: '217', parsel: '2', areaM2: 17091.59, landUse: 'Tarla' } };
+    const verdict = cadastralGateVerdict(row1);
+    expect(verdict.tier).toBe('unverified');
+    expect(verdict.pending.length).toBe(2);
   });
 
   it('weak when any gate fails', () => {

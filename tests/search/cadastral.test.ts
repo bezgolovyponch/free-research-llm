@@ -57,13 +57,15 @@ describe('CADASTRAL_GATES', () => {
 describe('cadastralCheck', () => {
   const row = (finding: Record<string, unknown>) => ({ finding });
 
-  it('parcelExists passes when a reference is on record and is pending without one', () => {
-    expect(cadastralCheck(row({ parcelRef: '33/1234' }), 'parcelExists').ok).toBe(true);
+  it('parcelExists passes only on an official registry record, not on a reference a page or model states', () => {
+    expect(cadastralCheck({ ...row({}), cadastre: { registry: 'TKGM', place: 'Tekke', ada: '217', parsel: '2', areaM2: 17091.59, landUse: 'Tarla' } }, 'parcelExists')).toMatchObject({ ok: true, detail: 'official record TKGM Tekke 217/2' });
+    expect(cadastralCheck(row({ parcelRef: '33/1234' }), 'parcelExists').ok).toBe(null);
     expect(cadastralCheck(row({}), 'parcelExists').ok).toBe(null);
   });
 
-  it('boundariesMapped passes when boundary elements exist and is pending without them', () => {
-    expect(cadastralCheck(row({ boundaryCount: 4 }), 'boundariesMapped').ok).toBe(true);
+  it('boundariesMapped passes on a registry polygon and stays pending on a claimed boundary count', () => {
+    expect(cadastralCheck({ ...row({}), cadastre: { registry: 'TKGM', place: 'Tekke', ada: '217', parsel: '2', areaM2: 17091.59, landUse: 'Tarla' } }, 'boundariesMapped').ok).toBe(true);
+    expect(cadastralCheck(row({ boundaryCount: 4 }), 'boundariesMapped').ok).toBe(null);
     expect(cadastralCheck(row({}), 'boundariesMapped').ok).toBe(null);
   });
 
@@ -71,6 +73,12 @@ describe('cadastralCheck', () => {
     expect(cadastralCheck(row({ sharedTitle: true }), 'ownershipClear').ok).toBe(false);
     expect(cadastralCheck(row({ encumbrance: true }), 'ownershipClear').ok).toBe(false);
     expect(cadastralCheck(row({}), 'ownershipClear').ok).toBe(null);
+    expect(cadastralCheck({ ...row({ parcelRef: '33/1234' }), cadastre: { registry: 'TKGM', place: 'Tekke', ada: '217', parsel: '2', areaM2: 17091.59, landUse: 'Tarla' } }, 'ownershipClear').ok).toBe(null);
+  });
+
+  it('zoningAllows fails on forest land in the registry and never passes on a record alone', () => {
+    expect(cadastralCheck({ ...row({}), cadastre: { ...{ registry: 'TKGM', place: 'Tekke', ada: '217', parsel: '2', areaM2: 17091.59, landUse: 'Tarla' }, landUse: 'Orman' } }, 'zoningAllows').ok).toBe(false);
+    expect(cadastralCheck({ ...row({ parcelRef: '33/1234' }), cadastre: { registry: 'TKGM', place: 'Tekke', ada: '217', parsel: '2', areaM2: 17091.59, landUse: 'Tarla' } }, 'zoningAllows').ok).toBe(null);
   });
 
   it('zoningAllows fails on industrial zone or protected area and is pending without a record', () => {
@@ -79,8 +87,9 @@ describe('cadastralCheck', () => {
     expect(cadastralCheck(row({}), 'zoningAllows').ok).toBe(null);
   });
 
-  it('surfaceKnown and pricePerM2Known pass when the value is finite and are pending without it', () => {
-    expect(cadastralCheck(row({ surfaceM2: 5000 }), 'surfaceKnown').ok).toBe(true);
+  it('surfaceKnown passes on the registry area, not a stated one; pricePerM2Known passes on a finite comparable', () => {
+    expect(cadastralCheck({ ...row({}), cadastre: { registry: 'TKGM', place: 'Tekke', ada: '217', parsel: '2', areaM2: 17091.59, landUse: 'Tarla' } }, 'surfaceKnown')).toMatchObject({ ok: true, detail: '17092 m² on TKGM Tekke 217/2' });
+    expect(cadastralCheck(row({ surfaceM2: 5000 }), 'surfaceKnown').ok).toBe(null);
     expect(cadastralCheck(row({}), 'surfaceKnown').ok).toBe(null);
     expect(cadastralCheck(row({ pricePerM2: 47.5 }), 'pricePerM2Known').ok).toBe(true);
     expect(cadastralCheck(row({}), 'pricePerM2Known').ok).toBe(null);

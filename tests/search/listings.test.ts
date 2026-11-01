@@ -99,6 +99,8 @@ describe('listing extraction', () => {
   it('reads the largest stated area of a page in square metres, hectares included', async () => {
     const { areaFromText } = await import('../../src/search/listings.mjs');
     expect(areaFromText('Área bruta 120 m² · Área do terreno: 2 500 m²')).toBe(2500);
+    expect(areaFromText('Muğla Menteşe Göktepede 2.521,95 M² Satılık Tarla')).toBe(2522);
+    expect(areaFromText('Satılık 1.401 M2 Tarla')).toBe(1401);
     expect(areaFromText('Terreno rústico com 2 ha')).toBe(20000);
     expect(areaFromText('no area here')).toBeNull();
   });

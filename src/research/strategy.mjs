@@ -3,6 +3,7 @@ import { PERCEIVED_MAX_C } from './cci.mjs';
 import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
 import { zoningOf, explorePoints, haversineKm } from './site.mjs';
+import { cadastreNotes } from './parcels.mjs';
 
 export const STRATEGY_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -245,6 +246,9 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const risks = [...(country?.risks ?? [])];
   if (zoning === 'agricultural' && country?.agriculturalRisk) risks.push(country.agriculturalRisk);
   if (SHARED_TITLE.test(words)) risks.push('shared title (hisseli): you buy a share, not a parcel');
+  const registry = cadastreNotes(row, m2);
+  risks.push(...registry.risks);
+  why.push(...registry.why);
   if (climate?.cci?.hotDays >= 1) risks.push(`about ${climate.cci.hotDays} day(s) a year above 34 °C, when camping demand drops (Ma 2021): shade, fans or closing on those days`);
   const tradeoffs = failed.filter((c) => c.id !== 'legal').map((c) => `${c.label}: no (${c.detail})`);
   const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set([...unknown.map((c) => c.detail), ...(failed.length && potentialUnknown ? [`misses ${failed.map((c) => c.label).join(', ')}; whether something nearby makes up for it is measured when the map service answers`] : [])])].join('; ')}` : tier === 'trade-off' ? `trade-off with potential: ${potential.join('; ')}` : tooSmall ? `does not fit: ${tradeoffs.join('; ')}; too little land for a glamping site, which nothing nearby can make up for` : `does not fit: ${tradeoffs.join('; ')}; nothing nearby draws guests to make up for it`;
