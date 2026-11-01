@@ -264,7 +264,7 @@ describe('ResearchEngine', () => {
     expect(reads).toContain('https://www.imovirtual.com/pt/resultados/comprar/terreno/faro?priceMax=20000');
     const seen: string[][] = [];
     const modes: string[] = [];
-    engine.sites = { apply: async (c: { kept: Array<{ url: string }>; keptCount: number }, _b: unknown, o: { mode: string }) => { modes.push(o.mode); seen.push(c.kept.map((r) => r.url)); return { ...c, kept: c.kept.slice(0, 2), keptCount: 2, sites: { assessed: 4, located: 4, far: 2, unlocated: 0, pending: 0, failed: 0 } }; } } as never;
+    engine.sites = { apply: async (c: { kept: Array<{ url: string }>; keptCount: number }, _b: unknown, o: { mode: string }) => { modes.push(o.mode); seen.push(c.kept.map((r) => r.url)); return { ...c, kept: c.kept.slice(0, 2), keptCount: 2, sites: { assessed: 4, located: 4, far: 2, unlocated: 0, pending: 0, failed: 0 } }; }, trendGaps: () => ({ missing: ['PT'], due: [] }) } as never;
     const piece = done.nodes.find((n: { parentId: string | null }) => n.parentId);
     piece.finding = { ...piece.finding, items: [{ title: 'Model pick', url: 'https://other.example/anuncio/terreno-ID9zzzzz', value: 5000, unit: 'EUR' }] };
     await engine.collectCandidates(done);
@@ -284,6 +284,7 @@ describe('ResearchEngine', () => {
     expect(done.candidates.keptCount).toBe(0);
     expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);
     expect(done.log.some((l: { message: string }) => /site fit: 4 listing\(s\) measured .* 2 farther than an e-bike ride from the sea/.test(l.message))).toBe(true);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /price trend still missing for PT: waiting for the next retry/.test(l.message))).toBe(true);
   });
 
   it('keeps the last complete candidate table visible while a new one is measured, so the Results tab never shows a half-built table', async () => {
