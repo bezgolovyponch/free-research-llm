@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { coordsOf, extractListings, pagePlace, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate } from '../../src/search/listings.mjs';
 
 const BASE = 'https://portal.example/land-for-sale';
+const CZ_BASE = 'https://www.sreality.cz/hledani/prodej/pozemky';
 
 function card(id: number, title: string, price: string, area = '') {
   return `<div class="card"><a href="/listing/plot-${id}-u${id}000000"><img src="/i/${id}.jpg"></a><a href="/listing/plot-${id}-u${id}000000">${title}</a><p>${price}</p>${area ? `<span>${area}</span>` : ''}<a href="/agent/7">Agent</a></div>`;
@@ -103,5 +104,65 @@ describe('listing extraction', () => {
     expect(areaFromText('Satılık 1.401 M2 Tarla')).toBe(1401);
     expect(areaFromText('Terreno rústico com 2 ha')).toBe(20000);
     expect(areaFromText('no area here')).toBeNull();
+  });
+
+  it('reads sreality.cz embedded JSON with priceCzk, coordinates and strips site suffix from title', () => {
+    const records = [1, 2, 3].map((n) => ({
+      priceCzk: 460000 + n * 1000,
+      latitude: 50.371607 + n * 0.001,
+      longitude: 13.866084 + n * 0.001,
+      name: `Prodej zahrady ${463 + n} m², Obora`,
+      href: `/detail/prodej/pozemek/zahrada/obora-obora-/227442695${n}`,
+    }));
+    const nextData = { props: { pageProps: { data: { searchAds: { items: records } } } } };
+    const anchors = records.map((r) => `<a href="${r.href}">${r.name} • Sreality.cz</a>`).join('');
+    const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(nextData)}</script>${anchors}`;
+    const items = fromEmbeddedJson(html, CZ_BASE);
+    expect(items.length).toBe(3);
+    expect(items[0]).toMatchObject({
+      title: 'Prodej zahrady 464 m², Obora',
+      url: 'https://www.sreality.cz/detail/prodej/pozemek/zahrada/obora-obora-/2274426951',
+      value: 461000,
+      unit: 'CZK',
+      lon: 13.867084,
+    });
+    expect(items[0].lat).toBeCloseTo(50.372607, 5);
+  });
+
+  it('keeps the listing anchor titles when the page title is script code', () => {
+    const html = `
+      <meta property="og:title" content="Prodej pozemku 500 m², Praha">
+      <title>slide.classList.remove('is-transition-from', 'is-transition-to')); },</title>
+      <h1>Prodej pozemku 500 m², Praha</h1>
+      <a href="/listing/plot-1-u1000000">Prodej pozemku 500 m², Praha</a>
+      <a href="/listing/plot-2-u2000000">Prodej pozemku 600 m², Brno</a>
+      <a href="/listing/plot-3-u3000000">Prodej pozemku 700 m², Ostrava</a>
+    `;
+    const { items } = fromCards(html, BASE);
+    expect(items.length).toBe(3);
+    expect(items[0].title).toBe('Prodej pozemku 500 m², Praha');
+    expect(items[0].title).not.toContain('classList');
+  });
+
+  it('rejects titles with arrow functions and brace pairs', () => {
+    const html = `<a href="/listing/plot-1-u1000000">() => { return x; }</a><a href="/listing/plot-2-u2000000">() => { return x; }</a><a href="/listing/plot-3-u3000000">() => { return x; }</a>`;
+    const { items } = fromCards(html, BASE);
+    expect(items.length).toBe(3);
+    expect(items.every((i) => i.title === i.url)).toBe(true);
+  });
+
+  it('rejects titles containing function keyword', () => {
+    const html = `<a href="/listing/plot-1-u1000000">function foo() {}</a><a href="/listing/plot-2-u2000000">function foo() {}</a><a href="/listing/plot-3-u3000000">function foo() {}</a>`;
+    const { items } = fromCards(html, BASE);
+    expect(items.length).toBe(3);
+    expect(items.every((i) => i.title === i.url)).toBe(true);
+  });
+
+  it('strips Sreality.cz suffix from titles in JSON-LD', () => {
+    const ld = { '@type': 'Product', name: 'Prodej pozemku 500 m² • Sreality.cz', url: 'https://www.sreality.cz/detail/prodej/pozemek/123456', offers: { price: 100000, priceCurrency: 'CZK' } };
+    const html = `<a href="https://www.sreality.cz/detail/prodej/pozemek/123456">Prodej pozemku 500 m² • Sreality.cz</a><script type="application/ld+json">${JSON.stringify(ld)}</script>`;
+    const items = fromJsonLd(html, CZ_BASE);
+    expect(items.length).toBe(1);
+    expect(items[0].title).toBe('Prodej pozemku 500 m²');
   });
 });

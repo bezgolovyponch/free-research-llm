@@ -16,8 +16,17 @@ const NEXT_TEXT = /^(?:next|next page|seguinte|próxima|proxima|siguiente|suivan
 const PAGE_PARAM = /([?&](?:page|pagina|pag|p|sayfa|trang)=)(\d+)/i;
 const PAGE_PATH = /(\/(?:page|pagina|pag|sayfa|trang)[/-]?)(\d+)(\/?)$/i;
 
+const CODE_TITLE = /classList|=>|'\);|function\(|\{[\s\S]*\}/;
+
 function clean(value, max = 160) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function sanitizeTitle(raw) {
+  const title = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  if (!title) return '';
+  if (CODE_TITLE.test(title)) return '';
+  return title.replace(/\s*•\s*Sreality\.cz$/i, '').slice(0, 160);
 }
 
 function numberOf(value) {
@@ -171,12 +180,14 @@ function fromRecord(record, base, anchors) {
   if (!url && record.id !== undefined) url = resolveUrl(String(record.id), base, anchors);
   if (!url) return null;
   const price = fieldBy(record, PRICE_KEY, priceOf);
+  const priceCzk = record.priceCzk ?? (record.offers && typeof record.offers === 'object' ? record.offers.priceCzk : undefined);
   const currency = clean(record.priceCurrency ?? record.currency ?? record.offers?.priceCurrency ?? '', 8).toUpperCase();
+  const title = sanitizeTitle(field(record, TITLE_KEYS) || url);
   return {
-    title: clean(field(record, TITLE_KEYS) || url),
+    title,
     url,
-    value: price?.value ?? null,
-    unit: price?.unit || (price ? currency : ''),
+    value: price?.value ?? (typeof priceCzk === 'number' ? priceCzk : null),
+    unit: price?.unit || (price ? currency : (priceCzk ? 'CZK' : '')),
     area: fieldBy(record, AREA_KEY, areaOf),
     place: placeOf(record.location ?? record.address ?? record.geo ?? null) || clean(fieldBy(record, PLACE_KEY, (v) => (typeof v === 'string' ? v : '')) ?? '', 80),
     ...coordsOf(record),
@@ -307,7 +318,8 @@ export function fromCards(source, base, { isHtml = true, template = '' } = {}) {
     const text = cardText(source, at, order[i + 1]?.[1] ?? source.length, isHtml);
     const price = headlinePrice(parseAmounts(text));
     const area = text.match(AREA_TEXT);
-    return { title: clean(titles.get(url) || text.slice(0, 100)) || url, url, value: price?.value ?? null, unit: price?.currency ?? '', area: area ? numberOf(area[1]) : null, areaUnit: area ? area[2].toLowerCase() : '', place: '', card: clean(text, 300) };
+    const title = sanitizeTitle(titles.get(url) || text.slice(0, 100)) || url;
+    return { title, url, value: price?.value ?? null, unit: price?.currency ?? '', area: area ? numberOf(area[1]) : null, areaUnit: area ? area[2].toLowerCase() : '', place: '', card: clean(text, 300) };
   });
   return { items, template: pathTemplate(order[0][0]) };
 }
