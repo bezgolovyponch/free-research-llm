@@ -648,6 +648,89 @@ describe('graded research answers feed routing', () => {
     const seen = outcomes.posterior(provider.id, 'research', 3);
     expect(seen.observed).toBeGreaterThan(0);
   });
+
+  it('synthesize records outcome when candidates exist, NOT when candidates is null', async () => {
+    const provider = new ScriptedProvider();
+    const { engine, router } = engineWith(provider);
+    const recorded: Array<{ purpose: string; passed: boolean }> = [];
+    router.recordOutcome = ({ purpose, passed }: { purpose: string; passed: boolean }) => {
+      recorded.push({ purpose, passed });
+    };
+    const project = await engine.createProject({ question: 'Find plots for glamping in Portugal', autoRun: false });
+    await engine.run(project.id);
+    const leaf = project.nodes.find((n: { parentId: string | null }) => n.parentId !== null);
+    leaf.status = 'verified';
+    leaf.finding = { answer: 'two plots', claims: [], items: [] };
+    leaf.verification = { grade: 'verified', score: 80, checks: [], failures: [] };
+    // candidates present (with all required fields) -> checkMemoClaims returns object -> recordOutcome called
+    project.candidates = { found: 2, keptCount: 2, toCheckCount: 0, screenedCount: 0, kept: [], toCheck: [], screened: {}, tiers: { fits: 0, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, verification: null, sites: { trends: {} } };
+    project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'x', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    await engine.synthesize(project);
+    expect(recorded.filter((r) => r.purpose === 'synthesize')).toHaveLength(1);
+    // no candidates -> checkMemoClaims returns null -> claimCheck is null -> no recordOutcome
+    recorded.length = 0;
+    project.candidates = null;
+    await engine.synthesize(project);
+    expect(recorded.filter((r) => r.purpose === 'synthesize')).toHaveLength(0);
+  });
+
+  it('synthesize records passed=false when claimCheck has contradictions', async () => {
+    const { ScriptedProvider } = await import('../../src/llm/scripted-provider.mjs');
+    const { TASK_MARKERS } = await import('../../src/research/prompts.mjs');
+    // Custom provider that returns a synthesize response with a contradiction
+    const scripted = new ScriptedProvider();
+    const provider = {
+      id: 'demo',
+      ready: true,
+      selected: { fast: 'test-fast', deep: 'test-deep', vision: 'test-vision' },
+      canServe: () => true,
+      describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'test-fast', deep: 'test-deep', local: true, keyEnv: null, signup: '', modelCount: 2 }),
+      async chat({ messages, tier, json, temperature, timeoutMs }: { messages: Array<{ role: string; content: string }>; tier: string; json?: boolean; temperature?: number; timeoutMs?: number }) {
+        const prompt = messages[messages.length - 1].content;
+        if (prompt.includes(TASK_MARKERS.synthesize)) {
+          return {
+            content: JSON.stringify({
+              verdict: 'GO-IF',
+              confidence: 'high',
+              summary: 'median price 5000 EUR',
+              keyNumbers: [],
+              scenarios: [],
+              sensitivity: [],
+              risks: [],
+              openQuestions: [],
+              nextSteps: [],
+              bestEstimate: null,
+              actions: [],
+              options: [],
+            }),
+            model: tier === 'deep' ? 'test-deep' : 'test-fast',
+            provider: 'demo',
+            usage: {},
+          };
+        }
+        // For other calls, use a single ScriptedProvider instance with all parameters
+        return scripted.chat({ messages, tier, json, temperature, timeoutMs });
+      },
+    };
+    const { engine, router } = engineWith(provider);
+    const recorded: Array<{ purpose: string; passed: boolean }> = [];
+    router.recordOutcome = ({ purpose, passed }: { purpose: string; passed: boolean }) => {
+      recorded.push({ purpose, passed });
+    };
+    const project = await engine.createProject({ question: 'Find plots for glamping in Portugal', autoRun: false });
+    await engine.run(project.id);
+    recorded.length = 0; // clear the synthesize outcome from the first run
+    const leaf = project.nodes.find((n: { parentId: string | null }) => n.parentId !== null);
+    leaf.status = 'verified';
+    leaf.finding = { answer: 'two plots', claims: [], items: [] };
+    leaf.verification = { grade: 'verified', score: 80, checks: [], failures: [] };
+    // candidates with a listing that has a value, report claims a different value -> contradiction
+    // plan must have verdict, why (array), and risks (array) for siteText()
+    project.candidates = { found: 2, keptCount: 2, toCheckCount: 0, screenedCount: 0, kept: [{ value: 10000, unit: 'EUR', plan: { tier: 'fits', verdict: 'Fits all checks', why: ['price in range', 'coastal'], risks: [] } }], toCheck: [], screened: {}, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, verification: null, sites: { trends: {} } };
+    await engine.synthesize(project);
+    expect(recorded.filter((r) => r.purpose === 'synthesize')).toHaveLength(1);
+    expect(recorded[0].passed).toBe(false);
+  });
 });
 
 describe('external verifier from the engine', () => {

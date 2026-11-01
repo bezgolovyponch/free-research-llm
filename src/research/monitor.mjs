@@ -131,14 +131,28 @@ export function captureBaseline(node, { at = new Date().toISOString() } = {}) {
   return baseline;
 }
 
-export function recordSample(node, { at = new Date().toISOString(), values } = {}) {
+export function recordSample(node, { at = new Date().toISOString(), values, championKept = false } = {}) {
   const sampleValues = values ?? numericSignature(node);
   if (!sampleValues.length) return null;
   const baseline = node.drift?.baseline;
   const stats = summaryStats(sampleValues);
   const test = baseline ? ksTest(baseline.values, sampleValues) : null;
   const score = baseline ? driftScore(baseline.values, sampleValues) : 0;
-  const sample = { at, values: sampleValues, stats, test, score };
+  const sample = { at, values: sampleValues, stats, test, score, championKept };
+  node.drift = { ...(node.drift ?? {}), samples: [...(node.drift?.samples ?? []), sample].slice(-MAX_DRIFT_SAMPLES) };
+  return sample;
+}
+
+export function recordChampionGap(node, gain) {
+  const value = Number(gain) || 0;
+  const sample = {
+    at: new Date().toISOString(),
+    values: [value],
+    stats: summaryStats([value]),
+    test: null,
+    score: value,
+    championKept: true,
+  };
   node.drift = { ...(node.drift ?? {}), samples: [...(node.drift?.samples ?? []), sample].slice(-MAX_DRIFT_SAMPLES) };
   return sample;
 }
@@ -146,7 +160,8 @@ export function recordSample(node, { at = new Date().toISOString(), values } = {
 export function driftCheck(node) {
   const drift = node.drift;
   if (!drift?.baseline || !drift?.samples?.length) return null;
-  const latest = drift.samples[drift.samples.length - 1];
+  const latest = [...drift.samples].reverse().find((s) => !s.championKept);
+  if (!latest) return null;
   const baseline = drift.baseline;
   const score = driftScore(baseline.values, latest.values);
   const test = ksTest(baseline.values, latest.values);
