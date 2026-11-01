@@ -103,7 +103,7 @@ export class OpenAICompatibleProvider {
       const res = await this.fetchImpl(`${this.baseURL}${path}`, { ...init, headers: this.headers(), signal: controller.signal });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        throw new ProviderError(`${this.id} HTTP ${res.status}${quotaWindow(body)}: ${body.slice(0, 240)}`, { status: res.status, retryAfterMs: retryAfter(res) || retryAfterFromText(body, this.minIntervalMs), provider: this.id });
+        throw new ProviderError(`${this.id} HTTP ${res.status}${quotaWindow(body)}: ${body.slice(0, 240)}`, { status: res.status, retryAfterMs: Math.max(retryAfter(res), retryAfterFromText(body, this.minIntervalMs)), provider: this.id });
       }
       return await res.json();
     } catch (error) {
