@@ -255,18 +255,21 @@ describe('regradeSettled', () => {
 });
 
 describe('recordChampionGap / researchNoiseFloor', () => {
-  it('records champion gap and measures noise floor from kept samples', () => {
+  it('records champion gap and measures noise floor from kept samples (signed gains)', () => {
     const node: any = { id: 'D1', drift: {} };
-    recordChampionGap(node, 0.02);
+    // Mix of positive and negative gains — noiseFloor uses signed values
+    recordChampionGap(node, -0.02);
     recordChampionGap(node, 0.03);
-    recordChampionGap(node, 0.01);
+    recordChampionGap(node, -0.01);
     recordChampionGap(node, 0.025);
-    recordChampionGap(node, 0.015);
+    recordChampionGap(node, -0.015);
     const floor = researchNoiseFloor(node);
-    expect(floor).toBeGreaterThan(0.001);
+    // 2 * sample SD of [-0.02, 0.03, -0.01, 0.025, -0.015]
+    // mean = 0.002, sd ≈ 0.0236, 2*sd ≈ 0.0472
+    expect(floor).toBeCloseTo(0.047, 2);
     expect(node.drift.samples.length).toBe(5);
     expect(node.drift.samples.every((s: any) => s.championKept)).toBe(true);
-    expect(node.drift.samples.map((s: any) => s.score)).toEqual([0.02, 0.03, 0.01, 0.025, 0.015]);
+    expect(node.drift.samples.map((s: any) => s.score)).toEqual([-0.02, 0.03, -0.01, 0.025, -0.015]);
   });
 
   it('falls back to MIN_GAIN when no champion-kept samples', () => {

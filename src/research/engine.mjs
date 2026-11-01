@@ -604,8 +604,10 @@ export class ResearchEngine {
       generatedAt: new Date().toISOString(),
     };
     this.planActions(project);
-    const passed = project.report.claimCheck?.contradicted?.length === 0;
-    this.router.recordOutcome?.({ provider: reply.provider, purpose: 'synthesize', passed });
+    if (project.report.claimCheck) {
+      const passed = project.report.claimCheck.contradicted.length === 0;
+      this.router.recordOutcome?.({ provider: reply.provider, purpose: 'synthesize', passed });
+    }
     await this.checkAcceptance(project);
     this.emit(project, 'report', `decision memo ready: ${project.report.verdict}`);
   }

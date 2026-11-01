@@ -144,7 +144,7 @@ export function recordSample(node, { at = new Date().toISOString(), values, cham
 }
 
 export function recordChampionGap(node, gain) {
-  const value = Math.abs(Number(gain) || 0);
+  const value = Number(gain) || 0;
   const sample = {
     at: new Date().toISOString(),
     values: [value],
