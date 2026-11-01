@@ -589,3 +589,15 @@ describe('httpJson retries a dropped connection, not a refusal', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('shared cache merge keeps a fetched price series over a newer failure', () => {
+  it('never lets a failed or empty read replace a series another worker fetched', () => {
+    const assessor = new SiteAssessor({ sleep: async () => {} }) as unknown as { merge(o: object): void; store: { hpi: Record<string, unknown> } };
+    assessor.store.hpi = { PT: { at: 100, value: { real: 2 } }, ES: { at: 300, value: null, failures: 2, retryAt: 900 } };
+    assessor.merge({ sites: {}, places: {}, points: {}, facts: {}, hpi: { PT: { at: 500, value: null, failures: 1, retryAt: 700 }, ES: { at: 200, value: { real: 4 } } } });
+    expect(assessor.store.hpi.PT).toMatchObject({ value: { real: 2 } });
+    expect(assessor.store.hpi.ES).toMatchObject({ value: { real: 4 } });
+    assessor.merge({ hpi: { PT: { at: 600, value: { real: 3 } } } });
+    expect(assessor.store.hpi.PT).toMatchObject({ value: { real: 3 } });
+  });
+});

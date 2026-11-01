@@ -280,9 +280,17 @@ export class SiteAssessor {
 
   merge(other) {
     if (!other) return;
+    const valued = (entry) => entry?.value !== null && entry?.value !== undefined;
     for (const table of STORE_TABLES) {
       const mine = this.store[table] ?? {};
-      for (const [key, entry] of Object.entries(other[table] ?? {})) if (!mine[key] || (entry?.at ?? 0) > (mine[key]?.at ?? 0)) mine[key] = entry;
+      for (const [key, entry] of Object.entries(other[table] ?? {})) {
+        const held = mine[key];
+        if (table === 'hpi' && held && valued(held) !== valued(entry)) {
+          if (valued(entry)) mine[key] = entry;
+          continue;
+        }
+        if (!held || (entry?.at ?? 0) > (held?.at ?? 0)) mine[key] = entry;
+      }
       this.store[table] = mine;
     }
   }
