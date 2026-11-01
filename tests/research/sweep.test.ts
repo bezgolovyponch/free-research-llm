@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildBrief } from '../../src/research/brief.mjs';
+import { buildCandidates } from '../../src/research/candidates.mjs';
 import { CandidateSweeper, listingsShown, portalPages, priceFilterUrl } from '../../src/research/sweep.mjs';
 
 const kind = { label: 'plot of land', terms: ['land', 'terreno'] };
@@ -44,6 +45,23 @@ describe('portal sweep', () => {
     expect(read).toEqual(['https://imo.example/pt/resultados', 'https://imo.example/pt/resultados?price_max=20000', 'https://imo.example/pt/resultados?price_max=20000&page=2']);
     expect(result?.pages.map((p: { from: string; listings: unknown[] }) => [p.from, p.listings.length])).toEqual([['portal page already read', 2], ['price filter found on imo.example', 1], ['next page link', 2]]);
     expect(await new CandidateSweeper({ search }).sweep(project, { ...brief, kind: null }, {})).toBeNull();
+  });
+
+  it('gives every page of a seed start that country, so a .com portal keeps its listings instead of leaving them to check', async () => {
+    const spanish = buildBrief({ question: 'Plots near the sea in Spain, 20000EUR max', acceptance: { expected: '3 plots in Spain', itemCount: 3, valueRange: [0, 20000], unit: 'EUR' }, template: { itemKind: kind } });
+    const spanishListing = (n: number) => ({ title: `Terreno rustico en Galicia ${n}`, url: `https://www.pisos.com/comprar/terreno-en-galicia-${1000000 + n}`, value: 15000, unit: 'EUR' });
+    const pages: Record<string, { listings: unknown[]; next: string; links: unknown[] }> = {
+      'https://www.pisos.com/venta/terrenos-galicia/hasta-20000/': { listings: [spanishListing(1)], next: 'https://www.pisos.com/venta/terrenos-galicia/hasta-20000/?page=2', links: [{ url: 'https://www.pisos.com/venta/terrenos-galicia/hasta-20000/?price_max=1000000' }] },
+      'https://www.pisos.com/venta/terrenos-galicia/hasta-20000/?price_max=20000': { listings: [spanishListing(2)], next: 'https://www.pisos.com/venta/terrenos-galicia/hasta-20000/?price_max=20000&page=2', links: [] },
+      'https://www.pisos.com/venta/terrenos-galicia/hasta-20000/?price_max=20000&page=2': { listings: [spanishListing(3)], next: '', links: [] },
+    };
+    const search = { readPage: async (url: string) => ({ status: 200, locale: 'es', text: '', ...(pages[url] ?? { listings: [], next: '', links: [] }) }) };
+    const seeds = () => [{ url: 'https://www.pisos.com/venta/terrenos-galicia/hasta-20000/', country: 'ES', sample: ['terreno'], count: 1, seed: true }];
+    const result = await new CandidateSweeper({ search, seeds }).sweep({ nodes: [] }, spanish, {});
+    expect(result?.pages.map((p: { country: string }) => p.country)).toEqual(['ES', 'ES', 'ES']);
+    const candidates = buildCandidates([{ id: 'sweep', sources: result?.pages ?? [] }], spanish, {});
+    expect(candidates.toCheckCount).toBe(0);
+    expect(candidates.kept.map((r: { country: string }) => r.country)).toEqual(['Spain', 'Spain', 'Spain']);
   });
 
   it('reads a seed portal of every named country before the count target can stop the sweep, one country at a time', async () => {

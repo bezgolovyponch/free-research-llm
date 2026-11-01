@@ -54,6 +54,12 @@ describe('concept brief', () => {
     expect(sourceCountry({ url: 'https://agents.example/', text: 'one Vietnam mention' })).toBe('');
   });
 
+  it('takes the country the page was read for, before the address, the language or the text', () => {
+    expect(sourceCountry({ url: 'https://www.pisos.com/x', country: 'ES' })).toBe('ES');
+    expect(sourceCountry({ url: 'https://www.pisos.com/x', country: 'Spain' })).toBe('');
+    expect(sourceCountry({ url: 'https://www.pisos.com/x', country: 'ES', locale: 'pt' })).toBe('ES');
+  });
+
   it('places a listing by its own text first, then by the page it was found on', () => {
     expect(itemCountry({ url: 'https://famalo.hr/x', title: 'Zemljište' })).toEqual({ code: 'HR', by: 'site address' });
     expect(itemCountry({ url: 'https://agents.example/viewProperty--location--Turkey--1', title: 'Seafront land' })).toEqual({ code: 'TR', by: 'listing text' });
