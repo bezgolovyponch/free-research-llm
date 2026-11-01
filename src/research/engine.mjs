@@ -214,8 +214,8 @@ export class ResearchEngine {
     return this.store.save(project);
   }
 
-  async decompose(project) {
-    project.phase = 'decomposing';
+  async decompose(project, phase = 'decomposing') {
+    project.phase = phase;
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
     await this.store.save(project);
     const template = templateById(project.templateId);
@@ -252,7 +252,7 @@ export class ResearchEngine {
     this.running.add(id);
     try {
       const project = await this.load(id);
-      if (!project.nodes.length) await this.decompose(project);
+      if (!project.nodes.length) await this.decompose(project, 'building-tree');
       project.phase = 'tree-ready';
       this.emit(project, 'phase', 'tree ready — review it, then press Run or start the self-improving loop');
       return await this.store.save(project);

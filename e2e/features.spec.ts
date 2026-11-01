@@ -52,6 +52,7 @@ test('results tab shows what was delivered and has its own chat', async ({ page 
   await page.goto('/');
   await page.locator('#inQuestion').fill('Which used vans bought in Germany resell in Czechia with a 10% margin?');
   await page.getByRole('button', { name: 'Research now' }).click();
+  await expect(page.locator('#phasePill')).toContainText('done', { timeout: 40000 });
   await page.locator('.tabs .tab', { hasText: 'Results' }).click();
   await expect(page.locator('#resultsBody')).toContainText('What the research found', { timeout: 40000 });
   await expect(page.locator('#resultsBody')).toContainText('Memo verdict');
@@ -269,7 +270,8 @@ test('share: More → Share explains the one-research link and says when remote 
   await page.locator('#inQuestion').fill('Which Czech city is best for a small bakery?');
   await page.locator('#inExpected').fill('one city with three reasons');
   await page.getByRole('button', { name: 'Build the tree →' }).click();
-  await expect(page.locator('#outline .orow').first()).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('#phasePill')).toContainText('tree-ready', { timeout: 30000 });
+  await expect(page.locator('#btnRun')).toHaveText('▶ Run');
   await page.locator('#moreBtn').click();
   await page.locator('#mShare').click();
   const box = page.locator('#shareBox');

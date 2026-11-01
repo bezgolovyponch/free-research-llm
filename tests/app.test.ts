@@ -234,6 +234,10 @@ describe('App reports in the app conversation', () => {
     expect(await app.settleStale()).toEqual([project.id]);
     expect((await app.engine.load(project.id)).phase).toBe('cancelled');
     expect(await app.settleStale()).toEqual([]);
+    const building = await app.engine.createProject({ question: 'Which Czech city is best for a small bakery?' });
+    building.phase = 'building-tree';
+    await app.store.save(building);
+    expect(await app.settleStale()).toEqual([building.id]);
     await new Promise((r) => setTimeout(r, 50));
     expect((await app.appChat.thread()).map((m: { content: string }) => m.content)).toContain('New research: Which kiosk spot in Brno pays back fastest?');
     await app.logs.queue;
