@@ -455,23 +455,28 @@ export class SiteAssessor {
     return withLakes;
   }
 
+  hpiFresh(entry) {
+    if (!entry) return false;
+    return this.now() - entry.at < (entry.value !== null && entry.value !== undefined ? SITE_TTL_MS : MISS_TTL_MS);
+  }
+
   async priceTrend(code) {
     if (!code) return null;
     const known = this.store.hpi[code];
-    if (this.fresh(known)) return known.value;
+    if (this.hpiFresh(known)) return known.value ?? null;
     if (!this.limits.newSites) return known?.value ?? null;
-    let value = null;
+    let value;
     try {
       const geo = EUROSTAT_CODE[code] ?? code;
       const hpi = yearly(await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`));
       const hicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${geo}&sinceTimePeriod=2020`));
       value = trendOf(hpi, hicp);
     } catch {
-      value = null;
+      return known?.value ?? null;
     }
-    this.store.hpi[code] = { at: this.now(), value };
+    this.store.hpi[code] = { at: this.now(), value: value ?? null };
     this.persist();
-    return value;
+    return value ?? null;
   }
 
 

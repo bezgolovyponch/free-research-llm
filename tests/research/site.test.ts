@@ -496,3 +496,24 @@ describe('Overpass instances', () => {
     expect(asked).toEqual([OVERPASS_URLS[0]]);
   });
 });
+
+describe('price trend cache: a failed Eurostat read is not an answer', () => {
+  it('retries after an outage instead of marking the country as having no series for 30 days', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-trend-'));
+    let clock = 1_000_000_000_000;
+    let down = true;
+    const json = (rows: number[]) => ({ dimension: { time: { category: { index: { '2020': 0, '2021': 1, '2022': 2, '2023': 3, '2024': 4 } } } }, value: Object.fromEntries(rows.map((v, i) => [String(i), v])) });
+    const fetchJson = async (url: string) => {
+      if (down) throw new Error('eurostat unreachable');
+      return url.includes('prc_hpi') ? json([100, 105, 110, 115, 120]) : json([100, 102, 104, 106, 108]);
+    };
+    const assessor = new (SiteAssessor as unknown as new (o: object) => { priceTrend(code: string): Promise<number | null>; store: { hpi: Record<string, unknown> } })({ file: path.join(dir, 'sites.json'), fetchJson, now: () => clock, sleep: async () => {} });
+    expect(await assessor.priceTrend('PT')).toBeNull();
+    expect(assessor.store.hpi.PT).toBeUndefined();
+    down = false;
+    const retried = await assessor.priceTrend('PT');
+    expect(retried).toMatchObject({ real: expect.any(Number), year: '2024' });
+    expect(assessor.store.hpi.PT).toMatchObject({ value: retried });
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});

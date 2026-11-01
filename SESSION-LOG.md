@@ -3,6 +3,17 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-11-01 · why results were "to confirm" and no plot was "fits"
+
+Asked: why every result is to confirm and none fits, why the expected result reads 100% met, and why the improve loop cannot confirm anything itself.
+
+- **Why no "fits":** a plot is "fits" only when every decision-model check is measured and met (`src/research/strategy.mjs`, `planFor`). A check that cannot be measured is `null`, which makes the plot "to confirm". Six checks: sea distance (null without a location, or within the map's ±2 km when the rough coastline is used), camping season and no-air-conditioning (null while the climate is unmeasured or the map service is busy), units (null without an area), the country price trend (null without an official series), location consistency (null on a place conflict), and the legal path (null for a country with no researched path).
+- **Defect found:** `SiteAssessor.priceTrend` (`src/research/site.mjs`) cached a failed Eurostat read as a valid "no series" answer, with the 30-day TTL. One outage therefore marked every plot of that country "to confirm" for a month. The price trend is country-level, so the whole country was affected at once.
+- **Fix:** a failed read is not stored; a genuine "no series" is kept for 24 h (`MISS_TTL_MS`), a value for 30 days. Test: `tests/research/site.test.ts` ("a failed Eurostat read is not an answer"). The test fails on the previous code and passes on the fix.
+- **Why the improve loop cannot confirm these:** a loop trial runs in cache mode (`MODES.cache`: no new sites, no page reads, no map queries). It cannot fetch a missing price series or measure a new place, so the same checks stay null across trials. The external verifier (`verifier/verify.mjs`) re-measures price, area, coordinates, sea distance and the months, but not the country trend or the legal path, so a verified plot still stays "to confirm" on those two checks.
+- **Not verified here:** the "100% met" figure. It comes from `acceptance.mjs` (`evaluate`), which averages per-check values, and the value is capped at 1. If only the confirmed items are counted, every measured check can be 1, which gives 100% while most plots are unmeasured. The project data is not in this sandbox, so this is a hypothesis to check on a live research.
+- **Open decisions:** whether verifier-confirmed measurements should move a plot to "fits" while the country-level checks are shown separately, and where the country trend should come from when Eurostat is unreachable.
+
 ## Session 2026-10-31 (6) · the loop tries the whole question last
 
 Asked: a full-cycle pass on the review suggestions: fix, test, merge, audit, fix again.
