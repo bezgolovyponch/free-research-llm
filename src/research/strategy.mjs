@@ -146,10 +146,15 @@ export function foundationOf(strategy, project) {
   return { rules, criteria: strategy.criteria.map(({ id, label, measure }) => ({ id, label, measure })), clauses, complete: modelled.length === clauses.length, missing: clauses.filter((c) => !c.criteria.length).map((c) => c.text) };
 }
 
+export function askedCriteria(foundation) {
+  return foundation?.clauses?.length ? [...new Set(foundation.clauses.flatMap((c) => c.criteria))] : null;
+}
+
 export function foundationText(foundation) {
   if (!foundation) return '';
   const r = foundation.rules;
-  const lines = [`Decision model (code checks every listing against it; a listing counts only when every check is measured and met): sea within ${r.ebikeKm.value} km by e-bike; at least ${r.minWorkableMonths.value} camping months (Camping Climate Index above 3, acceptable or better, Ma 2021 Table 4); hottest month average high at most ${r.maxHottest.value} °C, days above 34 °C shown as exceptions (no air conditioning${r.maxHottest.source === 'assumption' ? '; this limit is assumed, not taken from your words or a source' : r.maxHottest.source === 'ma2021' ? '; the perceived maximum from Fisichelli et al. 2015, cited by Ma 2021' : ''}); room for ${r.minUnits.value}+ units; a legal path for the buyer; country price trend above the EU average; entry cost = price + transfer tax + ${r.minUnits.value} bell tents.`];
+  const has = (id) => keepCheck(id, askedCriteria(foundation));
+  const lines = [`Decision model (code checks every listing against it; a listing counts only when every check is measured and met): ${has('sea') ? `sea within ${r.ebikeKm.value} km by e-bike; ` : ''}${has('season') ? `at least ${r.minWorkableMonths.value} camping months (Camping Climate Index above 3, acceptable or better, Ma 2021 Table 4); ` : ''}${has('noAc') ? `hottest month average high at most ${r.maxHottest.value} °C, days above 34 °C shown as exceptions (no air conditioning${r.maxHottest.source === 'assumption' ? '; this limit is assumed, not taken from your words or a source' : r.maxHottest.source === 'ma2021' ? '; the perceived maximum from Fisichelli et al. 2015, cited by Ma 2021' : ''}); ` : ''}room for ${r.minUnits.value}+ units; a legal path for the buyer; ${has('trend') ? 'country price trend above the EU average; ' : ''}entry cost = price + transfer tax + ${r.minUnits.value} bell tents.`];
   if (foundation.missing.length) lines.push(`Not modelled yet (no code check): ${foundation.missing.join('; ')}`);
   return lines.join('\n');
 }
@@ -199,7 +204,13 @@ function seaCheck(site, ebike) {
   return check('sea', label, site.coastKm !== null && site.coastKm <= ebike, `sea ${site.coastKm ?? '>25'} km${by}`);
 }
 
-export function planFor(row, strategy, { convert = null, euHpi = null, trends = null } = {}) {
+function keepCheck(id, asked) {
+  if (asked === null) return true;
+  if (asked.includes(id)) return true;
+  return ['units', 'legal', 'location'].includes(id);
+}
+
+export function planFor(row, strategy, { convert = null, euHpi = null, trends = null, asked = null } = {}) {
   const rules = strategy.rules;
   const trend = trends?.[row.countryCode] ?? null;
   const hpi = trend?.real ?? row.fit?.hpi ?? null;
@@ -212,7 +223,7 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const words = `${row.title ?? ''} ${row.place ?? ''}`;
   const zoning = zoningOf(row);
   const ebike = rules.ebikeKm.value;
-  const checks = [
+  const allChecks = [
     seaCheck(site, ebike),
     check('season', `${rules.minWorkableMonths.value}+ camping months (Camping Climate Index above 3: acceptable or better, Ma 2021 Table 4)`, climate?.cci ? climate.workable >= rules.minWorkableMonths.value : null, climate?.cci ? `${climate.workable} camping months (index above 3), ${climate.good ?? '?'} good (≥ 5), ${climate.comfortable} optimal (≥ 7), ${climate.cci.optimalDays} optimal days a year` : 'climate not measured with the Camping Climate Index yet'),
     check('noAc', 'no air conditioning needed', climate?.cci ? climate.hottest <= rules.maxHottest.value : null, climate?.cci ? `hottest month average high ${climate.hottest} °C (limit ${rules.maxHottest.value} °C); ${climate.cci.hotDays} day(s) a year above 34 °C` : 'climate not measured with the Camping Climate Index yet'),
@@ -221,16 +232,17 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
     check('location', 'the listing location is consistent', row.placeConflict ? null : true, row.placeConflict ?? 'map point and title agree'),
     check('legal', 'a legal path for a buyer', country ? !country.blocker && !INDUSTRIAL.test(words) : null, country?.blocker ?? (INDUSTRIAL.test(words) ? 'industrial site: camping parks must be 1,000 m from insalubrious industry (Portaria 1320/2008)' : country?.path ?? 'no path researched for this country')),
   ];
+  const checks = allChecks.filter((c) => keepCheck(c.id, asked));
   const failed = checks.filter((c) => c.ok === false);
   const unknown = checks.filter((c) => c.ok === null);
   const blocked = checks.find((c) => c.id === 'legal' && c.ok === false);
   const why = [];
-  if (site?.coastKm !== null && site?.coastKm !== undefined && site.coastKm <= ebike) why.push(`sea ${site.coastKm} km${site.beachKm !== null && site.beachKm !== undefined ? `, beach ${site.beachKm} km` : ''}: inside the ${ebike} km e-bike ride`);
-  if (climate?.cci && climate.workable >= rules.minWorkableMonths.value) why.push(`${climate.workable} camping months a year by the Camping Climate Index (${climate.good ?? '?'} good, ${climate.comfortable} optimal, ${climate.cci.optimalDays} optimal days a year)`);
-  if (climate?.cci && climate.hottest <= rules.maxHottest.value) why.push(`hottest month average high ${climate.hottest} °C: tents work without air conditioning${climate.cci.hotDays ? ` (about ${climate.cci.hotDays} day(s) a year above 34 °C)` : ''}`);
+  if (keepCheck('sea', asked) && site?.coastKm !== null && site?.coastKm !== undefined && site.coastKm <= ebike) why.push(`sea ${site.coastKm} km${site.beachKm !== null && site.beachKm !== undefined ? `, beach ${site.beachKm} km` : ''}: inside the ${ebike} km e-bike ride`);
+  if (keepCheck('season', asked) && climate?.cci && climate.workable >= rules.minWorkableMonths.value) why.push(`${climate.workable} camping months a year by the Camping Climate Index (${climate.good ?? '?'} good, ${climate.comfortable} optimal, ${climate.cci.optimalDays} optimal days a year)`);
+  if (keepCheck('noAc', asked) && climate?.cci && climate.hottest <= rules.maxHottest.value) why.push(`hottest month average high ${climate.hottest} °C: tents work without air conditioning${climate.cci.hotDays ? ` (about ${climate.cci.hotDays} day(s) a year above 34 °C)` : ''}`);
   if (units !== null && units >= rules.minUnits.value) why.push(`${Math.round(m2).toLocaleString('en-US')} m² holds ${units} units, ${rules.minUnits.value} are enough to open`);
   if (cost) why.push(`entry ≈ ${eur(cost.total)} (price ${eur(cost.price)} + ${cost.taxLabel} ${eur(cost.tax)}${cost.tents !== null ? ` + ${cost.units} bell tents ${eur(cost.tents)}` : ''}; excludes ${cost.excludes})`);
-  if (hpi !== null && euHpi !== null && hpi > euHpi) why.push(`${row.country} house prices ${signed(hpi)}% a year after inflation${trend ? ` (nominal ${signed(trend.change)}%, inflation ${trend.inflation}%, ${trend.year})` : ''} vs EU ${signed(euHpi)}% (Eurostat, country level, not land)`);
+  if (keepCheck('trend', asked) && hpi !== null && euHpi !== null && hpi > euHpi) why.push(`${row.country} house prices ${signed(hpi)}% a year after inflation${trend ? ` (nominal ${signed(trend.change)}%, inflation ${trend.inflation}%, ${trend.year})` : ''} vs EU ${signed(euHpi)}% (Eurostat, country level, not land)`);
   if (site && !site.mapPending) why.push(`${explorePoints(site)} things to explore and ${(site.lodging ?? 0) + (site.campsites ?? 0)} places to stay within 15 km (demand)`);
   if (site?.mapPending) why.push('things to explore and places to stay nearby: queued, the public map service is busy');
   if (country?.path && !country.blocker) why.push(`path: ${country.path}`);
@@ -383,8 +395,9 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   const trends = candidates.sites?.trends ?? null;
   const all = [...(candidates.kept ?? []), ...(candidates.far ?? [])];
   const medians = { ...pricePerM2Medians(all), ...(candidates.priceMedians ?? {}) };
+  const asked = askedCriteria(foundation);
   const rows = all.map((row) => {
-    const plan = planFor(row, model, { convert, euHpi, trends });
+    const plan = planFor(row, model, { convert, euHpi, trends, asked });
     const cheap = implausiblyCheap(row, medians, all);
     if (!cheap) return { ...row, plan };
     const doubtful = ['fits', 'trade-off'].includes(plan.tier);
@@ -394,7 +407,7 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
   const euTrend = trends?.EU27_2020 ?? null;
   const outside = (candidates.outside ?? []).map((row) => {
-    const plan = planFor(row, model, { convert, euHpi, trends });
+    const plan = planFor(row, model, { convert, euHpi, trends, asked });
     return { ...row, plan: { ...plan, opportunity: opportunityOf(row, plan, { trends, euTrend }) } };
   }).sort((a, b) => b.plan.opportunity.score - a.plan.opportunity.score || (a.plan.entry?.total ?? Infinity) - (b.plan.entry?.total ?? Infinity));
   const { far, ...rest } = candidates;

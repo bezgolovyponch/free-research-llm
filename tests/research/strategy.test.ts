@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, quoteFound, StrategyRetriever, strategyFor, unitsFor } from '../../src/research/strategy.mjs';
+import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, quoteFound, StrategyRetriever, strategyFor, unitsFor, foundationOf, foundationText, askedCriteria } from '../../src/research/strategy.mjs';
 
 const rules = GLAMPING_LOW_ENTRY.rules;
 const toEur = (value: number, from: string) => (from === 'GBP' ? value * 1.2 : value);
@@ -264,5 +264,119 @@ describe('decision model from the user words', () => {
     const out = applyStrategy({ sites: { euHpi: 2.9, trends: { HR: { realCagr: 6.2, since: '2020', year: '2025' }, EU27_2020: { realCagr: 2.1 } } }, kept: [], outside: [{ ...vir, url: 'low', site: site(40, { viewpoints: 0, beaches: 0, attractions: 0, campsites: 9 }) }, { ...vir, url: 'high' }], screened: {}, screenedCount: 0 }, GLAMPING_LOW_ENTRY, { convert: toEur });
     expect(out.outside.map((r: { url: string }) => r.url)).toEqual(['high', 'low']);
     expect(out.keptCount).toBe(0);
+  });
+});
+
+describe('asked criteria filtering', () => {
+  const czech = {
+    title: 'Land for glamping 5000 m² South Bohemia',
+    countryCode: 'CZ',
+    country: 'Czechia',
+    value: 40000,
+    area: 5000,
+    areaUnit: 'm²',
+    site: { coastKm: null, beachKm: null, beaches: 0, viewpoints: 10, attractions: 5, reserves: 2, protectedAreas: 1, hikingRoutes: 8, campsites: 4, lodging: 30, climate: { workable: 6, comfortable: 3, hottest: 26, coldest: -4, cci: { annual: 5.2, optimalDays: 80, hotDays: 0, optimalTrend: 1.2, perYear: [], years: 5 } } },
+    fit: { score: 0.8, hpi: 8.5 },
+  };
+
+  it('a Czech row under a Czech foundation has no sea/season/noAc/trend checks and verdict does not mention sea', () => {
+    const czechQuestion = { question: 'Find appropriate plots eligible for glamping in Czech Republic with entrance investments 1000000 CZK', guidance: '' };
+    const f = foundationOf(GLAMPING_LOW_ENTRY, czechQuestion);
+    expect(f.clauses.some((c) => c.criteria.includes('sea'))).toBe(false);
+    expect(f.clauses.some((c) => c.criteria.includes('season'))).toBe(false);
+    expect(f.clauses.some((c) => c.criteria.includes('noAc'))).toBe(false);
+    expect(f.clauses.some((c) => c.criteria.includes('trend'))).toBe(false);
+    expect(f.clauses.some((c) => c.criteria.includes('units'))).toBe(true);
+    expect(f.clauses.some((c) => c.criteria.includes('legal'))).toBe(true);
+
+    const plan = planFor(czech, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5, asked: ['units', 'legal', 'location', 'entry'] });
+    const checkIds = plan.checks.map((c) => c.id);
+    expect(checkIds).not.toContain('sea');
+    expect(checkIds).not.toContain('season');
+    expect(checkIds).not.toContain('noAc');
+    expect(checkIds).not.toContain('trend');
+    expect(checkIds).toContain('units');
+    expect(checkIds).toContain('legal');
+    expect(checkIds).toContain('location');
+    expect(plan.verdict).not.toMatch(/sea \d/);
+    expect(plan.verdict).not.toMatch(/camping months/);
+    expect(plan.verdict).not.toMatch(/air conditioning/);
+    expect(plan.why.join(' ')).not.toMatch(/sea \d/);
+    expect(plan.why.join(' ')).not.toMatch(/camping months/);
+    expect(plan.why.join(' ')).not.toMatch(/air conditioning/);
+  });
+
+  it('the original coastal question still gets all checks', () => {
+    const coastalQuestion = {
+      question: 'Find appropriate plots to buy for glamping business, but also with the strong price increase trend, very low enterance investments, 20000EUR max, 10 month a year, mild climate to have Glampings so no air condition, nearby sea or the ocean accessible by ebike',
+      guidance: '"Accessible by e-bike" means the sea is within e-bike distance (about 20 km on ordinary roads)',
+    };
+    const f = foundationOf(GLAMPING_LOW_ENTRY, coastalQuestion);
+    const asked = [...new Set(f.clauses.flatMap((c) => c.criteria))];
+    expect(asked).toContain('sea');
+    expect(asked).toContain('season');
+    expect(asked).toContain('noAc');
+    expect(asked).toContain('trend');
+    expect(asked).toContain('units');
+    expect(asked).toContain('legal');
+
+    const plan = planFor(nazare, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5, asked });
+    const checkIds = plan.checks.map((c) => c.id);
+    expect(checkIds).toContain('sea');
+    expect(checkIds).toContain('season');
+    expect(checkIds).toContain('noAc');
+    expect(checkIds).toContain('trend');
+    expect(checkIds).toContain('units');
+    expect(checkIds).toContain('legal');
+    expect(checkIds).toContain('location');
+    expect(plan.verdict).toBe('fits every criterion');
+    expect(plan.why.join(' | ')).toContain('sea 2.7 km');
+    expect(plan.why.join(' | ')).toContain('12 camping months a year by the Camping Climate Index');
+    expect(plan.why.join(' | ')).toContain('hottest month average high 24 °C: tents work without air conditioning');
+  });
+
+  it('applyStrategy passes asked from foundation clauses', () => {
+    const czechQuestion = { question: 'Find appropriate plots eligible for glamping in Czech Republic with entrance investments 1000000 CZK', guidance: '' };
+    const f = foundationOf(GLAMPING_LOW_ENTRY, czechQuestion);
+    const table = { sites: { euHpi: 8.5 }, kept: [czech], far: [], screened: {}, screenedCount: 0 };
+    const out = applyStrategy(table, GLAMPING_LOW_ENTRY, { convert: toEur, foundation: f });
+    const plan = out.kept[0].plan;
+    const checkIds = plan.checks.map((c) => c.id);
+    expect(checkIds).not.toContain('sea');
+    expect(checkIds).not.toContain('season');
+    expect(checkIds).not.toContain('noAc');
+    expect(checkIds).not.toContain('trend');
+    expect(checkIds).toContain('units');
+    expect(checkIds).toContain('legal');
+    expect(checkIds).toContain('location');
+    expect(plan.verdict).not.toMatch(/sea \d/);
+    expect(plan.verdict).not.toMatch(/camping months/);
+    expect(plan.verdict).not.toMatch(/air conditioning/);
+  });
+
+  it('foundationText only names asked rules', () => {
+    const czechQuestion = { question: 'Find appropriate plots eligible for glamping in Czech Republic with entrance investments 1000000 CZK', guidance: '' };
+    const f = foundationOf(GLAMPING_LOW_ENTRY, czechQuestion);
+    const text = foundationText(f);
+    expect(text).not.toContain('sea within');
+    expect(text).not.toContain('camping months');
+    expect(text).not.toContain('air conditioning');
+    expect(text).not.toContain('price trend above the EU average');
+    expect(text).toContain('room for 3+ units');
+    expect(text).toContain('a legal path for the buyer');
+    expect(text).toContain('entry cost = price + transfer tax + 3 bell tents');
+
+    const coastalQuestion = {
+      question: 'Find appropriate plots to buy for glamping business, but also with the strong price increase trend, very low enterance investments, 20000EUR max, 10 month a year, mild climate to have Glampings so no air condition, nearby sea or the ocean accessible by ebike',
+      guidance: '"Accessible by e-bike" means the sea is within e-bike distance (about 20 km on ordinary roads)',
+    };
+    const f2 = foundationOf(GLAMPING_LOW_ENTRY, coastalQuestion);
+    const text2 = foundationText(f2);
+    expect(text2).toContain('sea within 20 km by e-bike');
+    expect(text2).toContain('at least 10 camping months');
+    expect(text2).toContain('air conditioning');
+    expect(text2).toContain('price trend above the EU average');
+    expect(foundationText({ ...f2, clauses: [] })).toContain('sea within 20 km by e-bike');
+    expect(askedCriteria({ ...f2, clauses: [] })).toBeNull();
   });
 });

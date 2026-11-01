@@ -340,7 +340,7 @@ export class ResearchEngine {
         const c = table.parcels;
         if (c) this.emit(project, 'candidates', `official parcel records: ${c.matched} of ${c.eligible} listing(s) matched a land-registry parcel by the number the listing states, ${c.missed} state no parcel number or none matched, ${c.pending} still to look up`);
       }
-      if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (sea distance, climate from 2025 daily weather per 0.25° cell, things to explore within 15 km), ${s.far} farther than an e-bike ride from the sea, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
+      if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (${brief.coastal ? 'sea distance, ' : ''}climate from 2025 daily weather per 0.25° cell, things to explore within 15 km)${brief.coastal ? `, ${s.far} farther than an e-bike ride from the sea` : ''}, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
     if (strategy) {
       table = applyStrategy(table, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
