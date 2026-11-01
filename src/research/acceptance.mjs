@@ -26,9 +26,13 @@ function finite(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function currencyOfWord(word) {
+  return Object.keys(CURRENCIES).find((code) => code.toLowerCase() === word || CURRENCIES[code].includes(word)) ?? '';
+}
+
 export function currencyOf(token) {
   const t = String(token ?? '').toLowerCase().trim();
-  return Object.keys(CURRENCIES).find((code) => code.toLowerCase() === t || CURRENCIES[code].includes(t)) ?? '';
+  return currencyOfWord(t) || t.split(/[\s,;/()]+/).map(currencyOfWord).find(Boolean) || '';
 }
 
 export function toAmount(raw) {

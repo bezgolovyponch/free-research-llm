@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, hasCriteria, headlinePrice, inRange, looksLikeListing, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, hasCriteria, headlinePrice, inRange, looksLikeListing, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -104,6 +104,12 @@ describe('listing price on the page', () => {
 });
 
 describe('prices in more currencies and scales', () => {
+  it('reads the currency of a compound unit such as "€ EUR"', () => {
+    expect(currencyOf('€ EUR')).toBe('EUR');
+    expect(currencyOf('Kč (CZK)')).toBe('CZK');
+    expect(currencyOf('m²')).toBe('');
+  });
+
   it('reads lira, dong, scale words, and never a reference code or a number on another line', () => {
     expect(parseAmounts('450.000 TL · 2,150,000,000 ₫ · ₫ 75.6 billion · Giá 1,1 tỷ · € 20 k · € 1.2 million')).toEqual([
       { value: 450000, currency: 'TRY', perUnit: false },
