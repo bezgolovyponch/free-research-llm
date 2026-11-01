@@ -568,6 +568,10 @@ export class SiteAssessor {
         }
         stats.located++;
         let site = this.cachedSite(point.lat, point.lon);
+        if (site && !site.mapPending && site.coastKm === null) {
+          const filled = await this.withFileCoast(point.lat, point.lon, site);
+          if (filled !== site) site = this.keepSite(point.lat, point.lon, filled);
+        }
         const mapAllowed = (ctx.maps ?? 0) < (this.limits.mapQueries ?? this.limits.newSites) && this.now() - started <= this.limits.budgetMs;
         if (!site?.climate?.cci || (site.mapPending && mapAllowed)) {
           if (ctx.fresh >= this.limits.newSites || this.now() - started > this.limits.budgetMs) {
