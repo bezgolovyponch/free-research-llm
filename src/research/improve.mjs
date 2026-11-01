@@ -146,7 +146,7 @@ export const STALL_TRIALS = 20;
 export function stallCheck(project, now = Date.now()) {
   const trials = project.improve?.trials ?? [];
   const lastKept = trials.map((t) => t.outcome).lastIndexOf('kept');
-  const since = trials.slice(lastKept + 1);
+  const since = trials.slice(lastKept + 1).filter((t) => t.outcome !== 'provider-outage');
   const firstSeen = Math.min(...[since[0]?.at, project.improve?.startedAt].filter(Boolean).map(Date.parse), now);
   const from = lastKept >= 0 ? Date.parse(trials[lastKept].at) : firstSeen;
   const weakest = [...(project.acceptanceResult?.checks ?? [])].sort((a, b) => a.value - b.value)[0] ?? null;
@@ -411,7 +411,7 @@ export class ProjectImprover {
       this.engine.emit(project, 'improve-state', stallMessage(patch.stall));
     }
     if (trial?.outcome === 'kept') appendAppMessage(project, `Kept a change on ${trial.nodeId}: ${trial.change}. Score ${trial.before} → ${trial.score}.`);
-    if ('active' in patch) this.engine.emit(project, 'improve-state', patch.active ? `self-improving loop started for ${improve.hours} h` : `self-improving loop ended: ${patch.stopReason ?? patch.error ?? 'stopped'} · baseline ${improve.baseline} → best ${improve.best}`);
+    if ('active' in patch) this.engine.emit(project, 'improve-state', patch.active ? `self-improving loop started for ${Math.round(improve.hours * 10) / 10} h` : `self-improving loop ended: ${patch.stopReason ?? patch.error ?? 'stopped'} · baseline ${improve.baseline} → best ${improve.best}`);
     if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}${trial.diagnosis ? ` · diagnosis: ${trial.diagnosis}` : ''}${trial.guided ? ' · guided by kept changes or verified pieces of its type' : ''}`, { nodeId: trial.nodeId });
     await this.engine.store.save(project);
     return improve;
@@ -595,8 +595,9 @@ export class ProjectImprover {
       }
       return await state.lock.run(() => this.commit(id, { snapshot, project, touched, removed, researched, nodeId, base, change }, state));
     } catch (error) {
-      await note({ ...base, change: 'trial failed', outcome: 'error', score: state.best.score, detail: error.message.slice(0, 200) });
-      if (QUOTA_ERROR.test(error.message) && this.live(state)) await this.sleep(Math.min(QUOTA_PAUSE_MS, Math.max(0, state.deadline - this.now())));
+      const isQuota = QUOTA_ERROR.test(error.message);
+      await note({ ...base, change: 'trial failed', outcome: isQuota ? 'provider-outage' : 'error', score: state.best.score, detail: error.message.slice(0, 200) });
+      if (isQuota && this.live(state)) await this.sleep(Math.min(QUOTA_PAUSE_MS, Math.max(0, state.deadline - this.now())));
       return { kept: false };
     }
   }
