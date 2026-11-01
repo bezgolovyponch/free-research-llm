@@ -9,8 +9,10 @@ import {
   ksTest,
   lineageFor,
   numericSignature,
+  recordChampionGap,
   recordSample,
   regradeSettled,
+  researchNoiseFloor,
   slidingWindows,
   summaryStats,
 } from '../../src/research/monitor.mjs';
@@ -249,5 +251,68 @@ describe('regradeSettled', () => {
     });
     expect(result).toEqual([]);
     expect(settled.status).toBe('supported');
+  });
+});
+
+describe('recordChampionGap / researchNoiseFloor', () => {
+  it('records champion gap and measures noise floor from kept samples', () => {
+    const node: any = { id: 'D1', drift: {} };
+    recordChampionGap(node, 0.02);
+    recordChampionGap(node, 0.03);
+    recordChampionGap(node, 0.01);
+    recordChampionGap(node, 0.025);
+    recordChampionGap(node, 0.015);
+    const floor = researchNoiseFloor(node);
+    expect(floor).toBeGreaterThan(0.001);
+    expect(node.drift.samples.length).toBe(5);
+    expect(node.drift.samples.every((s: any) => s.championKept)).toBe(true);
+    expect(node.drift.samples.map((s: any) => s.score)).toEqual([0.02, 0.03, 0.01, 0.025, 0.015]);
+  });
+
+  it('falls back to MIN_GAIN when no champion-kept samples', () => {
+    const node: any = { id: 'D1', drift: { samples: [] } };
+    const floor = researchNoiseFloor(node);
+    expect(floor).toBe(0.001);
+  });
+});
+
+describe('recordSample championKept', () => {
+  it('records championKept flag on sample', () => {
+    const node: any = { id: 'D1', finding: { claims: [{ value: 100 }] } };
+    captureBaseline(node);
+    recordSample(node, { championKept: true });
+    expect(node.drift.samples[0].championKept).toBe(true);
+  });
+
+  it('defaults championKept to false', () => {
+    const node: any = { id: 'D1', finding: { claims: [{ value: 100 }] } };
+    captureBaseline(node);
+    recordSample(node);
+    expect(node.drift.samples[0].championKept).toBe(false);
+  });
+});
+
+describe('driftCheck skips championKept samples', () => {
+  it('ignores champion-kept samples when checking drift', () => {
+    const node: any = {
+      id: 'D1',
+      finding: { claims: [{ value: 100 }] },
+    };
+    captureBaseline(node);
+    recordSample(node, { values: [100] });
+    recordChampionGap(node, 0.5);
+    const d = driftCheck(node);
+    expect(d).not.toBeNull();
+    expect(d.sampleAt).toBe(node.drift.samples[0].at);
+  });
+
+  it('returns null when only champion-kept samples exist', () => {
+    const node: any = {
+      id: 'D1',
+      drift: { baseline: { at: 't0', values: [100], stats: summaryStats([100]) }, samples: [] },
+    };
+    recordChampionGap(node, 0.1);
+    const d = driftCheck(node);
+    expect(d).toBeNull();
   });
 });

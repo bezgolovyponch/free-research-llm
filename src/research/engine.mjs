@@ -26,7 +26,7 @@ import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
 import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
-import { captureBaseline, championChallenger, lineageFor, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
+import { captureBaseline, championChallenger, lineageFor, recordChampionGap, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
@@ -237,6 +237,8 @@ export class ResearchEngine {
       if (second && second.tree.nodes.length >= 2 && second.issues.length < issues.length) ({ reply, tree, issues } = second);
     }
     if (tree.nodes.length < 2) throw new Error('the model returned an empty issue tree; try again or use a stronger model');
+    const passed = !issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced');
+    this.router.recordOutcome?.({ provider: reply.provider, purpose: 'decompose', passed });
     const proposed = project.acceptance?.locked ? { spec: project.acceptance, dropped: [] } : groundAcceptance(normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected), { expected: project.acceptance?.expected, question: project.question, constraints: project.constraints });
     const acceptance = proposed.spec;
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
@@ -480,18 +482,19 @@ export class ResearchEngine {
   async critique(node, finding, sources, avoid) {
     try {
       const reply = await this.router.complete({ purpose: 'critique', tier: 'fast', avoid, messages: critiquePrompt({ node, finding, sources }) });
-      return normalizeCritique(reply.data);
+      const critique = normalizeCritique(reply.data);
+      const passed = critique !== null;
+      this.router.recordOutcome?.({ provider: reply.provider, purpose: 'critique', passed });
+      return critique;
     } catch {
       return null;
     }
   }
 
   async researchLeaf(project, node, hint) {
+    const settledBefore = SETTLED.has(node.status);
+    const champion = settledBefore && node.finding ? { finding: node.finding, verification: node.verification } : null;
     node.status = 'researching';
-    let champion = null;
-    if (SETTLED.has(node.status) && node.finding) {
-      champion = { finding: node.finding, verification: node.verification };
-    }
     this.emit(project, 'node', `${node.id}: searching sources`, { nodeId: node.id });
     node.sources = await this.gatherSources(project, node);
     if (node.ownerOnly && !node.sources.length) {
@@ -528,6 +531,7 @@ export class ResearchEngine {
           node.verification = champion.verification;
           node.status = champion.verification?.grade ?? node.status;
           node.championKept = true;
+          recordChampionGap(node, decision.gain);
           this.emit(project, 'node', `${node.id}: previous finding kept — ${decision.reason}`, { nodeId: node.id });
         }
       }
@@ -557,6 +561,8 @@ export class ResearchEngine {
     const finding = normalizeFinding(reply.data);
     node.sources = children.map((c) => ({ id: c.id, kind: 'node', title: c.title, url: '', domain: `node:${c.id}`, text: c.finding?.answer ?? '' }));
     const verification = verifyFinding({ finding, sources: node.sources, node: { method: 'rollup' } });
+    const passed = verification.grade === 'verified' || verification.grade === 'supported';
+    this.router.recordOutcome?.({ provider: reply.provider, purpose: 'rollup', passed });
     const weakest = Math.min(...children.map((c) => GRADE_RANK[c.status] ?? 0));
     const fromChildren = ['unsupported', 'weak', 'supported', 'verified'][weakest];
     const ownChecksPassed = verification.grade === 'verified' || verification.grade === 'supported';
@@ -598,6 +604,8 @@ export class ResearchEngine {
       generatedAt: new Date().toISOString(),
     };
     this.planActions(project);
+    const passed = project.report.claimCheck?.contradicted?.length === 0;
+    this.router.recordOutcome?.({ provider: reply.provider, purpose: 'synthesize', passed });
     await this.checkAcceptance(project);
     this.emit(project, 'report', `decision memo ready: ${project.report.verdict}`);
   }
