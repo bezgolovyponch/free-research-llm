@@ -601,3 +601,68 @@ describe('shared cache merge keeps a fetched price series over a newer failure',
     expect(assessor.store.hpi.PT).toMatchObject({ value: { real: 3 } });
   });
 });
+
+describe('price trend audit fixes (PR #45)', () => {
+  const json = (rows: number[]) => ({ dimension: { time: { category: { index: { '2020': 0, '2021': 1, '2022': 2, '2023': 3, '2024': 4 } } } }, value: Object.fromEntries(rows.map((v, i) => [String(i), v])) });
+  type A = { priceTrend(c: string): Promise<unknown>; trends(rows: object[]): Promise<{ trends: Record<string, unknown> }>; trendGaps(c: string[]): { missing: string[]; due: string[] }; merge(o: object): void; persist(): Promise<void>; limits: { newSites: number }; store: { hpi: Record<string, Record<string, unknown>>; sites: Record<string, unknown> } };
+  const make = (o: object) => new (SiteAssessor as unknown as new (o: object) => A)({ sleep: async () => {}, ...o });
+
+  it('a loop trial (cache mode) never takes data another worker wrote to the shared file', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-trend-cache-'));
+    const file = path.join(dir, 'sites.json');
+    const worker = make({ file, fetchJson: async (u: string) => (u.includes('prc_hpi') ? json([5, 6, 7, 8, 9]) : json([1, 2, 3, 4, 2])), now: () => 5000 });
+    const main = make({ file, fetchJson: async () => { throw new Error('main must not fetch in cache mode'); }, now: () => 5000 });
+    await main.trends([]);
+    await worker.priceTrend('PT');
+    worker.store.sites.k = { at: 5000 };
+    await worker.persist();
+    main.limits = { newSites: 0 } as never;
+    expect((await main.trends([{ countryCode: 'PT' }])).trends.PT).toBeNull();
+    expect(main.store.sites.k).toBeUndefined();
+    main.limits = { newSites: 12 } as never;
+    expect((await main.trends([{ countryCode: 'PT' }])).trends.PT).toMatchObject({ real: expect.any(Number) });
+    expect(main.store.sites.k).toBeUndefined();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('shares the failure count and next retry between processes, and a failure never claims a fetch time', () => {
+    const a = make({});
+    a.store.hpi = { PT: { at: 0, checked: 100, value: null, failures: 1, retryAt: 200 } };
+    a.merge({ hpi: { PT: { at: 0, checked: 300, value: null, failures: 2, retryAt: 900 } } });
+    expect(a.store.hpi.PT).toMatchObject({ failures: 2, retryAt: 900 });
+    a.merge({ hpi: { PT: { at: 0, checked: 250, value: null, failures: 1, retryAt: 400 } } });
+    expect(a.store.hpi.PT).toMatchObject({ failures: 2 });
+  });
+
+  it('records a failure with at 0 when nothing was fetched before', async () => {
+    const a = make({ fetchJson: async () => { throw new TypeError('fetch failed'); }, now: () => 7000 });
+    await a.priceTrend('PT');
+    expect(a.store.hpi.PT).toMatchObject({ at: 0, checked: 7000, failures: 1 });
+  });
+
+  it('treats a refusal (HTTP 4xx) as a miss kept for 24 h, and an outage (5xx, 429, network) as a retry', async () => {
+    let clock = 1000;
+    let error: Error = new Error('HTTP 404 from ec.europa.eu');
+    const a = make({ fetchJson: async () => { throw error; }, now: () => clock });
+    await a.priceTrend('TR');
+    expect(a.store.hpi.TR.retryAt).toBeUndefined();
+    expect(a.trendGaps(['TR']).due).not.toContain('TR');
+    clock += 25 * 3600 * 1000;
+    expect(a.trendGaps(['TR']).due).toContain('TR');
+    for (const e of [new Error('HTTP 503 from ec.europa.eu'), new Error('HTTP 429 from ec.europa.eu'), new TypeError('fetch failed')]) {
+      error = e;
+      clock += 25 * 3600 * 1000;
+      await a.priceTrend('TR');
+      expect(a.store.hpi.TR.retryAt).toBeGreaterThanOrEqual(clock);
+    }
+  });
+
+  it('httpJson does not retry a timeout (the caller backs off instead)', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls++; throw Object.assign(new Error('timed out'), { name: 'TimeoutError' }); });
+    const a = new SiteAssessor({ sleep: async () => {} });
+    await expect(a.httpJson('https://stats.example/slow')).rejects.toThrow('timed out');
+    expect(calls).toBe(1);
+    vi.unstubAllGlobals();
+  });
+});

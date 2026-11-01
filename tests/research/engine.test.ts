@@ -284,7 +284,7 @@ describe('ResearchEngine', () => {
     expect(done.candidates.keptCount).toBe(0);
     expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);
     expect(done.log.some((l: { message: string }) => /site fit: 4 listing\(s\) measured .* 2 farther than an e-bike ride from the sea/.test(l.message))).toBe(true);
-    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /price trend still missing for PT: waiting for the next retry/.test(l.message))).toBe(true);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /price trend still missing for PT: next try when its wait ends and the table is rebuilt/.test(l.message))).toBe(true);
   });
 
   it('keeps the last complete candidate table visible while a new one is measured, so the Results tab never shows a half-built table', async () => {

@@ -31,6 +31,7 @@ export const RETRY_STATUS = new Set([429, 502, 503, 504]);
 export const RETRY_WAITS_MS = [10000, 30000];
 export const TREND_RETRY_BASE_MS = 60 * 1000;
 export const TREND_RETRY_CAP_MS = 6 * 3600 * 1000;
+export const TREND_TIMEOUT_MS = 30000;
 const NETWORK_ERROR = /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|aborted|timeout/i;
 
 export function backoffMs(attempt, { base = TREND_RETRY_BASE_MS, cap = TREND_RETRY_CAP_MS, random = Math.random } = {}) {
@@ -251,7 +252,7 @@ export class SiteAssessor {
       try {
         res = await fetch(url, { ...rest, headers: { 'user-agent': USER_AGENT, accept: 'application/json', ...(rest.headers ?? {}) }, signal: AbortSignal.timeout(timeoutMs) });
       } catch (error) {
-        if (noRetry || !transientError(error) || attempt >= RETRY_WAITS_MS.length) throw error;
+        if (noRetry || !transientError(error) || error?.name === 'TimeoutError' || error?.name === 'AbortError' || attempt >= RETRY_WAITS_MS.length) throw error;
         await this.sleep(RETRY_WAITS_MS[attempt]);
         continue;
       }
@@ -289,7 +290,8 @@ export class SiteAssessor {
           if (valued(entry)) mine[key] = entry;
           continue;
         }
-        if (!held || (entry?.at ?? 0) > (held?.at ?? 0)) mine[key] = entry;
+        const stamp = (e) => (table === 'hpi' ? e?.checked ?? e?.at : e?.at) ?? 0;
+        if (!held || stamp(entry) > stamp(held)) mine[key] = entry;
       }
       this.store[table] = mine;
     }
@@ -447,7 +449,10 @@ export class SiteAssessor {
   }
 
   async trends(rows) {
-    if (this.file) this.merge(await this.readStore());
+    if (this.file && this.limits.newSites) {
+      const disk = await this.readStore();
+      if (disk) this.merge({ hpi: disk.hpi });
+    }
     const codes = [...new Set(rows.map((r) => r.countryCode).filter(Boolean)), EU_AGGREGATE];
     const trends = {};
     for (const code of codes) trends[code] = await this.priceTrend(code);
@@ -504,16 +509,21 @@ export class SiteAssessor {
     let value;
     try {
       const geo = EUROSTAT_CODE[code] ?? code;
-      const hpi = yearly(await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`));
-      const hicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${geo}&sinceTimePeriod=2020`));
+      const hpi = yearly(await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`, { timeoutMs: TREND_TIMEOUT_MS }));
+      const hicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${geo}&sinceTimePeriod=2020`, { timeoutMs: TREND_TIMEOUT_MS }));
       value = trendOf(hpi, hicp);
-    } catch {
+    } catch (error) {
+      if (!transientError(error) && !/HTTP (?:429|5\d\d)/.test(String(error?.message ?? ''))) {
+        this.store.hpi[code] = { at: this.now(), checked: this.now(), value: known?.value ?? null };
+        this.persist();
+        return known?.value ?? null;
+      }
       const failures = (known?.failures ?? 0) + 1;
-      this.store.hpi[code] = { at: known?.at ?? this.now(), value: known?.value ?? null, failures, retryAt: this.now() + backoffMs(failures - 1) };
+      this.store.hpi[code] = { at: known?.at ?? 0, checked: this.now(), value: known?.value ?? null, failures, retryAt: this.now() + backoffMs(failures - 1) };
       this.persist();
       return known?.value ?? null;
     }
-    this.store.hpi[code] = { at: this.now(), value: value ?? null };
+    this.store.hpi[code] = { at: this.now(), checked: this.now(), value: value ?? null };
     this.persist();
     return value ?? null;
   }
