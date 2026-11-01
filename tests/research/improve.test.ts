@@ -424,6 +424,14 @@ describe('a loop that cannot get stuck', () => {
     expect(JSON.stringify(saved.chats).match(/loop is stalled/g)).toHaveLength(1);
   });
 
+  it('states a resumed loop length rounded to a tenth of an hour', async () => {
+    const saved: { improve?: object } = {};
+    const events: string[] = [];
+    const engine = { load: async () => structuredClone(saved), store: { save: async (p: object) => Object.assign(saved, p) }, emit: (_p: unknown, _t: string, message: string) => events.push(message) };
+    await new ProjectImprover({ engine: engine as never }).record('p', { active: true, hours: 19.09954888888889 });
+    expect(events).toContain('self-improving loop started for 19.1 h');
+  });
+
   it('refuses a repeated change without re-researching or re-rolling the research', async () => {
     const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [{ nodeId: 'Q', removedPieceId: 'D2', change: 'Remove D2', outcome: 'reverted-whole', at: at(0) }] } };
     let runs = 0;
@@ -511,5 +519,44 @@ describe('a loop that cannot get stuck', () => {
     expect(await improver.trial('p', 'D3', state)).toEqual({ kept: false });
     expect(runs).toBe(0);
     expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'repeat', detail: expect.stringMatching(/^like a change tested 3 times on 3 pieces of this type \(D1\.1, D2, D1\.2\) and never kept/) });
+  });
+
+  it('records provider-outage when a quota error is thrown during trial, and error for other errors', async () => {
+    const project = { id: 'p', question: 'q', nodes: [...tree().nodes], improve: { trials: [] } };
+    let saved = structuredClone(project);
+    const engine = { load: async () => structuredClone(saved), store: { save: async (p: typeof project) => { saved = structuredClone(p); } }, emit: () => {}, resetWithAncestors: () => {}, run: async () => ({ ...structuredClone(saved), phase: 'done' }) };
+    const improver = new ProjectImprover({ engine: engine as never, sleep: async () => {} });
+    improver.propose = async () => { throw new Error('every provider failed for improve: gemini HTTP 503: high demand'); };
+    const state = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() } };
+    await improver.trial('p', 'D1.1', state);
+    expect(saved.improve.trials.at(-1).outcome).toBe('provider-outage');
+    expect(saved.improve.trials.at(-1).detail).toContain('every provider failed for improve: gemini HTTP 503');
+
+    const project2 = { id: 'p2', question: 'q', nodes: [...tree().nodes], improve: { trials: [] } };
+    let saved2 = structuredClone(project2);
+    const engine2 = { load: async () => structuredClone(saved2), store: { save: async (p: typeof project2) => { saved2 = structuredClone(p); } }, emit: () => {}, resetWithAncestors: () => {}, run: async () => ({ ...structuredClone(saved2), phase: 'done' }) };
+    const improver2 = new ProjectImprover({ engine: engine2 as never, sleep: async () => {} });
+    improver2.propose = async () => { throw new TypeError('some coding bug'); };
+    const state2 = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() } };
+    await improver2.trial('p2', 'D1.1', state2);
+    expect(saved2.improve.trials.at(-1).outcome).toBe('error');
+    expect(saved2.improve.trials.at(-1).detail).toContain('some coding bug');
+  });
+
+  it('stallCheck ignores provider-outage trials for stall detection', () => {
+    const t0 = Date.parse('2026-10-24T10:00:00Z');
+    const at = (min: number) => new Date(t0 + min * 60000).toISOString();
+    const kept = { nodeId: 'D2', outcome: 'kept', change: 'k', at: at(10) };
+    const outageTrials = Array.from({ length: 25 }, (_, i) => ({ nodeId: 'Q', outcome: 'provider-outage', change: `outage ${i}`, at: at(30 + i) }));
+    const project = { improve: { startedAt: at(0), trials: [kept, ...outageTrials] }, acceptanceResult: { checks: [] } };
+    const stall = stallCheck(project, t0 + 130 * 60000);
+    expect(stall.stalled).toBe(false);
+    expect(stall.trialsSinceKept).toBe(0);
+
+    const noGainTrials = Array.from({ length: 20 }, (_, i) => ({ nodeId: 'Q', outcome: 'no-gain', change: `try ${i}`, at: at(30 + i) }));
+    const project2 = { improve: { startedAt: at(0), trials: [kept, ...noGainTrials] }, acceptanceResult: { checks: [] } };
+    const stall2 = stallCheck(project2, t0 + 130 * 60000);
+    expect(stall2.stalled).toBe(true);
+    expect(stall2.trialsSinceKept).toBe(20);
   });
 });
