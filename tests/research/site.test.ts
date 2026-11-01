@@ -268,6 +268,20 @@ describe('SiteAssessor', () => {
     await fs.rm(path.dirname(file), { recursive: true, force: true });
   });
 
+  it('repairs stored sites with no coastline from the coastline file when the table is rebuilt from the cache', async () => {
+    const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
+    const noCoast = async (url: string, init?: { body?: string }) => (url.includes('overpass') ? { elements: [] } : net.fetchJson(url, init));
+    const file = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'frl-coast-')), 'sites.json');
+    const blind = new SiteAssessor({ file, fetchJson: noCoast, sleep: noSleep, coastFile: { nearestKm: async () => undefined } as never });
+    await blind.assess(VIR.lat, VIR.lon);
+    await blind.writing;
+    const cacheOnly = new SiteAssessor({ file, fetchJson: noCoast, sleep: noSleep, coastFile: { nearestKm: async () => 14 } as never });
+    const out = await cacheOnly.apply({ ...table, kept: [{ ...rows[0], lat: VIR.lat, lon: VIR.lon }], keptCount: 1 }, brief, { mode: 'cache' });
+    expect(out.kept[0].site).toMatchObject({ coastKm: 14, coastBy: COAST_FILE_FILLED });
+    await cacheOnly.writing;
+    await fs.rm(path.dirname(file), { recursive: true, force: true });
+  });
+
   it('treats an Overpass reply that timed out inside the server as a failed instance and asks the next one', async () => {
     const asked: string[] = [];
     const fetchJson = async (url: string) => {
