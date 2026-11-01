@@ -29,6 +29,17 @@ export const STORE_VERSION = 4;
 const STORE_TABLES = ['sites', 'places', 'hpi', 'points', 'facts'];
 export const RETRY_STATUS = new Set([429, 502, 503, 504]);
 export const RETRY_WAITS_MS = [10000, 30000];
+export const TREND_RETRY_BASE_MS = 60 * 1000;
+export const TREND_RETRY_CAP_MS = 6 * 3600 * 1000;
+const NETWORK_ERROR = /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|aborted|timeout/i;
+
+export function backoffMs(attempt, { base = TREND_RETRY_BASE_MS, cap = TREND_RETRY_CAP_MS, random = Math.random } = {}) {
+  return Math.floor(random() * Math.min(cap, base * 2 ** Math.max(0, attempt)));
+}
+
+export function transientError(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError' || NETWORK_ERROR.test(String(error?.message ?? '')) || NETWORK_ERROR.test(String(error?.cause?.code ?? error?.cause?.message ?? ''));
+}
 const USER_AGENT = 'free-research-llm (site fit; https://github.com/bezgolovyponch/free-research-llm)';
 export const INSTANCE_TIMEOUT_MS = 45000;
 export const INSTANCE_REST_MS = 10 * 60 * 1000;
@@ -236,7 +247,14 @@ export class SiteAssessor {
   async httpJson(url, init = {}) {
     for (let attempt = 0; ; attempt++) {
       const { timeoutMs = 150000, noRetry = false, ...rest } = init;
-      const res = await fetch(url, { ...rest, headers: { 'user-agent': USER_AGENT, accept: 'application/json', ...(rest.headers ?? {}) }, signal: AbortSignal.timeout(timeoutMs) });
+      let res;
+      try {
+        res = await fetch(url, { ...rest, headers: { 'user-agent': USER_AGENT, accept: 'application/json', ...(rest.headers ?? {}) }, signal: AbortSignal.timeout(timeoutMs) });
+      } catch (error) {
+        if (noRetry || !transientError(error) || attempt >= RETRY_WAITS_MS.length) throw error;
+        await this.sleep(RETRY_WAITS_MS[attempt]);
+        continue;
+      }
       if (res.ok) return res.json();
       if (noRetry || !RETRY_STATUS.has(res.status) || attempt >= RETRY_WAITS_MS.length) throw new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
       await this.sleep(RETRY_WAITS_MS[attempt]);
@@ -421,6 +439,7 @@ export class SiteAssessor {
   }
 
   async trends(rows) {
+    if (this.file) this.merge(await this.readStore());
     const codes = [...new Set(rows.map((r) => r.countryCode).filter(Boolean)), EU_AGGREGATE];
     const trends = {};
     for (const code of codes) trends[code] = await this.priceTrend(code);
@@ -457,7 +476,16 @@ export class SiteAssessor {
 
   hpiFresh(entry) {
     if (!entry) return false;
+    if (entry.retryAt) return this.now() < entry.retryAt;
     return this.now() - entry.at < (entry.value !== null && entry.value !== undefined ? SITE_TTL_MS : MISS_TTL_MS);
+  }
+
+  trendGaps(codes = []) {
+    const missing = [...new Set([...codes.filter(Boolean), EU_AGGREGATE])].filter((code) => {
+      const entry = this.store.hpi[code];
+      return !entry || entry.value === null || entry.value === undefined;
+    });
+    return { missing, due: missing.filter((code) => !this.hpiFresh(this.store.hpi[code])) };
   }
 
   async priceTrend(code) {
@@ -472,6 +500,9 @@ export class SiteAssessor {
       const hicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${geo}&sinceTimePeriod=2020`));
       value = trendOf(hpi, hicp);
     } catch {
+      const failures = (known?.failures ?? 0) + 1;
+      this.store.hpi[code] = { at: known?.at ?? this.now(), value: known?.value ?? null, failures, retryAt: this.now() + backoffMs(failures - 1) };
+      this.persist();
       return known?.value ?? null;
     }
     this.store.hpi[code] = { at: this.now(), value: value ?? null };

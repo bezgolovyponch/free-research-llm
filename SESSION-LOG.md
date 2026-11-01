@@ -3,6 +3,17 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-11-01 (2) · the price trend is retried until the source answers
+
+Asked: why the Eurostat price trend is part of "fits", why it failed, and that the app must keep retrieving until it gets the data, using the mechanics real products use.
+
+- **Why it is part of "fits":** the low-entry glamping decision model maps the clause "strong price increase trend" (`src/research/strategy.mjs`, criterion `trend`) to the Eurostat house price index of the country against the EU average. `planFor` applies all of the model's checks to every plot, including this one, whether or not the question names it. A plot is "fits" only when every check is measured and met, so a missing country series moved every plot of that country to "to confirm".
+- **Why it failed (from the code; the Mac's logs are not in this sandbox):** (1) `httpJson` retried HTTP 429/5xx but not a dropped connection or a timeout, so a transient network error failed at once; (2) the background measuring worker started only when places were unmeasured, so a missing series was never fetched again; (3) loop trials run in cache mode and cannot fetch; (4) before PR #44, a failed read was cached as "no series" for 30 days. Eurostat itself could not be reached from this cloud sandbox (its network policy denies `ec.europa.eu`), so the live API was not tested here.
+- **Mechanics adopted (AWS SDK standard retry strategy, "exponential backoff with full jitter"):** `backoffMs` waits a random share of a doubling window (base 1 min, cap 6 h); the app records each failure (`failures`, `retryAt`) and retries without a limit on the number of attempts, so it keeps trying until the source answers without hammering it. `transientError` classifies dropped connections and timeouts as retryable; HTTP refusals stay final. `httpJson` now retries network errors with the existing waits.
+- **Keeps retrieving:** `trendGaps` reports missing series and those due for a retry; the engine starts the background worker when a series is due (not only when places are pending), and logs "price trend still missing for …". `trends()` re-reads the shared cache first, so a series fetched by the worker reaches the table.
+- **Tests:** `tests/research/site.test.ts` (backoff range and cap, transient vs final errors, outage → wait → retry → kept, 25 failures in a row stay capped, `httpJson` retries a network error but not a 404 or `noRetry`); `tests/research/engine.test.ts` (the "still missing" log). Gate: 706 unit tests pass; e2e fails only for the sandbox reason.
+- **Open:** a second source for countries Eurostat does not publish, or when it is down for days (OECD, BIS residential property prices). Not added: their endpoints could not be verified from this sandbox, and an endpoint that was not tested would not be shipped. Allowing `ec.europa.eu`, `sdmx.oecd.org` and `stats.bis.org` in the environment's network settings would let it be verified and added.
+
 ## Session 2026-11-01 · why results were "to confirm" and no plot was "fits"
 
 Asked: why every result is to confirm and none fits, why the expected result reads 100% met, and why the improve loop cannot confirm anything itself.

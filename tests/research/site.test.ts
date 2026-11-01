@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { climateOf } from '../../src/research/cci.mjs';
-import { namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, measureOrder, fitOf, haversineKm, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, siteKey, zoningOf } from '../../src/research/site.mjs';
+import { TREND_RETRY_CAP_MS, backoffMs, transientError, namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, measureOrder, fitOf, haversineKm, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, siteKey, zoningOf } from '../../src/research/site.mjs';
 
 const VIR = { lat: 44.3, lon: 15.09 };
 const DA_NANG = { lat: 16.055, lon: 108.22, name: 'Thai Hoa, Hai Chau, Da Nang, Vietnam' };
@@ -497,23 +497,95 @@ describe('Overpass instances', () => {
   });
 });
 
-describe('price trend cache: a failed Eurostat read is not an answer', () => {
-  it('retries after an outage instead of marking the country as having no series for 30 days', async () => {
+describe('price trend: retried with full-jitter backoff until the source answers (AWS SDK standard retry)', () => {
+  const json = (rows: number[]) => ({ dimension: { time: { category: { index: { '2020': 0, '2021': 1, '2022': 2, '2023': 3, '2024': 4 } } } }, value: Object.fromEntries(rows.map((v, i) => [String(i), v])) });
+  type Assessor = { priceTrend(code: string): Promise<{ real: number } | null>; trendGaps(codes: string[]): { missing: string[]; due: string[] }; store: { hpi: Record<string, { failures?: number; retryAt?: number; value?: unknown }> } };
+
+  it('waits a random share of a doubling window, never above the cap', () => {
+    expect(backoffMs(0, { random: () => 0 })).toBe(0);
+    expect(backoffMs(0, { random: () => 0.999, base: 1000, cap: 60000 })).toBe(999);
+    expect(backoffMs(3, { random: () => 0.5, base: 1000, cap: 60000 })).toBe(4000);
+    expect(backoffMs(30, { random: () => 0.999, base: 1000, cap: 60000 })).toBe(59940);
+  });
+
+  it('treats dropped connections and timeouts as transient, and HTTP refusals as final', () => {
+    expect(transientError(new TypeError('fetch failed'))).toBe(true);
+    expect(transientError(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toBe(true);
+    expect(transientError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }))).toBe(true);
+    expect(transientError(new Error('HTTP 404 from ec.europa.eu'))).toBe(false);
+  });
+
+  it('records an outage, waits out the backoff without calling, then retries and keeps the answer', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-trend-'));
     let clock = 1_000_000_000_000;
     let down = true;
-    const json = (rows: number[]) => ({ dimension: { time: { category: { index: { '2020': 0, '2021': 1, '2022': 2, '2023': 3, '2024': 4 } } } }, value: Object.fromEntries(rows.map((v, i) => [String(i), v])) });
+    let calls = 0;
     const fetchJson = async (url: string) => {
-      if (down) throw new Error('eurostat unreachable');
-      return url.includes('prc_hpi') ? json([100, 105, 110, 115, 120]) : json([100, 102, 104, 106, 108]);
+      calls++;
+      if (down) throw new TypeError('fetch failed');
+      return url.includes('prc_hpi') ? json([5, 6, 7, 8, 9]) : json([1, 2, 3, 4, 2]);
     };
-    const assessor = new (SiteAssessor as unknown as new (o: object) => { priceTrend(code: string): Promise<number | null>; store: { hpi: Record<string, unknown> } })({ file: path.join(dir, 'sites.json'), fetchJson, now: () => clock, sleep: async () => {} });
+    const assessor = new (SiteAssessor as unknown as new (o: object) => Assessor)({ file: path.join(dir, 'sites.json'), fetchJson, now: () => clock, sleep: async () => {} });
     expect(await assessor.priceTrend('PT')).toBeNull();
-    expect(assessor.store.hpi.PT).toBeUndefined();
+    const failed = assessor.store.hpi.PT;
+    expect(failed).toMatchObject({ failures: 1, value: null });
+    expect(failed.retryAt).toBeGreaterThanOrEqual(clock);
+    expect(assessor.trendGaps(['PT']).missing).toContain('PT');
+    calls = 0;
     down = false;
-    const retried = await assessor.priceTrend('PT');
-    expect(retried).toMatchObject({ real: expect.any(Number), year: '2024' });
-    expect(assessor.store.hpi.PT).toMatchObject({ value: retried });
+    if (failed.retryAt! > clock) {
+      expect(await assessor.priceTrend('PT')).toBeNull();
+      expect(calls).toBe(0);
+      expect(assessor.trendGaps(['PT']).due).not.toContain('PT');
+    }
+    clock = failed.retryAt! + 1;
+    expect(assessor.trendGaps(['PT']).due).toContain('PT');
+    const got = await assessor.priceTrend('PT');
+    expect(got).toMatchObject({ real: expect.any(Number), year: '2024' });
+    expect(assessor.store.hpi.PT).toMatchObject({ value: got });
+    expect(assessor.store.hpi.PT.retryAt).toBeUndefined();
+    expect(assessor.trendGaps(['PT']).missing).not.toContain('PT');
     await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('keeps retrying through a long outage, with the wait growing but capped', async () => {
+    let clock = 0;
+    const assessor = new (SiteAssessor as unknown as new (o: object) => Assessor)({ fetchJson: async () => { throw new TypeError('fetch failed'); }, now: () => clock, sleep: async () => {} });
+    for (let i = 0; i < 25; i++) {
+      await assessor.priceTrend('ES');
+      clock = (assessor.store.hpi.ES.retryAt ?? clock) + 1;
+    }
+    expect(assessor.store.hpi.ES.failures).toBe(25);
+    expect(assessor.store.hpi.ES.retryAt! - clock).toBeLessThanOrEqual(TREND_RETRY_CAP_MS);
+  });
+});
+
+describe('httpJson retries a dropped connection, not a refusal', () => {
+  it('retries a network error and returns the answer', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls++;
+      if (calls === 1) throw new TypeError('fetch failed');
+      return new Response(JSON.stringify({ ok: 1 }), { status: 200 });
+    });
+    const waits: number[] = [];
+    const assessor = new SiteAssessor({ sleep: async (ms: number) => { waits.push(ms); } });
+    expect(await assessor.httpJson('https://stats.example/data')).toEqual({ ok: 1 });
+    expect(calls).toBe(2);
+    expect(waits).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('does not retry a 404, and honours noRetry for network errors', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls++; return new Response('no', { status: 404 }); });
+    const assessor = new SiteAssessor({ sleep: async () => {} });
+    await expect(assessor.httpJson('https://stats.example/missing')).rejects.toThrow('HTTP 404');
+    expect(calls).toBe(1);
+    calls = 0;
+    vi.stubGlobal('fetch', async () => { calls++; throw new TypeError('fetch failed'); });
+    await expect(assessor.httpJson('https://stats.example/x', { noRetry: true })).rejects.toThrow('fetch failed');
+    expect(calls).toBe(1);
+    vi.unstubAllGlobals();
   });
 });
