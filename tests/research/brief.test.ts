@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, regionsIn, sourceCountry } from '../../src/research/brief.mjs';
+import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, regionsIn, sourceCountry } from '../../src/research/brief.mjs';
 
 const kind = { label: 'plot of land', terms: ['land', 'terreno'] };
 const plots = buildBrief({
@@ -81,5 +81,78 @@ describe('concept brief', () => {
     expect(isNewsPage('https://portal.example/anuncio/terreno-ID1abcd')).toBe(false);
     expect(mentionsCoast({ url: 'https://famalo.example/zemljiste-100-m-od-mora-14501', title: 'Zemljište' })).toBe(true);
     expect(mentionsCoast({ url: 'https://imo.example/terreno-coimbra-ID1abcd', title: 'Terreno Urbano Coimbra' })).toBe(false);
+  });
+});
+
+describe('buildBrief derives valueRange from question when acceptance lacks it', () => {
+  it('extracts CZK amount with "entrance investments" budget word', () => {
+    const brief = buildBrief({
+      question: 'Find appropriate plots eligible for glamping in Czech Republic with entrance investments 1000000 CZK - test run',
+      acceptance: { expected: 'provide 10 plots that will fulfill common requirments for the plot for glamping, in glamping business, for around 1000000 price of the plot', itemCount: 10, valueRange: null, unit: '' },
+      template: { itemKind: kind },
+    });
+    expect(brief.valueRange).toEqual([0, 1000000]);
+    expect(brief.unit).toBe('CZK');
+    expect(brief.valueFrom).toBe('question');
+  });
+
+  it('extracts EUR amount with "max" budget word', () => {
+    const brief = buildBrief({
+      question: 'Find plots 20000EUR max',
+      acceptance: { expected: '', itemCount: 10, valueRange: null, unit: '' },
+      template: { itemKind: kind },
+    });
+    expect(brief.valueRange).toEqual([0, 20000]);
+    expect(brief.unit).toBe('EUR');
+    expect(brief.valueFrom).toBe('question');
+  });
+
+  it('returns null for amount without currency', () => {
+    const brief = buildBrief({
+      question: 'budget 40000',
+      acceptance: { expected: '', itemCount: 10, valueRange: null, unit: '' },
+      template: { itemKind: kind },
+    });
+    expect(brief.valueRange).toBeNull();
+    expect(brief.unit).toBe('');
+    expect(brief.valueFrom).toBeNull();
+  });
+
+  it('reads a Czech cap written as do 1 000 000 Kč', () => {
+    expect(budgetOf('Pozemek pro glamping do 1 000 000 Kč')).toEqual({ valueRange: [0, 1000000], unit: 'CZK' });
+    expect(budgetOf('Pozemek pro glamping, 1 000 000 Kč')).toBeNull();
+  });
+
+  it('keeps acceptance valueRange when provided', () => {
+    const brief = buildBrief({
+      question: 'glamping in Czech Republic with entrance investments 1000000 CZK',
+      acceptance: { expected: '', itemCount: 10, valueRange: [0, 500000], unit: 'EUR' },
+      template: { itemKind: kind },
+    });
+    expect(brief.valueRange).toEqual([0, 500000]);
+    expect(brief.unit).toBe('EUR');
+    expect(brief.valueFrom).toBe('acceptance');
+  });
+
+  it('extracts amount when it ends the clause', () => {
+    const brief = buildBrief({
+      question: 'I want to buy land for glamping, budget 50000 EUR.',
+      acceptance: { expected: '', itemCount: 10, valueRange: null, unit: '' },
+      template: { itemKind: kind },
+    });
+    expect(brief.valueRange).toEqual([0, 50000]);
+    expect(brief.unit).toBe('EUR');
+    expect(brief.valueFrom).toBe('question');
+  });
+
+  it('ignores per-unit amounts', () => {
+    const brief = buildBrief({
+      question: 'land at 200 EUR per m², max 50000 EUR total',
+      acceptance: { expected: '', itemCount: 10, valueRange: null, unit: '' },
+      template: { itemKind: kind },
+    });
+    expect(brief.valueRange).toEqual([0, 50000]);
+    expect(brief.unit).toBe('EUR');
+    expect(brief.valueFrom).toBe('question');
   });
 });
