@@ -37,7 +37,22 @@ describe('claim attribution (verified quotes, as in GopherCite and ALCE)', () =>
   it('flags numbers in the answer that no claim, calculation or the question supports', () => {
     const finding = { answer: 'One plot at 20,000 EUR, 6 km from the beach; about 45 plots exist.', claims: [{ text: 'The plot costs 20,000 EUR, 6 km from the beach' }], calculation: null };
     expect(ungroundedNumbers(finding, { question: 'Plots under 20,000 EUR?' })).toEqual(['45']);
-    expect(ungroundedNumbers({ answer: 'In 2026 there were 3 offers', claims: [] })).toEqual([]);
+    expect(ungroundedNumbers({ answer: 'In 2026 there were 3 offers', claims: [] })).toEqual(['3']);
+  });
+
+  it('flags small numbers like 10 camping months when ungrounded', () => {
+    expect(ungroundedNumbers({ answer: 'The site has 10 camping months', claims: [] })).toEqual(['10']);
+  });
+
+  it('does not flag small numbers when supported by a claim', () => {
+    const finding = { answer: 'The site has 10 camping months', claims: [{ text: '10 camping months a year' }] };
+    expect(ungroundedNumbers(finding)).toEqual([]);
+  });
+
+  it('ignores ordinal list markers and years', () => {
+    expect(ungroundedNumbers({ answer: '1. Prices rose\n2. Costs fell', claims: [] })).toEqual([]);
+    expect(ungroundedNumbers({ answer: 'in 2025', claims: [] })).toEqual([]);
+    expect(ungroundedNumbers({ answer: '(1) First item', claims: [] })).toEqual([]);
   });
 
   it('normalises accents, separators and punctuation the same way on both sides', () => {

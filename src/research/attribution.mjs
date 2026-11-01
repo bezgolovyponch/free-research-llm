@@ -41,11 +41,24 @@ export function attributionSummary(claims = []) {
   return { factual: factual.length, attributed: attributed.length, share, numericMissing, passed: share >= MIN_ATTRIBUTED_SHARE && numericMissing.length === 0 };
 }
 
+function stripDatesAndOrdinals(text) {
+  return String(text ?? '')
+    .replace(/^\s*\d+\.\s*/gm, '')
+    .replace(/\(\s*\d+\s*\)/g, '')
+    .replace(/\b\d{1,2}(?:st|nd|rd|th)\b/gi, '')
+    .replace(/\b\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/gi, '')
+    .replace(/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\b/gi, '')
+    .replace(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/g, '');
+}
+
 export function ungroundedNumbers(finding, node = {}) {
   const allowed = new Set([
     ...(finding.claims ?? []).flatMap((c) => numbersIn(`${c.text} ${c.value ?? ''}`)),
     ...numbersIn(JSON.stringify(finding.calculation ?? {})),
     ...numbersIn(node.question ?? ''),
+    ...numbersIn(node.title ?? ''),
+    ...numbersIn(node.metric ?? ''),
   ]);
-  return [...new Set(numbersIn(finding.answer).filter((n) => !allowed.has(n) && Number(n) > 12))];
+  const cleanedAnswer = stripDatesAndOrdinals(finding.answer);
+  return [...new Set(numbersIn(cleanedAnswer).filter((n) => !allowed.has(n)))];
 }
