@@ -44,6 +44,12 @@ describe('results workbook: every table, exact links, typed numbers', () => {
     expect(rows[0][col('url')]).toBe('https://imo.example/anuncio/ID1');
   });
 
+  it('does not count a confirmed listing whose tier dropped below fits', () => {
+    const stale = { ...project, candidates: { ...project.candidates, kept: [row({ plan: { ...row({}).plan, tier: 'trade-off' }, verified: { verdict: 'confirmed', failed: [] } })] } };
+    const [header, ...rows] = plotRows(stale);
+    expect(rows[0][header.indexOf('counted in the result')]).toBe('no');
+  });
+
   it('flags an area that disagrees with the listing title and keeps numbers as numbers', () => {
     const [header, ...rows] = plotRows(project);
     const col = (name: string) => header.indexOf(name);

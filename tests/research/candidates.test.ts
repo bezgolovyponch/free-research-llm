@@ -82,6 +82,26 @@ describe('candidate table', () => {
     expect(lines[1]).toBe('- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated | sea 2.5 km, beach 3 km | 9 workable months (6 comfortable), hottest month max 27.5°C | 16 beaches, viewpoints, sights, reserves and trails within 15 km | zoning agricultural | about 30 pitches');
   });
 
+  it('counts a row toward the result only when it still fits every check and the verifier confirmed it', () => {
+    const confirmed = { verdict: 'confirmed', failed: [], at: '2026-10-26T18:00:00Z' };
+    const stale = {
+      ...table,
+      verification: { at: '2026-10-26T18:00:00Z', fits: 1, checked: 2, confirmed: 2, refuted: 0, unconfirmed: 0, pending: 0 },
+      kept: [
+        { ...table.kept[0], plan: { tier: 'fits', verdict: 'fits every criterion', why: [], risks: [] }, verified: confirmed },
+        { ...table.kept[0], url: 'https://imo.example/stale', plan: { tier: 'trade-off', verdict: 'trade-off', why: [], risks: [] }, verified: confirmed },
+      ],
+    };
+    expect(candidateDeliverables(stale).map((d: { url: string }) => d.url)).toEqual([table.kept[0].url]);
+  });
+
+  it('prints zero for every tier the table does not have, never undefined', () => {
+    const text = tableVerdict({ tiers: { fits: 1 } });
+    expect(text).toContain('0 to confirm');
+    expect(text).toContain('0 blocked by law');
+    expect(text).not.toContain('undefined');
+  });
+
   it('keeps every listing that passes the brief up to 1,000, so plots past the 50 asked for are measured and shown too', () => {
     const listings = Array.from({ length: 450 }, (_, i) => ({ title: `Terreno rústico ${i}`, url: `https://imo.example/pt/anuncio/terreno-${i}-ID9${String(i).padStart(4, '0')}`, value: 5000 + i, unit: 'EUR', area: 1000, place: 'Mira' }));
     const out = buildCandidates([{ id: 'D1', sources: [{ id: 'S1', url: 'https://imo.example/pt/resultados', locale: 'pt', text: '', listings }] }], brief, { convert });
