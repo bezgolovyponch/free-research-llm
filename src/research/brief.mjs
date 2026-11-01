@@ -1,4 +1,5 @@
 import { plain } from './itemgate.mjs';
+import { headlinePrice, parseAmounts } from './acceptance.mjs';
 
 export const COUNTRIES = [
   ['AT', 'Austria', ['osterreich'], 'EU'],
@@ -131,16 +132,30 @@ function narrowedGroups(text) {
   return groupsIn(text).filter((g) => membersOf(g).some((code) => named.has(code))).map((g) => `${g} narrowed to ${membersOf(g).filter((c) => named.has(c)).map((c) => countryByCode(c).name).join(', ')}, the members you named`);
 }
 
+const BUDGET_WORD = /\b(?:max|maximum|up to|under|below|less than|budget|invest\w*|entrance|enterance|entry|at most|around|az)\b|\bdo\s+\d|≤/;
+const CLAUSE_BREAK = /[,;]|\bbut\b|\band\b/i;
+
+export function budgetOf(...texts) {
+  for (const clause of texts.filter(Boolean).join(', ').split(CLAUSE_BREAK)) {
+    if (!BUDGET_WORD.test(plain(clause))) continue;
+    const amount = headlinePrice(parseAmounts(clause));
+    if (amount) return { valueRange: [0, amount.value], unit: amount.currency };
+  }
+  return null;
+}
+
 export function buildBrief({ question = '', acceptance = {}, constraints = {}, template = null } = {}) {
   const words = [question, acceptance?.expected, ...Object.values(constraints ?? {})].filter((v) => typeof v === 'string').join(' ');
   const regions = regionsIn(words);
   const groups = openGroups(words);
   const lists = Boolean(acceptance?.itemCount);
+  const budget = acceptance?.valueRange ? null : budgetOf(question, acceptance?.expected);
   return {
     kind: lists ? template?.itemKind ?? null : null,
     itemCount: acceptance?.itemCount ?? null,
-    valueRange: acceptance?.valueRange ?? null,
-    unit: acceptance?.unit ?? '',
+    valueRange: acceptance?.valueRange ?? budget?.valueRange ?? null,
+    unit: acceptance?.valueRange ? acceptance?.unit ?? '' : budget?.unit ?? acceptance?.unit ?? '',
+    valueFrom: acceptance?.valueRange ? 'acceptance' : budget ? 'question' : null,
     regions,
     groups,
     narrowed: narrowedGroups(words),

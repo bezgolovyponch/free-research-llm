@@ -52,3 +52,21 @@ describe('item gate: rentals, word ends, broken links', () => {
     expect(() => screenItem({ title: 'Terreno', url: 'https://portal.example/anuncio/terreno-%E0%A4%A-ID1abcde' }, options)).not.toThrow();
   });
 });
+
+describe('item gate: Czech/Slovak/Polish land terms', () => {
+  const glampingKind = { label: 'plot of land', terms: ['land', 'terreno', 'arsa', 'parcela', 'pozemek', 'pozemku', 'pozemky', 'pozemkem', 'parcely', 'parcelu', 'zahrada', 'zahrady', 'louka', 'louky', 'pozemok', 'dzialka', 'dzialki', 'dzialke'] };
+  const glampingOptions = { valueRange: [0, 20000], unit: 'EUR', kind: glampingKind, convert: (v: number, from: string) => (from === 'USD' ? v * 0.9 : v) };
+
+  it('accepts Czech/Slovak/Polish land listings by title and URL', () => {
+    expect(screenItem({ title: 'Prodej zahrady 464 m², Obora', url: 'https://www.bezrealitky.cz/nemovitosti-byty-domy/1063228-nabidka-prodej-pozemku-velka-nad-velickou' }, glampingOptions).ok).toBe(true);
+    expect(screenItem({ title: 'Prodej pozemku 1000 m²', url: 'https://www.sreality.cz/detail/prodej/pozemek/bydleni/zulova-zulova-/1524400204' }, glampingOptions).ok).toBe(true);
+    expect(screenItem({ title: 'Prodej parcely 500 m²', url: 'https://www.bezrealitky.cz/nemovitosti-byty-domy/prodej-parcelu-12345' }, glampingOptions).ok).toBe(true);
+    expect(screenItem({ title: 'Prodej louky 2000 m²', url: 'https://www.sreality.cz/detail/prodej/pozemek/louka/kunice-kunice-/2274426957' }, glampingOptions).ok).toBe(true);
+    expect(screenItem({ title: 'Sprzedaż działki 1000 m²', url: 'https://otodom.pl/oferta/dzialka-12345' }, glampingOptions).ok).toBe(true);
+  });
+
+  it('rejects apartment listings even with similar URL patterns', () => {
+    expect(screenItem({ title: 'Prodej bytu 3+1 68 m²', url: 'https://www.sreality.cz/detail/prodej/byt/3+1/brno-trnita-koliskova/3380817996' }, glampingOptions).ok).toBe(false);
+    expect(screenItem({ title: 'Prodej bytu 2+kk', url: 'https://www.bezrealitky.cz/nemovitosti-byty-domy/prodej-byty-12345' }, glampingOptions).ok).toBe(false);
+  });
+});

@@ -380,3 +380,37 @@ describe('asked criteria filtering', () => {
     expect(askedCriteria({ ...f2, clauses: [] })).toBeNull();
   });
 });
+
+describe('strategy criteria words regex accepts all currencies', () => {
+  it('price criterion matches CZK amounts', () => {
+    const priceCriterion = GLAMPING_LOW_ENTRY.criteria.find((c) => c.id === 'price');
+    expect(priceCriterion?.words.test('1000000 CZK')).toBe(true);
+    expect(priceCriterion?.words.test('1 000 000 Kč')).toBe(true);
+    expect(priceCriterion?.words.test('1000000 kc')).toBe(true);
+  });
+
+  it('price criterion matches PLN amounts', () => {
+    const priceCriterion = GLAMPING_LOW_ENTRY.criteria.find((c) => c.id === 'price');
+    expect(priceCriterion?.words.test('200000 PLN')).toBe(true);
+    expect(priceCriterion?.words.test('200 000 zł')).toBe(true);
+    expect(priceCriterion?.words.test('200000 zl')).toBe(true);
+  });
+
+  it('price criterion matches USD amounts', () => {
+    const priceCriterion = GLAMPING_LOW_ENTRY.criteria.find((c) => c.id === 'price');
+    expect(priceCriterion?.words.test('50000 USD')).toBe(true);
+    expect(priceCriterion?.words.test('$50,000')).toBe(true);
+  });
+
+  it('price criterion matches GBP amounts', () => {
+    const priceCriterion = GLAMPING_LOW_ENTRY.criteria.find((c) => c.id === 'price');
+    expect(priceCriterion?.words.test('40000 GBP')).toBe(true);
+    expect(priceCriterion?.words.test('£40,000')).toBe(true);
+  });
+
+  it('price criterion matches TRY amounts', () => {
+    const priceCriterion = GLAMPING_LOW_ENTRY.criteria.find((c) => c.id === 'price');
+    expect(priceCriterion?.words.test('1000000 TRY')).toBe(true);
+    expect(priceCriterion?.words.test('1 000 000 TL')).toBe(true);
+  });
+});

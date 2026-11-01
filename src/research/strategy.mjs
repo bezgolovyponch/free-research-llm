@@ -45,7 +45,7 @@ export const GLAMPING_LOW_ENTRY = {
   },
   criteria: [
     { id: 'kind', label: 'a plot of land for sale', words: /\b(?:plot|land|terreno|parcel)/i, measure: 'item gate on every listing (kind, sale, single page)' },
-    { id: 'price', label: 'price within the budget', words: /\d[\d.,\s]*(?:eur|€|euro)|\bmax\b|budget/i, measure: 'price read from the listing, converted at ECB rates' },
+    { id: 'price', label: 'price within the budget', words: /\d[\d.,\s]*(?:€|eur|euro|zł|zl|pln|kč|kc|czk|\$|usd|£|gbp|₺|(?<![a-z])tl(?![a-z])|try|₫|vnđ|vnd)|(?:€|eur|euro|zł|zl|pln|kč|kc|czk|\$|usd|£|gbp|₺|(?<![a-z])tl(?![a-z])|try|₫|vnđ|vnd)\s?\d|\bmax\b|budget/i, measure: 'price read from the listing, converted at ECB rates' },
     { id: 'region', label: 'in the countries you named', words: null, measure: 'country from the site address, language or listing text' },
     { id: 'sea', label: 'sea within an e-bike ride', words: /\b(?:sea|ocean|coast|beach|e-?bike)/i, measure: 'distance to the OpenStreetMap coastline from the listing location' },
     { id: 'season', label: 'camping months a year', words: /\bmonths?\b|season|climate|weather/i, measure: 'Camping Climate Index (Ma 2021) from Open-Meteo daily weather of 2025 in the 0.25° cell of the listing: months with a mean index above 3 (acceptable, good or optimal in Ma 2021 Table 4; an adverse-weather day is set to 3, unfavorable)' },
