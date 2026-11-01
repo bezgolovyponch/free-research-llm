@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Verifier, compare, jsonLdOffers, namedCountries, numberOf, obligationsOf, pageAreas, pageCoords, textPrices, campingIndex, campingMonths, humidexOf, climateCell } from '../../verifier/verify.mjs';
+import { Verifier, compare, jsonLdOffers, namedCountries, numberOf, obligationsOf, pageAreas, statedLimit, pageCoords, textPrices, campingIndex, campingMonths, humidexOf, climateCell } from '../../verifier/verify.mjs';
 
 const project = {
   id: 'p1',
@@ -44,6 +44,15 @@ describe('external verifier: obligations from the user\'s own words', () => {
     expect(ob.climate).toMatchObject({ campingIndexAbove: 3, from: expect.stringMatching(/^Camping Climate Index \(Ma 2021/) });
     expect(namedCountries('plots in the EU')).toEqual([]);
     expect(obligationsOf({ question: 'plots in the EU' }).regions).toHaveLength(27);
+  });
+
+  it('checks the sea only when the user asks for it and reads a budget the acceptance left out', () => {
+    const czech = { question: 'Find appropriate plots eligible for glamping in Czech Republic with entrance investments 1000000 CZK - test run', acceptance: { expected: 'provide 10 plots for glamping, for around 1000000 price of the plot', valueRange: null, unit: '' }, constraints: { location: 'Czech Republic', budget: '40000' } };
+    expect(obligationsOf(czech)).toMatchObject({ priceMin: 0, priceMax: 1000000, currency: 'CZK', priceFrom: 'question', seaKm: null, seaFrom: 'not asked', regions: ['CZ'] });
+    expect(obligationsOf(project)).toMatchObject({ priceFrom: 'acceptance', seaFrom: 'guidance' });
+    expect(statedLimit('budget 40000')).toBeNull();
+    expect(statedLimit('pozemek do 1 000 000 Kč')).toEqual({ max: 1000000, currency: 'CZK' });
+    expect(statedLimit('plots 20000EUR max')).toEqual({ max: 20000, currency: 'EUR' });
   });
 });
 
@@ -93,6 +102,18 @@ describe('external verifier: fail-closed verdicts', () => {
     expect((await verifier({ 'imo.example': listing(20000, 1640), ...world(2, 'hr') }).verifyRow(row, obligationsOf(project))).verdict).toBe('refuted');
     expect((await verifier({ 'imo.example': listing(20000, 1640), ...world(null) }).verifyRow(row, obligationsOf(project))).verdict).toBe('refuted');
     expect((await verifier({ 'imo.example': listing(20000, 1640), ...world(2, 'pt', 36) }).verifyRow(row, obligationsOf(project))).verdict).toBe('refuted');
+  });
+
+  it('compares a limit in its own currency and skips the sea for an inland question', async () => {
+    const czech = { question: 'plots eligible for glamping in Czech Republic with entrance investments 1000000 CZK', acceptance: { valueRange: null } };
+    const czRow = { url: 'https://www.bezrealitky.cz/nemovitosti-byty-domy/1052623-nabidka-prodej-pozemku-morkuvky', price: 48307, currency: 'CZK', area: 852, lat: 49.84, lon: 16.95, plan: { tier: 'fits' } };
+    const page = (price: number) => () => new Response(`<html><script type="application/ld+json">{"offers":{"price":"${price}","priceCurrency":"CZK"}}</script><p>852 m²</p>"latitude": 49.84, "longitude": 16.95</html>`, { status: 200 });
+    const ecb = { 'ecb.europa.eu': () => new Response("<Cube currency='CZK' rate='25.0'/>", { status: 200 }) };
+    const cheap = await verifier({ 'bezrealitky.cz': page(48307), ...world(null, 'cz'), ...ecb }).verifyRow(czRow, obligationsOf(czech));
+    expect(cheap.verdict).toBe('confirmed');
+    expect(cheap.checks.some((c: { check: string }) => c.check.startsWith('sea'))).toBe(false);
+    const dear = await verifier({ 'bezrealitky.cz': page(1500000), ...world(null, 'cz'), ...ecb }).verifyRow({ ...czRow, price: 1500000 }, obligationsOf(czech));
+    expect(dear.checks.find((c: { check: string }) => c.check === 'price within the limit')?.status).toBe('refuted');
   });
 
   it('leaves a row unconfirmed, and so not accepted, when a source does not answer', async () => {

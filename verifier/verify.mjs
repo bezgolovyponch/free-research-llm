@@ -29,6 +29,20 @@ export function namedCountries(text) {
   return Object.entries(COUNTRY_NAMES).filter(([, names]) => names.some((n) => new RegExp(`(^|[^a-z])${n}([^a-z]|$)`).test(t))).map(([code]) => code);
 }
 
+const SEA_WORDS = /(^|[^a-z])(sea|ocean|coast|coastal|beach|seaside|shore|e-?bike)([^a-z]|$)/;
+const BUDGET_WORDS = /(^|[^a-z])(max|maximum|up to|under|below|budget|invest[a-z]*|entrance|enterance|entry|at most|around|az)([^a-z]|$)|(^|[^a-z])do\s+\d|≤/;
+const LIMIT_CURRENCIES = { eur: 'EUR', '€': 'EUR', euro: 'EUR', czk: 'CZK', kc: 'CZK', pln: 'PLN', zl: 'PLN', usd: 'USD', $: 'USD', gbp: 'GBP', '£': 'GBP', try: 'TRY', tl: 'TRY' };
+const LIMIT_AMOUNT = /(\d[\d\s.,]*\d|\d)\s*(eur|euro|€|czk|kc|pln|zl|usd|gbp|try|tl)(?![a-z])|(€|\$|£)\s*(\d[\d\s.,]*\d|\d)/;
+
+export function statedLimit(...texts) {
+  for (const clause of fold(texts.filter(Boolean).join(', ')).split(/[,;]|\bbut\b|\band\b/)) {
+    if (!BUDGET_WORDS.test(clause)) continue;
+    const m = clause.match(LIMIT_AMOUNT);
+    if (m) return { max: numberOf(m[1] ?? m[4]), currency: LIMIT_CURRENCIES[m[2] ?? m[3]] };
+  }
+  return null;
+}
+
 export function obligationsOf(project) {
   const words = [project.question, project.acceptance?.expected, ...Object.values(project.constraints ?? {})].filter((v) => typeof v === 'string').join(' ');
   const named = namedCountries(words);
@@ -36,13 +50,17 @@ export function obligationsOf(project) {
   const regions = [...new Set([...named, ...(euWord && !named.some((c) => EU.includes(c)) ? EU : [])])];
   const months = String(project.question ?? '').match(/(\d{1,2})\s*months?\b/i);
   const km = String(project.guidance ?? '').match(/about\s+(\d{1,3})\s*km/i);
+  const range = project.acceptance?.valueRange ?? null;
+  const stated = range ? null : statedLimit(project.question, project.acceptance?.expected);
+  const sea = SEA_WORDS.test(fold(`${words} ${project.guidance ?? ''}`));
   return {
-    priceMin: project.acceptance?.valueRange?.[0] ?? 0,
-    priceMax: project.acceptance?.valueRange?.[1] ?? null,
-    currency: String(project.acceptance?.unit ?? 'EUR').toUpperCase(),
+    priceMin: range?.[0] ?? 0,
+    priceMax: range?.[1] ?? stated?.max ?? null,
+    currency: String((range ? project.acceptance?.unit : stated?.currency) || 'EUR').toUpperCase(),
+    priceFrom: range ? 'acceptance' : stated ? 'question' : 'none',
     regions,
-    seaKm: km ? Number(km[1]) : DEFAULT_SEA_KM,
-    seaFrom: km ? 'guidance' : 'default',
+    seaKm: !sea ? null : km ? Number(km[1]) : DEFAULT_SEA_KM,
+    seaFrom: !sea ? 'not asked' : km ? 'guidance' : 'default',
     minMonths: months ? Number(months[1]) : null,
     climate: { campingIndexAbove: 3, from: 'Camping Climate Index (Ma 2021, ch. 2, eq. 3, Tables 3–4): monthly mean index above 3, acceptable or better' },
   };
@@ -266,7 +284,10 @@ export class Verifier {
     const prices = [...jsonLdOffers(html), ...textPrices(text)].filter((p) => p.currency === String(row.currency || ob.currency).toUpperCase()).map((p) => p.price);
     checks.push(compare('price on the page', row.price, prices, PRICE_TOLERANCE));
     const eur = row.price !== null && row.price !== undefined ? await this.toEur(row.price, String(row.currency || ob.currency).toUpperCase()).catch(() => null) : null;
-    checks.push(eur === null ? { check: 'price within the limit', status: 'unconfirmed', detail: 'no exchange rate' } : { check: 'price within the limit', status: eur >= ob.priceMin && (ob.priceMax === null || eur <= ob.priceMax * (1 + PRICE_TOLERANCE)) ? 'confirmed' : 'refuted', detail: `€${Math.round(eur)} against ${ob.priceMin}–${ob.priceMax}` });
+    const minEur = await this.toEur(ob.priceMin, ob.currency).catch(() => null);
+    const maxEur = ob.priceMax === null ? null : await this.toEur(ob.priceMax, ob.currency).catch(() => null);
+    const limitKnown = minEur !== null && (ob.priceMax === null || maxEur !== null);
+    checks.push(eur === null || !limitKnown ? { check: 'price within the limit', status: 'unconfirmed', detail: 'no exchange rate' } : { check: 'price within the limit', status: eur >= minEur && (maxEur === null || eur <= maxEur * (1 + PRICE_TOLERANCE)) ? 'confirmed' : 'refuted', detail: `€${Math.round(eur)} against ${ob.priceMin}–${ob.priceMax ?? 'no limit'} ${ob.currency}` });
     if (row.area) checks.push(compare('area on the page', row.areaM2 ?? row.area, pageAreas(text), AREA_TOLERANCE));
     const own = pageCoords(html);
     const point = own ?? (Number.isFinite(row.lat) && Number.isFinite(row.lon) ? { lat: row.lat, lon: row.lon } : null);
@@ -279,12 +300,14 @@ export class Verifier {
       } catch (error) {
         checks.push({ check: 'in the asked countries', status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
       }
-      try {
-        const km = await this.seaKm(point, ob.seaKm + 5);
-        const close = km !== null && Math.abs(km - ob.seaKm) < COAST_MARGIN_KM;
-        checks.push({ check: `sea within ${ob.seaKm} km`, status: close ? 'unconfirmed' : km !== null && km <= ob.seaKm ? 'confirmed' : 'refuted', detail: `${km === null ? `no coastline within ${ob.seaKm + 5} km` : `${km} km`} (Natural Earth 1:10m coastline${close ? `; within its ${COAST_MARGIN_KM} km precision of the limit` : ''})` });
-      } catch (error) {
-        checks.push({ check: `sea within ${ob.seaKm} km`, status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
+      if (ob.seaKm !== null) {
+        try {
+          const km = await this.seaKm(point, ob.seaKm + 5);
+          const close = km !== null && Math.abs(km - ob.seaKm) < COAST_MARGIN_KM;
+          checks.push({ check: `sea within ${ob.seaKm} km`, status: close ? 'unconfirmed' : km !== null && km <= ob.seaKm ? 'confirmed' : 'refuted', detail: `${km === null ? `no coastline within ${ob.seaKm + 5} km` : `${km} km`} (Natural Earth 1:10m coastline${close ? `; within its ${COAST_MARGIN_KM} km precision of the limit` : ''})` });
+        } catch (error) {
+          checks.push({ check: `sea within ${ob.seaKm} km`, status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
+        }
       }
       if (ob.minMonths) {
         try {
