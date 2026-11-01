@@ -194,6 +194,7 @@ export function localeCountry(locale) {
 
 export function sourceCountry(source) {
   if (!source) return '';
+  if (source.country && countryByCode(source.country)) return source.country;
   const byTld = tldCountry(source.url);
   if (byTld) return byTld;
   const byLocale = localeCountry(source.locale);

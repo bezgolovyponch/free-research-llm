@@ -87,14 +87,14 @@ export class CandidateSweeper {
     const keys = new Set();
     let left = this.budget;
     const keptNow = () => buildCandidates([...project.nodes, { id: 'sweep', sources: pages }], brief, options).keptCount;
-    const visit = async (url, from, arm) => {
+    const visit = async (url, from, arm, country = '') => {
       if (!url || read.has(url) || left <= 0) return null;
       read.add(url);
       left--;
       const page = await this.search.readPage(url);
       const fresh = (page.listings ?? []).filter((l) => !keys.has(listingKey(l.url)));
       fresh.forEach((l) => keys.add(listingKey(l.url)));
-      const record = { id: `P${pages.length + 1}`, kind: 'web', url, from, title: `${hostOf(url)} listings`, domain: hostOf(url), locale: page.locale ?? '', text: String(page.text ?? '').slice(0, STORED_PAGE_TEXT), links: [], listings: fresh, status: page.status ?? 0 };
+      const record = { id: `P${pages.length + 1}`, kind: 'web', url, from, country, title: `${hostOf(url)} listings`, domain: hostOf(url), locale: page.locale ?? '', text: String(page.text ?? '').slice(0, STORED_PAGE_TEXT), links: [], listings: fresh, status: page.status ?? 0 };
       pages.push(record);
       const kept = fresh.length ? buildCandidates([{ id: 'sweep', sources: [record] }], brief, options).keptCount : 0;
       const y = yields.get(arm) ?? { useful: 0, empty: 0, listings: 0 };
@@ -108,12 +108,12 @@ export class CandidateSweeper {
       if (skipped(start)) continue;
       visited.add(start.country);
       const reserved = starts.slice(index + 1).filter((s) => s.seed || !visited.has(s.country)).length;
-      const first = await visit(start.url, start.seed ? `seed portal for ${start.country}` : 'portal page already read', start.url);
+      const first = await visit(start.url, start.seed ? `seed portal for ${start.country}` : 'portal page already read', start.url, start.country);
       if (!first?.listings?.length) continue;
       const filtered = brief.valueRange ? priceFilterUrl(first.links, start.url, brief.valueRange[1]) : '';
-      let page = filtered ? (await visit(filtered, `price filter found on ${hostOf(start.url)}`, start.url)) ?? first : first;
+      let page = filtered ? (await visit(filtered, `price filter found on ${hostOf(start.url)}`, start.url, start.country)) ?? first : first;
       if (!page?.listings?.length) page = first;
-      for (let n = 1; n < this.perSite && page?.next && left > reserved && (start.seed || keptNow() < target); n++) page = await visit(page.next, 'next page link', start.url);
+      for (let n = 1; n < this.perSite && page?.next && left > reserved && (start.seed || keptNow() < target); n++) page = await visit(page.next, 'next page link', start.url, start.country);
     }
     for (const [url, y] of yields) this.arms?.record(url, y);
     const arms = [...yields].map(([url, y]) => ({ url, ...y, draw: starts.find((s) => s.url === url)?.draw ?? null })).sort((a, b) => b.listings - a.listings);
