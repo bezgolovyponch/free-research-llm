@@ -125,7 +125,7 @@ export const PROVIDER_PRESETS = [
     optionalKeyEnv: 'POLLINATIONS_API_KEY',
     disableEnv: 'FRL_POLLINATIONS',
     signup: 'https://enter.pollinations.ai',
-    minIntervalMs: 31000,
+    minIntervalMs: 45000,
     maxOutputTokens: 1500,
     extraBody: { reasoning_effort: 'low' },
     prefer: { fast: ['openai-fast', 'openai'], deep: ['openai-fast', 'openai'] },

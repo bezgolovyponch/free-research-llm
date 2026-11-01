@@ -105,6 +105,18 @@ describe('provider limits', () => {
     expect(error.retryAfterMs).toBe(30000);
   });
 
+  it('takes the larger of the retry-after header and the body window (pollinations 402)', async () => {
+    const pollinations = PROVIDER_PRESETS.find((p) => p.id === 'pollinations')!;
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'openai-fast' }] })],
+      [/\/chat\/completions$/, () => new Response('{"error":{"code":"FREE_LIMIT","message":"Free limit reached: 1 reply every 45 seconds per IP. Retry after 14s"}}', { status: 402, headers: { 'retry-after': '14' } })],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: { ...pollinations, minIntervalMs: 0 }, fetchImpl }).discover();
+    const error = await p.chat({ messages: [] }).catch((e) => e);
+    expect(error.retryable).toBe(true);
+    expect(error.retryAfterMs).toBe(45000);
+  });
+
   it('retries with a doubled token budget when the reply was cut off', async () => {
     const budgets: number[] = [];
     const fetchImpl = fakeFetch([
