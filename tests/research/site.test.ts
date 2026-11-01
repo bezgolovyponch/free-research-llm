@@ -115,6 +115,10 @@ describe('site measurements', () => {
     expect(zoningOf({ title: 'Terreno rústico 4720 m²' })).toBe('agricultural');
     expect(zoningOf({ title: 'Terreno Urbano | Coimbra' })).toBe('buildable');
     expect(zoningOf({ title: 'Land for sale' })).toBe('not stated');
+    expect(zoningOf({ title: 'Prodej zahrady 464 m², Obora' })).toBe('agricultural');
+    expect(zoningOf({ title: 'Prodej louky 5 200 m²' })).toBe('agricultural');
+    expect(zoningOf({ title: 'Zemědělská půda Kunice' })).toBe('agricultural');
+    expect(zoningOf({ title: 'Prodej stavebního pozemku 934 m²' })).toBe('buildable');
   });
 
   it('finds coordinates a listing page publishes', () => {

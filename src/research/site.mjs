@@ -133,8 +133,8 @@ export function explorePoints(site) {
   return (site.beaches ?? 0) + (site.viewpoints ?? 0) + (site.attractions ?? 0) + (site.reserves ?? 0) + (site.protectedAreas ?? 0) + (site.hikingRoutes ?? 0);
 }
 
-const AGRICULTURAL = /r[uú]stic|agr[ií]col|agricultur|poljoprivredn|izuzeto iz gra[dđ]evinsk|outside the building zone|tarla|n[oô]ng nghi[eệ]p|farmland/i;
-const BUILDABLE = /urban[oa]?\b|building plot|gra[dđ]evinsk[oa] zemlji|baugrund|baugenehmigung|approved project|projec?to aprovado|th[oổ] c[uư]|imarl[ıi]|constru[cç][aã]o/i;
+const AGRICULTURAL = /r[uú]stic|agr[ií]col|agricultur|poljoprivredn|izuzeto iz gra[dđ]evinsk|outside the building zone|tarla|n[oô]ng nghi[eệ]p|farmland|zem[eě]d[eě]lsk|orn[aá] p[uů]d|\bpole\b|\blouk[ayu]\b|\bzahrad[ayu]?\b/i;
+const BUILDABLE = /urban[oa]?\b|building plot|gra[dđ]evinsk[oa] zemlji|baugrund|baugenehmigung|approved project|projec?to aprovado|th[oổ] c[uư]|imarl[ıi]|constru[cç][aã]o|stavebn[ií]/i;
 
 export function zoningOf(row) {
   const words = `${row.title ?? ''} ${row.place ?? ''} ${row.zoningText ?? ''}`;

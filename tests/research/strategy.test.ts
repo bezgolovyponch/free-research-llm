@@ -85,6 +85,17 @@ describe('low-entry glamping strategy', () => {
     expect(plan.verdict.match(/climate not measured with the Camping Climate Index yet/g)).toHaveLength(1);
   });
 
+  it('gives a Czech plot a legal path with no transfer tax and the land-use plan and agricultural fund risks', () => {
+    const meadow = { ...nazare, countryCode: 'CZ', country: 'Czechia', title: 'Prodej louky 5 200 m²', value: 600000, area: 5200 };
+    const plan = planFor(meadow, GLAMPING_LOW_ENTRY, { convert: toEur });
+    expect(plan.checks.find((c) => c.id === 'legal')?.ok).toBe(true);
+    expect(plan.path).toContain('územní plán');
+    expect(plan.entry?.tax).toBe(0);
+    expect(plan.risks.join(' ')).toContain('vynětí ze ZPF');
+    expect(plan.risks.join(' ')).toContain('reciprocal restrictions');
+    expect(planFor({ ...meadow, title: 'Prodej stavebního pozemku 934 m²' }, GLAMPING_LOW_ENTRY, { convert: toEur }).risks.join(' ')).not.toContain('vynětí ze ZPF');
+  });
+
   it('flags a Turkish shared title and the foreign-buyer project duty', () => {
     const plan = planFor({ ...nazare, countryCode: 'TR', country: 'Turkey', title: 'Hisseli tarla 5 dönüm', area: 5, areaUnit: 'dönüm' }, GLAMPING_LOW_ENTRY, { convert: toEur });
     expect(plan.risks.join(' ')).toContain('shared title');
