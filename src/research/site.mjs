@@ -9,6 +9,8 @@ import { CoastFile } from './coastline.mjs';
 export const GONE_STATUS = new Set([404, 410]);
 
 export const EBIKE_KM = 25;
+export const COAST_FILE_FILLED = 'Natural Earth 1:10m coastline (the map query found no coastline)';
+const OVERPASS_FAILED = /runtime error|timed out|out of memory/i;
 export const NEAR_KM = 15;
 export const SITE_TTL_MS = 30 * 24 * 3600 * 1000;
 export const NEW_SITES_PER_PASS = 12;
@@ -413,8 +415,9 @@ export class SiteAssessor {
   }
 
   async assess(lat, lon, { map = true } = {}) {
-    const cached = this.cachedSite(lat, lon);
-    if (cached?.climate?.cci && !(cached.mapPending && map)) return cached;
+    const stored = this.cachedSite(lat, lon);
+    const cached = stored && !stored.mapPending ? await this.withFileCoast(lat, lon, stored) : stored;
+    if (cached?.climate?.cci && !(cached.mapPending && map)) return cached === stored ? cached : this.keepSite(lat, lon, cached);
     const climate = cached?.climate?.cci ? cached.climate : await this.climate(lat, lon);
     if (cached && !cached.mapPending) return this.keepSite(lat, lon, { ...cached, climate });
     let site = null;
@@ -427,9 +430,16 @@ export class SiteAssessor {
         if (!this.coastFile) throw error;
       }
     }
+    if (site) site = await this.withFileCoast(lat, lon, site);
     if (!site) site = cached ?? (await this.siteFromCoastFile(lat, lon));
     if (!site) throw new Error('map service busy and no coastline file');
     return this.keepSite(lat, lon, { ...site, climate });
+  }
+
+  async withFileCoast(lat, lon, site) {
+    if (site.coastKm !== null || !this.coastFile) return site;
+    const coastKm = await this.coastFile.nearestKm(lat, lon, EBIKE_KM);
+    return typeof coastKm === 'number' ? { ...site, coastKm, coastBy: COAST_FILE_FILLED } : site;
   }
 
   async siteFromCoastFile(lat, lon) {
@@ -469,6 +479,7 @@ export class SiteAssessor {
       if (i < OVERPASS_URLS.length - 1 && this.now() - (this.overpassDown.get(url) ?? -Infinity) < INSTANCE_REST_MS) continue;
       try {
         const json = await this.fetchJson(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}`, timeoutMs: INSTANCE_TIMEOUT_MS, noRetry: true });
+        if (OVERPASS_FAILED.test(String(json?.remark ?? ''))) throw new Error(`Overpass: ${json.remark}`);
         this.overpassAt = at;
         return json;
       } catch (error) {

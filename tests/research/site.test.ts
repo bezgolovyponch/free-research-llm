@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { climateOf } from '../../src/research/cci.mjs';
-import { TREND_RETRY_CAP_MS, backoffMs, transientError, namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, measureOrder, fitOf, haversineKm, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, siteKey, zoningOf } from '../../src/research/site.mjs';
+import { COAST_FILE_FILLED, TREND_RETRY_CAP_MS, backoffMs, transientError, namesRegion, EBIKE_KM, NEW_SITES_PER_PASS, PAGE_READS_PER_PASS, SiteAssessor, measureOrder, fitOf, haversineKm, overpassQuery, pageCoordinates, parseSurroundings, pitchesFor, siteKey, zoningOf } from '../../src/research/site.mjs';
 
 const VIR = { lat: 44.3, lon: 15.09 };
 const DA_NANG = { lat: 16.055, lon: 108.22, name: 'Thai Hoa, Hai Chau, Da Nang, Vietnam' };
@@ -251,6 +251,32 @@ describe('SiteAssessor', () => {
     const second = await assessor.apply({ ...table, kept: [row], keptCount: 1 }, brief, {});
     expect(second.kept[0].site.mapPending).toBeUndefined();
     expect(second.kept[0].site).toMatchObject({ coastKm: 0.6, viewpoints: 13 });
+  });
+
+  it('takes the coastline file when the map query finds no coastline, and repairs a stored site that has none', async () => {
+    const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
+    const noCoast = async (url: string, init?: { body?: string }) => (url.includes('overpass') ? { elements: [] } : net.fetchJson(url, init));
+    const file = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'frl-coast-')), 'sites.json');
+    const blind = new SiteAssessor({ file, fetchJson: noCoast, sleep: noSleep, coastFile: { nearestKm: async () => undefined } as never });
+    expect((await blind.assess(VIR.lat, VIR.lon)).coastKm).toBeNull();
+    await blind.writing;
+    const seeing = new SiteAssessor({ file, fetchJson: noCoast, sleep: noSleep, coastFile: { nearestKm: async () => 14 } as never });
+    expect(await seeing.assess(VIR.lat, VIR.lon)).toMatchObject({ coastKm: 14, coastBy: COAST_FILE_FILLED });
+    const fresh = new SiteAssessor({ fetchJson: noCoast, sleep: noSleep, coastFile: { nearestKm: async () => 8.2 } as never });
+    expect(await fresh.assess(VIR.lat, VIR.lon)).toMatchObject({ coastKm: 8.2, coastBy: COAST_FILE_FILLED });
+    await seeing.writing;
+    await fs.rm(path.dirname(file), { recursive: true, force: true });
+  });
+
+  it('treats an Overpass reply that timed out inside the server as a failed instance and asks the next one', async () => {
+    const asked: string[] = [];
+    const fetchJson = async (url: string) => {
+      asked.push(url);
+      return asked.length === 1 ? { remark: 'runtime error: Query timed out in "query" at line 1 after 26 seconds.', elements: [] } : { elements: [{ id: 1 }] };
+    };
+    const assessor = new SiteAssessor({ fetchJson, sleep: noSleep });
+    expect(await assessor.overpass('[out:json];node(1);out;')).toEqual({ elements: [{ id: 1 }] });
+    expect(new Set(asked).size).toBe(2);
   });
 
   it('caps map queries per pass and gives the other plots the coastline-file distance at once', async () => {
