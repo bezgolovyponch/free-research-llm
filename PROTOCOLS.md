@@ -35,10 +35,26 @@ Each row names the code that enforces it and the test that proves it.
 | numbers-sourced | a number has no source and is not marked an assumption | weak |
 | independent-sources | "high" confidence with fewer than 2 source domains | weak |
 | critique | the independent reviewer finds a major flaw | weak |
+| meaning | a claim that affects the result is not backed in meaning by its quote (see 2b) | to confirm: caps the piece at supported, never verified |
 | expected result | item count, live deep links, value in range (currency converted at ECB daily rates), required words | scored, shown in Report |
 
 Grades: **verified** = all gates pass and 2+ independent domains (or your data); **supported** = all pass; **weak**; **unsupported**.
 Tests: `tests/research/verify.test.ts`, `tests/research/acceptance.test.ts`.
+
+## 2b. Meaning check (logic version 2, 2026-11-02)
+
+The attribution gate proves a quote is on a fetched page and holds the claim's numbers. It does not prove the quote says what the claim says ("Bell tents cost from €950" passed for "A building permit costs €950"). The meaning check closes that gap ([`src/research/support.mjs`](src/research/support.mjs)):
+
+1. **Which claims.** Quoted claims that affect the result: a number, a calculation input, or a piece whose method is calculation, comparison or data. At most 6 per piece. Assumptions and roll-up pieces (they quote other pieces) are not checked.
+2. **Code first.** For English quotes, at least half of the claim's key terms must appear in the quote; otherwise the claim cannot be "supported" even when both models say yes.
+3. **Two votes.** The most capable free model (router class `top`, not the model that wrote the claim) votes, then a fast model of another provider (class `volume`). Both "yes" gives *supported*; both "no" *unsupported*; anything else *disagree*; fewer than two answers *unchecked*. Code records each vote (provider, model, vote, reason).
+4. **Resolve before flagging.** A claim that is not supported is searched for in the pages already fetched for its piece: a sentence with all its numbers and its key terms. If the two models back that sentence, the claim takes it as its quote (`resolvedFrom`).
+5. **To confirm.** *disagree*, *unsupported* and *unchecked* show as "⚠ to confirm" with a cause of at most 200 characters in short bullets. The piece is capped at *supported*; it is not made weak and not re-researched for it.
+6. **Regular audit.** Every run start (`monitorPass`) rebuilds `project.supportAudit`: claims checked, supported, to confirm, disagreements and *stale* claims checked under an older logic version. Its queue lists disagreements first, then unsupported, then unchecked.
+7. **Logic changes.** When `SUPPORT_LOGIC_VERSION` rises, the Results page shows an alert with the number of stale claims and a **Recheck these claims** button (`POST /api/projects/<id>/recheck-support`). Rechecking re-runs only the meaning check, never the source attribution (stored page text is capped at 4,000 characters).
+8. **Outside the app.** The external verifier re-reads each cited page and checks the quote, its numbers and its key terms on its own (`verifier/claims.mjs`).
+
+Plots to confirm get the same treatment: the tooltip names the checks not yet measured and how often each one ended a measured plot in the same research (≥5 measured plots; ≥50% is "often a complete blocker"); to-confirm rows sort least likely blocked first ([`src/research/blockers.mjs`](src/research/blockers.mjs)). The Results page states what the results are: the current conclusion, with its date, counts, outside-check counts, claims to confirm and whether the loop is running.
 
 ## 3. Change protocol (chat, edits, suggestions)
 

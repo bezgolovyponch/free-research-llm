@@ -7,7 +7,8 @@ import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './a
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
-import { needsEscalation, verifyFinding } from './verify.mjs';
+import { needsEscalation, verifyFinding, withMeaning } from './verify.mjs';
+import { claimsToCheck, contextOf, isStale, normalizeVote, resolveFromSources, supportAudit, supportPrompt, supportRecord, termCheck, toConfirm } from './support.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
@@ -39,6 +40,7 @@ const ATTACHMENT_TEXT_LIMIT = 20000;
 const ATTACHMENT_TYPES = /\.(csv|tsv|txt|md|json|html?)$/i;
 const SWEEP_PAGES_KEPT = 120;
 export const TEAM_TTL_MS = 24 * 3600 * 1000;
+export const SUPPORT_PARALLEL = 3;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -498,6 +500,43 @@ export class ResearchEngine {
     }
   }
 
+  async supportVote(purpose, tier, avoid, claim, quote) {
+    try {
+      const reply = await this.router.complete({ purpose, tier, avoid, messages: supportPrompt({ claim, quote }) });
+      return normalizeVote(reply.data, { provider: reply.provider, model: reply.model });
+    } catch {
+      return null;
+    }
+  }
+
+  async voteOnQuote(claim, quote, author, context = '') {
+    const shown = context || quote;
+    const first = await this.supportVote('support', 'deep', author, claim.text, shown);
+    const second = await this.supportVote('support-second', 'fast', first?.provider ?? author, claim.text, shown);
+    return supportRecord({ votes: [first, second].filter(Boolean), term: termCheck(claim.text, shown) });
+  }
+
+  async checkClaimSupport(node, claim, author) {
+    let record = await this.voteOnQuote(claim, claim.quote, author, contextOf(claim.quote, node.sources ?? [], claim.sourceIds ?? []));
+    const found = toConfirm(record) ? resolveFromSources(claim, node.sources ?? []) : null;
+    if (found) {
+      const retry = await this.voteOnQuote(claim, found.quote, author);
+      if (retry.verdict === 'supported') {
+        Object.assign(claim, { quote: found.quote, sourceIds: [found.sourceId] });
+        record = { ...retry, resolvedFrom: found.sourceId };
+      }
+    }
+    claim.support = record;
+  }
+
+  async checkSupport(project, node, finding, author) {
+    const claims = claimsToCheck(finding, node);
+    for (let i = 0; i < claims.length; i += SUPPORT_PARALLEL) await Promise.all(claims.slice(i, i + SUPPORT_PARALLEL).map((claim) => this.checkClaimSupport(node, claim, author)));
+    const open = claims.filter((c) => toConfirm(c.support)).length;
+    if (claims.length) this.emit(project, 'node', `${node.id}: meaning checked for ${claims.length} claim(s), ${open} to confirm`, { nodeId: node.id });
+    return { checked: claims.length, open };
+  }
+
   async researchLeaf(project, node, hint) {
     const settledBefore = SETTLED.has(node.status);
     const champion = settledBefore && node.finding ? { finding: node.finding, verification: node.verification } : null;
@@ -529,6 +568,7 @@ export class ResearchEngine {
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
       const retryAnyway = needsEscalation(mechanical) && attempt < MAX_ATTEMPTS;
       const critique = retryAnyway ? null : await this.critique(node, finding, shown, reply.provider);
+      if (!retryAnyway) await this.checkSupport(project, node, finding, reply.provider);
       const verification = retryAnyway ? mechanical : verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
       if (champion) {
@@ -927,7 +967,27 @@ export class ResearchEngine {
       downgradeTo: 'pending',
     });
     if (changed.length) this.emit(project, 'edit', `drift detected, re-researching: ${changed.map((c) => `${c.nodeId} (${c.drift})`).join(', ')}`);
+    project.supportAudit = supportAudit(project.nodes);
+    if (project.supportAudit.disagree) this.emit(project, 'edit', `audit: ${project.supportAudit.disagree} claim(s) where the checking models disagree come first to confirm: ${[...new Set(project.supportAudit.queue.slice(0, 3).map((q) => q.nodeId))].join(', ')}`);
     return changed;
+  }
+
+  async recheckSupport(id) {
+    if (this.running.has(id)) throw new ProjectBusyError('stop the run before rechecking');
+    const project = await this.load(id);
+    let pieces = 0;
+    let claims = 0;
+    for (const node of project.nodes) {
+      if (!(node.finding?.claims ?? []).some((c) => isStale(c, node.finding, node))) continue;
+      const author = String(node.model ?? '').split('/')[0] || undefined;
+      claims += (await this.checkSupport(project, node, node.finding, author)).checked;
+      node.verification = withMeaning(node.verification, node.finding);
+      if (node.verification) node.status = node.verification.grade;
+      pieces += 1;
+    }
+    project.supportAudit = supportAudit(project.nodes);
+    await this.store.save(project);
+    return { ok: true, message: `rechecked ${pieces} piece(s), ${claims} claim(s): ${project.supportAudit.toConfirm} to confirm` };
   }
 
   async resetResearch(id, { tree = false } = {}) {

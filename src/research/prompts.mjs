@@ -20,6 +20,7 @@ export const TASK_MARKERS = {
   expand: 'TASK=EXPAND',
   research: 'TASK=RESEARCH',
   critique: 'TASK=CRITIQUE',
+  support: 'TASK=SUPPORT',
   rollup: 'TASK=ROLLUP',
   synthesize: 'TASK=SYNTHESIZE',
   variant: 'TASK=IMPROVE_NODE',

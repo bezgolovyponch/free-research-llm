@@ -4,6 +4,7 @@ import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
 import { zoningOf, explorePoints, haversineKm } from './site.mjs';
 import { cadastreNotes } from './parcels.mjs';
+import { withConfirmRisk } from './blockers.mjs';
 
 export const STRATEGY_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -456,6 +457,7 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
     return { ...row, plan: { ...plan, risks: [...plan.risks, cheap], ...(doubtful ? { tier: 'unverified', verdict: `to confirm: ${cheap}` } : {}) } };
   });
   rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || b.plan.share - a.plan.share || (a.plan.entry?.total ?? Infinity) - (b.plan.entry?.total ?? Infinity));
+  rows.splice(0, rows.length, ...withConfirmRisk(rows));
   const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
   const euTrend = trends?.EU27_2020 ?? null;
   const outside = (candidates.outside ?? []).map((row) => {

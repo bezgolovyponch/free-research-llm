@@ -30,6 +30,8 @@ import { pcSetupCommand, pcSetupScript } from './local/pcsetup.mjs';
 import { ensureLocalModel } from './local/autostart.mjs';
 import { InstanceLock } from './instancelock.mjs';
 import os from 'node:os';
+import { supportAudit } from './research/support.mjs';
+import { resultsNature } from './research/blockers.mjs';
 
 const MAX_BODY = 32 * 1024 * 1024;
 const VENDOR = {
@@ -64,7 +66,8 @@ async function readJson(req) {
 export function withResults(project) {
   if (!project || typeof project !== 'object' || !Array.isArray(project.nodes) || typeof project.question !== 'string') return project;
   const { plan, ...status } = resultStatus(project);
-  const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question, modelOf(project)) };
+  const support = supportAudit(project.nodes);
+  const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question, modelOf(project)), support, nature: resultsNature({ ...project, supportAudit: support }) };
   return { ...project, ...(project.sweep ? { sweep: clientSweep(project.sweep) } : {}), nodes: clientNodes(project.nodes).map((n) => (cleanTitle(n.title) !== n.title ? { ...n, title: cleanTitle(n.title) } : n)), results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
 }
 
@@ -213,6 +216,10 @@ export function createServer(app, gate = new AccessGate()) {
       return app.engine.resetResearch(id, await readJson(req));
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/tree$/, async (req, [id]) => app.engine.buildTree(id)],
+    ['POST', /^\/api\/projects\/([\w-]+)\/recheck-support$/, async (req, [id]) => {
+      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      return app.engine.recheckSupport(id);
+    }],
     ['PATCH', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => app.engine.updateProject(id, await readJson(req))],
     ['GET', /^\/api\/projects\/([\w-]+)\/logs$/, async (req, [id]) => app.logs.read(`project-${id}`)],
     ['GET', /^\/api\/logs\/model-calls$/, async () => app.logs.read('model-calls')],
