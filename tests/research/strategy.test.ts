@@ -96,6 +96,17 @@ describe('low-entry glamping strategy', () => {
     expect(planFor({ ...meadow, title: 'Prodej stavebního pozemku 934 m²' }, GLAMPING_LOW_ENTRY, { convert: toEur }).risks.join(' ')).not.toContain('vynětí ze ZPF');
   });
 
+  it('measures Czech units with the Portuguese density and labels it an assumption', () => {
+    const meadow = { ...nazare, countryCode: 'CZ', country: 'Czechia', title: 'Prodej louky 5 200 m²', value: 600000, area: 5200, site: site(20, { climate: climate(12, 24) }) };
+    const plan = planFor(meadow, GLAMPING_LOW_ENTRY, { convert: toEur });
+    expect(plan.units).toBe(30);
+    const unitsCheck = plan.checks.find((c) => c.id === 'units');
+    expect(unitsCheck?.ok).toBe(true);
+    expect(unitsCheck?.detail).toContain('assumption: Portugal density, no national rule found for Czechia');
+    expect(plan.why.join(' ')).toContain('assumption: Portugal density');
+    expect(planFor(nazare, GLAMPING_LOW_ENTRY, { convert: toEur }).checks.find((c) => c.id === 'units')?.detail).not.toContain('assumption');
+  });
+
   it('flags a Turkish shared title and the foreign-buyer project duty', () => {
     const plan = planFor({ ...nazare, countryCode: 'TR', country: 'Turkey', title: 'Hisseli tarla 5 dönüm', area: 5, areaUnit: 'dönüm' }, GLAMPING_LOW_ENTRY, { convert: toEur });
     expect(plan.risks.join(' ')).toContain('shared title');

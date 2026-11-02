@@ -1534,6 +1534,7 @@ function renderResults(){
   if(ar)h+='<div style="margin-top:6px">'+ar.checks.map(c=>'<div class="check"><span class="'+(c.passed?"y":"n")+'">'+(c.passed?"✓":"✗")+"</span><span>"+esc(c.label)+" <b>"+Math.round(c.value*100)+"%</b></span></div>").join("")+"</div>";
   if(ar&&r&&ar.score>=0.99&&!/^\s*GO\b/i.test(r.verdict))h+='<div class="notice" style="margin:10px 0 0">The expected-result checks pass, but they only test the count, the links and the price range. The memo verdict is <b>'+esc(trunc(r.verdict,80))+"</b>, so the question itself is not settled yet. Ask the Results chat what is missing.</div>";
   h+='<p class="small faint" style="margin-top:8px">'+good.length+"/"+p.nodes.length+" pieces pass the checks · ask about these results in the chat → <b>Results</b></p></div>";
+  h+='<div class="card" id="crossResearchPrinciples"><div class="small faint">Cross-research principles</div><div class="small muted">Loading…</div></div>';
   h+=proposalsHtml(p);
   h+=candidatesHtml(p);
   const items=ar?ar.items:[];
@@ -1545,6 +1546,7 @@ function renderResults(){
   if(!ar&&!r&&!good.length)h+='<div class="card"><b>No results yet.</b><p class="small muted" style="margin-top:4px">Press ▶ Run. Results appear here as pieces pass the checks.</p></div>';
   box.innerHTML=h;
   renderPip();
+  (async()=>{try{const box=$("crossResearchPrinciples");if(!box)return;const data=await api("/api/principles");let html="";for(const [type,principles] of Object.entries(data)){if(!principles.length)continue;html+='<div style="margin-top:8px"><b>'+esc(type)+"</b>";for(const pr of principles){html+='<div class="small" style="margin-top:4px">'+esc(pr.statement)+"</div>";}html+="</div>";}box.innerHTML=html||'<div class="small muted">No cross-research principles recorded yet.</div>';}catch(e){$("crossResearchPrinciples").innerHTML='<div class="small" style="color:var(--rd)">Failed to load: '+esc(e.message)+"</div>";}})();
   box.querySelectorAll("a[data-node]").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();select(a.dataset.node,"details");}));
   const rw=$("resRewrite");if(rw)rw.addEventListener("click",async()=>{rw.disabled=true;rw.textContent="writing…";try{STATE.project=await api("/api/projects/"+p.id+"/synthesize",{method:"POST"});STATE.project=await api("/api/projects/"+p.id);renderAll();toast("memo rewritten from the current pieces");}catch(e){toast(e.message);rw.disabled=false;}});
   const pr=$("resPrint");if(pr)pr.addEventListener("click",()=>{setPane("report");setTimeout(()=>window.print(),300);});

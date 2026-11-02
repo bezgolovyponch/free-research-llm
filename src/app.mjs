@@ -15,7 +15,7 @@ import { SiteRecipes } from './search/recipes.mjs';
 import { SiteAssessor } from './research/site.mjs';
 import { ParcelRegistry } from './research/parcels.mjs';
 import { ProjectImprover } from './research/improve.mjs';
-import { LessonBook } from './research/lessons.mjs';
+import { LessonBook, principlesFrom } from './research/lessons.mjs';
 import { NodeChat } from './research/chat.mjs';
 import { SubIssueSuggester } from './research/suggest.mjs';
 import { ExchangeRates } from './research/rates.mjs';
@@ -471,6 +471,16 @@ export class App {
       claude: claude.installed ? `installed (${claude.version})` : 'not installed',
       coders: this.coder?.engines?.() ?? [],
     };
+  }
+
+  async getPrinciples(type = null) {
+    await this.lessons.load();
+    const allTypes = [...new Set(this.lessons.lessons.map((l) => l.type).filter(Boolean))];
+    const result = {};
+    for (const t of type ? [type] : allTypes) {
+      result[t] = principlesFrom(this.lessons.lessons, t);
+    }
+    return result;
   }
 
   restartForCode(env) {
