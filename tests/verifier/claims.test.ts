@@ -17,6 +17,11 @@ describe('external verifier: reading claim text the way a person would', () => {
     expect(numbers('1900 2099 2100')).toEqual([2100]);
   });
 
+  it('does not read source and piece ids as numbers or terms', () => {
+    expect(numbers('S4 states the distance is 1911 kilometers')).toEqual([1911]);
+    expect(terms('The source S2 identifies a page').has('s2')).toBe(false);
+  });
+
   it('compares the content words and ignores filler, plurals and prices', () => {
     expect([...terms('The building permit costs €950 for small sites')].sort()).toEqual(['building', 'permit', 'site', 'small']);
     expect([...terms('Prices of tents and years')]).toEqual(['tent']);
@@ -49,6 +54,16 @@ describe('external verifier: one claim at a time', () => {
     expect(judgeClaim(czech, ['Povolení stavby stojí 950 € v malých lokalitách.'])).toEqual({ status: 'confirmed', detail: 'quote and numbers found; meaning not compared (not English)' });
   });
 
+  it('confirms a short quote when the page sentence around it names the claim\'s subject', () => {
+    const claim = { text: 'Vietnam land auctions had bids around 100000 USD per sq m', quote: 'with bids reaching an average of around US$100,000 per sq m' };
+    const text = 'Land auctions in the southern hub of Vietnam in late 2021 drew crowds, with bids reaching an average of around US$100,000 per sq m.';
+    expect(judgeClaim(claim, [text])).toEqual({ status: 'confirmed', detail: 'quote, numbers and key terms found' });
+  });
+
+  it('keeps the bell-tent quote refuted for the permit claim', () => {
+    expect(judgeClaim({ text: 'A building permit costs €950', quote: 'Bell tents cost from €950' }, ['Offer: Bell tents cost from €950 incl. delivery'])).toEqual({ status: 'refuted', detail: 'quote is about something else: missing building, permit' });
+  });
+
   it('leaves a claim unconfirmed when the cited page could not be read', () => {
     expect(judgeClaim(permit, [])).toEqual({ status: 'unconfirmed', detail: 'cited page could not be read' });
     expect(judgeClaim(permit, [''])).toEqual({ status: 'unconfirmed', detail: 'cited page could not be read' });
@@ -74,6 +89,21 @@ describe('external verifier: which claims need checking', () => {
       { nodeId: 'n1', text: 'A building permit costs €950', quote: 'The building permit costs €950 for small sites', urls: ['https://www.mzcr.cz/x'] },
       { nodeId: 'n1', text: 'A second fee is 12', quote: 'The second fee is 12', urls: ['https://www.mzcr.cz/y'] },
     ]);
+  });
+
+  it('skips roll-up claims with no web page and claims whose only digit is a source id', () => {
+    const project = {
+      nodes: [{
+        id: 'n2',
+        method: 'roll-up',
+        finding: { claims: [
+          { text: 'The distance is 1911 kilometers', quote: 'The distance is 1911 kilometers', sourceIds: ['D1'] },
+          { text: 'S1 identifies a land for sale page', quote: 'Land for sale', sourceIds: ['S1'] },
+        ] },
+        sources: [{ id: 'S1', url: 'https://www.mzcr.cz/z', title: 'Listings' }, { id: 'D1', title: 'Driver piece' }],
+      }],
+    };
+    expect(claimsToCheck(project)).toEqual([]);
   });
 });
 
