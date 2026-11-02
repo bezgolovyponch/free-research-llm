@@ -56,6 +56,17 @@ The attribution gate proves a quote is on a fetched page and holds the claim's n
 
 Plots to confirm get the same treatment: the tooltip names the checks not yet measured and how often each one ended a measured plot in the same research (≥5 measured plots; ≥50% is "often a complete blocker"); to-confirm rows sort least likely blocked first ([`src/research/blockers.mjs`](src/research/blockers.mjs)). The Results page states what the results are: the current conclusion, with its date, counts, outside-check counts, claims to confirm and whether the loop is running.
 
+## 2c. Value without ownership (universal, 2026-11-02)
+
+When a country's rule says a buyer cannot own the land (`blocker`) but names a sourced way to use it (`withoutOwning`: lease or partnership with the land-use-right holder), the plot stays **Blocked** as a purchase and never counts as a fit. [`src/research/lease.mjs`](src/research/lease.mjs) then sorts every such plot, in any country:
+
+- **Feasible:** it meets every other check the request asked for, every input is measured, and the setup pays back within the season and within the request's horizon (read from its words, for example "1 year" → 12 months; 12 months when none is stated).
+- **To confirm:** nothing fails, but a check or an input is not measured yet.
+- **Misses what you asked:** another asked check fails.
+- **Not feasible:** the setup does not pay back in time.
+
+The Results tab shows these as an alert, **Available to lease, not to buy**, with the path, the feasible plots (payback, the share of revenue the landholder can get, setup cost) and a cause of at most 200 characters per plot. It never turns a plot into a purchase.
+
 ## 3. Change protocol (chat, edits, suggestions)
 
 - Four chats with separate threads: piece, research, results, app ([CONCEPT.md](CONCEPT.md)). A message about the app itself sent to a research chat is answered by the App chat and not stored in the research (`NodeChat.send`, `scope: "app"`).

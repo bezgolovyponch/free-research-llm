@@ -329,7 +329,7 @@ test('results: the sortable table is the list, opportunities filter it, and a se
   await expect(page.locator('#candRows tr.on')).toContainText('Mira plot B');
   await pip.locator('.pip-head button[data-pipact="toggle"]').click();
   await expect(pip.locator('.pip-rail')).toBeVisible();
-  await expect(page.locator('#inspector')).toBeVisible();
+  await expect(page.locator('#inspector')).toBeHidden();
   await pip.locator('.pip-rail').click();
   await expect(pip.locator('.pip-body')).toBeVisible();
   await expect(page.locator('#inspector')).toBeHidden();

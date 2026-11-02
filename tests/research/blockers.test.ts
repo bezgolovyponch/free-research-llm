@@ -83,7 +83,7 @@ describe('resultsNature', () => {
     expect(lines).toContain('40 fit every criterion, 5 trade-offs, 12 to confirm, 30 weak, 2 blocked, from 911 listings found.');
     expect(lines).toContain('Checked outside the app 2026-11-02: 30 confirmed, 4 refuted, 6 unconfirmed, 2 not checked yet.');
     expect(lines).toContain('3 claim(s) to confirm (1 where the two checking models disagree); 7 claim(s) were checked under older logic.');
-    expect(lines).toContain('The self-improving loop is running until 02:30Z, so numbers can still move.');
+    expect(lines).toContain('The self-improving loop is running until 2026-11-03 02:30Z, so numbers can still move.');
   });
 
   it('alerts that to-confirm plots stay open while the loop is stopped', () => {

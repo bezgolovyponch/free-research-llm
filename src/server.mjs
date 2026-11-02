@@ -32,6 +32,9 @@ import { InstanceLock } from './instancelock.mjs';
 import os from 'node:os';
 import { supportAudit } from './research/support.mjs';
 import { resultsNature } from './research/blockers.mjs';
+import { horizonFromText, leaseOptions } from './research/lease.mjs';
+import { leaseCountries, strategyById } from './research/strategy.mjs';
+import { countryByCode } from './research/brief.mjs';
 
 const MAX_BODY = 32 * 1024 * 1024;
 const VENDOR = {
@@ -63,11 +66,13 @@ async function readJson(req) {
   }
 }
 
+export const DEFAULT_LEASE_HORIZON_MONTHS = 12;
+
 export function withResults(project) {
   if (!project || typeof project !== 'object' || !Array.isArray(project.nodes) || typeof project.question !== 'string') return project;
   const { plan, ...status } = resultStatus(project);
   const support = supportAudit(project.nodes);
-  const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question, modelOf(project)), support, nature: resultsNature({ ...project, supportAudit: support }) };
+  const results = { status, actions: plan.slice(0, 40), model: resultModel(project), treeAudit: auditTree(project.nodes, project.question, modelOf(project)), support, nature: resultsNature({ ...project, supportAudit: support }), lease: leaseOptions(project.candidates, { horizonMonths: horizonFromText(`${project.question} ${project.expected ?? ''}`) ?? DEFAULT_LEASE_HORIZON_MONTHS, asked: leaseCountries(strategyById(project.candidates?.strategy?.id), project.brief?.regions ?? []).map((c) => ({ ...c, name: countryByCode(c.code)?.name ?? c.code })) }) };
   return { ...project, ...(project.sweep ? { sweep: clientSweep(project.sweep) } : {}), nodes: clientNodes(project.nodes).map((n) => (cleanTitle(n.title) !== n.title ? { ...n, title: cleanTitle(n.title) } : n)), results, report: project.report ? { ...project.report, status: results.status, actions: results.actions } : null };
 }
 

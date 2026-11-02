@@ -469,3 +469,13 @@ describe('Vietnam: value without ownership (lease or partnership)', () => {
     expect(out.kept.find((r: { url: string }) => r.url === 'pt').plan.withoutOwning).toBeUndefined();
   });
 });
+
+describe('countries a buyer cannot own but can lease', () => {
+  it('are taken from the strategy rules, for any country with a blocker and a sourced lease path', async () => {
+    const { leaseCountries, strategyById, GLAMPING_LOW_ENTRY: glamping } = await import('../../src/research/strategy.mjs');
+    expect(strategyById(glamping.id)).toBe(glamping);
+    expect(strategyById('nope')).toBeNull();
+    expect(leaseCountries(glamping, ['PT', 'VN', 'TR']).map((c: { code: string }) => c.code)).toEqual(['VN']);
+    expect(leaseCountries(null, ['VN'])).toEqual([]);
+  });
+});
