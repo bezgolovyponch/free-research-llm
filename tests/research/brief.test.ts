@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, regionsIn, sourceCountry } from '../../src/research/brief.mjs';
+import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, regionsIn, sourceCountry, foreignCountryFromText, decodedUrl } from '../../src/research/brief.mjs';
 
 const kind = { label: 'plot of land', terms: ['land', 'terreno'] };
 const plots = buildBrief({
@@ -81,6 +81,74 @@ describe('concept brief', () => {
     expect(isNewsPage('https://portal.example/anuncio/terreno-ID1abcd')).toBe(false);
     expect(mentionsCoast({ url: 'https://famalo.example/zemljiste-100-m-od-mora-14501', title: 'Zemljište' })).toBe(true);
     expect(mentionsCoast({ url: 'https://imo.example/terreno-coimbra-ID1abcd', title: 'Terreno Urbano Coimbra' })).toBe(false);
+  });
+});
+
+describe('foreign country detection from listing text', () => {
+  it('detects German state names in German', () => {
+    expect(foreignCountryFromText('Grundstück in Sachsen')).toBe('DE');
+    expect(foreignCountryFromText('Land in Bayern')).toBe('DE');
+    expect(foreignCountryFromText('Baden-Württemberg Grundstück')).toBe('DE');
+    expect(foreignCountryFromText('Hessen Land')).toBe('DE');
+    expect(foreignCountryFromText('Niedersachsen')).toBe('DE');
+    expect(foreignCountryFromText('Rheinland-Pfalz')).toBe('DE');
+    expect(foreignCountryFromText('Schleswig-Holstein')).toBe('DE');
+    expect(foreignCountryFromText('Saarland')).toBe('DE');
+    expect(foreignCountryFromText('Berlin Grundstück')).toBe('DE');
+    expect(foreignCountryFromText('Hamburg')).toBe('DE');
+    expect(foreignCountryFromText('Bremen')).toBe('DE');
+    expect(foreignCountryFromText('Brandenburg')).toBe('DE');
+    expect(foreignCountryFromText('Mecklenburg-Vorpommern')).toBe('DE');
+    expect(foreignCountryFromText('Sachsen-Anhalt')).toBe('DE');
+    expect(foreignCountryFromText('Thüringen')).toBe('DE');
+    expect(foreignCountryFromText('Thueringen')).toBe('DE');
+  });
+
+  it('detects German state names in Czech', () => {
+    expect(foreignCountryFromText('Pozemek v Sasku')).toBe('DE');
+    expect(foreignCountryFromText('Země v Bavorsku')).toBe('DE');
+    expect(foreignCountryFromText('Badenovsko-Hesensko')).toBe('DE');
+    expect(foreignCountryFromText('Hesensko')).toBe('DE');
+    expect(foreignCountryFromText('Dolní Sasko')).toBe('DE');
+    expect(foreignCountryFromText('Dolni Sasko')).toBe('DE');
+    expect(foreignCountryFromText('Renansko-Pfalzsko')).toBe('DE');
+    expect(foreignCountryFromText('Šlesvik-Holštýnsko')).toBe('DE');
+    expect(foreignCountryFromText('Slesvik-Holstynsko')).toBe('DE');
+    expect(foreignCountryFromText('Saarland')).toBe('DE');
+    expect(foreignCountryFromText('Berlín')).toBe('DE');
+    expect(foreignCountryFromText('Hamburk')).toBe('DE');
+    expect(foreignCountryFromText('Brémy')).toBe('DE');
+    expect(foreignCountryFromText('Brandrova')).toBe('DE');
+    expect(foreignCountryFromText('Mecklenburgo-Pomorsko')).toBe('DE');
+    expect(foreignCountryFromText('Sasko-Anhalt')).toBe('DE');
+    expect(foreignCountryFromText('Thuringie')).toBe('DE');
+  });
+
+  it('returns empty for non-German text', () => {
+    expect(foreignCountryFromText('Pozemek v Praze')).toBe('');
+    expect(foreignCountryFromText('Terreno in Toscana')).toBe('');
+    expect(foreignCountryFromText('Land in Portugal')).toBe('');
+    expect(foreignCountryFromText('')).toBe('');
+  });
+
+  it('itemCountry returns DE for bazos.cz listing with German state in slug', () => {
+    const item = { url: 'https://reality.bazos.cz/inzerat/224223571/prodej-pozemku-obercarsdorf-dippoldiswalde-sasko.php', title: 'Pozemek v Sasku', place: '' };
+    expect(itemCountry(item)).toEqual({ code: 'DE', by: 'listing text (foreign state)' });
+  });
+
+  it('itemCountry returns DE for bazos.cz listing with Bayern in slug', () => {
+    const item = { url: 'https://reality.bazos.cz/inzerat/123/prodej-pozemku-muenchen-bayern.php', title: 'Grundstück in Bayern', place: '' };
+    expect(itemCountry(item)).toEqual({ code: 'DE', by: 'listing text (foreign state)' });
+  });
+
+  it('itemCountry returns CZ for normal CZ listing on bezrealitky.cz', () => {
+    const item = { url: 'https://www.bezrealitky.cz/inzerat/123/prodej-pozemku-praha.php', title: 'Prodej pozemku Praha', place: 'Praha' };
+    expect(itemCountry(item)).toEqual({ code: 'CZ', by: 'site address' });
+  });
+
+  it('itemCountry returns CZ for normal CZ listing on sreality.cz', () => {
+    const item = { url: 'https://www.sreality.cz/detail/prodej/pozemek/123/praha', title: 'Prodej pozemku Praha', place: 'Praha' };
+    expect(itemCountry(item)).toEqual({ code: 'CZ', by: 'site address' });
   });
 });
 

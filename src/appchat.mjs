@@ -44,7 +44,8 @@ export function proposalLabel(p, projects = []) {
 }
 
 export class AppChat {
-  constructor({ engine, improver, router, file, statusOf, docs, facts = async () => ({}), media = null, changes = null, coder = null }) {
+  constructor({ app, engine, improver, router, file, statusOf, docs, facts = async () => ({}), media = null, changes = null, coder = null }) {
+    this.app = app;
     this.changes = changes;
     this.coder = coder;
     this.engine = engine;
@@ -129,6 +130,24 @@ export class AppChat {
     const docs = this.docs?.search(`${text} ${read.map((f) => f.name).join(' ')}`) ?? [];
     const audit = this.auditor(facts);
     const context = { text: text || 'Read the attached files and tell me what they contain.', files: read, projects, thread, facts, docs };
+    const lower = text.toLowerCase();
+    if (lower.includes('principle') || lower.includes('lesson') || lower.includes('cross-research')) {
+      const typeMatch = text.match(/(?:for|of)\s+(listing-search|site-fit|strategy|decision-model|evidence|proposal|verification|improve|sweep|tree|chat|all)/i);
+      const type = typeMatch ? typeMatch[1].toLowerCase() : null;
+      const principles = await this.app.getPrinciples(type);
+      const lines = [];
+      for (const [t, ps] of Object.entries(principles)) {
+        if (!ps.length) continue;
+        lines.push(`**${t}**`);
+        for (const p of ps) {
+          lines.push(`  - ${p.statement}`);
+        }
+      }
+      const replyText = lines.length ? lines.join('\n') : 'No cross-research principles recorded yet.';
+      const assistant = { role: 'assistant', content: replyText, at: new Date().toISOString(), model: 'app', actions: [], proposals: [], audit: { passed: true, issues: [], revised: false } };
+      const saved = await this.update((t) => { t.push({ role: 'user', content: text, at: new Date().toISOString(), ...(from ? { from } : {}), ...(read.length ? { files: read.map((f) => ({ ...f, text: f.text.slice(0, FILE_TEXT_IN_THREAD) })) } : {}) }, assistant); });
+      return { thread: saved.thread, actions: [], proposals: [], audit: assistant.audit };
+    }
     let answer = await this.ask(context);
     let verdict = audit.audit(answer.text, { done: answer.actions.direct.map((a) => ({ ...a, ok: true })) });
     let revised = false;

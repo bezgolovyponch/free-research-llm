@@ -1,5 +1,5 @@
 import { currencyOf } from './acceptance.mjs';
-import { countryByCode, isNewsPage, itemCountry, mentionsCoast } from './brief.mjs';
+import { countryByCode, isNewsPage, itemCountry, mentionsCoast, foreignCountryFromText, decodedUrl } from './brief.mjs';
 import { screenItem } from './itemgate.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { explorePoints } from './site.mjs';
@@ -43,7 +43,13 @@ export function screenCandidate(row, brief, options = {}) {
   const reasons = [...verdict.reasons];
   if (isNewsPage(row.url)) reasons.push('news, blog or guide page');
   const country = itemCountry(row, row.source);
-  if (brief?.regions?.length && country.code && !brief.regions.includes(country.code)) reasons.push(`in ${countryByCode(country.code)?.name ?? country.code}, outside the asked regions`);
+  if (brief?.regions?.length && country.code && !brief.regions.includes(country.code)) {
+    const text = `${row.title ?? ''} ${row.place ?? ''} ${decodedUrl(row.url)}`;
+    const foreign = foreignCountryFromText(text);
+    if (!foreign || !brief.regions.includes(foreign)) {
+      reasons.push(`in ${countryByCode(country.code)?.name ?? country.code}, outside the asked regions`);
+    }
+  }
   const read = inUnit(row, brief?.unit ?? '', convert);
   const floor = brief?.valueRange ? brief.valueRange[1] * MIN_PLAUSIBLE_SHARE : 0;
   const value = read !== null && read < floor ? null : read;

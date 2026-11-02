@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { countryByCode, regionsIn } from './brief.mjs';
-import { areaFromText } from '../search/listings.mjs';
+import { areaFromText, detailPageCoords, DETAIL_COORDS_PORTALS } from '../search/listings.mjs';
 import path from 'node:path';
 import { climateOf } from './cci.mjs';
 import { ClimateCells } from './climatecells.mjs';
@@ -611,6 +611,35 @@ export class SiteAssessor {
     if (!candidates?.kept?.length && !candidates?.outside?.length) return candidates;
     await this.load();
     this.reads = 0;
+    if (readPage) {
+      const allRows = [...(candidates.kept ?? []), ...(candidates.outside ?? [])];
+      let detailFetches = 0;
+      const MAX_DETAIL_FETCHES = 20;
+      for (const row of allRows) {
+        if (detailFetches >= MAX_DETAIL_FETCHES) break;
+        const hasPlace = String(row.place ?? '').trim().length > 0;
+        const hasCoords = Number.isFinite(row.lat) && Number.isFinite(row.lon);
+        const cachedPoint = row.url ? this.store.points[row.url] : null;
+        const cachedFresh = cachedPoint && this.now() - cachedPoint.at < SITE_TTL_MS;
+        const cachedHasCoords = cachedPoint?.point?.lat && cachedPoint?.point?.lon;
+        const host = row.url ? new URL(row.url).hostname.toLowerCase() : '';
+        const isDetailPortal = DETAIL_COORDS_PORTALS.some((p) => host.includes(p));
+        if (!hasPlace && !hasCoords && !cachedHasCoords && isDetailPortal) {
+          try {
+            const page = await readPage(row.url);
+            if (page?.text) {
+              const coords = detailPageCoords(page.text, row.url);
+              if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon)) {
+                this.store.points[row.url] = { at: this.now(), point: { lat: coords.lat, lon: coords.lon, by: 'detail page' } };
+                detailFetches++;
+              }
+            }
+          } catch {
+          }
+        }
+      }
+      if (detailFetches) this.persist();
+    }
     const stats = { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 };
     const ctx = { readPage, onProgress, stats, started: this.now(), fresh: 0 };
     const inside = await this.measureRows(candidates.kept ?? [], brief, ctx);

@@ -173,6 +173,11 @@ export function createServer(app, gate = new AccessGate()) {
       }
     }],
     ['GET', /^\/api\/templates$/, async () => TEMPLATES],
+    ['GET', /^\/api\/principles$/, async (req) => {
+      const url = new URL(req.url, 'http://x');
+      const type = url.searchParams.get('type') || null;
+      return app.getPrinciples(type);
+    }],
     ['GET', /^\/api\/projects$/, async (req) => (await app.store.list()).filter((p) => !req.access.share || p.id === req.access.share)],
     ['POST', /^\/api\/projects$/, async (req) => {
       const body = await readJson(req);

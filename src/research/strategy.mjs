@@ -25,6 +25,9 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'cz-zpf', title: 'ESTAV.cz: převod zemědělské půdy na stavební pozemek (vynětí ze ZPF)', url: 'https://www.estav.cz/cz/5604.prevod-zemedelske-pudy-na-stavebni-pozemek-jak-zazadat-a-jake-jsou-poplatky', quotes: ['Tento orgán je dotčeným orgánem při veškerých stavebních záměrech, kterými jsou dotčeny pozemky náležející do ZPF'] },
     { id: 'cz-tax', title: 'Finanční správa: daň z nabytí nemovitých věcí (zrušena zákonem č. 386/2020 Sb.)', url: 'https://financnisprava.gov.cz/cs/dane/dane/dan-z-nabyti-nemovitych-veci', quotes: ['Daň z nabytí nemovitých věcí je zrušena ve všech případech'] },
     { id: 'cz-foreign', title: 'ARROWS: restrictions on purchases of agricultural land by foreigners (2024, updated 2026)', url: 'https://arws.cz/en/news-at-arrows/newsletter-not-only-for-brokers-restrictions-on-purchases-of-agricultural-land-by-foreigners-how-to-proceed-with-the-purchase-of-agricultural-land-by-foreigners-eviction-of-a-tenant-without-a-court-with-notarial-deed-it-is-possible-again', quotes: ['Find out whether the buyer is from a third country (outside the EU, Switzerland) which restricts the purchase of land by foreigners'] },
+    { id: 'cz-camping-law', title: 'Seznam Zprávy: Je karavan auto, nebo stavba? České kempy budou konečně vědět (2024)', url: 'https://www.seznamzpravy.cz/clanek/ekonomika-byznys-trendy-analyzy-je-karavan-auto-nebo-stavba-ceske-kempy-budou-konecne-vedet-233801', quotes: ['Od 1. 7. 2024 by se mělo mobilní ubytování do 55 metrů čtverečních přesunout do nové zelené kategorie drobných staveb, kde není potřeba povolení stavebního úřadu', 'Úřady mohou podle stávajícího znění stavebního zákona karavany a obytné vozy, které jsou na místě déle než 30 dnů, považovat za stavbu', 'Bude nicméně nutné, aby stály v místech, která mají v regulačním plánu a územním plánu obce využití k hromadné rekreaci'] },
+    { id: 'cz-akkcr', title: 'AKKCR: Stellplatzy v ČR - jaká jsou úskalí jejich výstavby?', url: 'https://akkcr.cz/nove-stellplatzy-v-cr-jaka-jsou-uskali-jejich-vystavby/', quotes: ['stavební úřad se ihned na stellplatz začne dívat jako na ubytovací zařízení – veřejné tábořiště či autokemp', 'hygiena zná jen staré osvědčené názvy, a tak nám nebyla schopna říci, co bude při kolaudaci chtít', 'zjištění informace, zda místo, kde jej chcete vybudovat, má ve svém územním plánu takovéto schválení'] },
+    { id: 'cz-justice', title: 'Česká Justice: Jaké právní požadavky musíte splnit pro otevření kempu? (2025)', url: 'https://www.ceska-justice.cz/2025/08/jake-pravni-pozadavky-musite-splnit-pro-otevreni-kempu/', quotes: ['Mnohé parcely jsou vedeny jako zemědělská půda nebo plochy bez možnosti zástavby a jejich využití pro kempování by vyžadovalo změnu v územním plánu', 'Hygienické standardy hrají klíčovou Rolle, zejména pokud má kemp oficiální kapacitu více než několik jednotek', 'Krajská hygienická stanice vyžaduje zajištění dostatečného počtu sprch, toalet, umyvadel a přístup k pitné vodě', 'Článek neuvádí konkrétní minimální velikosti parciel, přesné rozměry stanových míst, ani pravidla pro dočasné stavby bez základu'] },
     { id: 'vn-land', title: 'IFLR: Vietnam legal framework on foreign real estate ownership (2026)', url: 'https://www.iflr.com/article/2gi4ti8i1tgysiu7sddz4/sponsored/an-overview-of-vietnams-legal-framework-on-foreign-real-estate-ownership', quotes: ['direct private ownership of land is not permitted', 'may only buy directly from authorised developers'] },
     { id: 'tent', title: 'Boutique Camping: 5m Bell Tent Pro (shop data, GBP)', url: 'https://boutiquecamping.com/products/bell-tent-pro-5m.json', quotes: ['"price":"729.00"', '"price_currency":"GBP"'] },
     { id: 'units', title: 'TouchStay: glamping startup costs example (three units)', url: 'https://touchstay.com/blog/unlocking-glamping-profits', quotes: ['a glamping site with three luxury yurts'] },
@@ -82,12 +85,13 @@ export const GLAMPING_LOW_ENTRY = {
       agriculturalRisk: 'tarla: glamping needs a non-agricultural use permit, unpermitted use is fined and demolished',
     },
     CZ: {
-      path: 'Small camp of tents or yurts without foundations: usually no building permit, the building office decides whether a structure is temporary, and the plot must match the municipal land-use plan (územní plán)',
+      path: 'Small camp of tents/yurts without foundations: usually no building permit if ≤55 m² and ≤30 days; plot must be zoned for "hromadná rekreace" in municipal land-use plan (územní plán); hygiene requirements set case-by-case by regional hygiene station; >50% of existing 600+ campsites non-compliant with land-use plans',
       tax: { agricultural: 0, buildable: 0, 'not stated': 0 },
       taxLabel: 'no transfer tax (real estate acquisition tax abolished by Act 386/2020)',
-      sources: ['cz-glamping', 'cz-zpf', 'cz-tax', 'cz-foreign'],
-      risks: ['the municipal land-use plan (územní plán) must allow camping or recreation on this plot; ask the municipality before buying', 'a buyer from outside the EU: check reciprocal restrictions on agricultural land before buying'],
+      sources: ['cz-glamping', 'cz-zpf', 'cz-tax', 'cz-foreign', 'cz-camping-law', 'cz-akkcr', 'cz-justice'],
+      risks: ['the municipal land-use plan (územní plán) must allow "hromadná rekreace" (camping/recreation) on this plot; ask the municipality before buying', 'a buyer from outside the EU: check reciprocal restrictions on agricultural land before buying', 'no national pitch size, land share or max unit limits exist; rules are municipal'],
       agriculturalRisk: 'agricultural land (field, meadow, garden): a permanent structure needs the land taken out of the agricultural land fund (vynětí ze ZPF) and a fee',
+      rules: { pitchM2: null, campingShare: null, ruralMaxM2: null, ruralMaxUnits: null, tempStructureM2: { value: 55, source: 'cz-camping-law' }, caravanDays: { value: 30, source: 'cz-camping-law' } },
     },
     VN: {
       blocker: 'a foreign individual cannot hold land in Vietnam (land stays with the state; foreigners buy only from authorised developers); fits only a Vietnamese national',
@@ -173,9 +177,14 @@ export function areaM2(row) {
   return area;
 }
 
-export function unitsFor(m2, rules) {
+export function unitsFor(m2, rules, countryRules = null) {
   if (!m2) return null;
-  return Math.min(rules.ruralMaxUnits.value, Math.floor((Math.min(m2, rules.ruralMaxM2.value) * rules.campingShare.value) / rules.pitchM2.value));
+  const pitchM2 = countryRules?.pitchM2?.value ?? rules.pitchM2?.value;
+  const campingShare = countryRules?.campingShare?.value ?? rules.campingShare?.value;
+  const ruralMaxM2 = countryRules?.ruralMaxM2?.value ?? rules.ruralMaxM2?.value;
+  const ruralMaxUnits = countryRules?.ruralMaxUnits?.value ?? rules.ruralMaxUnits?.value;
+  if (!pitchM2 || !campingShare || !ruralMaxM2 || !ruralMaxUnits) return null;
+  return Math.min(ruralMaxUnits, Math.floor((Math.min(m2, ruralMaxM2) * campingShare) / pitchM2));
 }
 
 const eur = (n) => `€${Math.round(n).toLocaleString('en-US')}`;
@@ -215,19 +224,22 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const trend = trends?.[row.countryCode] ?? null;
   const hpi = trend?.real ?? row.fit?.hpi ?? null;
   const country = strategy.countries[row.countryCode] ?? null;
+  const countryRules = country?.rules ?? null;
   const site = row.site;
   const climate = site?.climate ?? null;
   const m2 = areaM2(row);
-  const units = unitsFor(m2, rules);
+  const units = unitsFor(m2, rules, countryRules);
   const cost = entryCost(row, country, units, rules, convert);
   const words = `${row.title ?? ''} ${row.place ?? ''}`;
   const zoning = zoningOf(row);
   const ebike = rules.ebikeKm.value;
+  const pitchM2 = countryRules?.pitchM2?.value ?? rules.pitchM2?.value;
+  const campingShare = countryRules?.campingShare?.value ?? rules.campingShare?.value;
   const allChecks = [
     seaCheck(site, ebike),
     check('season', `${rules.minWorkableMonths.value}+ camping months (Camping Climate Index above 3: acceptable or better, Ma 2021 Table 4)`, climate?.cci ? climate.workable >= rules.minWorkableMonths.value : null, climate?.cci ? `${climate.workable} camping months (index above 3), ${climate.good ?? '?'} good (≥ 5), ${climate.comfortable} optimal (≥ 7), ${climate.cci.optimalDays} optimal days a year` : 'climate not measured with the Camping Climate Index yet'),
     check('noAc', 'no air conditioning needed', climate?.cci ? climate.hottest <= rules.maxHottest.value : null, climate?.cci ? `hottest month average high ${climate.hottest} °C (limit ${rules.maxHottest.value} °C); ${climate.cci.hotDays} day(s) a year above 34 °C` : 'climate not measured with the Camping Climate Index yet'),
-    check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${rules.pitchM2.value} m² each on ${rules.campingShare.value * 100}% of the land` : 'area not shown'),
+    check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 && pitchM2 && campingShare ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${pitchM2} m² each on ${(campingShare * 100).toFixed(0)}% of the land` : m2 ? `${Math.round(m2).toLocaleString('en-US')} m² (no national pitch size/land share limits for ${row.countryCode})` : 'area not shown'),
     check('trend', 'real price trend above the EU average', hpi === null || euHpi === null ? null : hpi > euHpi, hpi === null ? `no official price series for ${row.country || 'this country'} in the model` : `${row.country} ${signed(hpi)}% a year after inflation vs EU ${euHpi === null ? '?' : `${signed(euHpi)}%`} (Eurostat, housing)`),
     check('location', 'the listing location is consistent', row.placeConflict ? null : true, row.placeConflict ?? 'map point and title agree'),
     check('legal', 'a legal path for a buyer', country ? !country.blocker && !INDUSTRIAL.test(words) : null, country?.blocker ?? (INDUSTRIAL.test(words) ? 'industrial site: camping parks must be 1,000 m from insalubrious industry (Portaria 1320/2008)' : country?.path ?? 'no path researched for this country')),

@@ -76,6 +76,49 @@ const ONE_COUNTRY_LANGUAGES = { pt: 'PT', el: 'GR', tr: 'TR', vi: 'VN', hr: 'HR'
 const GROUPS = { EU: /\b(?:eu|european union|e\.u\.)\b/ };
 const GENERIC_TLDS = new Set(['co', 'io', 'ai', 'me', 'tv', 'cc', 'fm', 'ly', 'to', 'gg', 'app']);
 const TLD_ALIASES = { uk: 'GB' };
+
+const MIRROR_TLDS = {
+  cz: 'DE',
+  at: 'DE',
+  sk: 'CZ',
+  hu: 'AT',
+  ro: 'HU',
+  bg: 'RO',
+  hr: 'SI',
+  si: 'HR',
+  rs: 'BA',
+  ba: 'RS',
+  me: 'RS',
+  mk: 'AL',
+  al: 'MK',
+  ua: 'RU',
+  by: 'RU',
+  md: 'RO',
+  ge: 'RU',
+  am: 'RU',
+  az: 'RU',
+  kz: 'RU',
+  kg: 'RU',
+  tj: 'RU',
+  tm: 'RU',
+  uz: 'RU',
+};
+
+const GERMAN_STATES_DE = [
+  'sachsen', 'bayern', 'baden-württemberg', 'baden-wuerttemberg', 'hessen', 'niedersachsen',
+  'rheinland-pfalz', 'rheinland-pfalz', 'schleswig-holstein', 'saarland',
+  'berlin', 'hamburg', 'bremen', 'brandenburg', 'mecklenburg-vorpommern',
+  'sachsen-anhalt', 'thüringen', 'thueringen',
+];
+
+const GERMAN_STATES_CZ = [
+  'sasko', 'sasku', 'bavorsko', 'bavorsku', 'badenovsko-hesensko', 'hesensko', 'hesensku', 'dolní sasko', 'dolni sasko', 'dolním sasku', 'dolnim sasku',
+  'renansko-pfalzsko', 'renansko-pfalzsku', 'šlesvik-holštýnsko', 'slesvik-holstynsko', 'šlesvik-holštýnskú', 'slesvik-holstynsku', 'saarland', 'saarlandu',
+  'berlín', 'berlíně', 'berline', 'hamburk', 'hamburku', 'brémy', 'brémě', 'breme', 'brandrova', 'brandrove', 'mecklenburgo-pomorsko', 'mecklenburgo-pomorsku',
+  'sasko-anhalt', 'sasko-anhaltu', 'thuringie', 'thuringii',
+];
+
+const GERMAN_STATES = [...GERMAN_STATES_DE, ...GERMAN_STATES_CZ];
 const COAST = /\b(?:sea|ocean|coast(?:al)?|beach|seaside|shore|seafront)\b/;
 const COAST_ON_PAGE = /\b(?:sea|ocean|coast|coastal|beach|seaside|seafront|sea view|praia|playa|plage|spiaggia|mar|deniz|denize|sahil|plaj|bai bien|gan bien|thalassa|paralia|strand|kust|mora|uvala|uvale|pogled na more|plaza|plazi|bord de mer|vista mare|frente mar|denize sifir)\b/;
 const NEWS_PATH = /\/(?:news|noticias|noticia|blog|tin-tuc|tin-thi-truong|haber|actualite|articles?|magazine|guide|guides|deco)(?:\/|$|-)/i;
@@ -193,12 +236,20 @@ function textCountries(text) {
   return COUNTRIES.filter(([code]) => namesOf(code).some((w) => mentions(t, w))).map(([code]) => code);
 }
 
-function decodedUrl(url) {
+export function decodedUrl(url) {
   try {
     return decodeURIComponent(String(url ?? '')).replace(/[-_+/]/g, ' ');
   } catch {
     return String(url ?? '').replace(/[-_+/]/g, ' ');
   }
+}
+
+export function foreignCountryFromText(text) {
+  const t = plain(text);
+  for (const state of GERMAN_STATES) {
+    if (mentions(t, state)) return 'DE';
+  }
+  return '';
 }
 
 export function localeCountry(locale) {
@@ -223,7 +274,14 @@ export function sourceCountry(source) {
 
 export function itemCountry(item, source = null) {
   const byTld = tldCountry(item.url);
-  if (byTld) return { code: byTld, by: 'site address' };
+  if (byTld) {
+    const text = `${item.title ?? ''} ${item.place ?? ''} ${decodedUrl(item.url)}`;
+    const foreign = foreignCountryFromText(text);
+    if (foreign && MIRROR_TLDS[byTld.toLowerCase()] === foreign) {
+      return { code: foreign, by: 'listing text (foreign state)' };
+    }
+    return { code: byTld, by: 'site address' };
+  }
   const named = textCountries(`${item.title ?? ''} ${item.place ?? ''} ${decodedUrl(item.url)}`);
   if (named.length === 1) return { code: named[0], by: 'listing text' };
   const fromSource = sourceCountry(source);

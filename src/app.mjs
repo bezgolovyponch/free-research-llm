@@ -223,6 +223,7 @@ export class App {
     this.claudeCoder = new ClaudeCodeCoder({ root: ROOT_DIR, workDir, changes: this.changes, note: (m) => this.noteApp(m), restart });
     this.coder = new ChangeRunner({ coders: { free: this.freeCoder, claude: this.claudeCoder }, changes: this.changes });
     this.appChat = new AppChat({
+      app: this,
       changes: this.changes,
       coder: this.coder,
       engine: this.engine,
@@ -471,6 +472,17 @@ export class App {
       claude: claude.installed ? `installed (${claude.version})` : 'not installed',
       coders: this.coder?.engines?.() ?? [],
     };
+  }
+
+  async getPrinciples(type = null) {
+    await this.lessons.load();
+    const { principlesFrom } = await import('./research/lessons.mjs');
+    const allTypes = [...new Set(this.lessons.lessons.map((l) => l.type).filter(Boolean))];
+    const result = {};
+    for (const t of type ? [type] : allTypes) {
+      result[t] = principlesFrom(this.lessons.lessons, t);
+    }
+    return result;
   }
 
   restartForCode(env) {
