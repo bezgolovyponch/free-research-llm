@@ -1,3 +1,5 @@
+import { supportAudit } from './support.mjs';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DETAIL = 200;
 const WEEK_MS = 7 * DAY_MS;
@@ -81,13 +83,10 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
     add('C8', 'The loop is not starved by provider outages', 'warn', ok, p.improve.active ? `${outages} of ${trials.length} recent trial(s) were provider outages.` : 'The improvement loop is not active.');
   }
 
-  const claims = Array.isArray(p.nodes) ? p.nodes.flatMap((n) => n?.finding?.claims ?? []) : null;
-  if (p.supportAudit && typeof p.supportAudit === 'object') {
-    const stale = Number(p.supportAudit.stale ?? 0);
+  const claimAudit = p.supportAudit && typeof p.supportAudit === 'object' ? p.supportAudit : Array.isArray(p.nodes) ? supportAudit(p.nodes) : null;
+  if (claimAudit) {
+    const stale = Number(claimAudit.stale ?? 0);
     add('C9', 'Claims are checked under the current logic', 'warn', !(stale > 0), stale > 0 ? `${stale} claim(s) were checked under older logic.` : 'Every claim is checked under the current logic.');
-  } else if (claims && claims.length) {
-    const missing = claims.filter((claim) => claim?.attributed === true && !claim?.support).length;
-    add('C9', 'Claims are checked under the current logic', 'warn', !missing, missing > 0 ? `${missing} attributed claim(s) have no support check.` : 'Every attributed claim has a support check.');
   }
 
   if (Array.isArray(p.nodes)) {
