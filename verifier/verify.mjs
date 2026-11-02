@@ -9,8 +9,15 @@ export const AREA_TOLERANCE = 0.05;
 export const DEFAULT_SEA_KM = 25;
 export const FETCH_ATTEMPTS = 3;
 export const RETRY_WAIT_MS = 3000;
+export const RATE_LIMIT_WAIT_MS = 30000;
 const CHECK_ORDER = { fits: 0, 'trade-off': 1, unverified: 2 };
 const retryable = (status) => status === 429 || status >= 500;
+const retryAfterMs = (res) => {
+  const seconds = Number(res.headers.get('retry-after'));
+  if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  return res.status === 429 ? RATE_LIMIT_WAIT_MS : 0;
+};
+const countryKey = (point) => `${point.lat.toFixed(3)},${point.lon.toFixed(3)}`;
 const UA = 'free-research-llm-verifier (independent check; https://github.com/bezgolovyponch/free-research-llm)';
 const NOMINATIM_REVERSE = 'https://nominatim.openstreetmap.org/reverse';
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
@@ -188,6 +195,8 @@ export class Verifier {
     this.fetch = fetchImpl;
     this.climateFile = cacheDir ? path.join(cacheDir, `climate-${CLIMATE_YEAR}.json`) : '';
     this.climateCells = null;
+    this.countryFile = cacheDir ? path.join(cacheDir, 'countries.json') : '';
+    this.countries = null;
     this.coastline = coastline;
     this.loadCoast = () => Coastline.load({ cacheDir, fetchImpl });
     this.now = now;
@@ -204,8 +213,10 @@ export class Verifier {
 
   async json(url, init) {
     let failure = null;
+    let wait = 0;
     for (let attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++) {
-      if (attempt > 1) await this.sleep(RETRY_WAIT_MS * (attempt - 1));
+      if (attempt > 1) await this.sleep(Math.max(wait, RETRY_WAIT_MS * (attempt - 1)));
+      wait = 0;
       let res;
       try {
         res = await this.get(url, init);
@@ -216,6 +227,7 @@ export class Verifier {
       if (res.ok) return res.json();
       failure = new Error(`HTTP ${res.status} from ${new URL(url).hostname}`);
       if (!retryable(res.status)) break;
+      wait = retryAfterMs(res);
     }
     throw failure;
   }
@@ -235,12 +247,29 @@ export class Verifier {
     return rates[currency] ? price / rates[currency] : null;
   }
 
+  async storedCountries() {
+    if (this.countries) return this.countries;
+    try {
+      this.countries = this.countryFile ? JSON.parse(await fs.readFile(this.countryFile, 'utf8')) : {};
+    } catch {
+      this.countries = {};
+    }
+    return this.countries;
+  }
+
   async country(point) {
+    const stored = await this.storedCountries();
+    const key = countryKey(point);
+    if (stored[key]) return stored[key];
     const wait = this.lastNominatim + 1100 - this.now();
     if (wait > 0) await this.sleep(wait);
     this.lastNominatim = this.now();
     const d = await this.json(`${NOMINATIM_REVERSE}?format=json&zoom=10&lat=${point.lat}&lon=${point.lon}`);
-    return String(d?.address?.country_code ?? '').toUpperCase();
+    const code = String(d?.address?.country_code ?? '').toUpperCase();
+    if (!code) return code;
+    stored[key] = code;
+    if (this.countryFile) await fs.writeFile(this.countryFile, JSON.stringify(stored));
+    return code;
   }
 
   async seaKm(point, radiusKm) {

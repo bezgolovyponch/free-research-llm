@@ -141,6 +141,19 @@ describe('external verifier: fail-closed verdicts', () => {
     expect(down).toBe(3);
   });
 
+  it('waits as long as a rate-limited source asks, or 30 s when it does not say', async () => {
+    const waits: number[] = [];
+    let calls = 0;
+    const limited = new Verifier({ fetchImpl: (async () => {
+      calls++;
+      if (calls === 1) return new Response('slow down', { status: 429, headers: { 'retry-after': '12' } });
+      if (calls === 2) return new Response('slow down', { status: 429 });
+      return Response.json({ ok: 1 });
+    }) as never, sleep: async (ms: number) => { waits.push(ms); } });
+    expect(await limited.json('https://nominatim.openstreetmap.org/reverse')).toEqual({ ok: 1 });
+    expect(waits).toEqual([12000, 30000]);
+  });
+
   it('does not ask again when the source refuses the request', async () => {
     let calls = 0;
     const v = new Verifier({ fetchImpl: (async () => {
@@ -176,6 +189,30 @@ describe('external verifier: fail-closed verdicts', () => {
     expect(record.complete).toBe(true);
   });
 
+});
+
+describe('external verifier: each map point is looked up in OpenStreetMap once and stored for later runs', () => {
+  it('reuses a stored country for points within about 100 m and never stores an empty answer', async () => {
+    const fsp = await import('node:fs/promises');
+    const os = await import('node:os');
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'frl-verifier-'));
+    const urls: string[] = [];
+    let answer = 'cz';
+    const fetchImpl = async (url: string) => { urls.push(url); return Response.json({ address: answer ? { country_code: answer } : {} }); };
+    const first = new Verifier({ fetchImpl: fetchImpl as never, sleep: async () => {}, now: () => 0, cacheDir: dir });
+    expect(await first.country({ lat: 49.19501, lon: 16.60801 })).toBe('CZ');
+    expect(await first.country({ lat: 49.19504, lon: 16.60799 })).toBe('CZ');
+    expect(urls).toHaveLength(1);
+    const second = new Verifier({ fetchImpl: fetchImpl as never, sleep: async () => {}, now: () => 0, cacheDir: dir });
+    expect(await second.country({ lat: 49.195, lon: 16.608 })).toBe('CZ');
+    expect(urls).toHaveLength(1);
+    answer = '';
+    expect(await second.country({ lat: 50.1, lon: 14.4 })).toBe('');
+    answer = 'cz';
+    expect(await second.country({ lat: 50.1, lon: 14.4 })).toBe('CZ');
+    expect(urls).toHaveLength(3);
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
 });
 
 describe('external verifier: one recent year of daily weather per 0.25 degree cell, fetched once by the verifier itself', () => {
