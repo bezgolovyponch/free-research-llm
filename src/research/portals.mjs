@@ -13,6 +13,8 @@ export const SEED_PORTALS = [
   ...['mugla', 'aydin', 'izmir', 'antalya', 'mersin', 'canakkale', 'balikesir', 'tekirdag', 'sinop', 'samsun', 'trabzon'].map((p) => ({ country: 'TR', kind: 'plot of land', coastal: true, maxPrice: null, url: emlakjet(p), sample: ['tarla'] })),
   ...['viana-do-castelo', 'braga', 'porto', 'aveiro', 'coimbra', 'leiria', 'lisboa', 'setubal', 'beja', 'faro'].map((d) => ({ country: 'PT', kind: 'plot of land', coastal: true, maxPrice: 20000, url: imovirtual(d), sample: ['terreno'] })),
   ...[sreality, bezrealitky].map((url) => ({ country: 'CZ', kind: 'plot of land', coastal: false, maxPrice: null, url, sample: ['pozemek', 'pozemky'] })),
+  ...['binh-thuan', 'ba-ria-vung-tau', 'khanh-hoa', 'da-nang', 'quang-nam', 'quang-ngai', 'binh-dinh', 'phu-yen', 'ninh-thuan', 'kien-giang', 'ca-mau', 'ben-tre', 'tra-vinh', 'soc-trang', 'bac-lieu', 'long-an', 'tien-giang', 'vinh-long', 'hau-giang', 'can-tho', 'an-giang', 'dong-thap', 'tay-ninh', 'binh-duong', 'binh-phuoc', 'long-an'].map((p) => ({ country: 'VN', kind: 'plot of land', coastal: true, maxPrice: null, url: `https://batdongsan.com.vn/ban-dat-dat-nen-${p}`, sample: ['đất', 'đất nền', 'bán đất'] })),
+  ...['binh-thuan', 'ba-ria-vung-tau', 'khanh-hoa', 'da-nang', 'quang-nam', 'quang-ngai', 'binh-dinh', 'phu-yen', 'ninh-thuan', 'kien-giang', 'ca-mau', 'ben-tre', 'tra-vinh', 'soc-trang', 'bac-lieu', 'long-an', 'tien-giang', 'vinh-long', 'hau-giang', 'can-tho', 'an-giang', 'dong-thap', 'tay-ninh', 'binh-duong', 'binh-phuoc', 'long-an'].map((p) => ({ country: 'VN', kind: 'plot of land', coastal: true, maxPrice: null, url: `https://alonhadat.com.vn/ban-dat-${p}`, sample: ['đất', 'đất nền', 'bán đất'] })),
 ];
 
 export function seedPortals(brief) {

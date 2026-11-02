@@ -82,6 +82,9 @@ describe('reference case: low-entry glamping plots (every note the user gave on 
   });
 
   it(`N14 ${note('N14')}`, () => {
-    expect(plan({ ...plot, countryCode: 'VN', country: 'Vietnam' }).verdict).toMatch(/^blocked: a foreign individual cannot hold land in Vietnam/);
+    const vn = plan({ ...plot, countryCode: 'VN', country: 'Vietnam' });
+    expect(vn.tier).not.toBe('blocked');
+    expect(vn.path).toContain('lease of land-use rights');
+    expect(vn.path).toContain('Business Cooperation Contract');
   });
 });

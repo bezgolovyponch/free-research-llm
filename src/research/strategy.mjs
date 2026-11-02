@@ -26,6 +26,8 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'cz-tax', title: 'Finanční správa: daň z nabytí nemovitých věcí (zrušena zákonem č. 386/2020 Sb.)', url: 'https://financnisprava.gov.cz/cs/dane/dane/dan-z-nabyti-nemovitych-veci', quotes: ['Daň z nabytí nemovitých věcí je zrušena ve všech případech'] },
     { id: 'cz-foreign', title: 'ARROWS: restrictions on purchases of agricultural land by foreigners (2024, updated 2026)', url: 'https://arws.cz/en/news-at-arrows/newsletter-not-only-for-brokers-restrictions-on-purchases-of-agricultural-land-by-foreigners-how-to-proceed-with-the-purchase-of-agricultural-land-by-foreigners-eviction-of-a-tenant-without-a-court-with-notarial-deed-it-is-possible-again', quotes: ['Find out whether the buyer is from a third country (outside the EU, Switzerland) which restricts the purchase of land by foreigners'] },
     { id: 'vn-land', title: 'IFLR: Vietnam legal framework on foreign real estate ownership (2026)', url: 'https://www.iflr.com/article/2gi4ti8i1tgysiu7sddz4/sponsored/an-overview-of-vietnams-legal-framework-on-foreign-real-estate-ownership', quotes: ['direct private ownership of land is not permitted', 'may only buy directly from authorised developers'] },
+    { id: 'vn-land-law', title: 'Luật Đất đai 2024 số 31/2024/QH15 (Land Law 2024)', url: 'https://luatvietnam.vn/dat-dai/luat-dat-dai-2024-so-31-2024-qh15-296638-d1.html', quotes: ['Tổ chức kinh tế có vốn đầu tư nước ngoài được Nhà nước cho thuê đất', 'Người sử dụng đất được thực hiện các quyền chuyển đổi, chuyển nhượng, cho thuê, cho thuê lại', 'Cho tổ chức, cá nhân khác, người gốc Việt Nam định cư ở nước ngoài đầu tư tại Việt Nam thuê quyền sử dụng đất'] },
+    { id: 'vn-investment', title: 'Luật Đầu tư 2020 số 61/2020/QH14 (Investment Law 2020)', url: 'https://luatvietnam.vn/dau-tu/luat-dau-tu-2020-so-61-2020-qh14-186270-d1.html', quotes: ['Hợp đồng BCC được ký kết giữa nhà đầu tư trong nước với nhà đầu tư nước ngoài hoặc giữa các nhà đầu tư nước ngoài thực hiện thủ tục cấp Giấy chứng nhận đăng ký đầu tư', 'Hợp đồng BCC bao gồm các nội dung chủ yếu: Tên, địa chỉ, người đại diện có thẩm quyền của các bên; Mục tiêu và phạm vi hoạt động đầu tư kinh doanh; Đóng góp của các bên và phân chia kết quả đầu tư kinh doanh; Tiến độ và thời hạn thực hiện hợp đồng; Quyền, nghĩa vụ của các bên'] },
     { id: 'tent', title: 'Boutique Camping: 5m Bell Tent Pro (shop data, GBP)', url: 'https://boutiquecamping.com/products/bell-tent-pro-5m.json', quotes: ['"price":"729.00"', '"price_currency":"GBP"'] },
     { id: 'units', title: 'TouchStay: glamping startup costs example (three units)', url: 'https://touchstay.com/blog/unlocking-glamping-profits', quotes: ['a glamping site with three luxury yurts'] },
     { id: 'eurostat', title: 'Eurostat house price index, annual rate of change (prc_hpi_a)', url: 'https://ec.europa.eu/eurostat/databrowser/view/prc_hpi_a/default/table', quotes: [] },
@@ -90,8 +92,12 @@ export const GLAMPING_LOW_ENTRY = {
       agriculturalRisk: 'agricultural land (field, meadow, garden): a permanent structure needs the land taken out of the agricultural land fund (vynětí ze ZPF) and a fee',
     },
     VN: {
-      blocker: 'a foreign individual cannot hold land in Vietnam (land stays with the state; foreigners buy only from authorised developers); fits only a Vietnamese national',
-      sources: ['vn-land'],
+      path: 'Foreign individuals cannot own land; operate without owning via: (1) lease of land-use rights from a Vietnamese land user (Land Law 2024 Art. 27, 33, 37: "Người sử dụng đất được thực hiện các quyền... cho thuê... Cho tổ chức, cá nhân khác... thuê quyền sử dụng đất"); (2) Business Cooperation Contract (BCC) with a Vietnamese partner (Investment Law 2020 Art. 27, 28: "Hợp đồng BCC được ký kết giữa nhà đầu tư trong nước với nhà đầu tư nước ngoài... bao gồm các nội dung: Đóng góp của các bên và phân chia kết quả đầu tư kinh doanh")',
+      tax: { agricultural: 0.02, buildable: 0.02, 'not stated': 0.02 },
+      taxLabel: 'registration fee for BCC/investment certificate; lease terms negotiated',
+      sources: ['vn-land', 'vn-land-law', 'vn-investment'],
+      risks: ['land is state-owned; foreign buyers cannot hold title', 'lease price and terms depend on negotiation with Vietnamese land user', 'BCC requires investment registration certificate (Giấy chứng nhận đăng ký đầu tư) per Investment Law 2020 Art. 38', 'no national pitch size or max unit limits for camping; local regulations apply'],
+      agriculturalRisk: 'agricultural land: conversion to non-agricultural use requires approval; lease must comply with land use purpose',
     },
   },
 };
@@ -284,6 +290,12 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
 export const PROJECTION_YEARS = 5;
 export const FEW_COMPETITORS = 2;
 
+export const LEASE_PATH_GROUP = 'Value without ownership (lease / partnership)';
+export const SETUP_COST_EUR = 2500;
+export const NIGHTLY_RATE_EUR = 80;
+export const OCCUPANCY = 0.6;
+export const CAMPING_MONTHS_VN = 8;
+
 export function opportunityOf(row, plan, { trends = null, euTrend = null } = {}) {
   const trend = trends?.[row.countryCode] ?? null;
   const site = row.site;
@@ -309,6 +321,22 @@ export function opportunityOf(row, plan, { trends = null, euTrend = null } = {})
   }
   if (plan.entry) reasons.push(`entry ≈ €${Math.round(plan.entry.total).toLocaleString('en-US')}`);
   return { score, reasons };
+}
+
+export function cashFlow1Year(row, plan, { nightlyRate = NIGHTLY_RATE_EUR, occupancy = OCCUPANCY, months = CAMPING_MONTHS_VN, setupCost = SETUP_COST_EUR } = {}) {
+  if (!plan?.entry || !plan.units) return null;
+  const firstYearCost = plan.entry.total + setupCost;
+  const revenuePerMonth = plan.units * nightlyRate * occupancy * 30;
+  const annualRevenue = revenuePerMonth * months;
+  const netYear1 = annualRevenue - firstYearCost;
+  const paybackMonths = netYear1 > 0 ? Math.ceil(firstYearCost / revenuePerMonth) : null;
+  return {
+    firstYearCost: Math.round(firstYearCost),
+    annualRevenue: Math.round(annualRevenue),
+    netYear1: Math.round(netYear1),
+    paybackMonths,
+    assumptions: { nightlyRate, occupancy, months, setupCost, units: plan.units },
+  };
 }
 
 export const TIER_ORDER = { fits: 0, 'trade-off': 1, unverified: 2, weak: 3, blocked: 4 };
@@ -398,17 +426,19 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
   const asked = askedCriteria(foundation);
   const rows = all.map((row) => {
     const plan = planFor(row, model, { convert, euHpi, trends, asked });
+    const cashFlow = row.countryCode === 'VN' && plan.entry ? cashFlow1Year(row, plan) : null;
     const cheap = implausiblyCheap(row, medians, all);
-    if (!cheap) return { ...row, plan };
+    if (!cheap) return { ...row, plan: { ...plan, cashFlow, group: row.countryCode === 'VN' ? LEASE_PATH_GROUP : undefined } };
     const doubtful = ['fits', 'trade-off'].includes(plan.tier);
-    return { ...row, plan: { ...plan, risks: [...plan.risks, cheap], ...(doubtful ? { tier: 'unverified', verdict: `to confirm: ${cheap}` } : {}) } };
+    return { ...row, plan: { ...plan, cashFlow, group: row.countryCode === 'VN' ? LEASE_PATH_GROUP : undefined, risks: [...plan.risks, cheap], ...(doubtful ? { tier: 'unverified', verdict: `to confirm: ${cheap}` } : {}) } };
   });
   rows.sort((a, b) => TIER_ORDER[a.plan.tier] - TIER_ORDER[b.plan.tier] || b.plan.share - a.plan.share || (a.plan.entry?.total ?? Infinity) - (b.plan.entry?.total ?? Infinity));
   const tiers = Object.fromEntries(Object.keys(TIER_ORDER).map((t) => [t, rows.filter((r) => r.plan.tier === t).length]));
   const euTrend = trends?.EU27_2020 ?? null;
   const outside = (candidates.outside ?? []).map((row) => {
     const plan = planFor(row, model, { convert, euHpi, trends, asked });
-    return { ...row, plan: { ...plan, opportunity: opportunityOf(row, plan, { trends, euTrend }) } };
+    const cashFlow = row.countryCode === 'VN' && plan.entry ? cashFlow1Year(row, plan) : null;
+    return { ...row, plan: { ...plan, cashFlow, group: row.countryCode === 'VN' ? LEASE_PATH_GROUP : undefined, opportunity: opportunityOf(row, plan, { trends, euTrend }) } };
   }).sort((a, b) => b.plan.opportunity.score - a.plan.opportunity.score || (a.plan.entry?.total ?? Infinity) - (b.plan.entry?.total ?? Infinity));
   const { far, ...rest } = candidates;
   const moved = far?.length ?? 0;
