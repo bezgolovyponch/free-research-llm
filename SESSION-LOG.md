@@ -3,6 +3,18 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-11-02 · free routing, honest loop measurement, Vietnam without ownership
+
+Asked: a routing setup so the app keeps working on free models on any computer with the user's keys, an audit of the research logic against recent methods, a Vietnam business model for plots that cannot be owned, everything merged, and further improvements with clarification questions.
+
+- **Routing (#71, #73):** several keys per provider (comma-separated, each checked by `keys check`, a resting key is skipped); a per-model daily limit retires that model, a busy model rests 10 min, at most 3 switches per call; Gemini daily quotas reset at midnight Pacific; OpenRouter prefers the free Gemma 4, Llama 3.3 70B and Nemotron models. `FREE-ROUTING.md` covers moving keys with `keys export` / `keys import`; FreeLLMAPI is optional.
+- **External verifier (#70, #75):** country answers are cached and Retry-After is honoured; prices embedded in listing JSON and CZK/PLN prices are read. Live result on the Czech research: 42 of 50 unconfirmed prices became confirmed, none refuted.
+- **Improve loop (#74):** an accepted trial is researched again before it is kept (winner's curse in noisy hill-climbing); the re-measure drift is recorded and sets the noise floor. Live drift is ±0.002–0.006.
+- **Loop start (#76):** loop trials use cached site data while the background worker measures; the first model call now comes 13 s after a restart (it was 15–30 min).
+- **Vietnam (#78):** a foreigner still cannot hold land (blocker kept). A separate group, "Value without ownership (lease or partnership)", models operating on a landholder's plot: AirROI Phú Quốc ADR ₫2,642,821 and occupancy 36.8%, a setup of $1,950 per tent, and camping months from the Camping Climate Index. It never counts toward the result.
+- **Czech law (#79, salvaged from #72):** three camping-law sources with verbatim quotes, a sourced CZ path, units outside Portugal labelled as the Portuguese density assumption, and a read-only `/api/principles` view. Dropped from #72: the unsourced Vietnam lease path, the chat interception, the invented mirror-country table and the detail-page pre-pass.
+- **Open:** sreality detail pages sit behind a Seznam bot and consent redirect, so the app cannot read their coordinates (279 cached misses); geocoding the place in the URL slug is the legitimate alternative. Mobile e2e run-click race (one flake). Cerebras returns HTTP 402. Tavily and Firecrawl are out of credit. #72 and #77 are superseded and wait to be closed. fcc listens on 0.0.0.0 with proxy auth off; switching to 127.0.0.1 awaits the user's approval.
+
 ## Session 2026-11-01 (2) · the price trend is retried until the source answers
 
 Asked: why the Eurostat price trend is part of "fits", why it failed, and that the app must keep retrieving until it gets the data, using the mechanics real products use.
