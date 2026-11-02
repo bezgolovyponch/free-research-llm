@@ -201,6 +201,8 @@
   .tabs::-webkit-scrollbar{display:none}
   .tab{background:none; border:0; border-bottom:2px solid transparent; padding:8px 12px; font-weight:650; color:var(--dim); cursor:pointer; white-space:nowrap}
   .tab.on{color:var(--txt); border-bottom-color:var(--acc)}
+  .nbadge{display:inline-flex; align-items:center; gap:3px; margin-left:4px; padding:0 6px; border-radius:999px; font-size:11px; font-weight:700; background:color-mix(in srgb, var(--am) 18%, var(--panel)); color:var(--am)}
+  .nbadge[hidden]{display:none}
   .pane{display:none; flex:1 1 auto; min-height:0; overflow:auto}
   .pane.on{display:block}
   .pane-inner{padding:16px 20px 40px}
@@ -468,6 +470,7 @@
         <button class="tab on" data-pane="tree">Tree &amp; pieces</button>
         <button class="tab" data-pane="sources">Sources</button>
         <button class="tab" data-pane="results">Results</button>
+        <button class="tab" data-pane="notes" id="notesTab">Notifications <span class="nbadge" id="notesBadge" hidden></span></button>
         <button class="tab" data-pane="report">Report</button>
         <button class="tab" data-pane="gates">Gates &amp; logs</button>
         <button class="tab" data-pane="loop" id="loopTab">Loop</button>
@@ -478,6 +481,7 @@
           <div class="pane on split" id="pane-tree"><div class="treegrid"><div class="treecol"><div class="treebar" id="treeBar"></div><div id="outline"></div></div><div class="piececol"><div class="tablewrap"><table id="pieceTable" class="rtable"></table></div><div id="pieceReport"></div></div></div></div>
           <div class="pane" id="pane-map"><div id="mapWrap"><svg id="cloud" xmlns="http://www.w3.org/2000/svg"></svg><div id="mapTools"><span class="small" id="mapSelInfo"></span><button class="btn secondary sm" id="btnMapSel" aria-pressed="false">Select pieces</button><button class="btn secondary sm" id="btnFit">Fit</button></div></div></div>
           <div class="pane" id="pane-results"><div class="pane-inner" id="resultsBody"></div></div>
+          <div class="pane" id="pane-notes"><div class="pane-inner" id="notesBody"></div></div>
           <div class="pane" id="pane-report"><div class="pane-inner" id="reportBody"></div></div>
           <div class="pane split" id="pane-sources"><div class="treegrid"><div class="treecol" id="srcTree"></div><div class="piececol" id="sourceList"></div></div></div>
           <div class="pane" id="pane-gates"><div class="pane-inner" id="gatesBody"></div></div>
@@ -836,7 +840,7 @@ async function openProject(id){
   STATE.es.onmessage=(m)=>{const d=JSON.parse(m.data);if(d.event&&d.event.type==="hello"&&newBuild(d.event.build))return;if(!STATE.project||STATE.project.id!==d.project.id)return;STATE.project=d.project;queueRender();if(d.event&&d.event.type==="phase")loadProjects();};
 }
 function queueRender(){if(STATE.drawQueued)return;STATE.drawQueued=true;requestAnimationFrame(()=>{STATE.drawQueued=false;renderAll();});}
-function renderAll(){if(!STATE.project)return;renderHead();renderOutline();renderPieces();drawTree(false);renderInspector();renderChat();renderResults();renderReport();renderSources();renderGates();}
+function renderAll(){if(!STATE.project)return;renderHead();renderOutline();renderPieces();drawTree(false);renderInspector();renderChat();renderResults();renderNotes();renderReport();renderSources();renderGates();}
 function nodesOf(){return STATE.project?STATE.project.nodes:[];}
 function byId(id){return nodesOf().find(n=>n.id===id);}
 function kids(id){return nodesOf().filter(n=>n.parentId===id).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));}
@@ -985,6 +989,7 @@ function setPane(name){
   document.querySelectorAll(".pane").forEach(p=>p.classList.toggle("on",p.id==="pane-"+name));
   if(name==="map")drawTree(true);
   if(name==="loop")renderLoopBox();
+  if(name==="notes")renderNotes();
   syncHash();
 }
 function syncChatTab(){$("chatTab").style.display="";$("chatIn").placeholder=mq.phone.matches?"Message…":"Message… Enter sends · Shift+Enter new line";}
@@ -1554,11 +1559,33 @@ function supportAlertHtml(p){
   if(s.disagree>0)h+='<div class="small" style="margin-top:8px">'+esc(s.disagree)+" claim(s) where the two checking models disagree: first in the audit queue.</div>"+(s.queue||[]).slice(0,5).map(q=>'<div class="small"><span class="mono">'+esc(q.nodeId)+"</span> "+esc(q.claim)+' <span class="faint" title="'+esc(q.cause)+'">why?</span></div>').join("");
   return h+"</div>";
 }
+function notificationsOf(p){
+  const out=[];if(!p)return out;
+  const l=p.results&&p.results.lease;const lease=leaseAlertHtml(p);
+  if(lease)out.push({key:"lease:"+((l&&l.headline)||""),html:lease});
+  const s=p.results&&p.results.support;const support=supportAlertHtml(p);
+  if(support)out.push({key:"support:"+(s.stale||0)+":"+(s.disagree||0),html:support});
+  return out;
+}
+function notesStoreKey(p){return "frl-notes-checked:"+p.id;}
+function notesChecked(p){try{const v=JSON.parse(localStorage.getItem(notesStoreKey(p))||"[]");return Array.isArray(v)?v:[];}catch(e){return[];}}
+function saveNotesChecked(p,keys){try{localStorage.setItem(notesStoreKey(p),JSON.stringify(keys));}catch(e){}}
+function renderNotes(){
+  const p=STATE.project;const box=$("notesBody");if(!box||!p)return;
+  const badge=$("notesBadge");
+  const list=notificationsOf(p);const checked=new Set(notesChecked(p));
+  const todo=list.filter(n=>!checked.has(n.key));const ordered=todo.concat(list.filter(n=>checked.has(n.key)));
+  box.innerHTML=ordered.length?ordered.map(n=>{const c=checked.has(n.key);return '<div style="margin-bottom:14px">'+n.html+'<label class="small"><input type="checkbox" data-note="'+esc(n.key)+'"'+(c?" checked":"")+"> "+(c?"Checked":"☐ Not checked yet — tick when you have read it")+"</label></div>";}).join(""):'<div class="card small muted">No notifications for this research.</div>';
+  if(badge){badge.hidden=!todo.length;badge.textContent=todo.length?"☐ "+todo.length:"";}
+  box.querySelectorAll("[data-note]").forEach(cb=>cb.addEventListener("change",()=>{const keys=new Set(notesChecked(p));if(cb.checked)keys.add(cb.dataset.note);else keys.delete(cb.dataset.note);saveNotesChecked(p,[...keys]);renderNotes();}));
+  const rc=$("btnRecheckSupport");if(rc)rc.addEventListener("click",async()=>{rc.disabled=true;try{const res=await api("/api/projects/"+p.id+"/recheck-support",{method:"POST",body:{}});toast(res.message||"Recheck started");}catch(e){toast(e.message);rc.disabled=false;}});
+  box.querySelectorAll("tr[data-lease-url]").forEach(tr=>tr.addEventListener("click",e=>{if(e.target.closest("a"))return;e.stopPropagation();openPip(tr.dataset.leaseUrl);}));
+}
 function renderResults(){
   const p=STATE.project;const box=$("resultsBody");if(!box)return;
   const ar=p.acceptanceResult;const r=p.report;const good=p.nodes.filter(n=>["verified","supported"].includes(n.status));const weak=p.nodes.filter(n=>!["verified","supported","pending","researching"].includes(n.status));
   const pid=encodeURIComponent(p.id);const st=r&&r.status;const be=r&&r.bestEstimate;
-  let h=leaseAlertHtml(p)+supportAlertHtml(p)+natureHtml(p)+'<div class="card"><div class="row"><b>Export</b><span class="spacer"></span><a class="btn sm" href="/api/projects/'+pid+'/results.xlsx" download title="Every table in one workbook: exact links, sortable and filterable columns. Excel opens it directly; for Google Sheets open https://sheets.new, then File → Import → Upload and choose this file.">All tables (.xlsx · Excel / Google Sheets)</a><a class="btn secondary sm" href="/api/projects/'+pid+'/report.md" download>Report (.md)</a><a class="btn secondary sm" href="/api/projects/'+pid+'/pieces.csv" download>Pieces &amp; actions (.csv)</a><a class="btn secondary sm" href="/api/projects/'+pid+'/items.csv" download>Delivered items (.csv)</a>'+(p.candidates?'<a class="btn secondary sm" href="/api/projects/'+pid+'/candidates.csv" download>Candidate table (.csv)</a>':"")+'<a class="btn secondary sm" href="/api/projects/'+pid+'/results.json" download>Everything (.json)</a><button class="btn ghost sm" id="resPrint">Print / PDF</button></div></div>';
+  let h=natureHtml(p)+'<div class="card"><div class="row"><b>Export</b><span class="spacer"></span><a class="btn sm" href="/api/projects/'+pid+'/results.xlsx" download title="Every table in one workbook: exact links, sortable and filterable columns. Excel opens it directly; for Google Sheets open https://sheets.new, then File → Import → Upload and choose this file.">All tables (.xlsx · Excel / Google Sheets)</a><a class="btn secondary sm" href="/api/projects/'+pid+'/report.md" download>Report (.md)</a><a class="btn secondary sm" href="/api/projects/'+pid+'/pieces.csv" download>Pieces &amp; actions (.csv)</a><a class="btn secondary sm" href="/api/projects/'+pid+'/items.csv" download>Delivered items (.csv)</a>'+(p.candidates?'<a class="btn secondary sm" href="/api/projects/'+pid+'/candidates.csv" download>Candidate table (.csv)</a>':"")+'<a class="btn secondary sm" href="/api/projects/'+pid+'/results.json" download>Everything (.json)</a><button class="btn ghost sm" id="resPrint">Print / PDF</button></div></div>';
   if(!r&&p.nodes.length)h+='<div class="card"><div class="small faint">Result</div><div class="verdict">No memo yet</div><p class="small muted" style="margin-top:4px">Press ▶ Run: the memo is always computed, even from weak pieces, and marked provisional. What is still open is listed below.</p></div>';
   const M=p.results&&p.results.model;const pc=x=>Math.round(x*100)+"%";const bar=x=>'<div class="rt-bar" style="height:8px;min-width:80px"><i style="width:'+Math.round(x*100)+'%;background:'+(x>=0.7?"var(--gr)":x>=0.45?"var(--am)":"var(--rd)")+'"></i></div>';
   if(M){
@@ -1591,7 +1618,6 @@ function renderResults(){
   box.querySelectorAll("a[data-node]").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();select(a.dataset.node,"details",true);}));
   const rw=$("resRewrite");if(rw)rw.addEventListener("click",async()=>{rw.disabled=true;rw.textContent="writing…";try{STATE.project=await api("/api/projects/"+p.id+"/synthesize",{method:"POST"});STATE.project=await api("/api/projects/"+p.id);renderAll();toast("memo rewritten from the current pieces");}catch(e){toast(e.message);rw.disabled=false;}});
   const pr=$("resPrint");if(pr)pr.addEventListener("click",()=>{setPane("report");setTimeout(()=>window.print(),300);});
-  const rc=$("btnRecheckSupport");if(rc)rc.addEventListener("click",async()=>{rc.disabled=true;try{const res=await api("/api/projects/"+p.id+"/recheck-support",{method:"POST",body:{}});toast(res.message||"Recheck started");}catch(e){toast(e.message);}});
   box.querySelectorAll("[data-rerun]").forEach(b=>b.addEventListener("click",async()=>{b.disabled=true;try{await api("/api/projects/"+p.id+"/nodes/"+encodeURIComponent(b.dataset.rerun)+"/rerun",{method:"POST",body:{hint:(acts.find(a=>a.nodeId===b.dataset.rerun)||{}).next||""}});toast(b.dataset.rerun+" re-researching");}catch(e){toast(e.message);b.disabled=false;}}));
   box.querySelectorAll("[data-clarify]").forEach(b=>b.addEventListener("click",()=>{const a=acts.find(x=>x.nodeId===b.dataset.clarify);select(a.nodeId,"chat",true);setScope("node");$("chatIn").value="Clarify: "+a.why;$("chatIn").focus();}));
 }
