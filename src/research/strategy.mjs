@@ -135,6 +135,14 @@ const INDUSTRIAL = /zona industrial|industrial zone|estaleiro|armaz[eÃ©]m|pol[iÃ
 const SHARED_TITLE = /hisseli|hisse(?:li)? tapu|shared title|quota[- ]part/i;
 export const STRONG_EXPLORE = 20;
 
+export function strategyById(id) {
+  return STRATEGIES.find((s) => s.id === id) ?? null;
+}
+
+export function leaseCountries(strategy, regions = []) {
+  return regions.filter((code) => strategy?.countries?.[code]?.blocker && strategy.countries[code].withoutOwning).map((code) => ({ code, path: strategy.countries[code].withoutOwning.path, sources: strategy.countries[code].withoutOwning.sources }));
+}
+
 export function strategyFor(templateId) {
   return STRATEGIES.find((s) => s.templates.includes(templateId)) ?? null;
 }

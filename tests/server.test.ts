@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { App } from '../src/app.mjs';
 import { ScriptedProvider } from '../src/llm/scripted-provider.mjs';
-import { startServer } from '../src/server.mjs';
+import { startServer, withResults } from '../src/server.mjs';
 
 let base: string;
 let close: () => void;
@@ -91,10 +91,19 @@ describe('HTTP server', () => {
     expect(done.results.support).toMatchObject({ version: 2, stale: 0 });
     expect(done.results.support.toConfirm).toBe(0);
     expect(done.results.nature.lines[0]).toMatch(/^Fits are the current conclusion/);
+    expect(done.results.lease).toBeNull();
     const recheck = await call('POST', `/api/projects/${created.body.id}/recheck-support`, {});
     expect(recheck.status).toBe(200);
     expect(recheck.body).toMatchObject({ ok: true, message: expect.stringMatching(/^rechecked 0 piece\(s\)/) });
     expect((await call('POST', '/api/projects/missing/recheck-support', {})).status).toBe(404);
+  });
+
+  it('adds the lease alert for plots that cannot be bought, with the horizon from the request', () => {
+    const leaseRow = (url: string, paybackMonths: number) => ({ url, title: 'Đất ven biển', place: 'Phan Thiết', country: 'Vietnam', countryCode: 'VN', plan: { tier: 'blocked', checks: [{ id: 'legal', label: 'Legal path', ok: false }, { id: 'sea', label: 'Sea within reach', ok: true }], withoutOwning: { path: 'operate without owning', sources: ['vn-lease'], units: 3, months: 8, setupEur: 5000, revenueEur: 20000, paybackMonths, landShareMax: 0.75, paysBackInYear: paybackMonths <= 8, missing: [] } } });
+    const project = { id: 'x', question: 'Plots for glamping, pay back within 1 year', nodes: [], candidates: { kept: [leaseRow('https://batdongsan.com.vn/ban-dat-xa-1', 2), leaseRow('https://batdongsan.com.vn/ban-dat-xa-2', 11)] } };
+    const lease = withResults(project).results.lease;
+    expect(lease).toMatchObject({ horizonMonths: 12, feasibleCount: 1, notFeasible: 1, countries: ['Vietnam'] });
+    expect(lease.headline).toMatch(/^1 plot\(s\) in Vietnam cannot be bought by a foreign buyer but can be leased/);
   });
 
   it('returns clean errors for bad input and unknown resources', async () => {

@@ -57,9 +57,9 @@ export function withConfirmRisk(rows = []) {
   return out;
 }
 
-function hhmm(iso) {
+function untilText(iso) {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(11, 16);
+  return Number.isNaN(d.getTime()) ? null : `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}Z`;
 }
 
 export function resultsNature(project = {}) {
@@ -67,13 +67,13 @@ export function resultsNature(project = {}) {
   const t = c?.tiers;
   const v = c?.verification;
   const s = project.supportAudit;
-  const loopEnds = project.improve?.active ? hhmm(project.improve.deadline) : null;
+  const loopEnds = project.improve?.active ? untilText(project.improve.deadline) : null;
   const lines = [
     'Fits are the current conclusion, not a final one: they change as listings appear or sell, sources are re-read and the checking logic improves.',
     t ? `${t.fits ?? 0} fit every criterion, ${t['trade-off'] ?? 0} trade-offs, ${t.unverified ?? 0} to confirm, ${t.weak ?? 0} weak, ${t.blocked ?? 0} blocked${c.found !== undefined ? `, from ${c.found} listings found` : ''}.` : null,
     v?.at ? `Checked outside the app ${String(v.at).slice(0, 10)}: ${v.confirmed ?? 0} confirmed, ${v.refuted ?? 0} refuted, ${v.unconfirmed ?? 0} unconfirmed${v.pending ? `, ${v.pending} not checked yet` : ''}.` : null,
     s ? `${s.toConfirm ?? 0} claim(s) to confirm${s.disagree ? ` (${s.disagree} where the two checking models disagree)` : ''}${s.stale ? `; ${s.stale} claim(s) were checked under older logic` : ''}.` : null,
-    loopEnds ? `The self-improving loop is running until ${loopEnds}Z, so numbers can still move.` : null,
+    loopEnds ? `The self-improving loop is running until ${loopEnds}, so numbers can still move.` : null,
     !project.improve?.active && t?.unverified ? `The self-improving loop is stopped: the ${t.unverified} plot(s) to confirm stay open until it runs again or they are measured.` : null,
   ].filter(Boolean);
   return { asOf: c?.builtAt ?? v?.at ?? null, lines };
