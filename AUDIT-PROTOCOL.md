@@ -19,6 +19,7 @@ It adapts three existing protocols instead of inventing a new one (and the mikos
 | S5 | **Risk.** Does the task touch keys, the access token, remote access, the terminal, deletion, or anything that spends money? | If yes: write down the safe default and what needs the user's explicit consent |
 | S6 | **Adjacent gaps.** What in the same flow would still be broken after the obvious fix? | Fix gaps in the same flow in the same pass; list the rest |
 | S7 | **Witness on live data.** Does the change act on existing researches (repairs, re-grading, gates, scoring, item screening, routing on measured data)? | Before deploying, run it on a copy of the live research (`node scripts/dryrun.mjs <research id>`, or the equivalent read-only check) and read every change it reports. A wrong change found there is fixed before anything ships (2026-10-23: the candidates repair renamed "Market demand"; the speed check read a cached prompt as 0 tokens/s) |
+| S9 | **Concept audit.** Run `node scripts/concept-audit.mjs --all` and walk [Part 4](#part-4--known-failure-modes-mandatory) for the layers the task touches | Every ✗ is fixed or named as a blocker before planning; every ⚠ is listed |
 | S8 | **Measurements.** Any before/after comparison | Times in one zone (UTC, with `Z`); windows and counts stated; too few samples are labelled as such |
 
 ## Part 2 · Before reporting the result
@@ -38,6 +39,7 @@ It adapts three existing protocols instead of inventing a new one (and the mikos
 | O9 | **No false claims of action.** | Every "created / deleted / pushed / installed" in the report matches a command whose output was seen |
 | O10 | **Concept still holds.** Re-check S1 against the final change | Chats stay in their scope; nothing runs without a gate or a button |
 | O12 | **Every suggestion is ready to execute.** Anything the app or the report tells the user to do | It names the exact URL, the exact button or field, and the exact command, taken from a provider's docs or this repo (key steps live in `src/llm/guides.mjs`). "Go to the website" alone fails |
+| O13 | **Concept audit again.** `node scripts/concept-audit.mjs --all` after deploy, and Part 4 re-walked for the touched layers | No new ✗; any ⚠ is reported with its count |
 | O11 | **Record.** | [SESSION-LOG.md](SESSION-LOG.md) has the session: what was asked, what changed, what is still open |
 
 A failed check is fixed, then the whole of Part 2 runs again. If a check cannot pass (for example, a permission was refused), the report says so in the first lines.
@@ -45,3 +47,57 @@ A failed check is fixed, then the whole of Part 2 runs again. If a check cannot 
 ## Part 3 · What the app enforces on its own replies
 
 The same rules run in code on every chat reply, before you see it ([`src/chat/reply-audit.mjs`](src/chat/reply-audit.mjs)): unknown links removed, secret values removed, unknown commands flagged, placeholders flagged, claimed-but-not-run actions flagged, one revision on failure, then a visible **⚠ audit** mark. Tests: [`tests/chat/reply-audit.test.ts`](tests/chat/reply-audit.test.ts), [`tests/appchat.test.ts`](tests/appchat.test.ts).
+
+## Part 4 · Known failure modes (mandatory)
+
+Every row happened in this app (date, PR) or is the same failure in another place. Each audit walks the rows of the layers it touches; **C-ids** are checked by code on live data (`src/research/conceptaudit.mjs`, run by `node scripts/concept-audit.mjs --all`, shown in each research's **Notifications** tab).
+
+### A · Concept: what counts as a result
+| # | Failure | How it is caught |
+|---|---|---|
+| A1 | The headline count included rows that do not fit every check (2026-11-02: 338 shown, 307 fit and were confirmed) | C1; `applyVerification` counts fits ∧ confirmed |
+| A2 | A plot counted with a check unmeasured or failed | C2 |
+| A3 | A plot counted where the buyer cannot own land (Vietnam), or a lease shown as a purchase (#77, rejected) | C3; PROTOCOLS 2c: lease options are a separate alert, never a fit |
+| A4 | Rows from countries not asked for; "EU" overriding the named countries | C4; brief tests |
+| A5 | Price limit broken by a wrong currency (645,100 EUR read as CZK, #67) or a deposit read as the price | C5; low-outlier rule; verifier price check |
+| A6 | Checks the user never asked for (sea check on an inland Czech question, #64, #68) | `askedCriteria` tests; verifier `obligationsOf` tests |
+| A7 | An asked country never reaches the table (Vietnam: no readable land portal) | C13 and the lease alert says so |
+| A8 | Fits hidden by a stale cached record (cached site without climate index, 2026-10-27) | witness on a copy before deploy (S7) |
+
+### B · Evidence and gates
+| # | Failure | How it is caught |
+|---|---|---|
+| B1 | A quote that exists but says something else ("Bell tents cost from €950" for a permit) | meaning check (PROTOCOLS 2b); C9, C10 |
+| B2 | A fabricated or non-verbatim quote in a peer PR (#72, #77) | re-read every quote live before merge; StrategyRetriever weekly; C11 |
+| B3 | Source ids or years read as numbers (S4, "1911 km", #85) | support and verifier tests |
+| B4 | The memo states numbers the verified record contradicts | C12; memo claim check |
+| B5 | A model grades itself | reviewer and meaning votes avoid the author's provider |
+
+### C · Outside verifier
+| # | Failure | How it is caught |
+|---|---|---|
+| C-1 | Verifier stalled at 0 fits, so nothing was ever confirmed (2026-10-31) | C6 |
+| C-2 | Verifier read an old project file and wrote an empty record marked complete (2026-10-27) | C6; inputs hash in the record |
+| C-3 | Verifier and app disagree on many fits (pisos card prices, #81) | C7: refuted share > 30% means the table logic is suspect |
+| C-4 | Verifier imports app code | `independence` gate |
+
+### D · Loop and routing
+| # | Failure | How it is caught |
+|---|---|---|
+| D1 | Provider outages counted as stalls, or starving the loop (#63; 2026-11-02 most trials provider-outage) | C8; outcome 'provider-outage' |
+| D2 | Re-measure that re-ran nothing, so noise was 0 (#74) | improve tests |
+| D3 | Free provider limits misread (OpenRouter 50 requests/day; Gemini 20/day; Cerebras 402) | measure before routing; Models & router page |
+| D4 | A slow local model gets calls (llamacpp: 20 of 200 calls worked, median 116 s) | router switch; speed check |
+| D5 | Two app servers on one data folder (2026-10-31) | instance lock |
+| D6 | Memory exhaustion from dead live-update connections (2026-10-23) | heap guard, watchdog |
+
+### E · Change process
+| # | Failure | How it is caught |
+|---|---|---|
+| E1 | Merged before CI had even started (#88, 2026-11-02) | wait until both Node 22 and 24 checks exist and are SUCCESS; never merge on "no checks reported" |
+| E2 | A PR deleting history or files beyond its purpose (#69: 644 lines) | review the full file list and every deleted line; count lost lines for docs |
+| E3 | `node_modules` symlink committed and deployed (#52) | stage explicit paths only; ignore rule `node_modules` |
+| E4 | Workers inventing fixture URLs or editing shared parsers (c1–c4) | real URL shapes in the spec; review every changed file |
+| E5 | Bot checks or consent redirects worked around | never: a site that refuses automated reads is left alone |
+| E6 | A claim of action that did not happen | O9; quote the command output |
+| E7 | Keys in a file | keys only in the key store or the process environment |

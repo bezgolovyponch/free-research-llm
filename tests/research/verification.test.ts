@@ -55,6 +55,19 @@ describe('external verification on the app side', () => {
     expect(out.kept.filter((r: { verified?: unknown }) => r.verified).map((r: { url: string }) => r.url)).toEqual(['t', 'u']);
   });
 
+  it('counts only confirmed fits as kept, while the verification summary still counts every confirmed tier', () => {
+    const rows = [row('a', 'fits'), row('b', 'fits'), row('c', 'trade-off'), row('d', 'fits')];
+    const rec = { at: '2026-11-01T00:00:00Z', results: [
+      { url: 'a', verdict: 'confirmed', checks: [] },
+      { url: 'b', verdict: 'confirmed', checks: [] },
+      { url: 'c', verdict: 'confirmed', checks: [] },
+      { url: 'd', verdict: 'refuted', checks: [] },
+    ] };
+    const out = applyVerification({ tiers: { fits: 3 }, kept: rows }, rec);
+    expect(out.keptCount).toBe(2);
+    expect(out.verification.confirmed).toBe(3);
+  });
+
   it('reads the verifier\'s record read-only and treats a missing or broken file as no verification', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-verif-'));
     await fs.writeFile(path.join(dir, 'p1.json'), JSON.stringify(record));
