@@ -468,23 +468,34 @@ describe('a loop that cannot get stuck', () => {
     expect(restingPieces([1, 2, 3].map((i) => ({ nodeId: 'D3', outcome: 'provider-outage', at: at(i) })), t0 + 10 * 60000).size).toBe(0);
   });
 
-  it('keeps a change only when the gain holds on a re-measure with nothing changed, and records the noise', async () => {
+  it('re-measures by researching the changed pieces again, keeps a change only when the gain holds on both, and records the second score as the new best', async () => {
     const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [] } };
     let saved = structuredClone(project);
     const scores = [0.5, 0.29];
-    const engine = { load: async () => structuredClone(saved), store: { save: async (p: typeof project) => { saved = structuredClone(p); } }, emit: () => {}, resetWithAncestors: () => {}, run: async () => ({ ...structuredClone(saved), phase: 'done' }), resynthesize: async () => {} };
+    const runs: string[][] = [];
+    const engine = {
+      load: async () => structuredClone(saved),
+      store: { save: async (p: typeof project) => { saved = structuredClone(p); } },
+      emit: () => {},
+      resetWithAncestors: (p: typeof project, id: string) => { p.nodes.find((n) => n.id === id)!.status = 'pending'; },
+      run: async () => { runs.push(saved.nodes.filter((n) => n.status === 'pending').map((n) => n.id)); return { ...structuredClone(saved), phase: 'done' }; },
+      resynthesize: async () => {},
+    };
     const state = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() }, measure: () => ({ score: scores.shift() }) };
     const improver = new ProjectImprover({ engine: engine as never });
     const trialProject = structuredClone(project);
     trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
     const base = { at: at(0), nodeId: 'D3', before: 0.3 };
     expect(await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toEqual({ kept: false });
-    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'reverted-noise', score: 0.29, detail: expect.stringMatching(/^measured 0\.5, re-measured 0\.29 with nothing changed/) });
-    expect(saved.improve.noise).toEqual([-0.21]);
+    expect(runs).toEqual([['D3'], ['D3']]);
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'reverted-noise', score: 0.29, detail: expect.stringMatching(/^measured 0\.5, re-measured 0\.29 after researching the same pieces again/) });
+    expect(saved.improve.remeasureNoise).toEqual([-0.21]);
     expect(saved.nodes.find((n) => n.id === 'D3')!.question).toBe('permits?');
     scores.push(0.36, 0.34);
-    expect(await improver.commit('p', { snapshot: saved, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toMatchObject({ kept: true, score: { score: 0.35 } });
-    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'kept', score: 0.35, remeasured: 0.34 });
+    expect(await improver.commit('p', { snapshot: saved, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toMatchObject({ kept: true, score: { score: 0.34 } });
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'kept', score: 0.34, remeasured: 0.34 });
+    expect(state.best.score).toBe(0.34);
+    expect(saved.improve.remeasureNoise).toEqual([-0.21, -0.02]);
   });
 
   it('raises the bar to two standard deviations of the measured noise once there are enough samples', () => {
