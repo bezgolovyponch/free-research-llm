@@ -260,6 +260,7 @@ describe('external verifier: the listing price a portal keeps in its own page da
 
   it('reads Czech crowns and Polish zloty written on the page', () => {
     expect(textPrices('Cena: 160 735 Kč')).toEqual([{ price: 160735, currency: 'CZK' }]);
+    expect(textPrices('por 12.000 € · 983 m² · 12 €/m² · €5/m2')).toEqual([{ price: 12000, currency: 'EUR' }]);
     expect(textPrices('1 200 000 zł')).toEqual([{ price: 1200000, currency: 'PLN' }]);
     expect(textPrices('CZK 5 000')).toEqual([{ price: 5000, currency: 'CZK' }]);
   });

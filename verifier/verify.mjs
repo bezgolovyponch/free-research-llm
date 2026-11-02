@@ -152,7 +152,7 @@ export function embeddedListingPrices(html, url) {
 
 export function textPrices(text) {
   const out = [];
-  for (const m of String(text ?? '').matchAll(/(€|£|\$|₺|₫|EUR|TRY|TL|VND|GBP|USD|CZK|PLN)\s?(\d[\d.,\s ]{0,15}\d|\d)|(\d[\d.,\s ]{0,15}\d|\d)\s?(€|£|₺|₫|EUR|TRY|TL|VND|GBP|USD|CZK|PLN|Kč|zł)/g)) {
+  for (const m of String(text ?? '').matchAll(/(€|£|\$|₺|₫|EUR|TRY|TL|VND|GBP|USD|CZK|PLN)\s?(\d[\d.,\s ]{0,15}\d|\d)(?!\s*\/\s*m)|(\d[\d.,\s ]{0,15}\d|\d)\s?(€|£|₺|₫|EUR|TRY|TL|VND|GBP|USD|CZK|PLN|Kč|zł)(?!\s*\/\s*m)/g)) {
     const raw = m[2] ?? m[3];
     const sym = m[1] ?? m[4];
     const price = numberOf(raw);

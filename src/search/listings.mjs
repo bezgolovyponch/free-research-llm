@@ -146,6 +146,15 @@ function anchorsOf(html, base) {
   return anchors;
 }
 
+function cardLinksOf(html, base) {
+  const links = [];
+  for (const m of String(html ?? '').matchAll(/<[a-z]+\s[^>]*?data-(?:lnk-)?href\s*=\s*["']([^"'#][^"']*)["']/gi)) {
+    const url = absoluteUrl(m[1], base);
+    if (url) links.push({ url, text: '', index: m.index });
+  }
+  return links;
+}
+
 function markdownAnchorsOf(markdown, base) {
   const anchors = [];
   for (const m of String(markdown ?? '').matchAll(/(?<!!)\[([^\]]{0,200})\]\((https?:\/\/[^)\s]+)\)/g)) {
@@ -297,13 +306,13 @@ function cardText(source, from, to, isHtml) {
 }
 
 export function fromCards(source, base, { isHtml = true, template = '' } = {}) {
-  const anchors = isHtml ? anchorsOf(source, base) : markdownAnchorsOf(source, base);
+  const anchors = isHtml ? [...anchorsOf(source, base), ...cardLinksOf(source, base)] : markdownAnchorsOf(source, base);
   const host = domainOf(base);
   const firsts = new Map();
   const titles = new Map();
   for (const a of anchors) {
     if (!looksLikeListing(a.url) || !domainOf(a.url).endsWith(host.split('.').slice(-2).join('.'))) continue;
-    if (!firsts.has(a.url)) firsts.set(a.url, a.index);
+    firsts.set(a.url, Math.min(firsts.get(a.url) ?? a.index, a.index));
     if (a.text.length > (titles.get(a.url) ?? '').length) titles.set(a.url, a.text);
   }
   const groups = new Map();

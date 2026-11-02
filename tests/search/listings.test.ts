@@ -144,6 +144,12 @@ describe('listing extraction', () => {
     expect(items[0].title).not.toContain('classList');
   });
 
+  it('starts a card at its data-lnk-href container, so a price shown before the title link stays with its own listing', () => {
+    const card = (n: number, price: string) => `<div class="ad-preview" data-lnk-href="/listing/plot-${n}-u${n}000000"><span class="price">${price} €</span><a href="/listing/plot-${n}-u${n}000000">Terreno ${n}</a><p>${n}00 m²</p></div>`;
+    const { items } = fromCards(card(1, '20.000') + card(2, '9.500') + card(3, '12.000'), BASE);
+    expect(items.map((i) => [i.title, i.value])).toEqual([['Terreno 1', 20000], ['Terreno 2', 9500], ['Terreno 3', 12000]]);
+  });
+
   it('rejects titles with arrow functions and brace pairs', () => {
     const html = `<a href="/listing/plot-1-u1000000">() => { return x; }</a><a href="/listing/plot-2-u2000000">() => { return x; }</a><a href="/listing/plot-3-u3000000">() => { return x; }</a>`;
     const { items } = fromCards(html, BASE);
