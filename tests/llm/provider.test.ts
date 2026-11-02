@@ -7,6 +7,22 @@ const groq = PROVIDER_PRESETS.find((p) => p.id === 'groq')!;
 const openrouter = PROVIDER_PRESETS.find((p) => p.id === 'openrouter')!;
 const cerebras = PROVIDER_PRESETS.find((p) => p.id === 'cerebras')!;
 
+describe('OpenRouter free model choice', () => {
+  const live = ['thinkingmachines/inkling-small:free', 'thinkingmachines/inkling:free', 'nvidia/nemotron-3.5-super-vl:free', 'nvidia/nemotron-3.5-lightning:free', 'nvidia/nemotron-3-ultra-550b-a55b:free', 'dots-studio/dots-3-note-preview:free', 'recursive/flint-v1.0:free', 'xingchen-agi/xing4.0-29b-a4b:free', 'google/gemma-4-26b-a4b-it:free', 'google/gemma-4-31b-it:free', 'cohere/north-mini-code:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'nvidia/nemotron-3.5-content-safety:free', 'liquid/lfm-2.5-2.6b:free'];
+  const openrouter = PROVIDER_PRESETS.find((p) => p.id === 'openrouter')!;
+
+  it('picks a known model family from the free list of 2026-11-02, never the first unknown one', () => {
+    expect(pickModel(live, openrouter.prefer.fast, true)).toBe('google/gemma-4-26b-a4b-it:free');
+    expect(pickModel(live, openrouter.prefer.deep, true)).toBe('nvidia/nemotron-3-ultra-550b-a55b:free');
+  });
+
+  it('still lands on a known family when the exact ids are renamed', () => {
+    const renamed = ['recursive/flint-v2.0:free', 'google/gemma-5-27b-it:free', 'deepseek/deepseek-v4-flash:free'];
+    expect(pickModel(renamed, openrouter.prefer.fast, true)).toBe('google/gemma-5-27b-it:free');
+    expect(pickModel(renamed, openrouter.prefer.deep, true)).toBe('deepseek/deepseek-v4-flash:free');
+  });
+});
+
 describe('pickModel', () => {
   it('prefers exact, then partial matches, and skips non-chat models', () => {
     expect(pickModel(['whisper-large', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'], ['llama-3.1-8b-instant'])).toBe('llama-3.1-8b-instant');
