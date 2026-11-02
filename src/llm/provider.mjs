@@ -2,6 +2,10 @@ import { NON_CHAT_MODEL } from './presets.mjs';
 
 const MAX_TOKEN_BUDGET = 16000;
 
+export function splitKeys(value) {
+  return [...new Set(String(value ?? '').split(',').map((k) => k.trim()).filter(Boolean))];
+}
+
 export class ProviderError extends Error {
   constructor(message, { status = 0, retryAfterMs = 0, provider = '' } = {}) {
     super(message);
@@ -53,12 +57,15 @@ function retryAfter(res) {
 }
 
 export class OpenAICompatibleProvider {
-  constructor({ preset, apiKey = '', baseURL, modelOverrides = {}, fetchImpl = fetch, timeoutMs = 120000, disabled = false }) {
+  constructor({ preset, apiKey = '', baseURL, modelOverrides = {}, fetchImpl = fetch, timeoutMs = 120000, disabled = false, now = () => Date.now() }) {
     this.disabled = disabled;
     this.id = preset.id;
     this.label = preset.label;
     this.preset = preset;
-    this.apiKey = apiKey;
+    this.keys = splitKeys(apiKey);
+    this.keyIndex = 0;
+    this.keyRestUntil = new Map();
+    this.now = now;
     this.baseURL = String(baseURL || preset.baseURL || '').replace(/\/$/, '');
     this.modelOverrides = modelOverrides;
     this.fetchImpl = fetchImpl;
@@ -78,6 +85,39 @@ export class OpenAICompatibleProvider {
     const wait = Math.max(0, this.nextSlot - now);
     this.nextSlot = Math.max(now, this.nextSlot) + this.minIntervalMs;
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+
+  get keyCount() {
+    return this.keys.length;
+  }
+
+  keyResting(index) {
+    return (this.keyRestUntil.get(index) ?? 0) > this.now();
+  }
+
+  get apiKey() {
+    if (this.keyResting(this.keyIndex)) {
+      const free = this.keys.findIndex((_, i) => !this.keyResting(i));
+      if (free >= 0) this.keyIndex = free;
+    }
+    return this.keys[this.keyIndex] ?? '';
+  }
+
+  rotateKey(until) {
+    if (this.keys.length < 2) return false;
+    this.keyRestUntil.set(this.keyIndex, until);
+    for (let step = 1; step < this.keys.length; step++) {
+      const next = (this.keyIndex + step) % this.keys.length;
+      if (this.keyResting(next)) continue;
+      this.keyIndex = next;
+      return true;
+    }
+    return false;
+  }
+
+  nextKeyAt() {
+    const rests = this.keys.map((_, i) => this.keyRestUntil.get(i) ?? 0).filter((until) => until > this.now());
+    return rests.length === this.keys.length ? Math.min(...rests) : 0;
   }
 
   get configured() {
@@ -173,7 +213,7 @@ export class OpenAICompatibleProvider {
   retireModel(model, until) {
     if (!model || !this.models?.length || this.modelOverrides.any || this.modelOverrides[Object.keys(this.selected).find((t) => this.selected[t] === model)]) return false;
     this.retired.set(model, until);
-    const live = this.models.filter((m) => !((this.retired.get(m) ?? 0) > Date.now()));
+    const live = this.models.filter((m) => !((this.retired.get(m) ?? 0) > this.now()));
     const pick = (tier) => (this.preset.prefer[tier] ? pickModel(live, this.preset.prefer[tier], this.preset.freeOnly, { strict: true }) : null);
     const next = { fast: pick('fast'), deep: pick('deep'), vision: pick('vision') };
     if (!next.fast && !next.deep) return false;
@@ -240,6 +280,8 @@ export class OpenAICompatibleProvider {
       vision: this.selected.vision,
       local: Boolean(this.preset.local),
       keyEnv: this.preset.keyEnv,
+      keys: this.keys.length,
+      keysResting: this.keys.filter((_, i) => this.keyResting(i)).length,
       accountEnv: this.preset.accountEnv ?? null,
       signup: this.preset.signup,
       modelCount: this.models.length,

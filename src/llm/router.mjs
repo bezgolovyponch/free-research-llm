@@ -23,10 +23,36 @@ const TIMED_OUT = /unreachable: timed out/;
 const BAD_KEY_MS = 6 * 3600 * 1000;
 const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
+const PER_MODEL_DAY = /quota window: per day, per model/;
+const OVERLOADED = /overloaded|high (?:traffic|demand)|currently experiencing|over capacity|no capacity|temporarily unavailable|provider returned error|UNAVAILABLE/i;
+export const OVERLOAD_REST_MS = 10 * 60 * 1000;
+export const MAX_SWITCHES_PER_CALL = 3;
 
 export function nextUtcMidnight(now) {
   const d = new Date(now);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) + 60000;
+}
+
+function utcOffsetMs(timeZone, at) {
+  const name = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' }).formatToParts(new Date(at)).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
+  const m = /GMT([+-])(\d{2}):(\d{2})/.exec(name);
+  return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 3600000 + Number(m[3]) * 60000) : 0;
+}
+
+export function nextMidnightIn(timeZone, now) {
+  const local = new Date(now + utcOffsetMs(timeZone, now));
+  const midnight = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1);
+  const guess = midnight - utcOffsetMs(timeZone, now);
+  return midnight - utcOffsetMs(timeZone, guess) + 60000;
+}
+
+export function quotaResetAt(provider, now) {
+  const timeZone = provider?.preset?.quotaResetTimeZone;
+  return timeZone ? nextMidnightIn(timeZone, now) : nextUtcMidnight(now);
+}
+
+export function overloaded(error) {
+  return !PER_MODEL_DAY.test(error.message) && (error.status === 503 || error.status === 529 || (error.status === 429 && OVERLOADED.test(error.message)));
 }
 
 export function estimateTokens(messages) {
@@ -154,11 +180,22 @@ export class ModelRouter {
   switchModel(provider, model, error) {
     if (!provider.retireModel || !model) return false;
     const gone = error.status === 404 && /no longer available|not found|does not exist|unknown model/i.test(error.message);
-    const usedUp = /quota window: per day, per model/.test(error.message);
-    if (!gone && !usedUp) return false;
-    const switched = provider.retireModel(model, gone ? Infinity : nextUtcMidnight(this.now()));
-    if (switched) this.record({ purpose: 'router', tier: '', provider: provider.id, model, ok: false, ms: 0, error: `${model} ${gone ? 'is no longer available' : 'used its daily quota'}; switched to ${provider.selected.fast} / ${provider.selected.deep}` });
+    const usedUp = PER_MODEL_DAY.test(error.message);
+    const busy = !gone && !usedUp && overloaded(error);
+    if (!gone && !usedUp && !busy) return false;
+    const until = gone ? Infinity : usedUp ? quotaResetAt(provider, this.now()) : this.now() + OVERLOAD_REST_MS;
+    const switched = provider.retireModel(model, until);
+    const why = gone ? 'is no longer available' : usedUp ? 'used its daily quota' : 'is overloaded; rests 10 min';
+    if (switched) this.record({ purpose: 'router', tier: '', provider: provider.id, model, ok: false, ms: 0, error: `${model} ${why}; switched to ${provider.selected.fast} / ${provider.selected.deep}` });
     return switched;
+  }
+
+  rotateKey(provider, error) {
+    if (!provider.rotateKey || overloaded(error)) return false;
+    if (!(error.status === 429 || error.quotaLimited || [401, 402, 403].includes(error.status))) return false;
+    const rotated = provider.rotateKey(this.cooldownFor(provider, error).until);
+    if (rotated) this.record({ purpose: 'router', tier: '', provider: provider.id, ok: false, ms: 0, error: `key ${provider.keyIndex + 1} of ${provider.keyCount} in use; the previous key rests (${this.cooldownFor(provider, error).reason})` });
+    return rotated;
   }
 
   restoreCooldowns(rows) {
@@ -180,19 +217,20 @@ export class ModelRouter {
     return restored;
   }
 
-  coolDown(provider, error) {
+  cooldownFor(provider, error) {
     const now = this.now();
-    let until = now + (error.retryAfterMs || this.cooldownMs);
-    let reason = 'rate limit';
-    if (error.status === 401 || error.status === 403) {
-      until = now + BAD_KEY_MS;
-      reason = 'key rejected; check it on Models & router';
-    } else if (!SHORT_LIMIT.test(error.message) && (error.status === 402 || DAILY.test(error.message))) {
-      until = Math.max(until, nextUtcMidnight(now));
-      reason = 'daily quota or credit used up; waits for the daily reset';
-    }
-    this.cooldownUntil.set(provider.id, until);
-    this.cooldownReason.set(provider.id, reason);
+    if (error.status === 401 || error.status === 403) return { until: now + BAD_KEY_MS, reason: 'key rejected; check it on Models & router' };
+    const until = now + (error.retryAfterMs || this.cooldownMs);
+    if (!SHORT_LIMIT.test(error.message) && (error.status === 402 || DAILY.test(error.message))) return { until: Math.max(until, quotaResetAt(provider, now)), reason: 'daily quota or credit used up; waits for the daily reset' };
+    return { until, reason: 'rate limit' };
+  }
+
+  coolDown(provider, error) {
+    const { until, reason } = this.cooldownFor(provider, error);
+    const keyBack = provider.nextKeyAt?.() ?? 0;
+    const back = keyBack > this.now() && keyBack < until ? keyBack : until;
+    this.cooldownUntil.set(provider.id, back);
+    this.cooldownReason.set(provider.id, back < until ? `every key rests; the first is back in ${Math.ceil((back - this.now()) / 60000)} min` : reason);
   }
 
   benchComputeError(provider, error) {
@@ -226,7 +264,9 @@ export class ModelRouter {
   async tryProviders(candidates, { messages, tier, json, purpose, temperature }, errors) {
     for (const provider of candidates) {
       let attemptMessages = messages;
-      for (let repair = 0; repair < 2; repair++) {
+      let repairs = 0;
+      let switches = 0;
+      while (repairs < 2) {
         const started = this.now();
         const model = provider.selected?.[tier] ?? provider.selected?.fast;
         this.inflight.set(provider.id, (this.inflight.get(provider.id) ?? 0) + 1);
@@ -242,12 +282,17 @@ export class ModelRouter {
           this.record({ purpose, tier, provider: provider.id, ok: false, ms: this.now() - started, error: error.message.slice(0, 200) });
           errors.push(error.message);
           if (error instanceof ProviderError) {
-            if (this.switchModel(provider, model, error)) break;
+            if (this.switchModel(provider, model, error) || this.rotateKey(provider, error)) {
+              switches++;
+              if (switches <= MAX_SWITCHES_PER_CALL) continue;
+              break;
+            }
             if (this.benchSlow(provider, error)) break;
             if (this.benchComputeError(provider, error)) break;
             if (error.retryable || [401, 402, 403].includes(error.status)) this.coolDown(provider, error);
             break;
           }
+          repairs++;
           attemptMessages = [...messages, { role: 'user', content: REPAIR_INSTRUCTION }];
         } finally {
           this.inflight.set(provider.id, Math.max(0, (this.inflight.get(provider.id) ?? 1) - 1));
