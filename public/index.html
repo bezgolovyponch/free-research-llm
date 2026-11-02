@@ -104,6 +104,7 @@
   .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
   .spacer{flex:1}
   .muted{color:var(--dim)} .faint{color:var(--faint)} .small{font-size:12px}
+  .notecheck{display:flex; align-items:center; gap:6px; margin-top:6px} .notecheck input{width:auto; margin:0; flex:0 0 auto}
   .conf{display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:1px 8px; border:1px solid currentColor}
   #candRows tr[data-url],#outRows tr[data-url]{cursor:pointer}
   #candRows tr[data-url]:hover td,#candRows tr.on td,#outRows tr[data-url]:hover td,#outRows tr.on td{background:color-mix(in srgb, var(--bl) 8%, var(--panel))}
@@ -1565,6 +1566,18 @@ function notificationsOf(p){
   if(lease)out.push({key:"lease:"+((l&&l.headline)||""),html:lease});
   const s=p.results&&p.results.support;const support=supportAlertHtml(p);
   if(support)out.push({key:"support:"+(s.stale||0)+":"+(s.disagree||0),html:support});
+  const a=p.results&&p.results.audit;
+  if(a&&Array.isArray(a.findings)){
+    const failed=a.findings.filter(f=>!f.ok);
+    if(failed.length){
+      const hasError=failed.some(f=>f.severity==="error");
+      let h='<div class="card" style="border-left:4px solid '+(hasError?"var(--rd)":"var(--am)")+'">';
+      h+='<div><b>Concept audit</b> · '+(a.errors||0)+' error(s), '+(a.warnings||0)+' warning(s)</div>';
+      h+=failed.map(f=>'<div class="small">'+(f.severity==="error"?"✗":"⚠")+' '+esc(f.label)+' — '+esc(f.detail)+'</div>').join("");
+      h+="</div>";
+      out.push({key:"audit:"+failed.map(f=>f.id).join(","),html:h});
+    }
+  }
   return out;
 }
 function notesStoreKey(p){return "frl-notes-checked:"+p.id;}
@@ -1575,7 +1588,7 @@ function renderNotes(){
   const badge=$("notesBadge");
   const list=notificationsOf(p);const checked=new Set(notesChecked(p));
   const todo=list.filter(n=>!checked.has(n.key));const ordered=todo.concat(list.filter(n=>checked.has(n.key)));
-  box.innerHTML=ordered.length?ordered.map(n=>{const c=checked.has(n.key);return '<div style="margin-bottom:14px">'+n.html+'<label class="small"><input type="checkbox" data-note="'+esc(n.key)+'"'+(c?" checked":"")+"> "+(c?"Checked":"☐ Not checked yet — tick when you have read it")+"</label></div>";}).join(""):'<div class="card small muted">No notifications for this research.</div>';
+  box.innerHTML=ordered.length?ordered.map(n=>{const c=checked.has(n.key);return '<div style="margin-bottom:14px">'+n.html+'<label class="small notecheck"><input type="checkbox" data-note="'+esc(n.key)+'"'+(c?" checked":"")+"> "+(c?"Checked":"☐ Not checked yet — tick when you have read it")+"</label></div>";}).join(""):'<div class="card small muted">No notifications for this research.</div>';
   if(badge){badge.hidden=!todo.length;badge.textContent=todo.length?"☐ "+todo.length:"";}
   box.querySelectorAll("[data-note]").forEach(cb=>cb.addEventListener("change",()=>{const keys=new Set(notesChecked(p));if(cb.checked)keys.add(cb.dataset.note);else keys.delete(cb.dataset.note);saveNotesChecked(p,[...keys]);renderNotes();}));
   const rc=$("btnRecheckSupport");if(rc)rc.addEventListener("click",async()=>{rc.disabled=true;try{const res=await api("/api/projects/"+p.id+"/recheck-support",{method:"POST",body:{}});toast(res.message||"Recheck started");}catch(e){toast(e.message);rc.disabled=false;}});

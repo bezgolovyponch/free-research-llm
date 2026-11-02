@@ -61,6 +61,9 @@ describe('HTTP server', () => {
     await reader.cancel();
     const done = await waitFor(created.body.id, 'done');
     expect(done.report.verdict).toBeTruthy();
+    expect(typeof done.results.audit.errors).toBe('number');
+    expect(typeof done.results.audit.warnings).toBe('number');
+    expect(Array.isArray(done.results.audit.findings)).toBe(true);
     const md = await call('GET', `/api/projects/${created.body.id}/report.md`);
     expect(md.body).toMatch(/## Verdict/);
     const rerun = await call('POST', `/api/projects/${created.body.id}/nodes/D1.1/rerun`, { hint: 'use 2026 data' });
