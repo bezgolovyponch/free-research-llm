@@ -102,15 +102,61 @@ export function jsonLdOffers(html) {
   return out.filter((o) => o.price !== null);
 }
 
-const SYMBOL = { '€': 'EUR', '£': 'GBP', $: 'USD', '₺': 'TRY', '₫': 'VND' };
+const SYMBOL = { '€': 'EUR', '£': 'GBP', $: 'USD', '₺': 'TRY', '₫': 'VND', Kč: 'CZK', zł: 'PLN', TL: 'TRY' };
+const PRICE_KEY = /^price(?:summary)?(czk|eur|pln|try|vnd|usd|gbp)?$/i;
+const ID_DEPTH = 3;
+const EMBEDDED_JSON = /<script[^>]*(?:id="__NEXT_DATA__"|type="application\/json")[^>]*>([\s\S]*?)<\/script>/gi;
+
+export function listingId(url) {
+  const runs = String(url ?? '').replace(/[?#].*$/, '').match(/\d{6,}/g);
+  return runs ? runs.at(-1) : null;
+}
+
+export function embeddedListingPrices(html, url) {
+  const id = listingId(url);
+  if (!id) return [];
+  const out = [];
+  const near = (v, depth, test) => {
+    if (!v || typeof v !== 'object' || depth < 0) return false;
+    return Object.entries(v).some(([key, x]) => test(key, x) || near(x, depth - 1, test));
+  };
+  const isId = (_, x) => (typeof x === 'string' || typeof x === 'number') && String(x) === id;
+  const isPrice = (key) => PRICE_KEY.test(key);
+  const pricesNear = (v, depth, currency) => {
+    if (!v || typeof v !== 'object' || depth < 0) return;
+    const own = String(v.priceCurrency ?? v.currency ?? currency ?? '').toUpperCase();
+    for (const [key, x] of Object.entries(v)) {
+      const m = PRICE_KEY.exec(key);
+      const unit = m?.[1] ? m[1].toUpperCase() : own;
+      if (m && typeof x === 'number' && x > 0 && unit) out.push({ price: x, currency: unit });
+      else pricesNear(x, depth - 1, own);
+    }
+  };
+  const anchors = (v) => !Array.isArray(v) && near(v, ID_DEPTH, isId) && near(v, ID_DEPTH, isPrice);
+  const walk = (v) => {
+    if (!v || typeof v !== 'object') return;
+    const children = Object.values(v).filter((x) => x && typeof x === 'object');
+    if (anchors(v) && !children.some(anchors)) pricesNear(v, ID_DEPTH, '');
+    children.forEach(walk);
+  };
+  for (const m of String(html ?? '').matchAll(EMBEDDED_JSON)) {
+    try {
+      walk(JSON.parse(m[1].trim()));
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
 
 export function textPrices(text) {
   const out = [];
-  for (const m of String(text ?? '').matchAll(/(€|£|\$|₺|₫|EUR|TRY|TL|VND|GBP|USD)\s?(\d[\d.,\s ]{0,15}\d|\d)|(\d[\d.,\s ]{0,15}\d|\d)\s?(€|£|₺|₫|EUR|TRY|TL|VND|GBP|USD)/g)) {
+  for (const m of String(text ?? '').matchAll(/(€|£|\$|₺|₫|EUR|TRY|TL|VND|GBP|USD|CZK|PLN)\s?(\d[\d.,\s ]{0,15}\d|\d)|(\d[\d.,\s ]{0,15}\d|\d)\s?(€|£|₺|₫|EUR|TRY|TL|VND|GBP|USD|CZK|PLN|Kč|zł)/g)) {
     const raw = m[2] ?? m[3];
     const sym = m[1] ?? m[4];
     const price = numberOf(raw);
-    if (price !== null) out.push({ price, currency: SYMBOL[sym] ?? (sym === 'TL' ? 'TRY' : sym) });
+    if (price !== null) out.push({ price, currency: SYMBOL[sym] ?? sym });
   }
   return out;
 }
@@ -310,7 +356,7 @@ export class Verifier {
       checks.push({ check: 'listing online', status: 'unconfirmed', detail: String(error.message).slice(0, 80) });
     }
     const text = pageText(html);
-    const prices = [...jsonLdOffers(html), ...textPrices(text)].filter((p) => p.currency === String(row.currency || ob.currency).toUpperCase()).map((p) => p.price);
+    const prices = [...jsonLdOffers(html), ...embeddedListingPrices(html, row.url), ...textPrices(text)].filter((p) => p.currency === String(row.currency || ob.currency).toUpperCase()).map((p) => p.price);
     checks.push(compare('price on the page', row.price, prices, PRICE_TOLERANCE));
     const eur = row.price !== null && row.price !== undefined ? await this.toEur(row.price, String(row.currency || ob.currency).toUpperCase()).catch(() => null) : null;
     const minEur = await this.toEur(ob.priceMin, ob.currency).catch(() => null);
