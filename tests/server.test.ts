@@ -85,6 +85,18 @@ describe('HTTP server', () => {
     expect(res.body).toMatchObject({ source: [{ change: 'Portuguese rural parks need municipal plan approval', verdict: 'helps' }] });
   });
 
+  it('reports the meaning check and the nature of the results, and rechecks claims on request', { timeout: 90000 }, async () => {
+    const created = await call('POST', '/api/projects', { question: 'Which camp permit costs apply in Czechia?' });
+    const done = await waitFor(created.body.id, 'done');
+    expect(done.results.support).toMatchObject({ version: 2, stale: 0 });
+    expect(done.results.support.toConfirm).toBe(0);
+    expect(done.results.nature.lines[0]).toMatch(/^Fits are the current conclusion/);
+    const recheck = await call('POST', `/api/projects/${created.body.id}/recheck-support`, {});
+    expect(recheck.status).toBe(200);
+    expect(recheck.body).toMatchObject({ ok: true, message: expect.stringMatching(/^rechecked 0 piece\(s\)/) });
+    expect((await call('POST', '/api/projects/missing/recheck-support', {})).status).toBe(404);
+  });
+
   it('returns clean errors for bad input and unknown resources', async () => {
     expect((await call('POST', '/api/projects', { question: 'x' })).status).toBe(400);
     expect((await call('GET', '/api/projects/does-not-exist')).status).toBe(404);

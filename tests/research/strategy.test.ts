@@ -262,6 +262,9 @@ describe('decision model from the user words', () => {
     expect(row.plan.tier).toBe('unverified');
     expect(row.plan.verdict).toMatch(/^to confirm: €2\.50\/m² is a low outlier for buildable land in Portugal among the 6 listings found/);
     expect(out.kept.find((r: { url: string }) => r.url === 'r0').plan.tier).toBe('fits');
+    expect(row.plan.confirmRisk.text).toMatch(/^• €2\.50\/m² is a low outlier/);
+    expect(row.plan.confirmRisk.text.length).toBeLessThanOrEqual(200);
+    expect(out.kept.find((r: { url: string }) => r.url === 'r0').plan.confirmRisk).toBeUndefined();
   });
 
   it('ranks plots outside the asked countries by opportunity: site checks, real trend and its continuation, scenic places with few campsites', async () => {

@@ -195,9 +195,9 @@ export function usageInfo(rows, { now = Date.now(), windowMs = WINDOW_MS } = {})
 }
 
 export const PURPOSE_CLASS = {
-  synthesize: 'top', decompose: 'top', expand: 'top', code: 'top', 'code-plan': 'top', improve: 'top', suggest: 'top', 'decision-model': 'top',
+  synthesize: 'top', decompose: 'top', expand: 'top', code: 'top', 'code-plan': 'top', improve: 'top', suggest: 'top', 'decision-model': 'top', support: 'top',
   research: 'research',
-  critique: 'volume', rollup: 'volume', 'app-chat': 'volume', 'results-chat': 'volume', chat: 'volume', media: 'volume',
+  critique: 'volume', 'support-second': 'volume', rollup: 'volume', 'app-chat': 'volume', 'results-chat': 'volume', chat: 'volume', media: 'volume',
 };
 export const MAX_PROMPT_TOKENS = { groq: 7000 };
 const RESERVE_UNTIL = 0.7;

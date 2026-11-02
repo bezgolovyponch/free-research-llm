@@ -794,3 +794,68 @@ describe('external verifier from the engine', () => {
     expect(seen[0]).toMatchObject({ id: project.id, question: project.question, candidates: { kept: [{ url: 'https://imo.example/anuncio/fit-ID1' }] } });
   });
 });
+
+describe('meaning check of claims', () => {
+  const quote = 'Bell tents cost from €950';
+  const claimOf = () => ({ text: 'A building permit costs €950', quote, sourceIds: ['S1'], attributed: true });
+  const nodeOf = (sources: object[] = [{ id: 'S1', text: `${quote}. Delivery is extra.` }]) => ({ id: 'D1', method: 'lookup', sources });
+
+  function votingEngine(votes: Record<string, string>) {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    const calls: { purpose: string; tier: string; avoid?: string; quote: string }[] = [];
+    router.complete = (async (request: { purpose: string; tier: string; avoid?: string; messages: { content: string }[] }) => {
+      const asked = /QUOTE: (.*)/.exec(request.messages[1].content)?.[1] ?? '';
+      calls.push({ purpose: request.purpose, tier: request.tier, avoid: request.avoid, quote: asked });
+      const provider = request.purpose === 'support' ? 'gemini' : 'groq';
+      const key = `${request.purpose}|${asked.includes(quote) ? 'old' : 'new'}`;
+      return { data: { supports: votes[key] ?? 'yes', reason: 'quote is about bell tents' }, provider, model: `${provider}-m` };
+    }) as typeof router.complete;
+    return { engine, calls };
+  }
+
+  it('asks the most capable model, then a fast model of another provider, and records both votes', async () => {
+    const { engine, calls } = votingEngine({ 'support|old': 'yes', 'support-second|old': 'no' });
+    const finding = { claims: [claimOf(), { text: 'No number here', attributed: true }] };
+    const result = await engine.checkSupport({ id: 'p', nodes: [] }, nodeOf(), finding, 'cerebras');
+    expect(result).toEqual({ checked: 1, open: 1 });
+    expect(calls.slice(0, 2)).toEqual([
+      { purpose: 'support', tier: 'deep', avoid: 'cerebras', quote: `${quote}. Delivery is extra.` },
+      { purpose: 'support-second', tier: 'fast', avoid: 'gemini', quote: `${quote}. Delivery is extra.` },
+    ]);
+    const support = finding.claims[0].support;
+    expect(support.verdict).toBe('disagree');
+    expect(support.votes.map((v: { provider: string; vote: string }) => [v.provider, v.vote])).toEqual([['gemini', 'yes'], ['groq', 'no']]);
+    expect(support.cause).toContain('• The two checking models disagree');
+    expect(finding.claims[1]).not.toHaveProperty('support');
+  });
+
+  it('resolves a claim to confirm from another fetched sentence before flagging it', async () => {
+    const { engine, calls } = votingEngine({ 'support|old': 'no', 'support-second|old': 'no' });
+    const node = nodeOf([{ id: 'S1', text: `${quote}.` }, { id: 'S2', text: 'The building permit for a small camp costs €950 in most districts.' }]);
+    const finding = { claims: [claimOf()] };
+    await engine.checkSupport({ id: 'p', nodes: [] }, node, finding, 'cerebras');
+    expect(calls.map((c) => c.quote)).toEqual([`${quote}.`, `${quote}.`, 'The building permit for a small camp costs €950 in most districts.', 'The building permit for a small camp costs €950 in most districts.']);
+    expect(finding.claims[0]).toMatchObject({ quote: 'The building permit for a small camp costs €950 in most districts.', sourceIds: ['S2'], support: { verdict: 'supported', resolvedFrom: 'S2' } });
+  });
+
+  it('leaves a claim unchecked when no model answers', async () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    router.complete = (async () => { throw new Error('every provider failed'); }) as typeof router.complete;
+    const finding = { claims: [claimOf()] };
+    await engine.checkSupport({ id: 'p', nodes: [] }, nodeOf(), finding, 'cerebras');
+    expect(finding.claims[0].support).toMatchObject({ verdict: 'unchecked', votes: [] });
+  });
+
+  it('rechecks claims graded under older logic on request and saves the audit', async () => {
+    const { engine } = votingEngine({ 'support|old': 'yes', 'support-second|old': 'yes' });
+    const project = await engine.createProject({ question: 'What does a camp permit cost in Czechia?' });
+    const finding = { answer: 'A permit costs €950.', claims: [{ text: 'A permit costs €950', quote: 'The permit costs €950 for a camp', sourceIds: ['S1'], attributed: true }] };
+    project.nodes = [{ id: 'D1', parentId: 'Q', title: 'Permit', question: 'Permit cost?', method: 'lookup', dependsOn: [], status: 'supported', finding, sources: [{ id: 'S1', text: 'The permit costs €950 for a camp.' }], verification: { grade: 'supported', score: 100, checks: [], failures: [] }, model: 'gemini/m' }];
+    await engine.store.save(project);
+    const result = await engine.recheckSupport(project.id);
+    expect(result).toMatchObject({ ok: true, message: 'rechecked 1 piece(s), 1 claim(s): 0 to confirm' });
+    const saved = await engine.load(project.id);
+    expect(saved.nodes[0].finding.claims[0].support.verdict).toBe('supported');
+    expect(saved.supportAudit).toMatchObject({ checked: 1, supported: 1, stale: 0 });
+  });
+});

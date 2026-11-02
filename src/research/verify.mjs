@@ -1,6 +1,7 @@
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { attributeClaims, attributionSummary, ungroundedNumbers } from './attribution.mjs';
 import { evaluate, sameNumber, toNumber } from './calc.mjs';
+import { toConfirm } from './support.mjs';
 
 export const GRADES = ['verified', 'supported', 'weak', 'unsupported'];
 
@@ -141,6 +142,14 @@ function checkConfidence(finding, sources) {
   );
 }
 
+function checkMeaning(finding) {
+  const checked = (finding?.claims ?? []).filter((c) => c.support);
+  if (!checked.length) return null;
+  const open = checked.filter((c) => toConfirm(c.support));
+  const result = check('meaning', 'Each claim that affects the result means what its quote says (two models agree, code enforces)', open.length === 0, open.length ? `${open.length} claim(s) to confirm: ${open.map((c) => `"${String(c.text).slice(0, 60)}"`).join('; ').slice(0, 240)}` : `${checked.length} claim(s) meaning-checked`);
+  return { ...result, advisory: true };
+}
+
 function checkCritique(critique) {
   if (!critique) return null;
   const major = critique.severity === 'major' && !critique.agree;
@@ -162,18 +171,37 @@ export function verifyFinding({ finding: raw, sources = [], critique = null, nod
     checkItemLinks(finding, sources),
     checkConfidence(finding, sources),
     checkCritique(critique),
+    checkMeaning(finding),
   ].filter(Boolean);
   const criticalFail = checks.some((c) => c.critical && !c.passed);
-  const anyFail = checks.some((c) => !c.passed);
+  const anyFail = checks.some((c) => !c.passed && !c.advisory);
+  const meaningOpen = checks.some((c) => c.advisory && !c.passed);
   const cited = new Set((finding?.claims ?? []).flatMap((c) => c.sourceIds ?? []));
   const webDomains = new Set(sources.filter((s) => cited.has(s.id) && s.url).map((s) => s.domain || domainOf(s.url)));
   let grade;
   if (criticalFail) grade = 'unsupported';
   else if (anyFail) grade = 'weak';
-  else if (webDomains.size >= 2 || (cited.size >= 1 && sources.some((s) => cited.has(s.id) && s.kind === 'data'))) grade = 'verified';
+  else if (verifiedWithoutMeaning(webDomains, cited, sources)) grade = meaningOpen ? 'supported' : 'verified';
   else grade = 'supported';
   const passed = checks.filter((c) => c.passed).length;
-  return { grade, score: Math.round((100 * passed) / checks.length), checks, failures: checks.filter((c) => !c.passed).map((c) => c.detail) };
+  return { grade, score: Math.round((100 * passed) / checks.length), checks, failures: checks.filter((c) => !c.passed).map((c) => c.detail), ...(meaningOpen && grade === 'supported' && verifiedWithoutMeaning(webDomains, cited, sources) ? { meaningCapped: true } : {}) };
+}
+
+function verifiedWithoutMeaning(webDomains, cited, sources) {
+  return webDomains.size >= 2 || (cited.size >= 1 && sources.some((s) => cited.has(s.id) && s.kind === 'data'));
+}
+
+export function withMeaning(verification, finding) {
+  if (!verification) return verification;
+  const meaning = checkMeaning(finding);
+  const others = (verification.checks ?? []).filter((c) => c.id !== 'meaning');
+  const checks = meaning ? [...others, meaning] : others;
+  const base = verification.meaningCapped ? 'verified' : verification.grade;
+  const open = Boolean(meaning && !meaning.passed);
+  const grade = base === 'verified' && open ? 'supported' : base;
+  const passed = checks.filter((c) => c.passed).length;
+  const { meaningCapped, ...rest } = verification;
+  return { ...rest, grade, score: checks.length ? Math.round((100 * passed) / checks.length) : verification.score, checks, failures: checks.filter((c) => !c.passed).map((c) => c.detail), ...(open && base === 'verified' ? { meaningCapped: true } : {}) };
 }
 
 export function needsEscalation(verification) {

@@ -13,7 +13,7 @@ export const TIER_TIMEOUT_MS = { fast: 45000, deep: 90000 };
 export function tierTimeoutMs(tier) {
   return TIER_TIMEOUT_MS[tier];
 }
-export const EXPECTED_OUTPUT_TOKENS = { synthesize: 1500, decompose: 1500, research: 800, improve: 500, suggest: 600, critique: 300, rollup: 400, 'decision-model': 700 };
+export const EXPECTED_OUTPUT_TOKENS = { synthesize: 1500, decompose: 1500, research: 800, improve: 500, suggest: 600, critique: 300, support: 150, 'support-second': 150, rollup: 400, 'decision-model': 700 };
 export const LOCAL_BUDGET_S = { synthesize: 300, decompose: 300 };
 export const LOCAL_DEFAULT_BUDGET_S = 100;
 export const TIMEOUTS_BEFORE_BENCH = 2;

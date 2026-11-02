@@ -77,6 +77,7 @@ const RESPONDERS = {
   },
   [TASK_MARKERS.research]: research,
   [TASK_MARKERS.critique]: () => ({ agree: true, severity: 'none', issues: [], betterAnswer: '' }),
+  [TASK_MARKERS.support]: () => ({ supports: 'yes', reason: '' }),
   [TASK_MARKERS.rollup]: rollup,
   [TASK_MARKERS.chat]: (prompt) => {
     const wantsRerun = /USER(?: REQUEST[^:]*)?: .*(re-?research|again)/i.test(prompt);

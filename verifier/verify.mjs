@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COAST_MARGIN_KM, Coastline } from './coast.mjs';
+import { claimsToCheck, judgeClaim } from './claims.mjs';
 
 export const PRICE_TOLERANCE = 0.02;
 export const AREA_TOLERANCE = 0.05;
@@ -398,6 +399,28 @@ export class Verifier {
     return { url: row.url, verdict: refuted.length ? 'refuted' : unconfirmed.length ? 'unconfirmed' : 'confirmed', checks };
   }
 
+  async verifyClaims(project) {
+    const pages = new Map();
+    const out = [];
+    for (const item of claimsToCheck(project)) {
+      const pageTexts = [];
+      for (const url of item.urls) {
+        if (!pages.has(url)) {
+          try {
+            const res = await this.get(url);
+            pages.set(url, res.ok ? pageText(await res.text()) : '');
+          } catch {
+            pages.set(url, '');
+          }
+        }
+        if (pages.get(url)) pageTexts.push(pages.get(url));
+      }
+      const { status, detail } = judgeClaim(item, pageTexts);
+      out.push({ nodeId: item.nodeId, text: item.text.slice(0, 160), status, detail });
+    }
+    return out;
+  }
+
   async verify(project, { onRow = async () => {} } = {}) {
     const ob = obligationsOf(project);
     const rows = (project.candidates?.kept ?? []).filter((r) => Object.hasOwn(CHECK_ORDER, r.plan?.tier ?? '')).sort((a, b) => CHECK_ORDER[a.plan.tier] - CHECK_ORDER[b.plan.tier]);
@@ -427,10 +450,13 @@ export async function main(argv = process.argv.slice(2)) {
   const out = path.join(dataDir, 'verification');
   await fs.mkdir(out, { recursive: true });
   const save = (record) => fs.writeFile(path.join(out, `${id}.json`), JSON.stringify(record, null, 1));
-  const record = await new Verifier({ cacheDir: out }).verify(project, { onRow: save });
+  const verifier = new Verifier({ cacheDir: out });
+  const record = await verifier.verify(project, { onRow: save });
+  record.claims = await verifier.verifyClaims(project);
   await save(record);
   await fs.appendFile(path.join(out, `${id}.jsonl`), `${JSON.stringify({ at: record.at, inputs: record.inputs, confirmed: record.confirmed.length, checked: record.results.length })}\n`);
   console.log(`verified ${record.results.length} row(s): ${record.confirmed.length} confirmed, ${record.results.filter((r) => r.verdict === 'refuted').length} refuted, ${record.results.filter((r) => r.verdict === 'unconfirmed').length} unconfirmed`);
+  console.log(`checked ${record.claims.length} claim(s): ${record.claims.filter((c) => c.status === 'confirmed').length} confirmed, ${record.claims.filter((c) => c.status === 'refuted').length} refuted, ${record.claims.filter((c) => c.status === 'unconfirmed').length} unconfirmed`);
   return 0;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { needsEscalation, verifyFinding } from '../../src/research/verify.mjs';
+import { needsEscalation, verifyFinding, withMeaning } from '../../src/research/verify.mjs';
 
 const sources = [
   { id: 'S1', url: 'https://a.example/x', domain: 'a.example', text: 'In Germany the average price of this car is 18,000 EUR for a 2019 model.' },
@@ -147,5 +147,41 @@ describe('listing delivery check', () => {
     expect(empty.grade).not.toMatch(/verified|supported/);
     const full = verifyFinding({ finding: { answer: 'One parcel at 18,000 EUR.', claims: [{ text: 'parcel 18,000 EUR', sourceIds: ['S1', 'S2'] }], confidence: 'medium', items: [{ url: 'https://a.example/ilan/1', value: 18000 }] }, sources, node });
     expect(full.checks.find((c: { id: string }) => c.id === 'delivers')).toMatchObject({ passed: true });
+  });
+});
+
+describe('meaning check', () => {
+  const agree = { agree: true, severity: 'none', issues: [] };
+  const support = (verdict: string) => ({ version: 2, verdict, votes: [], missing: [], cause: verdict === 'supported' ? '' : '• The two checking models disagree' });
+  const withSupport = (first: string, second: string) => ({ ...good, claims: [{ ...good.claims[0], support: support(first) }, { ...good.claims[1], support: support(second) }, good.claims[2]] });
+
+  it('keeps a finding verified when both checking models back every quote', () => {
+    const v = verifyFinding({ finding: withSupport('supported', 'supported'), sources, critique: agree });
+    expect(v.grade).toBe('verified');
+    expect(v.checks.find((c) => c.id === 'meaning')).toMatchObject({ passed: true, advisory: true });
+  });
+
+  it('caps a finding with a claim to confirm at supported, not weak', () => {
+    const v = verifyFinding({ finding: withSupport('supported', 'disagree'), sources, critique: agree });
+    expect(v.grade).toBe('supported');
+    expect(v.meaningCapped).toBe(true);
+    expect(v.checks.find((c) => c.id === 'meaning')?.detail).toMatch(/1 claim\(s\) to confirm: "PL price/);
+    expect(needsEscalation(v)).toBe(false);
+  });
+
+  it('adds no meaning check before claims were checked', () => {
+    expect(verifyFinding({ finding: good, sources, critique: agree }).checks.some((c) => c.id === 'meaning')).toBe(false);
+  });
+
+  it('re-applies only the meaning check on recheck, without re-reading sources', () => {
+    const before = verifyFinding({ finding: good, sources, critique: agree });
+    const capped = withMeaning(before, withSupport('unsupported', 'supported'));
+    expect(capped).toMatchObject({ grade: 'supported', meaningCapped: true });
+    const cleared = withMeaning(capped, withSupport('supported', 'supported'));
+    expect(cleared.grade).toBe('verified');
+    expect(cleared.meaningCapped).toBeUndefined();
+    expect(cleared.checks.filter((c) => c.id === 'meaning')).toHaveLength(1);
+    const weak = { ...before, grade: 'weak' };
+    expect(withMeaning(weak, withSupport('supported', 'supported')).grade).toBe('weak');
   });
 });

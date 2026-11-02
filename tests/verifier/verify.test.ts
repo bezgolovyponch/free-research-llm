@@ -191,6 +191,32 @@ describe('external verifier: fail-closed verdicts', () => {
 
 });
 
+describe('external verifier: research claims', () => {
+  it('checks each claim against the page it cites, fetching a repeated source only once', async () => {
+    const urls: string[] = [];
+    const verifier = new Verifier({ fetchImpl: (async (url: string) => {
+      urls.push(url);
+      return new Response('<html><p>Fees: The building permit costs €950 for small sites.</p></html>', { status: 200 });
+    }) as never, sleep: async () => {}, now: () => 0 });
+    const project = {
+      nodes: [{
+        id: 'n1',
+        method: 'desk research',
+        sources: [{ id: 'S1', url: 'https://www.mzcr.cz/x', title: 'Ministry' }],
+        finding: { claims: [
+          { text: 'A building permit costs €950', quote: 'The building permit costs €950 for small sites', sourceIds: ['S1'] },
+          { text: 'A building permit costs €950 again', quote: 'The building permit costs €950 for small sites', sourceIds: ['S1'] },
+        ] },
+      }],
+    };
+    expect(await verifier.verifyClaims(project)).toEqual([
+      { nodeId: 'n1', text: 'A building permit costs €950', status: 'confirmed', detail: 'quote, numbers and key terms found' },
+      { nodeId: 'n1', text: 'A building permit costs €950 again', status: 'confirmed', detail: 'quote, numbers and key terms found' },
+    ]);
+    expect(urls).toEqual(['https://www.mzcr.cz/x']);
+  });
+});
+
 describe('external verifier: each map point is looked up in OpenStreetMap once and stored for later runs', () => {
   it('reuses a stored country for points within about 100 m and never stores an empty answer', async () => {
     const fsp = await import('node:fs/promises');
