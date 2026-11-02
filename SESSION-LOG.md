@@ -3,6 +3,18 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-11-02 (night) — Notifications tab, concept audit, router failure bench
+
+- Asked: result alerts in a separate Notifications tab with an unchecked sign, not at the top of Results; after all changes are deployed, a full audit from the engine's fundamentals to its details that verifies the concept as a whole and goes through the mistakes that happened or might, stored as a mandatory part of the regular audit.
+- **#89:** Notifications tab; the lease alert and the claim-checking alert moved there; each alert has a per-viewer "checked" tick; the tab shows ☐ N unchecked; a changed alert becomes unchecked again. Results keeps "What these results are".
+- **#90:** `src/research/conceptaudit.mjs`, 14 read-only checks C1–C14 on stored data (counted plots, fits, ownership, regions, price limit, outside-check freshness and agreement, loop outages, claim logic, strategy sources, memo contradictions, asked countries, empty table); `node scripts/concept-audit.mjs --all`; a Concept audit notification per research. `AUDIT-PROTOCOL.md` Part 4 lists the known failure modes by layer (concept, evidence, outside verifier, loop and routing, change process), each with how it is caught; S9 and O13 make the audit mandatory at the start of a task and after deploy.
+- **Found by the audit and fixed in #90:** the kept count included confirmed trade-offs and to-confirm rows (eb501e showed 103, 66 fit and are confirmed; b7772e 354 vs 323). The stored tables correct themselves when the outside-check record is next applied.
+- **Found by the audit, fixed in #91:** 16 of the last 30 b7772e loop trials were provider outages; in the last 3,000 app model calls sambanova had 428 calls with 0 successes (every model "high demand"), pollinations 260 × HTTP 402, llamacpp 133 timeouts. Only the failing model rested 10 minutes, so an overloaded provider never rested. Now a provider rests 30 minutes after 12 failed calls in a row, doubling to at most 6 hours; a success resets it.
+- **Audit parity fix (#92):** the command-line audit counted all quoted claims as stale (92 and 102); it now computes the claim summary like the app (34 and 31).
+- **Process mistake:** #88 was merged before CI had started ("no checks reported"); CI then passed on Node 22 and 24. Merges now wait until both checks exist and are SUCCESS; recorded as E1 in Part 4.
+- **Other audit warnings left for the user:** 34 and 31 claims checked under older logic (Recheck button in Notifications); quotes no longer found on es-glamping and vn-str source pages; the memos of eb501e (3) and b7772e (5) contradict the verified record (Rewrite memo); no Vietnam plot in b7772e.
+- 50 of 52 stored researches have no finding.
+
 ## Session 2026-11-02 (late) — lease alert, local model off, PR checks, results layout
 
 - Asked: a special alert in the results for Vietnam plots that can be leased, if any, under the particular rules, fitting the request and eligible for a feasible proposal, stored as a universal rule in the engine; the loop as a tab; tabs higher and to the right edge; a collapsible right panel for chosen pieces and objects; the results to fill the screen; the local model turned off because it does not work; every PR and release verified, value confirmed and checked by the lead before merge.
