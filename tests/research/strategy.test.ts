@@ -31,7 +31,10 @@ describe('low-entry glamping strategy', () => {
     const cost = entryCost(nazare, GLAMPING_LOW_ENTRY.countries.PT, 24, rules, toEur);
     expect(cost).toMatchObject({ price: 20000, tax: 1160, tents: 2625, units: 3, total: 23785 });
     expect(entryCost({ ...nazare, title: 'Terreno urbano' }, GLAMPING_LOW_ENTRY.countries.PT, 24, rules, toEur)?.tax).toBe(1460);
-    expect(entryCost(nazare, GLAMPING_LOW_ENTRY.countries.VN, 24, rules, toEur)).toBeNull();
+    const vnCost = entryCost({ ...nazare, countryCode: 'VN', country: 'Vietnam' }, GLAMPING_LOW_ENTRY.countries.VN, 24, rules, toEur);
+    expect(vnCost).not.toBeNull();
+    expect(vnCost?.tax).toBe(400);
+    expect(vnCost?.total).toBe(23025);
   });
 
   it('says why a plot fits when every criterion is measured and met', () => {
@@ -73,8 +76,19 @@ describe('low-entry glamping strategy', () => {
     expect(plan.potential).toContain('sea 0.3 km: a strong short-season location');
   });
 
-  it('blocks Vietnam for a foreign buyer and industrial sites by the 1,000 m rule', () => {
-    expect(planFor({ ...nazare, countryCode: 'VN', country: 'Vietnam' }, GLAMPING_LOW_ENTRY).verdict).toMatch(/^blocked: a foreign individual cannot hold land/);
+  it('gives Vietnam a lease/BCC path for a foreign investor (not blocked)', () => {
+    const vnPlan = planFor({ ...nazare, countryCode: 'VN', country: 'Vietnam' }, GLAMPING_LOW_ENTRY, { convert: toEur });
+    expect(vnPlan.verdict).not.toMatch(/^blocked:/);
+    expect(vnPlan.path).toContain('lease');
+    expect(vnPlan.path).toContain('BCC');
+    expect(vnPlan.group).toBe('lease');
+    expect(vnPlan.cashFlow).toBeDefined();
+    expect(vnPlan.cashFlow?.nights).toBeGreaterThan(0);
+    expect(vnPlan.cashFlow?.revenue).toBeGreaterThan(0);
+    expect(vnPlan.cashFlow?.operating).toBeGreaterThan(0);
+    expect(vnPlan.cashFlow?.landRent).toBeGreaterThan(0);
+    expect(vnPlan.entry?.tax).toBe(400);
+    expect(vnPlan.entry?.total).toBe(23025);
     expect(planFor({ ...nazare, title: 'Terreno Rústico em Zona Industrial' }, GLAMPING_LOW_ENTRY).tier).toBe('blocked');
   });
 
@@ -94,6 +108,16 @@ describe('low-entry glamping strategy', () => {
     expect(plan.risks.join(' ')).toContain('vynětí ze ZPF');
     expect(plan.risks.join(' ')).toContain('reciprocal restrictions');
     expect(planFor({ ...meadow, title: 'Prodej stavebního pozemku 934 m²' }, GLAMPING_LOW_ENTRY, { convert: toEur }).risks.join(' ')).not.toContain('vynětí ze ZPF');
+  });
+
+  it('calculates units for Czech plots using Portugal density as a labelled assumption', () => {
+    const meadow = { ...nazare, countryCode: 'CZ', country: 'Czechia', title: 'Prodej louky 5 200 m²', value: 600000, area: 5200, site: site(20, { climate: climate(12, 24) }) };
+    const plan = planFor(meadow, GLAMPING_LOW_ENTRY, { convert: toEur });
+    expect(plan.units).toBe(30);
+    const unitsCheck = plan.checks.find((c) => c.id === 'units');
+    expect(unitsCheck?.ok).toBe(true);
+    expect(unitsCheck?.detail).toContain('assumption: Portugal density');
+    expect(plan.why.join(' ')).toContain('assumption: Portugal density');
   });
 
   it('flags a Turkish shared title and the foreign-buyer project duty', () => {
@@ -118,9 +142,9 @@ describe('low-entry glamping strategy', () => {
     const far = { ...nazare, url: 'f', site: site(40) };
     const table = { sites: { euHpi: 5.5 }, found: 3, kept: [{ ...nazare, url: 'a' }, { ...nazare, url: 'b', countryCode: 'VN' }], far: [far], farReason: 'farther than 25 km from the sea', screened: { 'farther than 25 km from the sea': 1, 'price outside': 4 }, screenedCount: 5, examples: [{ url: 'f', reasons: [] }] };
     const out = applyStrategy(table, GLAMPING_LOW_ENTRY, { convert: toEur, retrieved: { at: '2026-10-26T09:00:00Z', 'pt-park': { status: 200, confirmed: 3, quotes: 3 } } });
-    expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['a', 'f', 'b']);
-    expect(out.tiers).toEqual({ fits: 1, 'trade-off': 1, unverified: 0, weak: 0, blocked: 1 });
-    expect(out.keptCount).toBe(1);
+    expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['b', 'a', 'f']);
+    expect(out.tiers).toEqual({ fits: 2, 'trade-off': 1, unverified: 0, weak: 0, blocked: 0 });
+    expect(out.keptCount).toBe(2);
     expect(out.screened).toEqual({ 'price outside': 4 });
     expect(out.screenedCount).toBe(4);
     expect(out.examples).toEqual([]);

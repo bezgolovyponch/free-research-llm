@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coordsOf, extractListings, pagePlace, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate } from '../../src/search/listings.mjs';
+import { coordsOf, detailPageCoords, extractListings, pagePlace, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate } from '../../src/search/listings.mjs';
 
 const BASE = 'https://portal.example/land-for-sale';
 const CZ_BASE = 'https://www.sreality.cz/hledani/prodej/pozemky';
@@ -164,5 +164,36 @@ describe('listing extraction', () => {
     const items = fromJsonLd(html, CZ_BASE);
     expect(items.length).toBe(1);
     expect(items[0].title).toBe('Prodej pozemku 500 m²');
+  });
+});
+
+describe('detailPageCoords extracts coordinates from detail page HTML', () => {
+  it('extracts from sreality.cz __NEXT_DATA__', () => {
+    const html = `<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"listing":{"gps":{"lat":50.08,"lon":14.42}}}}}</script>`;
+    expect(detailPageCoords(html, 'https://www.sreality.cz/detail/prodej/pozemek/123')).toEqual({ lat: 50.08, lon: 14.42 });
+  });
+
+  it('extracts from bezrealitky.cz JSON-LD Place', () => {
+    const html = `<script type="application/ld+json">{"@type":"Place","geo":{"@type":"GeoCoordinates","latitude":"50.5","longitude":"15.8"}}</script>`;
+    expect(detailPageCoords(html, 'https://www.bezrealitky.cz/inzerat/123')).toEqual({ lat: 50.5, lon: 15.8 });
+  });
+
+  it('extracts from bezrealitky.cz data-lat/data-lon', () => {
+    const html = `<div data-lat="49.8" data-lon="15.2"></div>`;
+    expect(detailPageCoords(html, 'https://www.bezrealitky.cz/inzerat/123')).toEqual({ lat: 49.8, lon: 15.2 });
+  });
+
+  it('extracts from reality.bazos.cz JSON-LD Place', () => {
+    const html = `<script type="application/ld+json">{"@type":"Place","geo":{"@type":"GeoCoordinates","latitude":"49.1","longitude":"16.4"}}</script>`;
+    expect(detailPageCoords(html, 'https://reality.bazos.cz/inzerat/123')).toEqual({ lat: 49.1, lon: 16.4 });
+  });
+
+  it('returns null for unknown portal', () => {
+    expect(detailPageCoords('<div>no coords</div>', 'https://unknown.example/123')).toBeNull();
+  });
+
+  it('returns null for empty HTML', () => {
+    expect(detailPageCoords('', 'https://www.sreality.cz/detail/123')).toBeNull();
+    expect(detailPageCoords(null, 'https://www.sreality.cz/detail/123')).toBeNull();
   });
 });

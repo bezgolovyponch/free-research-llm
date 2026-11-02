@@ -458,6 +458,30 @@ describe('SiteAssessor', () => {
     await assessor.geocode('B, Croatia');
     expect(waits).toEqual([1100]);
   });
+
+  it('fetches at most 20 detail pages for coordinates per pass', async () => {
+    const net = fakeNet({ geocode: {} });
+    const assessor = new SiteAssessor({ fetchJson: net.fetchJson, sleep: noSleep });
+    const baseRow = { title: 'Test plot', value: 10000, area: 1000, country: 'Czech Republic', countryCode: 'CZ', coast: false };
+    const testRows = Array.from({ length: 25 }, (_, i) => ({
+      ...baseRow,
+      url: `https://www.sreality.cz/detail/prodej/pozemek/zahrada/obora/${i}`,
+      place: '',
+      lat: null,
+      lon: null,
+    }));
+    for (let i = 20; i < 25; i++) {
+      assessor.store.points[testRows[i].url] = { at: Date.now(), point: { lat: 50 + i * 0.01, lon: 14 + i * 0.01, by: 'detail page' } };
+    }
+    let fetches = 0;
+    const readPage = async () => {
+      fetches++;
+      return { text: `<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"listing":{"gps":{"lat":50.08,"lon":14.42}}}}}</script>`, coords: null };
+    };
+    const out = await assessor.apply({ ...table, kept: testRows, keptCount: testRows.length }, { coastal: false }, { readPage });
+    expect(fetches).toBe(20);
+    expect(out.sites.located).toBe(25);
+  });
 });
 
 describe('title and map agree', () => {

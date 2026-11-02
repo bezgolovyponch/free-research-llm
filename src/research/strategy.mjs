@@ -27,7 +27,7 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'cz-foreign', title: 'ARROWS: restrictions on purchases of agricultural land by foreigners (2024, updated 2026)', url: 'https://arws.cz/en/news-at-arrows/newsletter-not-only-for-brokers-restrictions-on-purchases-of-agricultural-land-by-foreigners-how-to-proceed-with-the-purchase-of-agricultural-land-by-foreigners-eviction-of-a-tenant-without-a-court-with-notarial-deed-it-is-possible-again', quotes: ['Find out whether the buyer is from a third country (outside the EU, Switzerland) which restricts the purchase of land by foreigners'] },
     { id: 'cz-camping-law', title: 'Seznam Zprávy: Je karavan auto, nebo stavba? České kempy budou konečně vědět (2024)', url: 'https://www.seznamzpravy.cz/clanek/ekonomika-byznys-trendy-analyzy-je-karavan-auto-nebo-stavba-ceske-kempy-budou-konecne-vedet-233801', quotes: ['Od 1. 7. 2024 by se mělo mobilní ubytování do 55 metrů čtverečních přesunout do nové zelené kategorie drobných staveb, kde není potřeba povolení stavebního úřadu', 'Úřady mohou podle stávajícího znění stavebního zákona karavany a obytné vozy, které jsou na místě déle než 30 dnů, považovat za stavbu', 'Bude nicméně nutné, aby stály v místech, která mají v regulačním plánu a územním plánu obce využití k hromadné rekreaci'] },
     { id: 'cz-akkcr', title: 'AKKCR: Stellplatzy v ČR - jaká jsou úskalí jejich výstavby?', url: 'https://akkcr.cz/nove-stellplatzy-v-cr-jaka-jsou-uskali-jejich-vystavby/', quotes: ['stavební úřad se ihned na stellplatz začne dívat jako na ubytovací zařízení – veřejné tábořiště či autokemp', 'hygiena zná jen staré osvědčené názvy, a tak nám nebyla schopna říci, co bude při kolaudaci chtít', 'zjištění informace, zda místo, kde jej chcete vybudovat, má ve svém územním plánu takovéto schválení'] },
-    { id: 'cz-justice', title: 'Česká Justice: Jaké právní požadavky musíte splnit pro otevření kempu? (2025)', url: 'https://www.ceska-justice.cz/2025/08/jake-pravni-pozadavky-musite-splnit-pro-otevreni-kempu/', quotes: ['Mnohé parcely jsou vedeny jako zemědělská půda nebo plochy bez možnosti zástavby a jejich využití pro kempování by vyžadovalo změnu v územním plánu', 'Hygienické standardy hrají klíčovou Rolle, zejména pokud má kemp oficiální kapacitu více než několik jednotek', 'Krajská hygienická stanice vyžaduje zajištění dostatečného počtu sprch, toalet, umyvadel a přístup k pitné vodě', 'Článek neuvádí konkrétní minimální velikosti parciel, přesné rozměry stanových míst, ani pravidla pro dočasné stavby bez základu'] },
+    { id: 'cz-justice', title: 'Česká Justice: Jaké právní požadavky musíte splnit pro otevření kempu? (2025)', url: 'https://www.ceska-justice.cz/2025/08/jake-pravni-pozadavky-musite-splnit-pro-otevreni-kempu/', quotes: ['Mnohé parcely jsou vedeny jako zemědělská půda nebo plochy bez možnosti zástavby a jejich využití pro kempování by vyžadovalo změnu v územním plánu', 'Hygienické standardy hrají klíčovou roli, zejména pokud má kemp oficiální kapacitu více než několik jednotek', 'Krajská hygienická stanice vyžaduje zajištění dostatečného počtu sprch, toalet, umyvadel a přístup k pitné vodě'] },
     { id: 'vn-land', title: 'IFLR: Vietnam legal framework on foreign real estate ownership (2026)', url: 'https://www.iflr.com/article/2gi4ti8i1tgysiu7sddz4/sponsored/an-overview-of-vietnams-legal-framework-on-foreign-real-estate-ownership', quotes: ['direct private ownership of land is not permitted', 'may only buy directly from authorised developers'] },
     { id: 'tent', title: 'Boutique Camping: 5m Bell Tent Pro (shop data, GBP)', url: 'https://boutiquecamping.com/products/bell-tent-pro-5m.json', quotes: ['"price":"729.00"', '"price_currency":"GBP"'] },
     { id: 'units', title: 'TouchStay: glamping startup costs example (three units)', url: 'https://touchstay.com/blog/unlocking-glamping-profits', quotes: ['a glamping site with three luxury yurts'] },
@@ -94,8 +94,13 @@ export const GLAMPING_LOW_ENTRY = {
       rules: { pitchM2: null, campingShare: null, ruralMaxM2: null, ruralMaxUnits: null, tempStructureM2: { value: 55, source: 'cz-camping-law' }, caravanDays: { value: 30, source: 'cz-camping-law' } },
     },
     VN: {
-      blocker: 'a foreign individual cannot hold land in Vietnam (land stays with the state; foreigners buy only from authorised developers); fits only a Vietnamese national',
+      path: 'Foreign investor: 50-year lease of state land + BCC (Business Cooperation Contract) with a Vietnamese partner; land stays with the state; lease registered with DONRE; BCC governs revenue share',
+      tax: { agricultural: 0.02, buildable: 0.02, 'not stated': 0.02 },
+      taxLabel: 'registration fee 2% of land value paid to DONRE',
       sources: ['vn-land'],
+      risks: ['the lease term is 50 years, extendable once; the BCC partner must be a Vietnamese entity with tourism or real estate scope; annual land rental to the state is separate from the 2% registration fee', 'the BCC must be approved by the provincial People\'s Committee; revenue share and exit terms are contractual, not statutory', 'no national pitch size, land share or max unit limits exist; rules are set by the provincial Department of Natural Resources and Environment (DONRE)'],
+      agriculturalRisk: 'agricultural land: conversion to non-agricultural use requires DONRE approval and a fee; unpermitted use is fined and the land can be recovered',
+      rules: { pitchM2: null, campingShare: null, ruralMaxM2: null, ruralMaxUnits: null },
     },
   },
 };
@@ -200,6 +205,22 @@ export function entryCost(row, country, units, rules, convert) {
   return { price: row.value, tax, taxLabel: country.taxLabel, tents, units: rules.minUnits.value, total: row.value + tax + (tents ?? 0), excludes: 'permits, platforms, water, power and furniture' };
 }
 
+const LEASE_PATH_GROUP = 'lease';
+const SETUP_COST_EUR = 5000;
+const NIGHTLY_RATE_EUR = 60;
+const OCCUPANCY = 0.45;
+const CAMPING_MONTHS_VN = 10;
+
+function cashFlow1Year(row, country, cost, units) {
+  if (row.countryCode !== 'VN' || !cost) return null;
+  const nights = CAMPING_MONTHS_VN * 30 * OCCUPANCY;
+  const revenue = nights * NIGHTLY_RATE_EUR * units;
+  const operating = revenue * 0.35;
+  const landRent = Math.round(row.value * 0.03);
+  const net = revenue - operating - landRent;
+  return { nights: Math.round(nights), revenue: Math.round(revenue), operating: Math.round(operating), landRent, net: Math.round(net) };
+}
+
 function check(id, label, ok, detail) {
   return { id, label, ok, detail };
 }
@@ -235,11 +256,12 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const ebike = rules.ebikeKm.value;
   const pitchM2 = countryRules?.pitchM2?.value ?? rules.pitchM2?.value;
   const campingShare = countryRules?.campingShare?.value ?? rules.campingShare?.value;
+  const usingFallback = countryRules && (countryRules.pitchM2 === null || countryRules.campingShare === null || countryRules.ruralMaxM2 === null || countryRules.ruralMaxUnits === null);
   const allChecks = [
     seaCheck(site, ebike),
     check('season', `${rules.minWorkableMonths.value}+ camping months (Camping Climate Index above 3: acceptable or better, Ma 2021 Table 4)`, climate?.cci ? climate.workable >= rules.minWorkableMonths.value : null, climate?.cci ? `${climate.workable} camping months (index above 3), ${climate.good ?? '?'} good (≥ 5), ${climate.comfortable} optimal (≥ 7), ${climate.cci.optimalDays} optimal days a year` : 'climate not measured with the Camping Climate Index yet'),
     check('noAc', 'no air conditioning needed', climate?.cci ? climate.hottest <= rules.maxHottest.value : null, climate?.cci ? `hottest month average high ${climate.hottest} °C (limit ${rules.maxHottest.value} °C); ${climate.cci.hotDays} day(s) a year above 34 °C` : 'climate not measured with the Camping Climate Index yet'),
-    check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 && pitchM2 && campingShare ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${pitchM2} m² each on ${(campingShare * 100).toFixed(0)}% of the land` : m2 ? `${Math.round(m2).toLocaleString('en-US')} m² (no national pitch size/land share limits for ${row.countryCode})` : 'area not shown'),
+    check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 && pitchM2 && campingShare ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${pitchM2} m² each on ${(campingShare * 100).toFixed(0)}% of the land${usingFallback ? ' (assumption: Portugal density)' : ''}` : m2 ? `${Math.round(m2).toLocaleString('en-US')} m² (no national pitch size/land share limits for ${row.countryCode})` : 'area not shown'),
     check('trend', 'real price trend above the EU average', hpi === null || euHpi === null ? null : hpi > euHpi, hpi === null ? `no official price series for ${row.country || 'this country'} in the model` : `${row.country} ${signed(hpi)}% a year after inflation vs EU ${euHpi === null ? '?' : `${signed(euHpi)}%`} (Eurostat, housing)`),
     check('location', 'the listing location is consistent', row.placeConflict ? null : true, row.placeConflict ?? 'map point and title agree'),
     check('legal', 'a legal path for a buyer', country ? !country.blocker && !INDUSTRIAL.test(words) : null, country?.blocker ?? (INDUSTRIAL.test(words) ? 'industrial site: camping parks must be 1,000 m from insalubrious industry (Portaria 1320/2008)' : country?.path ?? 'no path researched for this country')),
@@ -252,7 +274,7 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   if (keepCheck('sea', asked) && site?.coastKm !== null && site?.coastKm !== undefined && site.coastKm <= ebike) why.push(`sea ${site.coastKm} km${site.beachKm !== null && site.beachKm !== undefined ? `, beach ${site.beachKm} km` : ''}: inside the ${ebike} km e-bike ride`);
   if (keepCheck('season', asked) && climate?.cci && climate.workable >= rules.minWorkableMonths.value) why.push(`${climate.workable} camping months a year by the Camping Climate Index (${climate.good ?? '?'} good, ${climate.comfortable} optimal, ${climate.cci.optimalDays} optimal days a year)`);
   if (keepCheck('noAc', asked) && climate?.cci && climate.hottest <= rules.maxHottest.value) why.push(`hottest month average high ${climate.hottest} °C: tents work without air conditioning${climate.cci.hotDays ? ` (about ${climate.cci.hotDays} day(s) a year above 34 °C)` : ''}`);
-  if (units !== null && units >= rules.minUnits.value) why.push(`${Math.round(m2).toLocaleString('en-US')} m² holds ${units} units, ${rules.minUnits.value} are enough to open`);
+  if (units !== null && units >= rules.minUnits.value) why.push(`${Math.round(m2).toLocaleString('en-US')} m² holds ${units} units, ${rules.minUnits.value} are enough to open${usingFallback ? ' (assumption: Portugal density)' : ''}`);
   if (cost) why.push(`entry ≈ ${eur(cost.total)} (price ${eur(cost.price)} + ${cost.taxLabel} ${eur(cost.tax)}${cost.tents !== null ? ` + ${cost.units} bell tents ${eur(cost.tents)}` : ''}; excludes ${cost.excludes})`);
   if (keepCheck('trend', asked) && hpi !== null && euHpi !== null && hpi > euHpi) why.push(`${row.country} house prices ${signed(hpi)}% a year after inflation${trend ? ` (nominal ${signed(trend.change)}%, inflation ${trend.inflation}%, ${trend.year})` : ''} vs EU ${signed(euHpi)}% (Eurostat, country level, not land)`);
   if (site && !site.mapPending) why.push(`${explorePoints(site)} things to explore and ${(site.lodging ?? 0) + (site.campsites ?? 0)} places to stay within 15 km (demand)`);
@@ -290,7 +312,9 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set([...unknown.map((c) => c.detail), ...(failed.length && potentialUnknown ? [`misses ${failed.map((c) => c.label).join(', ')}; whether something nearby makes up for it is measured when the map service answers`] : [])])].join('; ')}` : tier === 'trade-off' ? `trade-off with potential: ${potential.join('; ')}` : tooSmall ? `does not fit: ${tradeoffs.join('; ')}; too little land for a glamping site, which nothing nearby can make up for` : `does not fit: ${tradeoffs.join('; ')}; nothing nearby draws guests to make up for it`;
   const measured = checks.filter((c) => c.ok !== null);
   const share = measured.length ? Math.round((measured.filter((c) => c.ok).length / checks.length) * 100) / 100 : 0;
-  return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, share, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };
+  const cashFlow = cashFlow1Year(row, country, cost, units);
+  const group = cashFlow ? LEASE_PATH_GROUP : null;
+  return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, share, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [], cashFlow, group };
 }
 
 export const PROJECTION_YEARS = 5;

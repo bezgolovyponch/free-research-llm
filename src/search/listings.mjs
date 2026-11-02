@@ -407,19 +407,21 @@ export function detailPageCoords(html, url) {
       const data = parseJson(script);
       if (!data) continue;
       const listing = data.props?.pageProps?.listing;
-      if (listing?.gps?.lat && listing?.gps?.lon) return { lat: listing.gps.lat, lon: listing.gps.lon };
-      if (listing?.location?.gps?.lat && listing?.location?.gps?.lon) return { lat: listing.location.gps.lat, lon: listing.location.gps.lon };
+      if (listing?.gps?.lat && listing?.gps?.lon) return { lat: Number(listing.gps.lat), lon: Number(listing.gps.lon) };
+      if (listing?.location?.gps?.lat && listing?.location?.gps?.lon) return { lat: Number(listing.location.gps.lat), lon: Number(listing.location.gps.lon) };
     }
   }
   if (hostname.includes('bezrealitky.cz')) {
     for (const script of scripts(html, /application\/ld\+json/i)) {
       const ld = parseJson(script);
       if (!ld) continue;
+      let coords = null;
       walk(ld, (node) => {
         if (node['@type'] === 'Place' && node.geo?.latitude && node.geo?.longitude) {
-          return { lat: node.geo.latitude, lon: node.geo.longitude };
+          coords = { lat: Number(node.geo.latitude), lon: Number(node.geo.longitude) };
         }
       });
+      if (coords) return coords;
     }
     const mapMatch = String(html).match(/data-lat\s*=\s*["']([^"']+)["'][^>]*data-lon\s*=\s*["']([^"']+)["']/i);
     if (mapMatch) return { lat: Number(mapMatch[1]), lon: Number(mapMatch[2]) };
@@ -428,11 +430,13 @@ export function detailPageCoords(html, url) {
     for (const script of scripts(html, /application\/ld\+json/i)) {
       const ld = parseJson(script);
       if (!ld) continue;
+      let coords = null;
       walk(ld, (node) => {
         if (node['@type'] === 'Place' && node.geo?.latitude && node.geo?.longitude) {
-          return { lat: node.geo.latitude, lon: node.geo.longitude };
+          coords = { lat: Number(node.geo.latitude), lon: Number(node.geo.longitude) };
         }
       });
+      if (coords) return coords;
     }
   }
   return null;

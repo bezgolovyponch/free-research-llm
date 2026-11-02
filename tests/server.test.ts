@@ -69,6 +69,22 @@ describe('HTTP server', () => {
     expect((await call('GET', '/api/projects')).body[0].id).toBe(created.body.id);
   });
 
+  it('serves cross-research principles via /api/principles', async () => {
+    const { principlesFrom } = await import('../src/research/lessons.mjs');
+    const lessons = [
+      { type: 'source', change: 'Portuguese rural parks need municipal plan approval', outcome: 'kept', gain: 0.1, researchId: 'p1' },
+      { type: 'source', change: 'Portuguese rural parks need municipal plan approval', outcome: 'kept', gain: 0.2, researchId: 'p2' },
+      { type: 'source', change: 'Portuguese rural parks need municipal plan approval', outcome: 'kept', gain: 0.15, researchId: 'p3' },
+      { type: 'gate', change: 'Sea distance must be measured', outcome: 'kept', gain: 0.05, researchId: 'p1' },
+    ];
+    const principles = principlesFrom(lessons, 'source');
+    expect(principles).toMatchObject([{ change: 'Portuguese rural parks need municipal plan approval', verdict: 'helps', tests: 3, kept: 3 }]);
+    await app.lessons.add(lessons);
+    const res = await call('GET', '/api/principles?type=source');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ source: [{ change: 'Portuguese rural parks need municipal plan approval', verdict: 'helps' }] });
+  });
+
   it('returns clean errors for bad input and unknown resources', async () => {
     expect((await call('POST', '/api/projects', { question: 'x' })).status).toBe(400);
     expect((await call('GET', '/api/projects/does-not-exist')).status).toBe(404);
