@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Verifier, compare, jsonLdOffers, namedCountries, numberOf, obligationsOf, pageAreas, statedLimit, pageCoords, textPrices, campingIndex, campingMonths, humidexOf, climateCell } from '../../verifier/verify.mjs';
+import { Verifier, compare, embeddedListingPrices, listingId, jsonLdOffers, namedCountries, numberOf, obligationsOf, pageAreas, statedLimit, pageCoords, textPrices, campingIndex, campingMonths, humidexOf, climateCell } from '../../verifier/verify.mjs';
 
 const project = {
   id: 'p1',
@@ -237,3 +237,30 @@ describe('external verifier: one recent year of daily weather per 0.25 degree ce
   });
 });
 
+
+describe('external verifier: the listing price a portal keeps in its own page data', () => {
+  const page = (data: unknown) => `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script><p>Podobné inzeráty 8 000 Kč</p></html>`;
+  const data = { props: { pageProps: { dehydratedState: { queries: [
+    { queryKey: ['estate', { id: 2532332364 }], state: { data: { name: 'Prodej zahrady 1463 m²', price: 79900, priceSummaryCzk: 79900, priceCzkPerSqM: 55 } } },
+    { queryKey: ['similar', { id: 2532332364 }], state: { data: { results: [{ hashId: 111111111, priceCzk: 1490000 }, { hashId: 222222222, priceCzk: 2100000 }] } } },
+  ] } } } };
+  const url = 'https://www.sreality.cz/detail/prodej/pozemek/zahrada/temice-temice-/2532332364';
+
+  it('takes the listing id from the last long number in the address', () => {
+    expect(listingId(url)).toBe('2532332364');
+    expect(listingId('https://reality.bazos.cz/inzerat/225641637/korycany-507-m2-pozemek-evc-e3378v014.php')).toBe('225641637');
+    expect(listingId('https://example.com/land/plot-12')).toBeNull();
+  });
+
+  it('reads only the price stored next to this listing id, never the prices of similar listings on the page', () => {
+    expect(embeddedListingPrices(page(data), url)).toEqual([{ price: 79900, currency: 'CZK' }]);
+    expect(embeddedListingPrices(page(data), 'https://www.sreality.cz/detail/prodej/pozemek/zahrada/x/999999999')).toEqual([]);
+    expect(embeddedListingPrices('<html>no data</html>', url)).toEqual([]);
+  });
+
+  it('reads Czech crowns and Polish zloty written on the page', () => {
+    expect(textPrices('Cena: 160 735 Kč')).toEqual([{ price: 160735, currency: 'CZK' }]);
+    expect(textPrices('1 200 000 zł')).toEqual([{ price: 1200000, currency: 'PLN' }]);
+    expect(textPrices('CZK 5 000')).toEqual([{ price: 5000, currency: 'CZK' }]);
+  });
+});
