@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRows, claimRows, exampleRows, plotRows, proposalRows, resultsSheets, resultsWorkbook, screenedRows, sourceRows, strategyRows, summaryRows, titleAreaM2 } from '../src/workbook.mjs';
+import { checkRows, claimRows, exampleRows, plotRows, proposalRows, resultsSheets, resultsWorkbook, screenedRows, sourceRows, strategyRows, summaryRows, titleAreaM2, withoutOwningRows } from '../src/workbook.mjs';
 import { unzip } from './helpers/unzip';
 
 const site = { coastKm: 2.6, beachKm: 2.7, lakeKm: 6.2, lakesNamed: true, beaches: 10, viewpoints: 12, attractions: 8, reserves: 2, protectedAreas: 4, hikingRoutes: 6, campsites: 16, lodging: 126, climate: { workable: 12, comfortable: 7, hottest: 24, coldest: 8 } };
@@ -105,5 +105,17 @@ describe('results workbook: every table, exact links, typed numbers', () => {
     expect(rows[1][8]).toBe('Fits all 2 criteria you set, confirmed outside the app');
     expect(rows[1][12]).toBe('no air conditioning needed: climate not measured yet');
     expect(rows.map((r: unknown[]) => r[4])).not.toContain('https://imo.example/anuncio/ID3');
+  });
+});
+
+describe('Without ownership sheet', () => {
+  it('lists the plots a foreign buyer cannot own with their first-season numbers, never as counted', () => {
+    const w = { group: 'Value without ownership (lease or partnership)', path: 'operate without owning', units: 3, months: 12, setupEur: 5265, revenueEur: 39000, paybackMonths: 2, landShareMax: 0.87, paysBackInYear: true, missing: [], inputs: ['rate', 'occupancy'], risks: ['licence'] };
+    const project = { candidates: { kept: [{ url: 'https://vn.example/1', title: 'Đất Phú Quốc', place: 'Phú Quốc', plan: { tier: 'blocked', withoutOwning: w } }, { url: 'https://pt.example/2', title: 'PT', plan: { tier: 'fits' } }], withoutOwning: { label: w.group, urls: ['https://vn.example/1'], paysBack: 1 } } };
+    const [header, ...rows] = withoutOwningRows(project);
+    expect(header.slice(0, 4)).toEqual(['group', 'counted in the result', 'title', 'url']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].slice(0, 12)).toEqual([w.group, 'no', 'Đất Phú Quốc', 'https://vn.example/1', 'Phú Quốc', 3, 12, 5265, 39000, 2, 0.87, 'yes']);
+    expect(resultsSheets({ ...project, question: 'q', nodes: [], log: [] } as never).map((s: { name: string }) => s.name)).toContain('Without ownership');
   });
 });

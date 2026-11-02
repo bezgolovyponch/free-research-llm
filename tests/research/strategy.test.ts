@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, quoteFound, StrategyRetriever, strategyFor, unitsFor, foundationOf, foundationText, askedCriteria } from '../../src/research/strategy.mjs';
+import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, quoteFound, StrategyRetriever, strategyFor, unitsFor, foundationOf, foundationText, askedCriteria, withoutOwningOf, WITHOUT_OWNING_GROUP } from '../../src/research/strategy.mjs';
 
 const rules = GLAMPING_LOW_ENTRY.rules;
 const toEur = (value: number, from: string) => (from === 'GBP' ? value * 1.2 : value);
@@ -412,5 +412,46 @@ describe('strategy criteria words regex accepts all currencies', () => {
     const priceCriterion = GLAMPING_LOW_ENTRY.criteria.find((c) => c.id === 'price');
     expect(priceCriterion?.words.test('1000000 TRY')).toBe(true);
     expect(priceCriterion?.words.test('1 000 000 TL')).toBe(true);
+  });
+});
+
+describe('Vietnam: value without ownership (lease or partnership)', () => {
+  const rates: Record<string, number> = { VND: 1 / 30000, USD: 0.9, EUR: 1 };
+  const convert = (value: number, from: string, to: string) => (to === 'EUR' && rates[from] ? value * rates[from] : null);
+  const vn = GLAMPING_LOW_ENTRY.countries.VN;
+  const climate = (months: number) => ({ workable: months, good: 6, comfortable: 2, hottest: 31, cci: { optimalDays: 120, hotDays: 0, monthly: [] } });
+
+  it('keeps the purchase blocked, and prices operating three tents on the landholder\'s land from sourced inputs and the site\'s measured season', () => {
+    const w = withoutOwningOf(vn, { climate: climate(12), units: 11, rules, convert })!;
+    expect(w).toMatchObject({ group: WITHOUT_OWNING_GROUP, units: 3, months: 12, setupEur: 5265, missing: [] });
+    expect(w.revenueEur).toBe(Math.round(3 * (2642821 / 30000) * 0.368 * 12 * (365 / 12)));
+    expect(w.paybackMonths).toBe(Math.ceil(5265 / (w.revenueEur! / 12)));
+    expect(w.paysBackInYear).toBe(true);
+    expect(w.landShareMax).toBe(Math.round((1 - 5265 / w.revenueEur!) * 100) / 100);
+    expect(w.inputs.join(' ')).toMatch(/not a glamping rate/);
+    expect(w.sources).toEqual(['vn-lease', 'vn-rent']);
+  });
+
+  it('a short season earns less, so the setup takes longer and leaves less for the landholder', () => {
+    const long = withoutOwningOf(vn, { climate: climate(12), units: 5, rules, convert })!;
+    const short = withoutOwningOf(vn, { climate: climate(4), units: 5, rules, convert })!;
+    expect(short.revenueEur!).toBeLessThan(long.revenueEur!);
+    expect(short.landShareMax!).toBeLessThan(long.landShareMax!);
+  });
+
+  it('names what is missing instead of guessing', () => {
+    expect(withoutOwningOf(vn, { climate: null, units: null, rules, convert })).toMatchObject({ units: null, revenueEur: null, paybackMonths: null, landShareMax: null, paysBackInYear: false, missing: ['area not shown', 'climate not measured yet'] });
+    expect(withoutOwningOf(vn, { climate: climate(12), units: 2, rules, convert })).toMatchObject({ missing: ['room for only 2 unit(s)'], paysBackInYear: false });
+    expect(withoutOwningOf(vn, { climate: climate(12), units: 3, rules, convert: null })!.missing).toEqual(['no exchange rate']);
+    expect(withoutOwningOf(GLAMPING_LOW_ENTRY.countries.PT, { climate: climate(12), units: 3, rules, convert })).toBeNull();
+  });
+
+  it('lists blocked Vietnamese plots in their own group, best payback first, and never counts them as plots to buy', () => {
+    const plot = (url: string, months: number) => ({ ...nazare, url, countryCode: 'VN', country: 'Vietnam', currency: 'VND', site: { ...site(2.7), climate: climate(months) } });
+    const out = applyStrategy({ kept: [plot('vn-short', 3), plot('vn-long', 12), { ...nazare, url: 'pt' }], toCheck: [], screened: {}, screenedCount: 0 }, GLAMPING_LOW_ENTRY, { convert });
+    expect(out.kept.filter((r: { plan: { tier: string } }) => r.plan.tier === 'blocked').map((r: { url: string }) => r.url).sort()).toEqual(['vn-long', 'vn-short']);
+    expect(out.withoutOwning).toMatchObject({ label: WITHOUT_OWNING_GROUP, urls: ['vn-long', 'vn-short'] });
+    expect(out.keptCount).toBe(out.tiers.fits);
+    expect(out.kept.find((r: { url: string }) => r.url === 'pt').plan.withoutOwning).toBeUndefined();
   });
 });
