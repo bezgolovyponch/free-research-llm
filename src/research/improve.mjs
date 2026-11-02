@@ -639,14 +639,17 @@ export class ProjectImprover {
       if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`);
       const measure = state.measure ?? projectScore;
       const score = measure(after);
-      const floor = noiseFloor(current.improve?.noise);
+      const floor = noiseFloor(current.improve?.remeasureNoise);
       if (acceptsTrial(best.score, score.score, removed, floor)) {
+        const fresh = await this.engine.load(id);
+        for (const t of touched) if (fresh.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(fresh, t);
+        await this.engine.store.save(fresh);
         const again = measure(await this.engine.run(id, { memo: false }));
         if (this.stopped(state)) return await reject('reverted-stopped');
-        const noise = [...(current.improve?.noise ?? []), round(again.score - score.score)].slice(-NOISE_SAMPLES);
-        await this.record(id, { noise });
-        if (!acceptsTrial(best.score, Math.min(score.score, again.score), removed, floor)) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} with nothing changed; the gain does not hold on both (noise floor ${floor})`, Math.min(score.score, again.score));
-        const kept = { ...again, score: round((score.score + again.score) / 2) };
+        const remeasureNoise = [...(current.improve?.remeasureNoise ?? []), round(again.score - score.score)].slice(-NOISE_SAMPLES);
+        await this.record(id, { remeasureNoise });
+        if (!acceptsTrial(best.score, Math.min(score.score, again.score), removed, floor)) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} after researching the same pieces again; the gain does not hold on both (noise floor ${floor})`, Math.min(score.score, again.score));
+        const kept = again;
         for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
         state.best = kept;
         await this.record(id, { best: kept.score }, { ...base, before: best.score, change, outcome: 'kept', score: kept.score, remeasured: again.score });
