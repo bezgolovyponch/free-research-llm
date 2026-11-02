@@ -348,6 +348,94 @@ describe('ModelRouter compute errors', () => {
   });
 });
 
+describe('ModelRouter provider failure streak bench', () => {
+  const rateLimited = () => new ProviderError('sambanova HTTP 429: rate limited', { status: 429 });
+  const badRequest = () => new ProviderError('sambanova HTTP 400: bad request', { status: 400 });
+
+  it('benches a provider for 30 minutes after 12 failed calls in a row, and the next call goes to another provider', async () => {
+    let now = 1000000;
+    const samba = provider('sambanova', Array.from({ length: 12 }, rateLimited));
+    const groq = provider('groq', []);
+    const router = new ModelRouter({ providers: [samba, groq], now: () => now });
+    for (let i = 0; i < 12; i++) {
+      if (i) now += 60001;
+      expect((await router.complete({ messages: [] })).provider).toBe('groq');
+    }
+    expect(samba.calls).toHaveLength(12);
+    expect(router.failureStreak.get('sambanova')).toBe(0);
+    expect(router.streakBenches.get('sambanova')).toBe(1);
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + 30 * 60 * 1000);
+    expect(router.cooldownReason.get('sambanova')).toBe('12 failed calls in a row; rests 30 min');
+    expect(router.ledger.find((r) => r.purpose === 'router' && r.provider === 'sambanova')).toMatchObject({ ok: false, ms: 0, error: '12 failed calls in a row; rests 30 min' });
+    expect((await router.complete({ messages: [] })).provider).toBe('groq');
+    expect(samba.calls).toHaveLength(12);
+    expect(groq.calls).toHaveLength(13);
+  });
+
+  it('doubles the rest each time the provider is benched again: 30 minutes, then 60', async () => {
+    let now = 1000000;
+    const samba = provider('sambanova', Array.from({ length: 24 }, rateLimited));
+    const groq = provider('groq', []);
+    const router = new ModelRouter({ providers: [samba, groq], now: () => now });
+    const fail = async () => expect((await router.complete({ messages: [] })).provider).toBe('groq');
+    for (let i = 0; i < 12; i++) {
+      if (i) now += 60001;
+      await fail();
+    }
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + 30 * 60 * 1000);
+    expect(router.streakBenches.get('sambanova')).toBe(1);
+    now = router.cooldownUntil.get('sambanova') + 1;
+    for (let i = 0; i < 12; i++) {
+      if (i) now += 60001;
+      await fail();
+    }
+    expect(router.streakBenches.get('sambanova')).toBe(2);
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + 60 * 60 * 1000);
+    expect(router.cooldownReason.get('sambanova')).toBe('12 failed calls in a row; rests 60 min');
+  });
+
+  it('resets the streak and the bench count when a call succeeds (11 failures, 1 success, 11 failures is not benched)', async () => {
+    const now = 1000000;
+    const samba = provider('sambanova', [...Array.from({ length: 11 }, badRequest), '{"ok":true}', ...Array.from({ length: 11 }, badRequest)]);
+    const groq = provider('groq', []);
+    const router = new ModelRouter({ providers: [samba, groq], now: () => now });
+    for (let i = 0; i < 11; i++) await router.complete({ messages: [] });
+    expect(router.failureStreak.get('sambanova')).toBe(11);
+    router.streakBenches.set('sambanova', 3);
+    expect((await router.complete({ messages: [] })).provider).toBe('sambanova');
+    expect(router.failureStreak.get('sambanova')).toBeUndefined();
+    expect(router.streakBenches.has('sambanova')).toBe(false);
+    for (let i = 0; i < 11; i++) await router.complete({ messages: [] });
+    expect(router.failureStreak.get('sambanova')).toBe(11);
+    expect(router.streakBenches.has('sambanova')).toBe(false);
+    expect(router.cooldownUntil.has('sambanova')).toBe(false);
+    expect(router.ledger.some((r) => r.purpose === 'router' && r.provider === 'sambanova')).toBe(false);
+  });
+
+  it('caps the rest at 6 hours however many times it is benched', async () => {
+    const now = 1000000;
+    const samba = provider('sambanova', Array.from({ length: 12 }, badRequest));
+    const groq = provider('groq', []);
+    const router = new ModelRouter({ providers: [samba, groq], now: () => now });
+    router.streakBenches.set('sambanova', 4);
+    for (let i = 0; i < 12; i++) await router.complete({ messages: [] });
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + 6 * 60 * 60 * 1000);
+    expect(router.cooldownReason.get('sambanova')).toBe('12 failed calls in a row; rests 360 min');
+    expect(router.streakBenches.get('sambanova')).toBe(5);
+  });
+
+  it('does not count the router\'s own note rows toward a provider\'s streak', async () => {
+    let now = 1000000;
+    const samba = provider('sambanova', Array.from({ length: 9 }, () => new ProviderError('sambanova HTTP 429: rate limited', { status: 429, retryAfterMs: 5000 })));
+    const router = new ModelRouter({ providers: [samba], now: () => now, sleep: async (ms: number) => { now += ms; } });
+    for (let i = 0; i < 3; i++) await expect(router.complete({ messages: [] })).rejects.toBeInstanceOf(NoModelAvailableError);
+    expect(router.ledger.filter((r) => r.provider === 'router')).toHaveLength(8);
+    expect(router.failureStreak.get('sambanova')).toBe(9);
+    expect(router.streakBenches.has('sambanova')).toBe(false);
+    expect(router.ledger.some((r) => r.purpose === 'router' && r.provider === 'sambanova')).toBe(false);
+  });
+});
+
 describe('ModelRouter local models by measured speed', () => {
   it('gives a local model only the calls that fit its speed, keeps it as last resort, and sizes its time limit to the call', async () => {
     const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');

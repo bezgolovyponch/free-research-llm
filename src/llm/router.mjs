@@ -27,6 +27,9 @@ const PER_MODEL_DAY = /quota window: per day, per model/;
 const OVERLOADED = /overloaded|high (?:traffic|demand)|currently experiencing|over capacity|no capacity|temporarily unavailable|provider returned error|UNAVAILABLE/i;
 export const OVERLOAD_REST_MS = 10 * 60 * 1000;
 export const MAX_SWITCHES_PER_CALL = 3;
+export const FAILURE_STREAK_BENCH = 12;
+export const STREAK_BENCH_MS = 30 * 60 * 1000;
+export const STREAK_BENCH_MAX_MS = 6 * 60 * 60 * 1000;
 
 export function nextUtcMidnight(now) {
   const d = new Date(now);
@@ -75,6 +78,8 @@ export class ModelRouter {
     this.inflight = new Map();
     this.timeoutStreak = new Map();
     this.computeErrorStreak = new Map();
+    this.failureStreak = new Map();
+    this.streakBenches = new Map();
     this.cooldownReason = new Map();
     this.ledger = [];
     this.calls = 0;
@@ -247,6 +252,23 @@ export class ModelRouter {
     return true;
   }
 
+  countFailure(provider) {
+    const streak = (this.failureStreak.get(provider.id) ?? 0) + 1;
+    if (streak < FAILURE_STREAK_BENCH) {
+      this.failureStreak.set(provider.id, streak);
+      return false;
+    }
+    const benches = this.streakBenches.get(provider.id) ?? 0;
+    const rest = Math.min(STREAK_BENCH_MS * 2 ** benches, STREAK_BENCH_MAX_MS);
+    const reason = `${streak} failed calls in a row; rests ${Math.round(rest / 60000)} min`;
+    this.cooldownUntil.set(provider.id, Math.max(this.cooldownUntil.get(provider.id) ?? 0, this.now() + rest));
+    this.cooldownReason.set(provider.id, reason);
+    this.streakBenches.set(provider.id, benches + 1);
+    this.failureStreak.set(provider.id, 0);
+    this.record({ purpose: 'router', tier: '', provider: provider.id, ok: false, ms: 0, error: reason });
+    return true;
+  }
+
   shortestCooldownMs() {
     const time = this.now();
     const waits = this.providers.filter((p) => p.ready).map((p) => (this.cooldownUntil.get(p.id) ?? 0) - time);
@@ -277,23 +299,32 @@ export class ModelRouter {
           this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms: this.now() - started, tokens: reply.usage?.total_tokens ?? null });
           this.timeoutStreak.delete(provider.id);
           this.computeErrorStreak.delete(provider.id);
+          this.failureStreak.delete(provider.id);
+          this.streakBenches.delete(provider.id);
           return { ...reply, data };
         } catch (error) {
           this.record({ purpose, tier, provider: provider.id, ok: false, ms: this.now() - started, error: error.message.slice(0, 200) });
           errors.push(error.message);
+          let stop = true;
+          let retry = false;
           if (error instanceof ProviderError) {
             if (this.switchModel(provider, model, error) || this.rotateKey(provider, error)) {
               switches++;
-              if (switches <= MAX_SWITCHES_PER_CALL) continue;
-              break;
+              if (switches <= MAX_SWITCHES_PER_CALL) {
+                retry = true;
+                stop = false;
+              }
+            } else if (!this.benchSlow(provider, error) && !this.benchComputeError(provider, error) && (error.retryable || [401, 402, 403].includes(error.status))) {
+              this.coolDown(provider, error);
             }
-            if (this.benchSlow(provider, error)) break;
-            if (this.benchComputeError(provider, error)) break;
-            if (error.retryable || [401, 402, 403].includes(error.status)) this.coolDown(provider, error);
-            break;
+          } else {
+            repairs++;
+            attemptMessages = [...messages, { role: 'user', content: REPAIR_INSTRUCTION }];
+            stop = false;
           }
-          repairs++;
-          attemptMessages = [...messages, { role: 'user', content: REPAIR_INSTRUCTION }];
+          this.countFailure(provider);
+          if (retry) continue;
+          if (stop) break;
         } finally {
           this.inflight.set(provider.id, Math.max(0, (this.inflight.get(provider.id) ?? 1) - 1));
         }
