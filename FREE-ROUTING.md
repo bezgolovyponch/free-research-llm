@@ -1,74 +1,66 @@
 # FREE ROUTING: keep the models going in a circle
 
-**The problem:** one free provider runs out (HTTP 429 per minute or per day, Groq HTTP 413 at 8000 tokens per minute, an empty Pollinations reply) and the loop or the coder stops.
+**The problem:** one free provider runs out (HTTP 429 per minute or per day, Groq HTTP 413 at 8000 tokens per minute, an overloaded Gemini model, an empty Pollinations reply) and the loop or the coder stops.
 
-**The existing open-source fix:** [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) (MIT). It is one OpenAI-compatible endpoint in front of the free tiers of 34 providers. It keeps a counter per key for requests and tokens per minute and per day. It skips a key before it hits its limit. On 429 or 5xx it cools that key and moves to the next model in the fallback chain. This app talks to it as its `custom` provider. Its own router stays behind it as the second line.
+**The fix lives in the app.** The router (`src/llm/router.mjs`) needs no other program, so it works on every computer the app runs on. Your keys travel with `keys export` / `keys import`. For each call it does this:
 
-A smaller alternative is [freelm](https://github.com/shihabshahrier/freelm) (MIT, `pip install freelm` or `npm install freelm`, `freelm serve` on `http://127.0.0.1:4000/v1`, model `auto`). It does the same thing with environment-variable keys. The steps below use FreeLLMAPI.
+1. **Order.** It tries the providers in `FRL_PROVIDER_ORDER` (or the built-in order) and skips any provider that is resting.
+2. **A busy model** (HTTP 503, or a 429 that says "overloaded" / "high traffic" / "Provider returned error") rests for 10 minutes. The same call goes on with the provider's next model. One busy Gemini model no longer benches all of Gemini.
+3. **A model that used its own daily quota, or was withdrawn,** is set aside until the quota resets (or for good). The same call goes on with the next model.
+4. **A key that hit a limit** (429, 402, 401/403) rests. The same call goes on with the provider's next key. The provider rests only when every key rests, and it comes back when the first key is free again.
+5. **Daily resets** are taken from each provider. Gemini resets at midnight Pacific time ([Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)); the others reset at midnight UTC.
+6. One call makes at most 3 model or key switches inside one provider. Then the call moves on to the next provider.
 
-## 1 · Install FreeLLMAPI
+## 1 · More capacity: more providers, more keys
 
-**macOS or Linux** (needs Docker Desktop running):
+Capacity grows only with free quota. Add every provider in [KEYS.md](KEYS.md). Two of them have **no daily cap**:
+
+| Provider | Free limit | Key |
+|---|---|---|
+| NVIDIA (build.nvidia.com) | about 40 requests per minute, no daily cap | `NVIDIA_API_KEY` |
+| Mistral (free Experiment plan) | 1 request per second, about 1 billion tokens per month; your data may be used for training | `MISTRAL_API_KEY` |
+
+**Several keys for one provider:** paste them separated by commas, in one value:
 
 ```bash
-curl -fsSL https://freellmapi.co/install.sh | bash
+node src/frl.mjs keys set GEMINI_API_KEY      # paste: AIza...first,AIza...second
 ```
 
-It sets up `~/freellmapi` and starts the router at `http://localhost:3001`. It listens on this computer only.
+`keys check` tests each key and names the one that fails. Use only keys you are allowed to hold under each provider's terms.
 
-**Windows:** download the desktop `.exe` installer from https://github.com/tashfeenahmed/freellmapi/releases and run it.
-
-## 2 · Give it your free keys
-
-1. Open http://localhost:3001.
-2. **Keys** page: paste every free key you have. Free signup links are in [KEYS.md](KEYS.md): Gemini, Groq, Cerebras, Mistral, NVIDIA, SambaNova, OpenRouter, Cloudflare, Cohere. Every extra key adds to the circle.
-3. **Fallback Chain:** put the fast providers first (Cerebras, Groq), then Gemini and Mistral, then the rest.
-4. Copy the unified key (`freellmapi-…`) from the header of the **Keys** page.
-
-## 3 · Point this app at it
-
-Run these in the app's **Terminal** (or a terminal in the app folder). Each one asks for one value, which goes into the system key store, never into a file.
+## 2 · Another computer, same keys
 
 ```bash
-node src/frl.mjs keys set CUSTOM_LLM_BASE_URL
-node src/frl.mjs keys set CUSTOM_LLM_MODEL
-node src/frl.mjs keys set CUSTOM_LLM_API_KEY
-node src/frl.mjs keys set FRL_PROVIDER_ORDER
-node src/frl.mjs restart
+node src/frl.mjs keys export     # on this computer: choose a passphrase, copy the encrypted line
+node src/frl.mjs keys import     # on the other computer: paste the line, type the passphrase
+node src/frl.mjs install         # always on there too
 ```
 
-Type these values when asked:
-
-| Setting | Value |
-|---|---|
-| `CUSTOM_LLM_BASE_URL` | `http://localhost:3001/v1` |
-| `CUSTOM_LLM_MODEL` | `auto` |
-| `CUSTOM_LLM_API_KEY` | the unified `freellmapi-…` key (input is hidden) |
-| `FRL_PROVIDER_ORDER` | `custom,pollinations` |
-
-`custom,pollinations` means: every call goes to FreeLLMAPI first. If even that has nothing left, the keyless Pollinations takes the call. To keep the app's direct keys as well, list them after it: `custom,cerebras,groq,gemini,mistral,openrouter,pollinations`.
-
-`restart` works when the app runs as the always-on service (`node src/frl.mjs install`). Otherwise stop the app and start it again.
-
-## 4 · Check it
+## 3 · Check it
 
 ```bash
+node src/frl.mjs keys check
 node src/frl.mjs status
 ```
 
-**Setup & keys** in the app must show `custom` as ready. FreeLLMAPI's dashboard shows each request and the provider that answered it.
+`/api/status` lists every provider with `keys`, `keysResting` and the reason it rests (`coolingReason`).
 
-## 5 · Keep the loop running
+## Optional: a separate gateway in front
 
-1. Make the app always on, so it survives restarts and sleep: `node src/frl.mjs install`.
-2. Open the research, then choose **Improve loop ▾ → Entire research…** or **Selected pieces…**. Set the hours (up to 72) and press **Start**.
-3. When the app restarts, it resumes the loop with the hours that were left, and keeps the same selection and exclusions.
-4. To run every research in turn, use **Improve all researches** on the home page.
+[FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) (MIT) is one OpenAI-compatible endpoint in front of the free tiers of 34 providers, with a counter per key. The app talks to it as its `custom` provider. Use it only when you want those extra providers without adding them here. It is one more program to install and keep running on each computer, and it keeps its own copy of the keys (encrypted).
 
-## What the app already does without FreeLLMAPI
+- **macOS:** the `.dmg` from its Releases page (menu-bar app, no Docker).
+- **Windows:** the `.exe` installer.
+- **Linux:** `docker compose`.
 
-The app's own router (`src/llm/router.mjs`) also goes in a circle: it tries the providers in `FRL_PROVIDER_ORDER`, puts a provider on a cooldown after a 429, and moves to the next. What FreeLLMAPI adds:
+Then save four values: `CUSTOM_LLM_BASE_URL` (its address plus `/v1`, as its dashboard shows), `CUSTOM_LLM_MODEL` = `auto`, `CUSTOM_LLM_API_KEY` (its unified key), and `FRL_PROVIDER_ORDER`. `FRL_PROVIDER_ORDER` is the list of providers the app uses, so keep the direct ones after it:
 
-- It counts each key's daily quota, so no call is wasted on a provider that is already spent. The 2026-10-19 loop wasted 71 Gemini and 78 OpenRouter calls that way.
-- It rotates several keys of the same provider.
-- It covers 34 providers instead of 13.
+```
+custom,cerebras,groq,gemini,nvidia,mistral,sambanova,openrouter,pollinations
+```
+
+## Keep the loop running
+
+1. `node src/frl.mjs install` makes the app always on, so it survives restarts.
+2. Open the research. Choose **Improve loop ▾ → Entire research…** or **Selected pieces…**, set the hours (up to 72) and press **Start**.
+3. After a restart the loop resumes with the hours that were left.

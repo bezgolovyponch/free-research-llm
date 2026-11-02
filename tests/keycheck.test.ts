@@ -35,4 +35,10 @@ describe('KeyChecker', () => {
     expect((await checker.verify('SEARXNG_URL', 'http://127.0.0.1:8888/')).ok).toBe(true);
     expect((await checker.verify('CLOUDFLARE_ACCOUNT_ID', 'abc')).ok).toBeNull();
   });
+
+  it('checks every key of a comma-separated list and names the one that fails', async () => {
+    const checker = new KeyChecker({ fetchImpl: (async (_url: string, init: { headers: Record<string, string> }) => (init.headers.authorization === 'Bearer gsk_bad' ? new Response('invalid', { status: 401 }) : jsonResponse({ data: [] }))) as never });
+    expect(await checker.verify('GROQ_API_KEY', 'gsk_a, gsk_b')).toMatchObject({ ok: true, value: 'gsk_a,gsk_b', detail: '2 keys, each HTTP 200' });
+    expect(await checker.verify('GROQ_API_KEY', 'gsk_a,gsk_bad')).toMatchObject({ ok: false, value: 'gsk_a,gsk_bad', detail: expect.stringMatching(/^key 2: HTTP 401/) });
+  });
 });

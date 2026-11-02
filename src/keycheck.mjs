@@ -1,4 +1,5 @@
 import { PROVIDER_PRESETS } from './llm/presets.mjs';
+import { splitKeys } from './llm/provider.mjs';
 import { KEYED_SEARCH_BACKENDS } from './search/search.mjs';
 
 export const KEY_PREFIXES = {
@@ -69,6 +70,22 @@ export class KeyChecker {
   }
 
   async verify(name, raw) {
+    const keys = splitKeys(cleanKey(raw));
+    if (keys.length < 2) return this.verifyOne(name, raw);
+    const results = [];
+    for (const key of keys) results.push(await this.verifyOne(name, key));
+    const failed = results.map((r, i) => (r.ok === false ? `key ${i + 1}: ${r.detail}${r.hint ? ` (${r.hint})` : ''}` : '')).filter(Boolean);
+    const repaired = results.map((r, i) => (r.repaired ? `key ${i + 1}: ${r.repaired}` : '')).filter(Boolean);
+    return {
+      ok: results.some((r) => r.ok === false) ? false : results.every((r) => r.ok) ? true : null,
+      detail: failed.length ? failed.join('; ') : `${keys.length} keys, each ${results[0].detail}`,
+      value: results.map((r) => r.value).join(','),
+      hint: null,
+      ...(repaired.length && !failed.length ? { repaired: repaired.join('; ') } : {}),
+    };
+  }
+
+  async verifyOne(name, raw) {
     const value = cleanKey(raw);
     const hint = formatHint(name, value);
     const result = await this.check(name, value);

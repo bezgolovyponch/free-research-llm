@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
-import { ModelRouter, NoModelAvailableError, estimateTokens, nextUtcMidnight, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { ModelRouter, NoModelAvailableError, OVERLOAD_REST_MS, estimateTokens, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -186,16 +186,15 @@ describe('ModelRouter model switching', () => {
     };
     const provider = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: fetchImpl as never }).discover();
     const router = new ModelRouter({ providers: [provider], sleep: async () => {} });
-    await expect(router.complete({ purpose: 'research', tier: 'deep', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
-    expect(provider.selected.deep).toBe('m-mid');
-    expect(router.cooldownUntil.has('gemini')).toBe(false);
-    await expect(router.complete({ purpose: 'research', tier: 'fast', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
-    expect(provider.selected.fast).toBe('m-lite-2');
-    const reply = await router.complete({ purpose: 'research', tier: 'fast', messages: [{ role: 'user', content: 'x' }] });
+    const reply = await router.complete({ purpose: 'research', tier: 'deep', messages: [{ role: 'user', content: 'x' }] });
     expect(reply.model).toBe('m-lite-2');
-    await expect(router.complete({ purpose: 'research', tier: 'deep', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
-    expect(provider.selected.deep).toBe('m-lite-2');
-    expect(calls.slice(0, 2)).toEqual(['m-big', 'm-lite']);
+    expect(calls).toEqual(['m-big', 'm-mid', 'm-lite', 'm-lite-2']);
+    expect(provider.selected).toMatchObject({ fast: 'm-lite-2', deep: 'm-lite-2' });
+    expect(router.cooldownUntil.has('gemini')).toBe(false);
+    const spent = await new OpenAICompatibleProvider({ preset: { ...preset, prefer: { fast: ['m-big'], deep: ['m-mid'] } }, apiKey: 'k', fetchImpl: (async (url: string, init: { body?: string }) => (url.endsWith('/models') ? new Response(JSON.stringify({ data: [{ id: 'm-big' }, { id: 'm-mid' }] })) : fetchImpl(url, init))) as never }).discover();
+    const benching = new ModelRouter({ providers: [spent], sleep: async () => {}, maxWaitMs: 0 });
+    await expect(benching.complete({ purpose: 'research', tier: 'deep', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow();
+    expect(benching.cooldownReason.get('gemini')).toMatch(/daily quota/);
   });
 });
 
@@ -397,5 +396,114 @@ describe('router outcomes', () => {
     expect(outcomes.posterior('groq', 'research', 4)).toMatchObject({ pass: 1, fail: 0 });
     expect(outcomes.posterior('groq', 'top', 4)).toMatchObject({ pass: 0, fail: 1 });
     expect(() => new ModelRouter({ providers: [] }).recordOutcome({ provider: 'x', purpose: 'research', passed: true })).not.toThrow();
+  });
+});
+
+describe('ModelRouter capacity inside one provider', () => {
+  const chatReply = (model: string) => new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], model }));
+  const ask = (router: ModelRouter) => router.complete({ purpose: 'research', tier: 'fast', messages: [{ role: 'user', content: 'x' }] });
+
+  it('treats a busy model as overloaded, but a plain rate limit or a daily quota as a limit', () => {
+    expect(overloaded(new ProviderError('gemini HTTP 503: This model is currently experiencing high demand', { status: 503 }))).toBe(true);
+    expect(overloaded(new ProviderError('sambanova HTTP 429: DeepSeek-V3.2-16k is currently experiencing high traffic', { status: 429 }))).toBe(true);
+    expect(overloaded(new ProviderError('openrouter HTTP 429: Provider returned error', { status: 429 }))).toBe(true);
+    expect(overloaded(new ProviderError('groq HTTP 429 [quota window: per minute]: Rate limit reached for model', { status: 429 }))).toBe(false);
+    expect(overloaded(new ProviderError('groq HTTP 429 [quota window: per day, per model]: Rate limit reached', { status: 429 }))).toBe(false);
+  });
+
+  it('moves an overloaded model aside for 10 minutes and answers with the next model in the same call', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    let now = Date.parse('2026-11-02T09:00:00Z');
+    const calls: string[] = [];
+    const fetchImpl = async (url: string, init: { body?: string }) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'flash' }, { id: 'flash-2' }] }));
+      const model = JSON.parse(init.body ?? '{}').model;
+      calls.push(model);
+      return model === 'flash' ? new Response('{"error":{"code":503,"message":"This model is currently experiencing high demand.","status":"UNAVAILABLE"}}', { status: 503 }) : chatReply(model);
+    };
+    const preset = { id: 'gemini', label: 'g', baseURL: 'https://g.example/v1', keyEnv: 'K', prefer: { fast: ['flash', 'flash-2'], deep: ['flash'] } };
+    const provider = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: fetchImpl as never, now: () => now }).discover();
+    const router = new ModelRouter({ providers: [provider], sleep: async () => {}, now: () => now });
+    expect((await ask(router)).model).toBe('flash-2');
+    expect(calls).toEqual(['flash', 'flash-2']);
+    expect(provider.retired.get('flash')).toBe(now + OVERLOAD_REST_MS);
+    expect(router.cooldownUntil.has('gemini')).toBe(false);
+    expect(router.computeErrorStreak.has('gemini')).toBe(false);
+    now += OVERLOAD_REST_MS + 1;
+    expect(provider.retireModel('flash-2', now + OVERLOAD_REST_MS)).toBe(true);
+    expect(provider.selected.fast).toBe('flash');
+  });
+
+  it('hands a rate-limited key over to the next key of the same provider, and rests the provider only when every key rests', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const now = Date.parse('2026-11-02T09:00:00Z');
+    const used: string[] = [];
+    let limited = new Set(['k1']);
+    const fetchImpl = async (url: string, init: { headers?: Record<string, string> }) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'gpt-oss-120b' }] }));
+      const key = String(init.headers?.authorization).replace('Bearer ', '');
+      used.push(key);
+      return limited.has(key) ? new Response('{"error":{"message":"Rate limit reached for model on requests per minute (RPM). Please try again in 20s"}}', { status: 429, headers: { 'retry-after': '20' } }) : chatReply('gpt-oss-120b');
+    };
+    const preset = { id: 'groq', label: 'q', baseURL: 'https://q.example/v1', keyEnv: 'K', prefer: { fast: ['gpt-oss-120b'], deep: ['gpt-oss-120b'] } };
+    const provider = await new OpenAICompatibleProvider({ preset, apiKey: 'k1, k2,k1', fetchImpl: fetchImpl as never, now: () => now }).discover();
+    expect(provider.keyCount).toBe(2);
+    const router = new ModelRouter({ providers: [provider], sleep: async () => {}, now: () => now, maxWaitMs: 0 });
+    expect((await ask(router)).model).toBe('gpt-oss-120b');
+    expect(used).toEqual(['k1', 'k2']);
+    expect(router.cooldownUntil.has('groq')).toBe(false);
+    expect(provider.describe()).toMatchObject({ keys: 2, keysResting: 1 });
+    limited = new Set(['k1', 'k2']);
+    await expect(ask(router)).rejects.toThrow(NoModelAvailableError);
+    expect(router.cooldownUntil.get('groq')).toBe(now + 20000);
+    expect(router.cooldownReason.get('groq')).toBe('rate limit');
+  });
+
+  it('brings a provider back when its first key is free again, not when the last limit ends', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const now = Date.parse('2026-11-02T09:00:00Z');
+    const preset = { id: 'cerebras', label: 'c', baseURL: 'https://c.example/v1', keyEnv: 'K', prefer: { fast: ['m'], deep: ['m'] } };
+    const provider = new OpenAICompatibleProvider({ preset, apiKey: 'a,b', now: () => now });
+    expect(provider.rotateKey(now + 60000)).toBe(true);
+    expect(provider.apiKey).toBe('b');
+    expect(provider.rotateKey(now + 3600000)).toBe(false);
+    const router = new ModelRouter({ providers: [provider], now: () => now });
+    router.coolDown(provider, new ProviderError('cerebras HTTP 429: tokens per day limit exceeded', { status: 429 }));
+    expect(router.cooldownUntil.get('cerebras')).toBe(now + 60000);
+    expect(router.cooldownReason.get('cerebras')).toMatch(/every key rests; the first is back in 1 min/);
+    expect(new OpenAICompatibleProvider({ preset, apiKey: 'a,b', now: () => now + 61000 }).apiKey).toBe('a');
+  });
+
+  it('waits for the Gemini daily reset at midnight Pacific time, across both daylight-saving changes', () => {
+    expect(new Date(nextMidnightIn('America/Los_Angeles', Date.parse('2026-11-02T09:05:00Z'))).toISOString()).toBe('2026-11-03T08:01:00.000Z');
+    expect(new Date(nextMidnightIn('America/Los_Angeles', Date.parse('2026-11-02T07:30:00Z'))).toISOString()).toBe('2026-11-02T08:01:00.000Z');
+    expect(new Date(nextMidnightIn('America/Los_Angeles', Date.parse('2026-03-08T07:00:00Z'))).toISOString()).toBe('2026-03-08T08:01:00.000Z');
+    expect(new Date(nextMidnightIn('America/Los_Angeles', Date.parse('2026-03-08T12:00:00Z'))).toISOString()).toBe('2026-03-09T07:01:00.000Z');
+    expect(new Date(nextMidnightIn('America/Los_Angeles', Date.parse('2026-11-01T06:00:00Z'))).toISOString()).toBe('2026-11-01T07:01:00.000Z');
+    const now = Date.parse('2026-11-02T05:00:00Z');
+    expect(quotaResetAt({ preset: { quotaResetTimeZone: 'America/Los_Angeles' } }, now)).toBe(Date.parse('2026-11-02T08:01:00Z'));
+    expect(quotaResetAt({ preset: {} }, now)).toBe(nextUtcMidnight(now));
+    const router = new ModelRouter({ providers: [], now: () => now });
+    router.coolDown({ id: 'gemini', preset: { quotaResetTimeZone: 'America/Los_Angeles' } }, new ProviderError('gemini HTTP 429 [quota window: per day]: exceeded your current quota', { status: 429 }));
+    expect(router.cooldownUntil.get('gemini')).toBe(Date.parse('2026-11-02T08:01:00Z'));
+  });
+
+  it('after three switches and a fourth failure in one call moves on to the next provider, keeping the switched one available', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const models = ['m1', 'm2', 'm3', 'm4', 'm5'];
+    const calls: string[] = [];
+    const fetchImpl = async (url: string, init: { body?: string }) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: models.map((id) => ({ id })) }));
+      calls.push(JSON.parse(init.body ?? '{}').model);
+      return new Response('{"error":{"code":429,"details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}', { status: 429 });
+    };
+    const preset = { id: 'gemini', label: 'g', baseURL: 'https://g.example/v1', keyEnv: 'K', prefer: { fast: models, deep: models } };
+    const busy = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: fetchImpl as never }).discover();
+    const backup = provider('groq', ['{"ok":true}']);
+    const router = new ModelRouter({ providers: [busy, backup as never], sleep: async () => {} });
+    expect((await ask(router)).provider).toBe('groq');
+    expect(calls).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect(busy.selected.fast).toBe('m5');
+    expect(router.cooldownUntil.has('gemini')).toBe(false);
   });
 });
