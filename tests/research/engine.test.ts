@@ -291,7 +291,17 @@ describe('ResearchEngine', () => {
     await engine.collectCandidates(done, { sweep: true });
     expect(strategyLines()).toBe(before + 1);
     engine.quiet.delete(done.id);
-    expect(modes).toEqual(['budget', 'all', 'cache', 'all']);
+    expect(modes).toEqual(['budget', 'all', 'cache', 'cache']);
+    const warmed: string[] = [];
+    engine.startSiteWarm = (id: string) => { warmed.push(id); };
+    engine.sites = { apply: async (c: { kept: unknown[] }, _b: unknown, o: { mode: string }) => { modes.push(o.mode); return { ...c, sites: { assessed: 1, located: 1, far: 0, unlocated: 0, pending: 3, failed: 0 } }; }, trendGaps: () => ({ missing: [], due: [] }) } as never;
+    engine.quiet.add(done.id);
+    await engine.collectCandidates(done, { sweep: true });
+    engine.quiet.delete(done.id);
+    expect(modes.at(-1)).toBe('cache');
+    expect(warmed).toEqual([done.id]);
+    engine.sites = { apply: async (c: { kept: Array<{ url: string }>; keptCount: number }) => ({ ...c, kept: c.kept.slice(0, 2), keptCount: 2, sites: { assessed: 4, located: 4, far: 2, unlocated: 0, pending: 0, failed: 0 } }), trendGaps: () => ({ missing: ['PT'], due: [] }) } as never;
+    await engine.collectCandidates(done);
     expect(done.candidates.kept).toHaveLength(2);
     expect(done.candidates.keptCount).toBe(0);
     expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);

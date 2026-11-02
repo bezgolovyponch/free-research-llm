@@ -328,7 +328,8 @@ export class ResearchEngine {
     }
     let table = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
     if (this.sites && !this.demo) {
-      const mode = sweep ? 'all' : this.quiet.has(project.id) ? 'cache' : 'budget';
+      const looping = this.quiet.has(project.id);
+      const mode = looping ? 'cache' : sweep ? 'all' : 'budget';
       const raw = table;
       table = await this.sites.apply(table, brief, { mode, readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null });
       const s = table.sites;
@@ -336,7 +337,7 @@ export class ResearchEngine {
       if (s?.pending || gaps.due.length) this.startSiteWarm(project.id, raw, brief);
       if (gaps.missing.length) this.emit(project, 'candidates', `price trend still missing for ${gaps.missing.join(', ')}: ${gaps.due.length ? `fetching ${gaps.due.join(', ')} again in the background` : 'next try when its wait ends and the table is rebuilt (a run, a loop pass or a page refresh)'}; each failure doubles the longest wait, up to 6 h`);
       if (this.parcels) {
-        table = await this.parcels.apply(table, { mode });
+        table = await this.parcels.apply(table, { mode: sweep ? 'all' : mode });
         const c = table.parcels;
         if (c) this.emit(project, 'candidates', `official parcel records: ${c.matched} of ${c.eligible} listing(s) matched a land-registry parcel by the number the listing states, ${c.missed} state no parcel number or none matched, ${c.pending} still to look up`);
       }
