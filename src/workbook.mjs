@@ -34,6 +34,17 @@ function checkLabels(rows, ids) {
   return ids.map((id) => rows.flatMap((r) => r.plan?.checks ?? []).find((c) => c.id === id)?.label ?? id);
 }
 
+export function withoutOwningRows(project) {
+  const c = project.candidates ?? {};
+  const byUrl = new Map((c.kept ?? []).map((r) => [r.url, r]));
+  const rows = (c.withoutOwning?.urls ?? []).map((u) => byUrl.get(u)).filter((r) => r?.plan?.withoutOwning);
+  const header = ['group', 'counted in the result', 'title', 'url', 'place', 'tents', 'camping months', 'setup EUR', 'revenue a year EUR', 'payback months', 'most the landholder can take (share of revenue)', 'pays back in the first season', 'missing', 'path', 'inputs', 'risks'];
+  return [header, ...rows.map((r) => {
+    const w = r.plan.withoutOwning;
+    return [w.group, 'no', String(r.title ?? ''), r.url, r.place ?? '', num(w.units), num(w.months), num(w.setupEur), num(w.revenueEur), num(w.paybackMonths), num(w.landShareMax), w.paysBackInYear ? 'yes' : 'no', w.missing.join('; '), w.path, w.inputs.join(' | '), w.risks.join(' | ')];
+  })];
+}
+
 export function plotRows(project) {
   const c = project.candidates ?? {};
   const listed = [...(c.kept ?? []).map((r) => ['your countries', r]), ...(c.toCheck ?? []).map((r) => ['to check (price or country not shown)', r]), ...(c.outside ?? []).map((r) => ['outside your countries', r])];
@@ -202,6 +213,7 @@ export function resultsSheets(project, exportedAt = new Date()) {
     ...(project.candidates ? [
       ...(project.candidates.proposals ? [{ name: 'Proposals', rows: proposalRows(project) }] : []),
       { name: 'Listings', rows: plotRows(project) },
+      ...(project.candidates.withoutOwning ? [{ name: 'Without ownership', rows: withoutOwningRows(project) }] : []),
       { name: 'Decision checks', rows: checkRows(project) },
       { name: 'Screened out', rows: screenedRows(project) },
       { name: 'Screened examples', rows: exampleRows(project) },

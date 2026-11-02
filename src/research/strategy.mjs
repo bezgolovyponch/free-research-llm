@@ -26,6 +26,10 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'cz-tax', title: 'Finanční správa: daň z nabytí nemovitých věcí (zrušena zákonem č. 386/2020 Sb.)', url: 'https://financnisprava.gov.cz/cs/dane/dane/dan-z-nabyti-nemovitych-veci', quotes: ['Daň z nabytí nemovitých věcí je zrušena ve všech případech'] },
     { id: 'cz-foreign', title: 'ARROWS: restrictions on purchases of agricultural land by foreigners (2024, updated 2026)', url: 'https://arws.cz/en/news-at-arrows/newsletter-not-only-for-brokers-restrictions-on-purchases-of-agricultural-land-by-foreigners-how-to-proceed-with-the-purchase-of-agricultural-land-by-foreigners-eviction-of-a-tenant-without-a-court-with-notarial-deed-it-is-possible-again', quotes: ['Find out whether the buyer is from a third country (outside the EU, Switzerland) which restricts the purchase of land by foreigners'] },
     { id: 'vn-land', title: 'IFLR: Vietnam legal framework on foreign real estate ownership (2026)', url: 'https://www.iflr.com/article/2gi4ti8i1tgysiu7sddz4/sponsored/an-overview-of-vietnams-legal-framework-on-foreign-real-estate-ownership', quotes: ['direct private ownership of land is not permitted', 'may only buy directly from authorised developers'] },
+    { id: 'vn-lease', title: 'Emerhub: how to start an accommodation business in Vietnam', url: 'https://emerhub.com/vietnam/open-hotel-in-vietnam/', quotes: ['In Vietnam, all land is owned by the state, and individuals or organizations can only obtain land use rights through leasing', 'foreign-owned entities are facilitated as either a wholly foreign-owned enterprise or a joint venture with a local partner'] },
+    { id: 'vn-rent', title: 'Le & Tran Law: understanding Vietnam Land Law 2024', url: 'https://letranlaw.com/insights/understanding-vietnam-land-law-2024/', quotes: ['Land users, including FIEs, can opt to pay land rent annually rather than in a single lump sum for the whole term'] },
+    { id: 'vn-str', title: 'AirROI: Phú Quốc Airbnb market, 12 months to September 2026 (whole short-term rentals, not glamping)', url: 'https://www.airroi.com/airbnb-data/vietnam/ki%C3%AAn-giang-province/ph%C3%BA-qu%E1%BB%91c', quotes: ['Occupancy rate 36.8%', 'Avg. daily rate (ADR) ₫2,642,821'] },
+    { id: 'glamping-costs', title: 'Wilderness Resource: how to start a glamping business in 2026', url: 'https://wildernessresource.com/blogs/blog/how-to-start-glamping-business', quotes: ['Premium glamping tents built for commercial use run from roughly $950 to $3,250 per unit', 'Budget $1,000-$3,000 per unit'] },
     { id: 'tent', title: 'Boutique Camping: 5m Bell Tent Pro (shop data, GBP)', url: 'https://boutiquecamping.com/products/bell-tent-pro-5m.json', quotes: ['"price":"729.00"', '"price_currency":"GBP"'] },
     { id: 'units', title: 'TouchStay: glamping startup costs example (three units)', url: 'https://touchstay.com/blog/unlocking-glamping-profits', quotes: ['a glamping site with three luxury yurts'] },
     { id: 'eurostat', title: 'Eurostat house price index, annual rate of change (prc_hpi_a)', url: 'https://ec.europa.eu/eurostat/databrowser/view/prc_hpi_a/default/table', quotes: [] },
@@ -92,6 +96,14 @@ export const GLAMPING_LOW_ENTRY = {
     VN: {
       blocker: 'a foreign individual cannot hold land in Vietnam (land stays with the state; foreigners buy only from authorised developers); fits only a Vietnamese national',
       sources: ['vn-land'],
+      withoutOwning: {
+        path: 'operate without owning: the Vietnamese land-use-right holder keeps the land and is paid a share of the revenue or an annual rent; the tents, bookings and operation are yours through a foreign-invested company or a joint venture with a local partner, licensed for tourist accommodation',
+        sources: ['vn-lease', 'vn-rent'],
+        nightly: { value: 2642821, currency: 'VND', source: 'vn-str', label: 'average nightly rate of Phú Quốc short-term rentals (AirROI, 12 months to September 2026), a market reference, not a glamping rate' },
+        occupancy: { value: 0.368, source: 'vn-str', label: 'occupancy of Phú Quốc short-term rentals (AirROI)' },
+        setupPerUnit: { value: 1950, currency: 'USD', source: 'glamping-costs', label: 'lowest commercial tent ($950) plus lowest furnishing ($1,000) per unit' },
+        risks: ['the landholder must be allowed to lease the land for tourism under its land-use purpose; agricultural land needs a change of use', 'a foreign-invested company or joint venture needs an investment registration and a tourist-accommodation licence before taking guests', 'the land share is negotiated: the figure shown is the most it can be while the setup still pays back in the first year'],
+      },
     },
   },
 };
@@ -278,7 +290,40 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const verdict = tier === 'fits' ? 'fits every criterion' : tier === 'blocked' ? `blocked: ${blocked.detail}` : tier === 'unverified' ? `to confirm: ${[...new Set([...unknown.map((c) => c.detail), ...(failed.length && potentialUnknown ? [`misses ${failed.map((c) => c.label).join(', ')}; whether something nearby makes up for it is measured when the map service answers`] : [])])].join('; ')}` : tier === 'trade-off' ? `trade-off with potential: ${potential.join('; ')}` : tooSmall ? `does not fit: ${tradeoffs.join('; ')}; too little land for a glamping site, which nothing nearby can make up for` : `does not fit: ${tradeoffs.join('; ')}; nothing nearby draws guests to make up for it`;
   const measured = checks.filter((c) => c.ok !== null);
   const share = measured.length ? Math.round((measured.filter((c) => c.ok).length / checks.length) * 100) / 100 : 0;
-  return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, share, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [] };
+  const withoutOwning = country?.blocker ? withoutOwningOf(country, { climate, units, rules, convert }) : null;
+  return { tier, verdict, checks, why, tradeoffs, potential, risks, units, areaM2: m2, trend: hpi, share, entry: cost, path: country?.blocker ? null : country?.path ?? null, sources: country?.sources ?? [], ...(withoutOwning ? { withoutOwning } : {}) };
+}
+
+export const WITHOUT_OWNING_GROUP = 'Value without ownership (lease or partnership)';
+export const DAYS_PER_MONTH = 365 / 12;
+
+export function withoutOwningOf(country, { climate = null, units = null, rules, convert = null }) {
+  const w = country?.withoutOwning;
+  if (!w) return null;
+  const opened = units === null ? null : Math.min(units, rules.minUnits.value);
+  const months = climate?.cci ? climate.workable : null;
+  const rate = convert ? convert(w.nightly.value, w.nightly.currency, 'EUR') : null;
+  const perUnit = convert ? convert(w.setupPerUnit.value, w.setupPerUnit.currency, 'EUR') : null;
+  const setup = opened && Number.isFinite(perUnit) ? Math.round(opened * perUnit) : null;
+  const revenue = opened && months && Number.isFinite(rate) ? Math.round(opened * rate * w.occupancy.value * months * DAYS_PER_MONTH) : null;
+  const payback = setup !== null && revenue ? Math.ceil(setup / (revenue / months)) : null;
+  const landShare = setup !== null && revenue ? Math.max(0, Math.round((1 - setup / revenue) * 100) / 100) : null;
+  const missing = [opened === null ? 'area not shown' : opened < rules.minUnits.value ? `room for only ${opened} unit(s)` : '', months === null ? 'climate not measured yet' : '', Number.isFinite(rate) && Number.isFinite(perUnit) ? '' : 'no exchange rate'].filter(Boolean);
+  return {
+    group: WITHOUT_OWNING_GROUP,
+    path: w.path,
+    sources: w.sources,
+    units: opened,
+    months,
+    setupEur: setup,
+    revenueEur: revenue,
+    paybackMonths: payback,
+    landShareMax: landShare,
+    paysBackInYear: !missing.length && payback !== null && payback <= months,
+    missing,
+    inputs: [w.nightly.label, w.occupancy.label, w.setupPerUnit.label, 'camping months: this site\'s Camping Climate Index (Ma 2021)'],
+    risks: w.risks,
+  };
 }
 
 export const PROJECTION_YEARS = 5;
@@ -417,7 +462,8 @@ export function applyStrategy(candidates, strategy, { convert = null, retrieved 
     screened[rest.farReason] = (screened[rest.farReason] ?? 0) - moved;
     if (screened[rest.farReason] <= 0) delete screened[rest.farReason];
   }
-  return { ...rest, screened, screenedCount: (rest.screenedCount ?? 0) - moved, examples: (rest.examples ?? []).filter((e) => !rows.some((r) => r.url === e.url)), outside, kept: rows, keptCount: tiers.fits, tiers, strategy: { id: strategy.id, label: strategy.label, rules: model.rules, foundation, euHpi, sources: strategy.sources.map(({ id, title, url, quotes }) => ({ id, title, url, quoted: quotes.length > 0, ...(retrieved?.[id] ?? {}) })), retrievedAt: retrieved?.at ?? null } };
+  const withoutOwning = rows.filter((r) => r.plan.withoutOwning).sort((a, b) => (b.plan.withoutOwning.paysBackInYear - a.plan.withoutOwning.paysBackInYear) || (b.plan.withoutOwning.landShareMax ?? -1) - (a.plan.withoutOwning.landShareMax ?? -1)).map((r) => r.url);
+  return { ...rest, ...(withoutOwning.length ? { withoutOwning: { label: WITHOUT_OWNING_GROUP, urls: withoutOwning, paysBack: rows.filter((r) => r.plan.withoutOwning?.paysBackInYear).length } } : {}), screened, screenedCount: (rest.screenedCount ?? 0) - moved, examples: (rest.examples ?? []).filter((e) => !rows.some((r) => r.url === e.url)), outside, kept: rows, keptCount: tiers.fits, tiers, strategy: { id: strategy.id, label: strategy.label, rules: model.rules, foundation, euHpi, sources: strategy.sources.map(({ id, title, url, quotes }) => ({ id, title, url, quoted: quotes.length > 0, ...(retrieved?.[id] ?? {}) })), retrievedAt: retrieved?.at ?? null } };
 }
 
 export class StrategyRetriever {
