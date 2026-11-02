@@ -79,8 +79,8 @@ export const PROVIDER_PRESETS = [
     signup: 'https://openrouter.ai/settings/keys',
     freeOnly: true,
     prefer: {
-      fast: ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3'],
-      deep: ['deepseek/deepseek-r1:free', 'deepseek/deepseek-chat-v3', 'deepseek', 'qwen/qwen3', 'llama-3.3-70b'],
+      fast: ['google/gemma-4-26b-a4b-it:free', 'google/gemma-4-31b-it:free', 'meta-llama/llama-3.3-70b-instruct:free', 'nvidia/nemotron-3-ultra', 'google/gemma', 'meta-llama/', 'qwen/', 'nvidia/nemotron', 'deepseek/', 'mistralai/'],
+      deep: ['nvidia/nemotron-3-ultra', 'deepseek/deepseek-r1:free', 'google/gemma-4-31b-it:free', 'deepseek/', 'qwen/', 'nvidia/nemotron', 'google/gemma', 'meta-llama/', 'mistralai/'],
       vision: ['google/gemma-4-31b-it:free', 'google/gemma-4-26b-a4b-it:free', 'nvidia/nemotron-3.5-super-vl:free'],
     },
   },
