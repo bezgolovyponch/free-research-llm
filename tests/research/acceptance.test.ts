@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, hasCriteria, headlinePrice, inRange, looksLikeListing, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, hasCriteria, headlinePrice, inRange, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -13,6 +13,22 @@ describe('acceptance', () => {
     const spec = normalizeAcceptance({ itemCount: '10', urlsLive: 1, valueRange: [4000, 2000], unit: 'EUR', mustMention: ['car'] }, '10 links');
     expect(spec).toEqual({ expected: '10 links', itemCount: 10, urlsLive: true, valueRange: [2000, 4000], unit: 'EUR', mustMention: ['car'] });
     expect(hasCriteria(normalizeAcceptance({}, 'memo'))).toBe(false);
+  });
+
+  it('reads the item count from the words the user wrote, before any tree exists', () => {
+    expect(itemCountFromWords(
+      'The list of 20 highest possible price/value ratio to buy, working links, a short why per car and the total cost',
+      'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off on price, mileage and distance',
+    )).toBe(20);
+    expect(itemCountFromWords(
+      '10 links to real, working marketplace listings of used cars priced 2000-4000 EUR',
+      'Which trendy used cars priced 2000-4000 EUR are for sale right now in Germany, Poland or Czechia?',
+    )).toBe(10);
+    expect(itemCountFromWords('', 'Should I open a specialty coffee kiosk in Brno?')).toBeNull();
+    expect(itemCountFromWords('a car priced up to 65000CZK')).toBeNull();
+    expect(itemCountFromWords('a plot within 300km of the coast')).toBeNull();
+    expect(itemCountFromWords('top 5 offers', 'at least 120 results')).toBe(5);
+    expect(itemCountFromWords('at least 2000 EUR per car')).toBeNull();
   });
 
   it('collects items only from gated nodes, deduplicated by URL', () => {

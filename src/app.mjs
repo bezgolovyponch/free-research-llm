@@ -419,10 +419,12 @@ export class App {
     await this.browser?.close();
     for (const id of [...this.engine.running]) {
       if (this.improver.isActive(id)) continue;
+      const stoppedByUser = this.engine.cancelled.has(id);
       this.engine.cancel(id);
       try {
         const project = await this.engine.load(id);
-        await this.saveHandoff(project, { reason: 'app stopped', resume: { wasRunning: true } });
+        if (stoppedByUser) project.phase = 'cancelled';
+        await this.saveHandoff(project, stoppedByUser ? { reason: 'stopped by user' } : { reason: 'app stopped', resume: { wasRunning: true } });
         await this.store.save(project);
       } catch {
         continue;

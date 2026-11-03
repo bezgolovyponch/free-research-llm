@@ -3,7 +3,7 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, itemCountFromWords, normalizeAcceptance } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -14,14 +14,14 @@ import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
-import { buildBrief, describeBrief, onConcept } from './brief.mjs';
+import { buildBrief, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { applyModel, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
-import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
+import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
@@ -102,6 +102,13 @@ export function normalizeEstimate(raw) {
   const field = (v) => String(v ?? '').trim().slice(0, 120);
   const e = { value: field(raw.value), unit: field(raw.unit), low: field(raw.low), high: field(raw.high), basis: field(raw.basis) };
   return e.value ? e : null;
+}
+
+const MIN_JUDGED_TEXT = 300;
+const SITE_MEASURES = new Set(['coastKm', 'beachKm', 'lakeKm', 'workableMonths', 'comfortableMonths', 'optimalDays', 'hotDays', 'hottestC', 'coldestC', 'explorePoints', 'staysNearby', 'realTrendVsEu']);
+
+export function needsSiteFit(strategy, decisionModel) {
+  return Boolean(strategy) || (decisionModel?.criteria ?? []).some((c) => SITE_MEASURES.has(c.measure));
 }
 
 export class ResearchEngine {
@@ -222,12 +229,16 @@ export class ResearchEngine {
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
     await this.store.save(project);
     const template = templateById(project.templateId);
+    if (!project.acceptance?.locked && !project.acceptance?.itemCount) {
+      const asked = itemCountFromWords(project.acceptance?.expected, project.question);
+      if (typeof asked === 'number') project.acceptance = { ...project.acceptance, itemCount: asked };
+    }
     await this.ensureDecisionModel(project);
     const ask = async (feedback) => {
       const reply = await this.router.complete({
         purpose: 'decompose',
         tier: 'deep',
-        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback }), project.guidance),
+        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback, listsItems: Boolean(project.acceptance?.itemCount) }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
       repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
@@ -249,6 +260,11 @@ export class ResearchEngine {
     if (acceptance?.itemCount) {
       await this.ensureDecisionModel(project);
       this.briefOf(project);
+    }
+    const model = project.decisionModel;
+    if (model) {
+      this.emit(project, 'decision', `purpose: ${model.purpose || 'not stated clearly — pieces must not be researched until it is'}`);
+      if (model.value) this.emit(project, 'decision', `value: ${model.value}`);
     }
     this.emit(project, 'tree', `issue tree ready: ${tree.nodes.length} nodes (${reply.provider}/${reply.model})`);
     await this.store.save(project);
@@ -273,13 +289,33 @@ export class ResearchEngine {
     const model = project.decisionModel ?? null;
     const kind = template.itemKind ?? (model?.kind?.terms?.length ? { label: model.kind.label, terms: model.kind.terms } : null);
     const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: { ...template, itemKind: kind } });
+    if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
     project.brief = { ...brief, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
+  async ensureArea(project) {
+    if (!this.sites?.areaCountries) return project.area ?? null;
+    const want = radiusIn(`${project.question ?? ''} ${project.acceptance?.expected ?? ''}`);
+    if (!want) return project.area ?? null;
+    const held = project.area;
+    if (held && held.km === want.km && String(held.place ?? '').toLowerCase() === want.place.toLowerCase()) return held;
+    try {
+      const area = await this.sites.areaCountries(want.place, want.km);
+      if (!area) return project.area ?? null;
+      project.area = area;
+      this.emit(project, 'decision', `area: within ${want.km} km of ${want.place} -> ${area.countries.join(', ')}`);
+      return area;
+    } catch (error) {
+      this.emit(project, 'warn', `area not measured: ${String(error?.message ?? error).slice(0, 160)}`);
+      return project.area ?? null;
+    }
+  }
+
   async ensureDecisionModel(project) {
+    await this.ensureArea(project);
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
     try {
       const model = await this.modeler.build(project);
@@ -296,7 +332,11 @@ export class ResearchEngine {
     const kept = sources.filter((s) => onConcept(s, brief));
     const dropped = sources.length - kept.length;
     if (dropped) this.emit(project, 'node', `${node.id}: ${dropped} source(s) dropped before any model call — outside the asked regions (${sources.filter((s) => !kept.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
-    return kept;
+    const query = evidenceQuery(node, brief);
+    const topical = kept.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= 2);
+    const offTopic = kept.length - topical.length;
+    if (offTopic) this.emit(project, 'node', `${node.id}: ${offTopic} source(s) dropped before any model call — off topic (${kept.filter((s) => !topical.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
+    return topical;
   }
 
   async collectCandidates(project, { sweep = false } = {}) {
@@ -333,7 +373,7 @@ export class ResearchEngine {
       }
     }
     let table = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
-    if (this.sites && !this.demo) {
+    if (this.sites && !this.demo && needsSiteFit(strategy, project.decisionModel)) {
       const looping = this.quiet.has(project.id);
       const mode = looping ? 'cache' : sweep ? 'all' : 'budget';
       const raw = table;
@@ -557,6 +597,8 @@ export class ResearchEngine {
     }
     this.emit(project, 'node', `${node.id}: ${node.sources.length} source(s) from ${new Set(node.sources.filter((x) => x.url).map((x) => hostOf(x.url))).size} site(s), analysing`, { nodeId: node.id });
     let failures = [];
+    const brief = project.brief ?? this.briefOf(project);
+    const alreadyListed = project.candidates?.kept?.length || project.candidates?.toCheck?.length ? `\nListings already found and read by code (do not search for listings again; use these when the piece is about them):\n${shortlistText(project.candidates, 15)}` : '';
     const retrieval = this.rankSources(project, node);
     if (retrieval.verdict === 'incorrect' || retrieval.verdict === 'none') await this.correctiveSearch(project, node);
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -566,7 +608,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
-        messages: withGuidance(researchPrompt({ question: project.question, node, sources: shown, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected, brief: (project.brief ?? this.briefOf(project)).text }), project.guidance),
+        messages: withGuidance(researchPrompt({ question: project.question, node, sources: shown, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected, brief: brief.text + alreadyListed }), project.guidance),
       });
       const finding = await this.withHarvest(project, node, await this.screenFinding(project, normalizeFinding(reply.data)));
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
@@ -781,6 +823,15 @@ export class ResearchEngine {
     return results;
   }
 
+  async stopIfCancelled(project, id, release) {
+    if (!this.cancelled.has(id)) return null;
+    project.phase = 'cancelled';
+    release();
+    this.emit(project, 'phase', 'stopped by user');
+    if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
+    return await this.store.save(project);
+  }
+
   async run(id, { hints = {}, memo = true, sweep = null } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
@@ -806,6 +857,14 @@ export class ResearchEngine {
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       this.regrade(project);
       this.monitorPass(project);
+      const listingsFirst = Boolean(project.acceptance?.itemCount && this.search?.readPage && !this.demo);
+      if (listingsFirst) {
+        this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
+        await this.collectCandidates(project, { sweep: true });
+        await this.store.save(project);
+        const stoppedAfterListings = await this.stopIfCancelled(project, id, release);
+        if (stoppedAfterListings) return stoppedAfterListings;
+      }
       this.emit(project, 'phase', 'researching sub-questions in dependency order');
       await this.store.save(project);
       const byId = new Map(project.nodes.map((n) => [n.id, n]));
@@ -834,18 +893,15 @@ export class ResearchEngine {
           await this.store.save(project);
         },
       });
-      if (this.cancelled.has(id)) {
-        project.phase = 'cancelled';
-        release();
-        this.emit(project, 'phase', 'stopped by user');
-        if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
-        return await this.store.save(project);
-      }
+      const stoppedAfterPieces = await this.stopIfCancelled(project, id, release);
+      if (stoppedAfterPieces) return stoppedAfterPieces;
       try {
         await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
       } catch (error) {
         this.emit(project, 'warn', `candidate table not built: ${error.message}`);
       }
+      const stoppedBeforeMemo = await this.stopIfCancelled(project, id, release);
+      if (stoppedBeforeMemo) return stoppedBeforeMemo;
       if (memo || !project.report) await this.synthesize(project);
       else await this.checkAcceptance(project);
       this.checkSpecs(project);

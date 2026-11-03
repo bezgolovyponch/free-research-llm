@@ -6,7 +6,7 @@ import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
-import { ResearchEngine, TEAM_TTL_MS } from '../../src/research/engine.mjs';
+import { ResearchEngine, TEAM_TTL_MS, needsSiteFit } from '../../src/research/engine.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
@@ -16,7 +16,7 @@ const fakeSearch = {
   async search(queries: string[]) {
     return [
       { kind: 'web', title: 'One', url: 'https://one.example/a', domain: 'one.example', snippet: 's', text: `about ${queries[0]}` },
-      { kind: 'web', title: 'Two', url: 'https://two.example/b', domain: 'two.example', snippet: 's', text: 'more evidence from a second independent source on the same question' },
+      { kind: 'web', title: 'Two', url: 'https://two.example/b', domain: 'two.example', snippet: 's', text: `more evidence from a second independent source about ${queries[0]}` },
     ];
   },
   describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
@@ -105,7 +105,7 @@ describe('ResearchEngine', () => {
       ...fakeSearch,
       async search(queries: string[], options: { exclude?: string[] } = {}) {
         calls.push({ queries, exclude: options.exclude ?? [] });
-        return calls.length === 1 || !options.exclude ? fakeSearch.search(queries) : [{ kind: 'web', title: 'Gap', url: 'https://gap.example/p', domain: 'gap.example', snippet: 's', text: 'RAV4 median 21,500 EUR' }];
+        return calls.length === 1 || !options.exclude ? fakeSearch.search(queries) : [{ kind: 'web', title: 'Gap', url: 'https://gap.example/p', domain: 'gap.example', snippet: 's', text: 'RAV4 median 21,500 EUR demand baseline figure' }];
       },
     };
     const { engine } = engineWith(provider, recordingSearch, 1);
@@ -357,6 +357,34 @@ describe('ResearchEngine', () => {
     expect(rewards).toEqual([[[project.id], project.acceptanceResult.score]]);
   });
 
+  it('turns the place and radius a question names into the countries the brief uses as regions', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
+    const asked: Array<[string, number]> = [];
+    engine.sites = { areaCountries: async (place: string, km: number) => { asked.push([place, km]); return { point: { lat: 50.07, lon: 14.44 }, km, place, countries: ['AT', 'CZ', 'DE', 'PL'] }; } } as never;
+    const project = await engine.createProject({ question: 'Find a hatchback to purchase within 300km from prague, hatchback under 15000 EUR', templateId: 'generic', expected: '3 hatchbacks within 300km from prague' });
+    await engine.ensureDecisionModel(project);
+    expect(asked).toEqual([['prague', 300]]);
+    expect(project.area).toMatchObject({ km: 300, place: 'prague', countries: ['AT', 'CZ', 'DE', 'PL'] });
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message === 'area: within 300 km of prague -> AT, CZ, DE, PL')).toBe(true);
+    const brief = engine.briefOf(project);
+    expect(brief.regions).toEqual(['AT', 'CZ', 'DE', 'PL']);
+    expect(brief.text).toContain('Where: Austria, Czechia, Germany, Poland');
+    await engine.ensureDecisionModel(project);
+    expect(asked).toHaveLength(1);
+  });
+
+  it('warns and leaves the area unset when the places in the radius cannot be geocoded', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
+    engine.sites = { areaCountries: async () => { throw new Error('HTTP 503 from nominatim.openstreetmap.org'); } } as never;
+    const project = await engine.createProject({ question: 'Find a hatchback to purchase within 300km from prague', templateId: 'generic' });
+    await engine.ensureDecisionModel(project);
+    expect(project.area).toBeUndefined();
+    expect(engine.briefOf(project).regions).toEqual([]);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'warn' && l.message === 'area not measured: HTTP 503 from nominatim.openstreetmap.org')).toBe(true);
+  });
+
   it('builds the decision model right after decompose learns the expected item count, so the brief lists pages instead of a memo', async () => {
     const proposal = { concept: 'used cars within budget', kind: { label: 'used car', terms: ['car', 'used car'] }, criteria: [{ clause: 'under 50000 EUR', measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000 EUR' }] };
     const builds: Array<{ itemCount: number | null }> = [];
@@ -392,14 +420,79 @@ describe('ResearchEngine', () => {
     expect(project.brief.text).not.toContain('Deliver: a decision memo');
   });
 
-  it('searches again before any model call when no retrieved page matches the piece, and shows the model the best passages', async () => {
+  it('reads the item count from the user words, so the decision model is built before the tree is decomposed', async () => {
+    const proposal = { concept: 'used cars within budget', kind: { label: 'used car', terms: ['car', 'used car'] }, criteria: [{ clause: 'under 50000 EUR', measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000 EUR' }] };
+    const order: string[] = [];
+    const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
+      order.push(`build:${(p.acceptance as { itemCount?: number | null } | undefined)?.itemCount ?? null}`);
+      p.decisionModel = { ...aggregate([normalizeSample(proposal), normalizeSample(proposal)], { question: String(p.question) }), caseIds: [] };
+      return p.decisionModel;
+    } };
+    const tree = {
+      decision: 'Choose used car listings under 50000 EUR',
+      successCriteria: 'live listing pages under 50000 EUR',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: null, urlsLive: true, valueRange: [0, 50000], unit: 'EUR', mustMention: [] },
+      nodes: [
+        { id: 'D1', parentId: null, title: 'Candidate listings', question: 'Which used car listings are for sale under 50000 EUR?', method: 'lookup', searchQueries: ['used cars for sale'] },
+        { id: 'D1.1', parentId: 'D1', title: 'Dealer stock', question: 'Which dealer listings show a used car under 50000 EUR?', method: 'lookup', searchQueries: ['used car dealer stock'] },
+        { id: 'D1.2', parentId: 'D1', title: 'Private ads', question: 'Which private ads show a used car under 50000 EUR?', method: 'lookup', searchQueries: ['used car private ads'] },
+        { id: 'D2', parentId: null, title: 'Price check', question: 'What do comparable used cars cost near 50000 EUR?', method: 'comparison', searchQueries: ['used car price comparison'] },
+        { id: 'D2.1', parentId: 'D2', title: 'Asking prices', question: 'What asking prices do comparable used cars show?', method: 'lookup', searchQueries: ['used car asking prices'] },
+        { id: 'D2.2', parentId: 'D2', title: 'Running costs', question: 'What running costs change which used car is worth shortlisting?', method: 'lookup', searchQueries: ['used car running costs'] },
+      ],
+    };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { order.push('decompose'); return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Which used car listings under 50000 EUR are worth shortlisting right now?', templateId: 'generic', expected: '10 links to real listings of used cars priced up to 50000 EUR' });
+    expect(project.acceptance?.itemCount ?? null).toBeNull();
+    await engine.decompose(project);
+    expect(order[0]).toBe('build:10');
+    expect(order.indexOf('build:10')).toBeLessThan(order.indexOf('decompose'));
+    expect(engine.modeler.fresh(project)).toBe(true);
+  });
+
+  it('reports the purpose and value stage 0 chose right after the decision model', async () => {
+    const purpose = 'A buyer wants a used car under 50000 EUR so that they shortlist the best value listings';
+    const value = 'a shortlist of used car listings under 50000 EUR below the median price of their model and year';
+    const proposal = { concept: 'used cars within budget', purpose, value, needs: [{ need: 'live used car listings', kind: 'listings', sources: ['sauto.cz'] }], kind: { label: 'used car', terms: ['car', 'used car'] }, criteria: [{ clause: 'under 50000 EUR', measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000 EUR' }] };
+    const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
+      p.decisionModel = { ...aggregate([normalizeSample(proposal), normalizeSample(proposal)], { question: String(p.question) }), caseIds: [] };
+      return p.decisionModel;
+    } };
+    const tree = {
+      decision: 'Choose used car listings under 50000 EUR',
+      successCriteria: 'live listing pages under 50000 EUR',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: null, urlsLive: true, valueRange: [0, 50000], unit: 'EUR', mustMention: [] },
+      nodes: [
+        { id: 'D1', parentId: null, title: 'Candidate listings', question: 'Which used car listings are for sale under 50000 EUR?', method: 'lookup', searchQueries: ['used cars for sale'] },
+        { id: 'D1.1', parentId: 'D1', title: 'Dealer stock', question: 'Which dealer listings show a used car under 50000 EUR?', method: 'lookup', searchQueries: ['used car dealer stock'] },
+        { id: 'D1.2', parentId: 'D1', title: 'Private ads', question: 'Which private ads show a used car under 50000 EUR?', method: 'lookup', searchQueries: ['used car private ads'] },
+        { id: 'D2', parentId: null, title: 'Price check', question: 'What do comparable used cars cost near 50000 EUR?', method: 'comparison', searchQueries: ['used car price comparison'] },
+        { id: 'D2.1', parentId: 'D2', title: 'Asking prices', question: 'What asking prices do comparable used cars show?', method: 'lookup', searchQueries: ['used car asking prices'] },
+        { id: 'D2.2', parentId: 'D2', title: 'Running costs', question: 'What running costs change which used car is worth shortlisting?', method: 'lookup', searchQueries: ['used car running costs'] },
+      ],
+    };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Which used car listings under 50000 EUR are worth shortlisting right now?', templateId: 'generic', expected: '10 links to real listings of used cars priced up to 50000 EUR' });
+    await engine.decompose(project);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message.startsWith('purpose:'))).toBe(true);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message === `purpose: ${purpose}`)).toBe(true);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message === `value: ${value}`)).toBe(true);
+  });
+
+  it('drops off-topic pages before any model call, searches again when nothing matches, and shows the model the retrieved page', async () => {
     const queries: string[][] = [];
     const prompts: string[] = [];
     const offTopic = {
       ...fakeSearch,
       async search(q: string[]) {
         queries.push(q);
-        if (queries.length === 1) return [{ kind: 'web', title: 'Bikes', url: 'https://bikes.example/a', domain: 'bikes.example', snippet: 's', text: 'battery range' }, { kind: 'web', title: 'Shop', url: 'https://shop.example/b', domain: 'shop.example', snippet: 's', text: 'free delivery' }];
+        if (queries.length === 1) return [{ kind: 'web', title: 'Bikes', url: 'https://bikes.example/a', domain: 'bikes.example', snippet: 's', text: 'battery range of electric bikes on a full charge, '.repeat(8) }, { kind: 'web', title: 'Shop', url: 'https://shop.example/b', domain: 'shop.example', snippet: 's', text: 'free delivery on orders over fifty, '.repeat(10) }];
         return [{ kind: 'web', title: 'Answer', url: 'https://answer.example/c', domain: 'answer.example', snippet: 's', text: `${q.join(' ')} documented here` }];
       },
     };
@@ -414,7 +507,9 @@ describe('ResearchEngine', () => {
     expect(queries[1]).toContain(leaf.question);
     expect(leaf.sources.map((s: { url: string }) => s.url)).toContain('https://answer.example/c');
     const research = prompts.find((p) => p.includes(TASK_MARKERS.research))!;
-    expect(research.indexOf('https://answer.example/c')).toBeLessThan(research.indexOf('https://bikes.example/a'));
+    expect(research).toContain('https://answer.example/c');
+    expect(research).not.toContain('https://bikes.example/a');
+    expect(built.log.some((l: { message: string }) => /source\(s\) dropped before any model call — off topic \(bikes\.example, shop\.example\)/.test(l.message))).toBe(true);
   });
 
   it('runs the corrective search when no pages were retrieved at all, before any model call', async () => {
@@ -598,6 +693,22 @@ describe('ResearchEngine', () => {
     const stopped = await engine.run(project.id);
     expect(stopped.phase).toBe('cancelled');
     expect(stopped.report).toBeNull();
+  });
+
+  it('honours a stop raised while collecting candidates', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Should I open a bakery in Brno next year?' });
+    let synthesized = false;
+    engine.collectCandidates = async () => {
+      engine.cancel(project.id);
+      return null;
+    };
+    engine.synthesize = async () => {
+      synthesized = true;
+    };
+    const stopped = await engine.run(project.id);
+    expect(stopped.phase).toBe('cancelled');
+    expect(synthesized).toBe(false);
   });
 
   it('regrades finished pieces whose answers say the evidence does not settle them, and rewrites the memo from the current pieces on request', async () => {
@@ -850,7 +961,7 @@ describe('meaning check of claims', () => {
 
   it('asks the most capable model, then a fast model of another provider, and records both votes', async () => {
     const { engine, calls } = votingEngine({ 'support|old': 'yes', 'support-second|old': 'no' });
-    const finding = { claims: [claimOf(), { text: 'No number here', attributed: true }] };
+    const finding = { answer: 'The permit costs €950.', claims: [claimOf(), { text: 'No number here', attributed: true }] };
     const result = await engine.checkSupport({ id: 'p', nodes: [] }, nodeOf(), finding, 'cerebras');
     expect(result).toEqual({ checked: 1, open: 1 });
     expect(calls.slice(0, 2)).toEqual([
@@ -867,7 +978,7 @@ describe('meaning check of claims', () => {
   it('resolves a claim to confirm from another fetched sentence before flagging it', async () => {
     const { engine, calls } = votingEngine({ 'support|old': 'no', 'support-second|old': 'no' });
     const node = nodeOf([{ id: 'S1', text: `${quote}.` }, { id: 'S2', text: 'The building permit for a small camp costs €950 in most districts.' }]);
-    const finding = { claims: [claimOf()] };
+    const finding = { answer: 'The permit costs €950.', claims: [claimOf()] };
     await engine.checkSupport({ id: 'p', nodes: [] }, node, finding, 'cerebras');
     expect(calls.map((c) => c.quote)).toEqual([`${quote}.`, `${quote}.`, 'The building permit for a small camp costs €950 in most districts.', 'The building permit for a small camp costs €950 in most districts.']);
     expect(finding.claims[0]).toMatchObject({ quote: 'The building permit for a small camp costs €950 in most districts.', sourceIds: ['S2'], support: { verdict: 'supported', resolvedFrom: 'S2' } });
@@ -876,7 +987,7 @@ describe('meaning check of claims', () => {
   it('leaves a claim unchecked when no model answers', async () => {
     const { engine, router } = engineWith(new ScriptedProvider());
     router.complete = (async () => { throw new Error('every provider failed'); }) as typeof router.complete;
-    const finding = { claims: [claimOf()] };
+    const finding = { answer: 'The permit costs €950.', claims: [claimOf()] };
     await engine.checkSupport({ id: 'p', nodes: [] }, nodeOf(), finding, 'cerebras');
     expect(finding.claims[0].support).toMatchObject({ verdict: 'unchecked', votes: [] });
   });
@@ -892,5 +1003,73 @@ describe('meaning check of claims', () => {
     const saved = await engine.load(project.id);
     expect(saved.nodes[0].finding.claims[0].support.verdict).toBe('supported');
     expect(saved.supportAudit).toMatchObject({ checked: 1, supported: 1, stale: 0 });
+  });
+
+  it('drops pages that share fewer than two topic terms with the node before any model call', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'What Czech car sites list used hatchbacks near Prague?' });
+    const node = { id: 'D1', title: 'What Czech car sites list hatchbacks?', question: 'used car hatchback', metric: 'count' };
+    const sources = [
+      { kind: 'web', title: 'UNESCO World Heritage Centre', url: 'https://whc.unesco.org/en/list/', domain: 'whc.unesco.org', snippet: 'World Heritage List', text: 'World Heritage sites in the Czech Republic: Prague historic centre, Cesky Krumlov and the Holašovice village.'.repeat(5) },
+      { kind: 'web', title: 'Ojeté vozy', url: 'https://www.sauto.cz/ojete', domain: 'sauto.cz', snippet: 'Inzerce', text: 'Ojeté hatchbacky Škoda Fabia, used car hatchback listings Czech' },
+    ];
+    const kept = engine.onConceptOnly(project, node, sources);
+    expect(kept.map((s: { url: string }) => s.url)).toEqual(['https://www.sauto.cz/ojete']);
+    expect(project.log.some((l: { message: string }) => l.message === 'D1: 1 source(s) dropped before any model call — off topic (whc.unesco.org)')).toBe(true);
+  });
+});
+
+describe('list-first research flow', () => {
+  const listingSearch = {
+    ...fakeSearch,
+    async readPage() {
+      return { status: 200, text: 'car listings', links: [], listings: [] };
+    },
+  };
+
+  it('reads marketplace listings by code before any piece is researched, then sweeps again at the end for portal pages the pieces found (pages already read come from the page cache)', async () => {
+    const provider = new ScriptedProvider();
+    const { engine } = engineWith(provider, listingSearch);
+    const project = await engine.createProject({ question: 'Find used hatchbacks within 300 km of Prague under 65000 CZK', expected: 'at least 20 cars' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 20, valueRange: [0, 65000], unit: 'CZK' } });
+    const calls: Array<{ sweep: boolean | null | undefined; research: number }> = [];
+    engine.collectCandidates = (async (_p: unknown, options: { sweep?: boolean } = {}) => {
+      calls.push({ sweep: options.sweep, research: provider.calls.filter((c) => c.marker === TASK_MARKERS.research).length });
+      return null;
+    }) as never;
+    const done = await engine.run(project.id);
+    expect(done.phase).toBe('done');
+    expect(calls[0]).toEqual({ sweep: true, research: 0 });
+    expect(calls.at(-1)!.sweep).toBe(true);
+    expect(calls.at(-1)!.research).toBeGreaterThan(0);
+    expect(calls.at(-1)!.research).toBeGreaterThan(0);
+    expect(calls.filter((c) => c.sweep === true)).toHaveLength(2);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message === 'listings first: reading marketplace pages by code before any piece is researched')).toBe(true);
+  });
+
+  it('keeps a single end-of-run table call for a research that does not ask for items', async () => {
+    const provider = new ScriptedProvider();
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Should I import e-bikes from Germany to Czechia?' });
+    const calls: Array<{ sweep: boolean | null | undefined; research: number }> = [];
+    engine.collectCandidates = (async (_p: unknown, options: { sweep?: boolean } = {}) => {
+      calls.push({ sweep: options.sweep, research: provider.calls.filter((c) => c.marker === TASK_MARKERS.research).length });
+      return null;
+    }) as never;
+    const done = await engine.run(project.id);
+    expect(done.phase).toBe('done');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].research).toBeGreaterThan(0);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('listings first:'))).toBe(false);
+  });
+});
+
+describe('needsSiteFit', () => {
+  it('measures sites only when a strategy or a decision criterion needs a place measurement', () => {
+    expect(needsSiteFit(null, { criteria: [] })).toBe(false);
+    expect(needsSiteFit(null, { criteria: [{ measure: 'priceEur' }] })).toBe(false);
+    expect(needsSiteFit(null, null)).toBe(false);
+    expect(needsSiteFit(null, { criteria: [{ measure: 'coastKm' }] })).toBe(true);
+    expect(needsSiteFit({ id: 'glamping' }, null)).toBe(true);
   });
 });

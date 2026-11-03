@@ -51,6 +51,7 @@ const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const HPI_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hpi_a';
 const HICP_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_aind';
 export const MIN_PLACE_RANK = 12;
+export const COUNTRY_PLACE_RANK = 4;
 const EUROSTAT_CODE = { GR: 'EL' };
 export const EU_AGGREGATE = 'EU27_2020';
 const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"][name]';
@@ -77,6 +78,19 @@ export function nearestKm(lat, lon, points) {
   let best = Infinity;
   for (const p of points) best = Math.min(best, haversineKm(lat, lon, p.lat, p.lon));
   return best === Infinity ? null : round(best);
+}
+
+export function destinationPoint(lat, lon, bearing, km) {
+  const rad = Math.PI / 180;
+  const degrees = 180 / Math.PI;
+  const angle = bearing * rad;
+  const arc = km / 6371;
+  const phi = lat * rad;
+  const lambda = lon * rad;
+  const toPhi = Math.asin(Math.sin(phi) * Math.cos(arc) + Math.cos(phi) * Math.sin(arc) * Math.cos(angle));
+  const toLambda = lambda + Math.atan2(Math.sin(angle) * Math.sin(arc) * Math.cos(phi), Math.cos(arc) - Math.sin(phi) * Math.sin(toPhi));
+  const toLon = (((toLambda * degrees + 540) % 360) + 360) % 360 - 180;
+  return { lat: toPhi * degrees, lon: toLon };
 }
 
 export function siteKey(lat, lon) {
@@ -352,6 +366,59 @@ export class SiteAssessor {
     this.store.places[key] = { at: this.now(), point };
     this.persist();
     return point;
+  }
+
+  async reverseCountry(lat, lon) {
+    const key = `rev|${lat.toFixed(2)}|${lon.toFixed(2)}`;
+    const known = this.store.places[key];
+    if (this.fresh(known)) return known.point;
+    const wait = this.lastGeocode + GEOCODE_GAP_MS - this.now();
+    if (wait > 0) await this.sleep(wait);
+    this.lastGeocode = this.now();
+    const found = await this.fetchJson(`${NOMINATIM_URL.replace(/\/search$/, '')}/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`);
+    const code = String(found?.address?.country_code ?? '').toUpperCase();
+    const point = code || null;
+    this.store.places[key] = { at: this.now(), point };
+    this.persist();
+    return point;
+  }
+
+  async areaCentre(place) {
+    const key = `centre|${place.toLowerCase()}`;
+    const known = this.store.places[key];
+    if (this.fresh(known)) return known.point;
+    const wait = this.lastGeocode + GEOCODE_GAP_MS - this.now();
+    if (wait > 0) await this.sleep(wait);
+    this.lastGeocode = this.now();
+    const found = await this.fetchJson(`${NOMINATIM_URL}?format=json&limit=1&q=${encodeURIComponent(place)}`);
+    const hit = Array.isArray(found) ? found[0] : null;
+    const point = hit && Number(hit.place_rank) > COUNTRY_PLACE_RANK ? { lat: Number(hit.lat), lon: Number(hit.lon), by: `place "${place}"` } : null;
+    this.store.places[key] = { at: this.now(), point };
+    this.persist();
+    return point;
+  }
+
+  async areaCountries(place, km) {
+    const point = await this.areaCentre(place);
+    if (!point) return null;
+    const codes = new Set();
+    const sample = async (lat, lon) => {
+      try {
+        const code = await this.reverseCountry(lat, lon);
+        if (code) codes.add(code);
+      } catch {
+        return;
+      }
+    };
+    await sample(point.lat, point.lon);
+    for (let i = 0; i < 16; i++) {
+      const bearing = i * 22.5;
+      for (const distance of [km, km / 2]) {
+        const at = destinationPoint(point.lat, point.lon, bearing, distance);
+        await sample(at.lat, at.lon);
+      }
+    }
+    return { point, km, place, countries: [...codes].sort() };
   }
 
   async locate(row, readPage) {

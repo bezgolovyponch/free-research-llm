@@ -5,7 +5,7 @@ function snapshot(project) {
   return new Map(project.nodes.map((n) => [n.id, { parentId: n.parentId, title: n.title, status: n.status, items: (n.finding?.items ?? []).map((i) => i.url) }]));
 }
 
-export async function previewMaintenance(engine, original) {
+export async function previewMaintenance(engine, original, { sweep = false } = {}) {
   const project = structuredClone(original);
   const before = snapshot(project);
   const compacted = compactProject(project);
@@ -14,7 +14,7 @@ export async function previewMaintenance(engine, original) {
   const rescreened = await engine.rescreenItems(project);
   const harvested = await engine.harvestAll(project);
   const regraded = engine.regrade(project);
-  const candidates = await engine.collectCandidates(project);
+  const candidates = sweep ? await engine.collectCandidates(project, { sweep: true }) : await engine.collectCandidates(project);
   const after = snapshot(project);
   const changes = { moved: [], retitled: [], regraded: [], removedItems: [] };
   for (const [id, now] of after) {

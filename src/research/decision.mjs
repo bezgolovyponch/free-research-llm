@@ -4,6 +4,7 @@ import { plain } from './itemgate.mjs';
 import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf, quoteFound } from './strategy.mjs';
 
+export const DECISION_MODEL_VERSION = 2;
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
 export const CASES_RETRIEVED = 2;
@@ -15,6 +16,7 @@ export const OPS = ['<=', '>=', '<', '>'];
 
 const finite = (n) => (Number.isFinite(Number(n)) && n !== null && n !== '' ? Number(n) : undefined);
 const climateOf = (row) => (row.site?.climate?.cci ? row.site.climate : undefined);
+const contentWords = (text) => new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
 
 export const MEASURES = {
   priceEur: { label: 'asking price', unit: 'EUR', read: (row) => finite(row.value) },
@@ -50,7 +52,15 @@ export function quoteStates(text, quote, value) {
   return numbersIn(quote).some((n) => n === Number(value));
 }
 
+const NEED_KINDS = ['listings', 'knowledge', 'computed'];
+const words = (text, max) => String(text ?? '').trim().slice(0, max);
+
 export function normalizeSample(raw) {
+  const needs = (Array.isArray(raw?.needs) ? raw.needs : []).map((n) => ({
+    need: words(n?.need, 160),
+    kind: NEED_KINDS.includes(n?.kind) ? n.kind : '',
+    sources: (Array.isArray(n?.sources) ? n.sources : []).map((s) => words(s, 80)).filter(Boolean).slice(0, 4),
+  })).filter((n) => n.need && n.kind).slice(0, 8);
   const criteria = (Array.isArray(raw?.criteria) ? raw.criteria : []).slice(0, 20).map((c) => ({
     clause: String(c?.clause ?? '').slice(0, 200),
     measure: String(c?.measure ?? ''),
@@ -59,9 +69,13 @@ export function normalizeSample(raw) {
     quote: String(c?.quote ?? '').slice(0, 200),
   })).filter((c) => MEASURES[c.measure] && c.op);
   const terms = (Array.isArray(raw?.kind?.terms) ? raw.kind.terms : []).map((t) => plain(String(t)).trim()).filter((t) => t && t.length <= 30).slice(0, 30);
+  const not = (Array.isArray(raw?.kind?.not) ? raw.kind.not : []).map((t) => plain(String(t)).trim()).filter((t) => t && t.length <= 40).slice(0, 40);
   return {
     concept: String(raw?.concept ?? '').slice(0, 300),
-    kind: { label: String(raw?.kind?.label ?? '').slice(0, 60), terms },
+    purpose: words(raw?.purpose, 240),
+    value: words(raw?.value, 240),
+    needs,
+    kind: { label: String(raw?.kind?.label ?? '').slice(0, 60), terms, not },
     criteria,
     unmodelled: (Array.isArray(raw?.unmodelled) ? raw.unmodelled : []).map((u) => String(u).slice(0, 200)).filter(Boolean).slice(0, 12),
   };
@@ -116,12 +130,30 @@ export function aggregate(samples, { question = '', guidance = '', cases = [] } 
   const termVotes = new Map();
   for (const sample of samples) for (const t of new Set(sample.kind.terms)) termVotes.set(t, (termVotes.get(t) ?? 0) + 1);
   const terms = [...termVotes].filter(([, v]) => v >= majority).map(([t]) => t);
+  const notVotes = new Map();
+  for (const sample of samples) for (const t of new Set(sample.kind.not ?? [])) notVotes.set(t, (notVotes.get(t) ?? 0) + 1);
+  const not = [...notVotes].filter(([, v]) => v >= majority).map(([t]) => t);
   const labels = samples.map((s) => s.kind.label).filter(Boolean);
   const label = labels.sort((a, b) => labels.filter((x) => x === b).length - labels.filter((x) => x === a).length)[0] ?? '';
   const clauses = clausesOf(question).map((text) => ({ text, criteria: criteria.filter((c) => (c.quote && quoteFound(text, c.quote)) || (c.clause && quoteFound(text, c.clause)) || (c.clause && quoteFound(c.clause, text))).map((c) => c.id) }));
+  const wanted = contentWords(said);
+  let chosen = null;
+  let purposeGrounded = 0;
+  for (const sample of samples) {
+    const overlap = [...contentWords(`${sample.purpose ?? ''} ${sample.value ?? ''}`)].filter((w) => wanted.has(w)).length;
+    if (!chosen || overlap > purposeGrounded) {
+      chosen = sample;
+      purposeGrounded = overlap;
+    }
+  }
+  const purpose = chosen?.purpose && chosen.value && purposeGrounded >= 2 && /so that/i.test(chosen.purpose) ? chosen.purpose : null;
   return {
     concept: samples.map((s) => s.concept).find(Boolean) ?? '',
-    kind: terms.length ? { label: label || terms[0], terms, verified: null } : null,
+    purpose,
+    value: chosen?.value || null,
+    needs: chosen?.needs ?? [],
+    purposeGrounded,
+    kind: terms.length ? { label: label || terms[0], terms, ...(not.length ? { not } : {}), verified: null } : null,
     criteria,
     noLimit,
     clauses,
@@ -142,9 +174,9 @@ export function verifyKind(kind, titles) {
 
 export function decisionPrompt({ question, guidance = '', expected = '', examples = [] }) {
   const measures = Object.entries(MEASURES).map(([id, m]) => `- ${id}: ${m.label} (${m.unit})`).join('\n');
-  const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
+  const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [] } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
   return [
-    { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label and the words (in English and in the languages of the named countries) that listing titles use for it. Answer with JSON only: {"concept": "...", "kind": {"label": "...", "terms": ["..."]}, "criteria": [...], "unmodelled": ["..."]}` },
+    { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label, the words (in English and in the languages of the named countries) that listing titles use for it, and "not", the words (in English and in the languages of the named countries, and of the countries around a named place) that listing titles use for things sold alongside the item that are not the item itself (parts, accessories, wanted ads, services).\n"purpose" is one sentence "<who> wants <outcome> so that <value>" in the user's own terms, naming the decision the result serves. "value" is one sentence naming the result worth having and how it is judged (for example "a shortlist of 20 hatchbacks within 300 km of Prague, each at or below 65,000 CZK and below the median price of its model and year"). "needs" is up to 8 items {"need": "...", "kind": "listings" | "knowledge" | "computed", "sources": ["a domain or a source type", up to 4]} where listings are read by code from portals, knowledge is researched by tree pieces, and computed is derived by code from the listings table. Answer with JSON only: {"concept": "...", "purpose": "...", "value": "...", "needs": [...], "kind": {"label": "...", "terms": ["..."], "not": ["..."]}, "criteria": [...], "unmodelled": ["..."]}` },
     { role: 'user', content: `${shots ? `Approved examples:\n${shots}\n\n` : ''}Question: ${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
   ];
 }
@@ -194,6 +226,9 @@ export function withModelRules(foundation, model) {
 export function modelText(model) {
   if (!model) return '';
   const lines = [];
+  lines.push(`Why: ${model.purpose || 'not stated clearly — pieces must not be researched until it is'}`);
+  if (model.value) lines.push(`Value: ${model.value}`);
+  if (model.needs?.length) lines.push(`Needs: ${model.needs.map((n) => `${n.need} (${n.kind}${n.sources?.length ? `: ${n.sources.join(', ')}` : ''})`).join('; ')}`);
   if (model.concept) lines.push(`Concept: ${model.concept}`);
   if (model.criteria.length) lines.push(`Decision model (code measures each listing): ${model.criteria.map((c) => `${MEASURES[c.measure].label} ${c.op} ${c.value} ${MEASURES[c.measure].unit} (${c.source})`).join('; ')}`);
   if (model.noLimit.length) lines.push(`Asked but no limit stated, so not checked: ${model.noLimit.map((c) => MEASURES[c.measure].label).join('; ')}`);
@@ -295,7 +330,7 @@ export class DecisionModeler {
 
   fresh(project) {
     const m = project.decisionModel;
-    return Boolean(m && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2);
+    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2);
   }
 
   async build(project) {
@@ -308,7 +343,7 @@ export class DecisionModeler {
     const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));
     if (samples.length < 2) return project.decisionModel ?? null;
     const model = aggregate(samples, { question, guidance, cases: examples });
-    project.decisionModel = { ...model, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString() };
+    project.decisionModel = { ...model, version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString() };
     if (this.cases) await this.cases.record(project.id, question, model);
     return project.decisionModel;
   }

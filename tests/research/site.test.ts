@@ -460,6 +460,61 @@ describe('SiteAssessor', () => {
   });
 });
 
+describe('countries within a radius', () => {
+  const PRAGUE = { lat: 50.0755, lon: 14.4378 };
+
+  function radiusNet(seen: string[] = []) {
+    const fetchJson = async (url: string) => {
+      if (url.includes('/reverse')) {
+        const lat = Number(url.match(/lat=(-?[\d.]+)/)![1]);
+        const lon = Number(url.match(/lon=(-?[\d.]+)/)![1]);
+        seen.push(`${lat.toFixed(2)},${lon.toFixed(2)}`);
+        const code = lon > 15.5 && lat > 50.6 ? 'pl' : lon < 12.5 ? 'de' : lat < 48.8 ? 'at' : 'cz';
+        return { address: { country_code: code } };
+      }
+      if (url.includes('q=czechia')) return [{ lat: '49.74', lon: '15.33', display_name: 'Česko', place_rank: 4 }];
+      return url.includes('q=prague') ? [{ lat: String(PRAGUE.lat), lon: String(PRAGUE.lon), display_name: 'Praha, Česko', place_rank: 7 }] : [];
+    };
+    return { fetchJson };
+  }
+
+  it('geocodes the place, samples 16 bearings at the radius and half of it, and returns the countries it finds', async () => {
+    const seen: string[] = [];
+    const area = await new SiteAssessor({ fetchJson: radiusNet(seen).fetchJson, sleep: noSleep }).areaCountries('prague', 300);
+    expect(area).toMatchObject({ km: 300, place: 'prague', point: { lat: PRAGUE.lat, lon: PRAGUE.lon } });
+    expect(area.countries).toEqual(expect.arrayContaining(['AT', 'CZ', 'DE', 'PL']));
+    expect(area.countries).toEqual([...area.countries].sort());
+    expect(new Set(area.countries).size).toBe(area.countries.length);
+    expect(seen).toHaveLength(33);
+    expect(seen[0]).toBe('50.08,14.44');
+    expect(seen).toContain('50.00,10.24');
+    expect(seen).toContain('47.38,14.44');
+  });
+
+  it('takes a capital that Nominatim ranks as a region as the centre, but never a whole country', async () => {
+    expect((await new SiteAssessor({ fetchJson: radiusNet().fetchJson, sleep: noSleep }).areaCentre('prague'))).toMatchObject({ lat: PRAGUE.lat, lon: PRAGUE.lon });
+    expect(await new SiteAssessor({ fetchJson: radiusNet().fetchJson, sleep: noSleep }).areaCentre('czechia')).toBeNull();
+  });
+
+  it('is null when the place cannot be geocoded', async () => {
+    expect(await new SiteAssessor({ fetchJson: radiusNet().fetchJson, sleep: noSleep }).areaCountries('nowhere', 300)).toBeNull();
+  });
+
+  it('caches reverse answers by rounded coordinates and waits like the geocoder asks', async () => {
+    const waits: number[] = [];
+    let t = 0;
+    const seen: string[] = [];
+    const assessor = new SiteAssessor({ fetchJson: radiusNet(seen).fetchJson, now: () => t, sleep: async (ms: number) => { waits.push(ms); t += ms; } });
+    expect(await assessor.reverseCountry(50.0755, 14.4378)).toBe('CZ');
+    expect(await assessor.reverseCountry(50.0751, 14.4371)).toBe('CZ');
+    expect(seen).toHaveLength(1);
+    expect(assessor.store.places['rev|50.08|14.44']).toMatchObject({ point: 'CZ' });
+    await assessor.reverseCountry(47.0, 14.0);
+    expect(waits.every((ms) => ms === 1100)).toBe(true);
+    expect(waits.length).toBe(1);
+  });
+});
+
 describe('title and map agree', () => {
   it('takes the place a title names, skipping generic words and numbers', async () => {
     const { titlePlace } = await import('../../src/research/site.mjs');

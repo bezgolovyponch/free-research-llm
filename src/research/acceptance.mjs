@@ -74,6 +74,32 @@ export function normalizeAcceptance(raw, expected = '') {
   };
 }
 
+const COUNT_NOUNS = 'links?|listings?|items?|results?|offers?|ads?|cars?|vehicles?|plots?|properties|property|options?|candidates?|suppliers?';
+const COUNT_PHRASE = /\b(?:at least|top|list of)\s+(\d{1,4})(?!\d)/gi;
+const COUNT_NOUN = new RegExp(`(?<![\\d.,])(\\d{1,4})(?![\\d.,])\\s+(?:${COUNT_NOUNS})(?![a-z])`, 'gi');
+const COUNT_UNIT_AFTER = /^\s*(?:[€$£₺₫]|(?:eur|euro|euros|czk|pln|usd|gbp|try|vnd|kč|kc|zl|zł|km|m2|m²|sqm|%|percent|years?|months?|weeks?|days?|hours?|minutes?)(?![a-zà-ÿ]))/i;
+const RANGE_BEFORE = /[-–—]\s*$/;
+const RANGE_AFTER = /^\s*[-–—]\s*\d/;
+
+export function itemCountFromWords(...texts) {
+  const source = texts.filter((t) => typeof t === 'string' && t.trim()).join(' \n ');
+  const found = [];
+  for (const m of source.matchAll(COUNT_PHRASE)) {
+    const at = m.index + m[0].length - m[1].length;
+    found.push({ at, end: at + m[1].length, value: Number(m[1]) });
+  }
+  for (const m of source.matchAll(COUNT_NOUN)) found.push({ at: m.index, end: m.index + m[1].length, value: Number(m[1]) });
+  found.sort((a, b) => a.at - b.at);
+  for (const { at, end, value } of found) {
+    if (!(value >= 1 && value <= 1000)) continue;
+    const before = source.slice(Math.max(0, at - 3), at);
+    const after = source.slice(end);
+    if (RANGE_BEFORE.test(before) || RANGE_AFTER.test(after) || COUNT_UNIT_AFTER.test(after)) continue;
+    return value;
+  }
+  return null;
+}
+
 export function hasCriteria(spec) {
   return Boolean(spec && (spec.itemCount || spec.urlsLive || spec.valueRange || spec.mustMention?.length));
 }

@@ -219,7 +219,7 @@ describe('claim logic check without a stored summary', () => {
   it('computes the same stale count the app shows, ignoring roll-ups and non-result claims', () => {
     const nodes = [
       { id: 'D1', sources: [{ id: 'D1.1', kind: 'node' }], finding: { claims: [{ text: 'D1.1 says: margin 300', attributed: true }] } },
-      { id: 'D1.1', method: 'lookup', sources: [{ id: 'S1', kind: 'web' }], finding: { claims: [{ text: 'A permit costs €950', attributed: true }, { text: 'Camping needs approval', attributed: true }] } },
+      { id: 'D1.1', method: 'lookup', sources: [{ id: 'S1', kind: 'web' }], finding: { answer: 'A permit costs €950.', claims: [{ text: 'A permit costs €950', attributed: true }, { text: 'Camping needs approval', attributed: true }] } },
     ];
     const c9 = conceptAudit({ nodes }).findings.find((f) => f.id === 'C9');
     expect(c9).toMatchObject({ ok: false, detail: '1 claim(s) were checked under older logic.' });

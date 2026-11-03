@@ -47,10 +47,10 @@ function calculationNumbers(finding) {
 
 export function affectsResult(claim, finding = {}, node = {}) {
   if (!claim || claim.assumption === true) return false;
+  if (typeof claim.value === 'number') return true;
   const text = String(claim.text ?? '').replace(SOURCE_REF, ' ');
-  if (/\d/.test(text) || typeof claim.value === 'number') return true;
-  const inputs = new Set(calculationNumbers(finding));
-  if (numbersIn(text).some((n) => inputs.has(n))) return true;
+  const resultNumbers = new Set([...numbersIn(finding?.answer), ...calculationNumbers(finding)]);
+  if (numbersIn(text).some((n) => resultNumbers.has(n))) return true;
   return DECIDING_METHODS.has(node?.method) || node?.decides === true;
 }
 

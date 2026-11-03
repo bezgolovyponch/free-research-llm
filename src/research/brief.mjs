@@ -127,6 +127,16 @@ export function regionsIn(text) {
   return [...codes];
 }
 
+const RADIUS = /\b(\d+)\s*km\s+(?:from|of|around)\s+([^,.;\n]+)/i;
+
+export function radiusIn(text) {
+  const hit = String(text ?? '').match(RADIUS);
+  if (!hit) return null;
+  const place = hit[2].split(/\s+and\s+/i)[0].trim().split(/\s+/).slice(0, 3).join(' ');
+  if (!place || /^the\s/i.test(place)) return null;
+  return { km: Number(hit[1]), place };
+}
+
 function narrowedGroups(text) {
   const named = new Set(namedCountries(text));
   return groupsIn(text).filter((g) => membersOf(g).some((code) => named.has(code))).map((g) => `${g} narrowed to ${membersOf(g).filter((c) => named.has(c)).map((c) => countryByCode(c).name).join(', ')}, the members you named`);

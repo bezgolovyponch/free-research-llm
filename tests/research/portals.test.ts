@@ -36,13 +36,14 @@ describe('seed portals', () => {
   it('matches car seeds through kind words and filters only the portal whose currency is the brief unit', () => {
     const carKind = { label: 'used car', terms: ['car', 'auto', 'samochod'] };
     const seeds = seedPortals({ kind: carKind, regions: ['DE', 'PL', 'CZ'], valueRange: [2000, 4000], unit: 'EUR' });
-    expect(seeds).toHaveLength(3);
     expect(new Set(seeds.map((s) => s.country))).toEqual(new Set(['DE', 'PL', 'CZ']));
-    expect(new Set(seeds.map((s) => s.url))).toEqual(new Set([
-      'https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000&atype=C',
-      'https://auto.bazos.cz/',
-      'https://www.otomoto.pl/osobowe',
-    ]));
+    expect(seeds.filter((s) => s.country === 'DE').map((s) => s.url)).toEqual(['https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000&atype=C']);
+    expect(seeds.filter((s) => s.country === 'PL').map((s) => s.url)).toEqual(['https://www.otomoto.pl/osobowe']);
+    const czech = seeds.filter((s) => s.country === 'CZ').map((s) => s.url);
+    expect(czech).toContain('https://auto.bazos.cz/skoda/');
+    expect(czech).toContain('https://auto.bazos.cz/volkswagen/');
+    expect(czech.every((url) => /^https:\/\/auto\.bazos\.cz\/[a-z]+\/$/.test(url))).toBe(true);
+    expect(czech.some((url) => /nahradnidily|pneumatiky|prislusenstvi/.test(url))).toBe(false);
     expect(seeds.every((s) => s.seed === true)).toBe(true);
     expect(seeds.some((s) => /pozemk|terreno|pisos/.test(s.url))).toBe(false);
   });
@@ -52,7 +53,7 @@ describe('seed portals', () => {
     const convert = (v: number, from: string, to: string) => (from === 'EUR' && to === 'CZK' ? v * 25 : from === 'EUR' && to === 'PLN' ? v * 4.3 : null);
     const seeds = seedPortals({ kind: carKind, regions: ['DE', 'PL', 'CZ'], valueRange: [2000, 4000], unit: 'EUR' }, convert);
     const urlOf = (country: string) => seeds.find((s) => s.country === country)?.url ?? '';
-    expect(urlOf('CZ')).toBe('https://auto.bazos.cz/?hledat=&cenaod=50000&cenado=100000');
+    expect(urlOf('CZ')).toBe('https://auto.bazos.cz/skoda/?hledat=&cenaod=50000&cenado=100000');
     expect(urlOf('DE')).toBe('https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000&atype=C');
     const otomoto = new URL(urlOf('PL'));
     expect(otomoto.searchParams.get('search[filter_float_price:from]')).toBe('8600');
@@ -63,7 +64,7 @@ describe('seed portals', () => {
     const carKind = { label: 'used car', terms: ['car', 'auto', 'samochod'] };
     const carBrief = { kind: carKind, regions: ['DE', 'PL', 'CZ'], valueRange: [2000, 4000], unit: 'EUR' };
     const plain = seedPortals(carBrief);
-    expect(plain.find((s) => s.country === 'CZ')?.url).toBe('https://auto.bazos.cz/');
+    expect(plain.find((s) => s.country === 'CZ')?.url).toBe('https://auto.bazos.cz/skoda/');
     expect(plain.find((s) => s.country === 'PL')?.url).toBe('https://www.otomoto.pl/osobowe');
     const convert = () => 1;
     const czSeeds = seedPortals({ kind, regions: ['CZ'], coastal: false, valueRange: [0, 5000000], unit: 'CZK' }, convert);

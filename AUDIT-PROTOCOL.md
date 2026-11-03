@@ -65,6 +65,9 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | A8 | Fits hidden by a stale cached record (cached site without climate index, 2026-10-27) | witness on a copy before deploy (S7) |
 | A9 | A list research outside the plot flow delivered nothing and the audit said nothing (cars, 2026-11-03: 0 of 10 links) | C15, C17 |
 | A10 | A research kept a removed template (car-arbitrage, removed 2026-10-20) | C16 |
+| A11 | A list research did its identify and screen stages as tree pieces over web search (car research 0c750f, 2026-11-03: 62 pages, none on a marketplace, 0 listings) | PROTOCOLS 4m: listings first by code, tree only for what listings cannot show |
+| A12 | "Within 300 km of Prague" gave no countries, so no portal was read | `radiusIn`, `areaCountries` |
+| A13 | Plot measurements (sea, climate, cadastre) ran on a car list and hung the run for 20+ min | `needsSiteFit`: only when a strategy or a site criterion asks |
 
 ### B · Evidence and gates
 | # | Failure | How it is caught |
@@ -92,6 +95,8 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | D4 | A slow local model gets calls (llamacpp: 20 of 200 calls worked, median 116 s) | router switch; speed check |
 | D5 | Two app servers on one data folder (2026-10-31) | instance lock |
 | D6 | Memory exhaustion from dead live-update connections (2026-10-23) | heap guard, watchdog |
+| D7 | Stop ignored after the pieces: a stopped research kept sweeping and writing its memo (2026-11-03) | `stopIfCancelled` after every stage |
+| D8 | A restart would resume a research the user had stopped | shutdown saves no resume for a stopped run and marks it cancelled |
 
 ### E · Change process
 | # | Failure | How it is caught |
@@ -103,3 +108,7 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | E5 | Bot checks or consent redirects worked around | never: a site that refuses automated reads is left alone |
 | E6 | A claim of action that did not happen | O9; quote the command output |
 | E7 | Keys in a file | keys only in the key store or the process environment |
+| E8 | The lead ran its own copy of a research instead of the user's (2026-11-03: created b4f648 while the user's 0c750f waited; about an hour lost) | before acting on "the research", list researches by creation time, take the newest the user created, confirm its id and question in the reply; never create a research the user did not ask for |
+| E9 | Bugs found one per full live re-run (7–15 min each) | replay first: `node scripts/dryrun.mjs <id> --sweep` reads the portals by code with no model calls; batch one round's fixes into one PR |
+| E10 | A long command waited on a condition that could not happen (cancel during the old candidate stage) | wait loops end on every terminal state and carry a timeout; check the stage the run is in before waiting |
+| E11 | Pages were read and scrapers planned before the purpose was stated (car research, 2026-11-03) | stage 0 of PROTOCOLS 4m: why, value, needs, a source per need, generic reader first; a custom scraper only for a proven-necessary source the generic reader fails on |
