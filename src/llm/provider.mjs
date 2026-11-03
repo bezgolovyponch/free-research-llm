@@ -79,12 +79,18 @@ export class OpenAICompatibleProvider {
     this.nextSlot = 0;
   }
 
+  queueMs() {
+    if (!this.minIntervalMs) return 0;
+    return Math.max(0, this.nextSlot - Date.now());
+  }
+
   async throttle() {
-    if (!this.minIntervalMs) return;
+    if (!this.minIntervalMs) return 0;
     const now = Date.now();
     const wait = Math.max(0, this.nextSlot - now);
     this.nextSlot = Math.max(now, this.nextSlot) + this.minIntervalMs;
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    return wait;
   }
 
   get keyCount() {
@@ -242,8 +248,9 @@ export class OpenAICompatibleProvider {
     const cap = this.preset.maxOutputTokens ?? MAX_TOKEN_BUDGET;
     let budget = Math.min(maxTokens, cap);
     let jsonMode = json;
+    let waitMs = 0;
     for (let attempt = 0; attempt < 4; attempt++) {
-      await this.throttle();
+      waitMs += await this.throttle();
       const payload = { model, messages, temperature, max_tokens: budget, ...(this.preset.extraBody ?? {}), ...(jsonMode ? { response_format: { type: 'json_object' } } : {}) };
       let body;
       try {
@@ -265,7 +272,7 @@ export class OpenAICompatibleProvider {
         continue;
       }
       if (!content) throw new ProviderError(`${this.id} returned an empty reply${truncated ? ' (token limit reached)' : ''}`, { status: 502, provider: this.id });
-      return { content, model, provider: this.id, usage: body.usage ?? {}, truncated };
+      return { content, model, provider: this.id, usage: body.usage ?? {}, truncated, waitMs };
     }
     throw new ProviderError(`${this.id} gave no usable reply after retries`, { status: 502, provider: this.id });
   }
@@ -316,8 +323,9 @@ export class AnthropicMessagesProvider extends OpenAICompatibleProvider {
     let body;
     let content = '';
     let truncated = false;
+    let waitMs = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
-      await this.throttle();
+      waitMs += await this.throttle();
       body = await this.request('/messages', {
         method: 'POST',
         body: JSON.stringify({ model, max_tokens: budget, temperature, system, messages: turns, ...(this.preset.thinking === false ? { thinking: { type: 'disabled' } } : {}) }),
@@ -339,6 +347,7 @@ export class AnthropicMessagesProvider extends OpenAICompatibleProvider {
         total_tokens: (body.usage?.input_tokens ?? 0) + (body.usage?.output_tokens ?? 0),
       },
       truncated,
+      waitMs,
     };
   }
 }

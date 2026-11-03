@@ -59,8 +59,9 @@ export function providerStats(ledger, { now = Date.now(), windowMs = WINDOW_MS }
   for (const row of ledger) {
     if (!row?.provider || row.provider === 'router') continue;
     if (row.ts && now - Date.parse(row.ts) > windowMs) continue;
-    const s = (stats[row.provider] ??= { calls: 0, ok: 0, failed: 0, rateLimited: 0, ms: { fast: [], deep: [], all: [] } });
+    const s = (stats[row.provider] ??= { calls: 0, ok: 0, failed: 0, rateLimited: 0, spentMs: 0, ms: { fast: [], deep: [], all: [] } });
     s.calls++;
+    if (Number(row.ms) > 0) s.spentMs += Number(row.ms);
     if (row.ok) {
       s.ok++;
       if (Number(row.ms) > 0) {
@@ -72,7 +73,7 @@ export function providerStats(ledger, { now = Date.now(), windowMs = WINDOW_MS }
       if (/429|413|quota|rate|limit/i.test(String(row.error ?? ''))) s.rateLimited++;
     }
   }
-  return Object.fromEntries(Object.entries(stats).map(([id, s]) => [id, { calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, reliability: (s.ok + 1) / (s.calls + 2), medianMs: { fast: median(s.ms.fast) ?? median(s.ms.all), deep: median(s.ms.deep) ?? median(s.ms.all) } }]));
+  return Object.fromEntries(Object.entries(stats).map(([id, s]) => [id, { calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, reliability: (s.ok + 1) / (s.calls + 2), spentMs: s.spentMs, msPerAnswer: s.ok ? s.spentMs / s.ok : null, medianMs: { fast: median(s.ms.fast) ?? median(s.ms.all), deep: median(s.ms.deep) ?? median(s.ms.all) } }]));
 }
 
 function qualityText(row) {
@@ -96,17 +97,19 @@ function reasonFor(row, role, strategy, rank) {
 export function rankRole({ role, strategy, providers, stats, customOrder = [], now = Date.now(), outcomes = null, purposeClass = null, rng = Math.random }) {
   const cls = purposeClass ?? (role === 'deep' ? 'research' : 'volume');
   const rows = providers.map((p) => {
-    const s = stats[p.id] ?? { calls: 0, ok: 0, failed: 0, rateLimited: 0, reliability: 0.5, medianMs: {} };
+    const s = stats[p.id] ?? { calls: 0, ok: 0, failed: 0, rateLimited: 0, reliability: 0.5, spentMs: 0, msPerAnswer: null, medianMs: {} };
     const [capability, capabilityBasis] = capabilityOf(p);
     const posterior = outcomes ? outcomes.posterior(p.id, cls, capability) : { mean: capability / 5, observed: 0, pass: 0, fail: 0 };
     const draw = outcomes ? outcomes.sample(p.id, cls, capability, rng) : capability / 5;
-    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, quality: posterior.mean, qualityObserved: posterior.observed, passed: posterior.pass, draw, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, medianMs: s.medianMs[role] ?? null };
+    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, quality: posterior.mean, qualityObserved: posterior.observed, passed: posterior.pass, draw, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, msPerAnswer: s.msPerAnswer ?? null, medianMs: s.medianMs[role] ?? null };
   });
-  const timed = rows.filter((r) => r.medianMs).map((r) => r.medianMs);
+  const speedMs = (r) => r.msPerAnswer ?? r.medianMs;
+  const timed = rows.map(speedMs).filter((ms) => ms);
   const fastest = timed.length ? Math.min(...timed) : null;
   const w = WEIGHTS[role];
   for (const r of rows) {
-    const speed = r.medianMs && fastest ? fastest / r.medianMs : 0.5;
+    const ms = speedMs(r);
+    const speed = ms && fastest ? fastest / ms : 0.5;
     r.score = w.capability * r.draw + w.reliability * r.reliability + w.speed * speed;
   }
   const weak = (r) => (r.capability <= 1 ? 2 : 0) + (r.reliability < MIN_RELIABILITY && r.calls >= 4 ? 1 : 0) + (r.calls >= NEVER_ANSWERED_AFTER && r.ok === 0 ? 1 : 0);
@@ -228,7 +231,7 @@ export function purposePlan({ providers, stats, usage = {}, enabled, outcomes = 
   const reservedTight = reserved && (usage[reserved]?.today?.used ?? 0) >= RESERVE_UNTIL;
   const top = orderBy(topRows, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || b.draw - a.draw || b.reliability - a.reliability);
   const research = orderBy(deep, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved && reservedTight) - Number(b.id === reserved && reservedTight) || b.score - a.score);
-  const volume = orderBy(fast, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved) - Number(b.id === reserved) || b.draw - a.draw || (a.medianMs ?? 1e9) - (b.medianMs ?? 1e9));
+  const volume = orderBy(fast, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved) - Number(b.id === reserved) || b.score - a.score);
   const orders = { top, research, volume };
   const byPurpose = Object.fromEntries(Object.entries(PURPOSE_CLASS).map(([purpose, cls]) => [purpose, orders[cls]]));
   byPurpose['research:deep'] = top;

@@ -21,12 +21,16 @@ export const TIMEOUT_BENCH_MS = 10 * 60 * 1000;
 export const COMPUTE_ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 const TIMED_OUT = /unreachable: timed out/;
 const BAD_KEY_MS = 6 * 3600 * 1000;
+export const PAYMENT_REST_MS = 24 * 3600 * 1000;
+const PAYMENT_REQUIRED = /payment required|subscription (?:is )?required|requires? a (?:paid|subscription)|upgrade your plan/i;
+const CREDIT_EXHAUSTED = /balance_units|billing_portal|insufficient (?:credit|funds|balance)|out of credits?/i;
 const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
 const PER_MODEL_DAY = /quota window: per day, per model/;
 const OVERLOADED = /overloaded|high (?:traffic|demand)|currently experiencing|over capacity|no capacity|temporarily unavailable|provider returned error|UNAVAILABLE/i;
 export const OVERLOAD_REST_MS = 10 * 60 * 1000;
 export const MAX_SWITCHES_PER_CALL = 3;
+export const QUEUE_DEMOTE_MS = 5000;
 export const FAILURE_STREAK_BENCH = 12;
 export const DEAD_AFTER_CALLS = 20;
 export const DEAD_WINDOW_MS = 30 * 60 * 1000;
@@ -154,7 +158,7 @@ export class ModelRouter {
   }
 
   demoteFull(providers) {
-    const full = (p) => p.maxConcurrent > 0 && (this.inflight.get(p.id) ?? 0) >= p.maxConcurrent;
+    const full = (p) => (p.maxConcurrent > 0 && (this.inflight.get(p.id) ?? 0) >= p.maxConcurrent) || (p.queueMs?.() ?? 0) > QUEUE_DEMOTE_MS;
     return [...providers.filter((p) => !full(p)), ...providers.filter(full)];
   }
 
@@ -233,7 +237,13 @@ export class ModelRouter {
       const at = Date.parse(row.ts);
       const badKey = (status === 401 || status === 403) && this.now() - at < BAD_KEY_MS;
       const text = String(row.error ?? '');
-      const noCredit = !SHORT_LIMIT.test(text) && (status === 402 || /balance_units|billing_portal|insufficient (?:credit|funds|balance)|out of credits?/i.test(text)) && !/exceeded your current quota|per day/i.test(text);
+      const paid = PAYMENT_REQUIRED.test(text) || (status === 402 && !SHORT_LIMIT.test(text) && !CREDIT_EXHAUSTED.test(text));
+      if (paid && Number.isFinite(at) && this.now() - at < PAYMENT_REST_MS) {
+        this.coolDown({ id }, { status, message: text });
+        restored.push(id);
+        continue;
+      }
+      const noCredit = !SHORT_LIMIT.test(text) && (status === 402 || CREDIT_EXHAUSTED.test(text)) && !/exceeded your current quota|per day/i.test(text);
       const daily = noCredit && nextUtcMidnight(at) > this.now();
       if (!badKey && !daily) continue;
       this.coolDown({ id }, { status, message: String(row.error ?? '') });
@@ -266,8 +276,11 @@ export class ModelRouter {
   cooldownFor(provider, error) {
     const now = this.now();
     if (error.status === 401 || error.status === 403) return { until: now + BAD_KEY_MS, reason: 'key rejected; check it on Models & router' };
+    const message = String(error.message ?? '');
+    const paid = PAYMENT_REQUIRED.test(message) || (error.status === 402 && !SHORT_LIMIT.test(message) && !CREDIT_EXHAUSTED.test(message));
+    if (paid) return { until: now + PAYMENT_REST_MS, reason: 'needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key' };
     const until = now + (error.retryAfterMs || this.cooldownMs);
-    if (!SHORT_LIMIT.test(error.message) && (error.status === 402 || DAILY.test(error.message))) return { until: Math.max(until, quotaResetAt(provider, now)), reason: 'daily quota or credit used up; waits for the daily reset' };
+    if (!SHORT_LIMIT.test(message) && (error.status === 402 || DAILY.test(message))) return { until: Math.max(until, quotaResetAt(provider, now)), reason: 'daily quota or credit used up; waits for the daily reset' };
     return { until, reason: 'rate limit' };
   }
 
@@ -339,7 +352,9 @@ export class ModelRouter {
           const reply = await provider.chat({ messages: attemptMessages, tier, json, temperature, timeoutMs: provider.timeoutFor?.(estimateTokens(attemptMessages), EXPECTED_OUTPUT_TOKENS[purpose] ?? 500) ?? tierTimeoutMs(tier) });
           this.calls++;
           const data = json ? extractJson(reply.content) : null;
-          this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms: this.now() - started, tokens: reply.usage?.total_tokens ?? null });
+          const waitMs = reply.waitMs ?? 0;
+          const ms = Math.max(0, (this.now() - started) - waitMs);
+          this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms, tokens: reply.usage?.total_tokens ?? null, ...(waitMs > 0 ? { waitMs } : {}) });
           this.timeoutStreak.delete(provider.id);
           this.computeErrorStreak.delete(provider.id);
           this.failureStreak.delete(provider.id);
