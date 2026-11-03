@@ -246,7 +246,11 @@ export function buildCandidates(nodes, brief, options = {}) {
     const { lowCut, ...rest } = row;
     toCheck.push({ ...rest, toCheck: [rest.toCheck, `price far below what most listings of this kind cost (under ${lowCut} ${unit}): likely a part, a deposit or an instalment`].filter(Boolean).join('; ') });
   }
-  if (brief?.subtype?.models?.length) kept = valueVsPeers(kept, brief.subtype.models);
+  if (brief?.subtype?.models?.length) {
+    const compared = valueVsPeers(kept, brief.subtype.models);
+    kept = compared.filter((row) => !row.peerNote);
+    for (const row of compared.filter((r) => r.peerNote)) toCheck.push({ ...row, toCheck: [row.toCheck, `price ${row.valueIndex} of its ${row.peers} peers' median: ${row.peerNote}`].filter(Boolean).join('; ') });
+  }
   if (kept.some((row) => row.valueIndex !== null && row.valueIndex !== undefined)) kept.sort((a, b) => (a.valueIndex ?? Infinity) - (b.valueIndex ?? Infinity) || (a.km ?? Infinity) - (b.km ?? Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
   else kept.sort((a, b) => Number(b.coast) - Number(a.coast) || (a.value ?? Infinity) - (b.value ?? Infinity));
   return {

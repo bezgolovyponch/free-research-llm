@@ -205,3 +205,15 @@ describe('peer value details', () => {
     expect(out[2].peerNote).toBeUndefined();
   });
 });
+
+describe('far below its peers is checked, not ranked first', () => {
+  it('moves a listing priced under half its peers median to the check list with the reason', async () => {
+    const { buildCandidates } = await import('../../src/research/candidates.mjs');
+    const ad = (n: number, title: string, value: number) => ({ title, url: `https://auto.bazos.cz/inzerat/22590${n}000/x.php`, value, unit: 'CZK' });
+    const nodes = [{ id: 'sweep', sources: [{ id: 'P1', url: 'https://auto.bazos.cz/skoda/', locale: 'cs', kindPage: true, listings: [ad(1, 'Škoda Fabia 1.4', 40000), ad(2, 'Škoda Fabia 1.2', 42000), ad(3, 'Škoda Fabia combi', 45000), ad(4, 'Škoda Fabia motor 1.4', 9000)] }] }];
+    const brief = { kind: { label: 'used car', terms: ['auto'] }, regions: ['CZ'], valueRange: [0, 65000], unit: 'CZK', excludes: [], subtype: { label: 'hatchback', models: ['skoda fabia'] } };
+    const table = buildCandidates(nodes, brief, {});
+    expect(table.kept.map((r: { value: number }) => r.value)).toEqual([40000, 42000, 45000]);
+    expect(table.toCheck.find((r: { value: number }) => r.value === 9000)?.toCheck).toMatch(/far below its peers/);
+  });
+});
