@@ -1213,6 +1213,9 @@ describe('knowledge queries about the item groups found', () => {
     expect(JSON.stringify(calls[0])).toContain('the main language of Czechia');
     await (engine as unknown as { planKnowledgeQueries: (p: unknown) => Promise<number | null> }).planKnowledgeQueries(project);
     expect(calls).toHaveLength(1);
+  });
+});
+
 describe('distance from the asked place', () => {
   it('measures stated places from the area centre and moves rows beyond the radius to the check list', async () => {
     const { haversineKm } = await import('../../src/research/site.mjs');
