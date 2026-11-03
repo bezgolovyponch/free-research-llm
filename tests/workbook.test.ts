@@ -133,3 +133,14 @@ describe('listing columns follow the data', () => {
     expect(header).not.toContain('fact: vehicle.mileage#n');
   });
 });
+
+describe('valuation columns in the export', () => {
+  it('exports market value, underpricing, confidence, engine and the value notes with sources', async () => {
+    const { plotRows } = await import('../src/workbook.mjs');
+    const row = { title: 'Dacia Sandero 1.4 MPI 2009 165000 km', url: 'https://auto.bazos.cz/inzerat/1/x.php', price: 25000, currency: 'CZK', value: 25000, unit: 'CZK', year: 2009, km: 165000, engine: '1.4 mpi', fuel: 'petrol', marketValue: 45272, underpriced: 1.81, valueConfidence: 'medium', highlight: 'underpriced: worth about 45,272 CZK', valueNotes: ['market value from 7 comparable dacia sandero listings', 'reliable (1.4): simple engine — "quote" (https://forum.example/sandero)'] };
+    const [header, first] = plotRows({ acceptance: { unit: 'CZK' }, candidates: { kept: [row], toCheck: [], outside: [] } });
+    const at = (name: string) => first[header.indexOf(name)];
+    expect([at('underpriced'), at('market value'), at('value confidence'), at('engine'), at('fuel')]).toEqual([1.81, 45272, 'medium', '1.4 mpi', 'petrol']);
+    expect(String(at('value notes'))).toContain('https://forum.example/sandero');
+  });
+});

@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import { headlinePrice, looksLikeListing, parseAmounts } from '../research/acceptance.mjs';
 import { absoluteUrl } from './html.mjs';
 
+export const SCHEMA_CHECK_VERSION = 2;
 export const SCHEMA_SAMPLE_CHARS = 12000;
 export const MIN_SCHEMA_ITEMS = 3;
 const FIELD_NAME = /^[a-z][a-z0-9 _-]{0,30}$/i;

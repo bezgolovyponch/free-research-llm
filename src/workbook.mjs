@@ -46,6 +46,14 @@ export function withoutOwningRows(project) {
 }
 
 const FACT_FIELDS = [
+  ['underpriced', (r) => (Number.isFinite(r.underpriced) ? r.underpriced : '')],
+  ['market value', (r) => r.marketValue],
+  ['value confidence', (r) => r.valueConfidence],
+  ['highlight', (r) => r.highlight],
+  ['condition', (r) => (r.condition ?? []).join(', ')],
+  ['engine', (r) => r.engine],
+  ['fuel', (r) => r.fuel],
+  ['value notes', (r) => (r.valueNotes ?? []).join(' | ')],
   ['group', (r) => r.group],
   ['year', (r) => r.year],
   ['mileage km', (r) => r.km],

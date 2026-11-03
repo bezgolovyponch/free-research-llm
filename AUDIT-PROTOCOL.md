@@ -72,6 +72,7 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | A15 | The memo said 15 results while the table held 70 and the acceptance check passed | `shortlistText` final counts, verdict starts with `tableVerdict` |
 | A16 | Table columns labelled € for CZK values | columns carry no currency; each value shows its unit |
 | A17 | Communities and expert sources never searched; knowledge pieces asked in generic English (12 of 14 weak) | `planKnowledgeQueries` |
+| A18 | "Underpriced" claimed on thin facts: ad dates read as model years, comparables of other years unadjusted, parts priced like cars (witness 2026-11-03: a 2006 car 'worth' 55,000 CZK) | `listingFacts` date rules; Theil–Sen adjustment; no value without year or mileage; highlight only at medium or high confidence |
 
 ### B · Evidence and gates
 | # | Failure | How it is caught |

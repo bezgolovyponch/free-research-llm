@@ -45,6 +45,7 @@ export const TEAM_TTL_MS = 24 * 3600 * 1000;
 export const SUPPORT_PARALLEL = 3;
 export const CALIBRATION_TITLES = 60;
 export const CALIBRATION_SAMPLES = 3;
+export const RECALIBRATE_GROWTH = 3;
 export const QUERY_PLAN_GROUPS = 6;
 export const MAX_DISTANCE_LOOKUPS = 60;
 
@@ -72,6 +73,37 @@ function calibrationTitles(pages, max = CALIBRATION_TITLES) {
 
 function strings(value, max = 8) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => String(v).trim()).filter(Boolean).slice(0, max);
+}
+
+const GROUP_KNOWLEDGE_GROUPS = 6;
+const GROUP_FACTS_TTL_MS = 30 * 24 * 3600 * 1000;
+
+function groupQueryPrompt({ group, engines, languages, kind }) {
+  return [
+    { role: 'system', content: 'You write web search queries. Answer with JSON only: {"queries": ["..."]}.' },
+    { role: 'user', content: `Item: ${kind || 'item'} "${group}"${engines.length ? `, engines or variants seen in listings: ${engines.join(', ')}` : ''}.
+Write 4 queries that find owner experiences and expert or statistical evidence about which engines or variants of "${group}" are reliable, durable or problematic and what typically fails (owner forums and clubs, defect or breakdown statistics such as the TÜV report or ADAC breakdown statistics where they exist). Write them in: ${languages.join(', ')}. Every query names "${group}".` },
+  ];
+}
+
+function groupFactsPrompt({ group, engines, sources }) {
+  const pages = sources.map((s) => `[${s.id}] ${s.url}\n${String(s.text ?? '').slice(0, 3500)}`).join('\n\n');
+  return [
+    { role: 'system', content: 'You extract facts only from the given pages. Answer with JSON only.' },
+    { role: 'user', content: `Item: "${group}"${engines.length ? `; engines or variants in the listings: ${engines.join(', ')}` : ''}.
+From the pages below, list facts about the reliability or durability of specific engines or variants of "${group}". Return {"facts": [{"engine": "the engine or variant as named, or \"\" for the whole model", "verdict": "reliable" | "problematic" | "neutral", "note": "what owners or experts report, at most 15 words", "quote": "the exact sentence from the page, copied character for character", "sourceId": "G1"}]}. Only facts the page states; no facts from memory; at most 8.
+
+${pages}` },
+  ];
+}
+
+export function verifiedGroupFacts(facts, sources) {
+  const squash = (t) => plain(t).replace(/\s+/g, ' ').trim();
+  return (Array.isArray(facts) ? facts : []).filter((f) => f && ['reliable', 'problematic', 'neutral'].includes(f.verdict) && String(f.quote ?? '').trim().length >= 20).map((f) => {
+    const source = sources.find((s) => s.id === f.sourceId);
+    const found = source && squash(source.text).includes(squash(f.quote));
+    return found ? { engine: String(f.engine ?? '').slice(0, 30), verdict: f.verdict, note: String(f.note ?? '').slice(0, 140), quote: String(f.quote).slice(0, 300), source: source.url } : null;
+  }).filter(Boolean).slice(0, 8);
 }
 
 function queryLanguages(regions = []) {
@@ -366,7 +398,7 @@ export class ResearchEngine {
     if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
-    project.brief = { ...brief, subtype: model?.subtype ?? null, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    project.brief = { ...brief, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -463,7 +495,9 @@ export class ResearchEngine {
 
   async calibrateKind(project) {
     const kind = project.decisionModel?.kind;
-    if (this.router && !this.demo && kind?.verified && kind.verified.share < 0.5 && !project.decisionModel.calibrated && project.sweep?.pages?.length) {
+    const swept = (project.sweep?.pages ?? []).reduce((n, page) => n + (page.listings?.length ?? 0), 0);
+    const grew = Boolean(project.decisionModel?.calibrated) && swept >= RECALIBRATE_GROWTH * (project.decisionModel.calibratedOn ?? swept);
+    if (this.router && !this.demo && kind?.verified && project.sweep?.pages?.length && (grew || (kind.verified.share < 0.5 && !project.decisionModel.calibrated))) {
       const titles = calibrationTitles(project.sweep.pages);
       if (titles.length) {
         try {
@@ -472,9 +506,12 @@ export class ResearchEngine {
           const merged = mergeCalibrations(replies);
           if (merged.samples < 2) throw new Error(`only ${merged.samples} of ${CALIBRATION_SAMPLES} calibration proposals answered`);
           const applied = applyCalibration(kind, merged, titles);
+          const before = project.decisionModel.subtype;
           project.decisionModel.kind = applied.kind;
-          project.decisionModel.subtype = applied.subtype;
+          project.decisionModel.subtype = grew && before ? { ...before, ...(applied.subtype ?? {}), models: [...new Set([...(before.models ?? []), ...(applied.subtype?.models ?? [])])], variants: [...new Set([...(before.variants ?? []), ...(applied.subtype?.variants ?? [])])] } : applied.subtype;
+          if (grew) this.emit(project, 'decision', `kind recalibrated on ${titles.length} titles (market grew from ${project.decisionModel.calibratedOn} to ${swept} listings)`);
           project.decisionModel.calibrated = new Date().toISOString();
+          project.decisionModel.calibratedOn = swept;
           this.emit(project, 'decision', `kind calibrated on ${titles.length} titles: not ${(applied.kind.not ?? []).join(', ') || 'none'}; ${applied.subtype?.label ?? ''}: ${applied.subtype?.models?.length ?? 0} models`);
         } catch (error) {
           this.emit(project, 'warn', `item kind not calibrated: ${String(error?.message ?? error).slice(0, 160)}`);
@@ -581,6 +618,41 @@ export class ResearchEngine {
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
     return c;
+  }
+
+  async gatherGroupKnowledge(project) {
+    if (!this.router || this.demo || !this.search?.search || !project?.acceptance?.itemCount) return 0;
+    const kept = project.candidates?.kept ?? [];
+    const models = project.decisionModel?.subtype?.models ?? [];
+    if (!kept.length || !models.length) return 0;
+    const now = Date.now();
+    const known = project.groupFacts ?? {};
+    const counts = new Map();
+    for (const row of kept) if (row.group) counts.set(row.group, (counts.get(row.group) ?? 0) + 1);
+    const groups = [...counts].sort((a, b) => b[1] - a[1]).map(([g]) => g).filter((g) => !(known[g] && now - Date.parse(known[g].at) < GROUP_FACTS_TTL_MS)).slice(0, GROUP_KNOWLEDGE_GROUPS);
+    if (!groups.length) return 0;
+    const languages = queryLanguages((project.brief ?? this.briefOf(project)).regions);
+    let added = 0;
+    for (const group of groups) {
+      try {
+        const engines = [...new Set(kept.filter((r) => r.group === group && r.engine).map((r) => r.engine))].slice(0, 6);
+        const plan = await this.router.complete({ purpose: 'decompose', tier: 'deep', messages: groupQueryPrompt({ group, engines, languages, kind: project.brief?.kind?.label ?? '' }) });
+        const queries = (Array.isArray(plan?.data?.queries) ? plan.data.queries : []).map((q) => String(q ?? '').trim()).filter((q) => q && plain(q).includes(plain(group).split(' ').at(-1))).slice(0, 4);
+        if (!queries.length) continue;
+        const sources = (await this.search.search(queries, { maxSources: 5 })).filter((s) => String(s.text ?? '').length > 200);
+        if (!sources.length) continue;
+        const shown = sources.map((s, i) => ({ ...s, id: `G${i + 1}` }));
+        const reply = await this.router.complete({ purpose: 'research', tier: 'deep', messages: groupFactsPrompt({ group, engines, sources: shown }) });
+        const facts = verifiedGroupFacts(reply?.data?.facts, shown);
+        project.groupFacts = { ...(project.groupFacts ?? {}), [group]: { at: new Date().toISOString(), facts, sources: shown.map((s) => s.url) } };
+        added += facts.length;
+        this.emit(project, 'decision', `${group}: ${facts.length} owner and expert fact(s) with quotes found on ${shown.length} page(s)${facts.length ? ` — ${facts.slice(0, 3).map((f) => `${f.verdict}${f.engine ? ` ${f.engine}` : ''}`).join(', ')}` : ''}`);
+      } catch (error) {
+        this.emit(project, 'warn', `${group}: owner and expert facts not gathered: ${String(error?.message ?? error).slice(0, 140)}`);
+      }
+    }
+    if (added) this.briefOf(project);
+    return added;
   }
 
   async planKnowledgeQueries(project) {
@@ -1092,6 +1164,7 @@ export class ResearchEngine {
         this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
         await this.collectCandidates(project, { sweep: true });
         await this.planKnowledgeQueries(project);
+        if (await this.gatherGroupKnowledge(project)) await this.collectCandidates(project, { sweep: false });
         await this.store.save(project);
         const stoppedAfterListings = await this.stopIfCancelled(project, id, release);
         if (stoppedAfterListings) return stoppedAfterListings;

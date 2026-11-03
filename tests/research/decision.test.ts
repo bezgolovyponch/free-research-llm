@@ -228,7 +228,7 @@ describe('item kind calibrated on real listing titles', () => {
 
   it('keeps a not word only when 2 or more titles use it, and a model only when 1 or more titles show it', () => {
     const out = applyCalibration(kind, proposal, titles);
-    expect(out.kind).toEqual({ label: 'used car', terms: ['hatchback'], not: ['parts', 'kola', 'svetlo', 'pneumatiky'] });
+    expect(out.kind).toEqual({ label: 'used car', terms: ['hatchback'], not: ['parts', 'kola', 'svetlo', 'pneumatiky'], condition: [] });
     expect(out.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa', '208'], variants: [], source: 'model proposal, matched to listing titles by code' });
   });
 
@@ -269,5 +269,15 @@ describe('calibration model names', () => {
     const titles = ['ŠKODA FABIA II COMFORT 2008', 'Škoda Fabia 1.4 MPI 50kw nová STK', 'Škoda Fabia 2, LPG'];
     const out = applyCalibration({ label: 'used car', terms: [] }, { data: { not: [], subtype: { label: 'hatchback', models: ['Skoda Fabia II'], variants: [] } } }, titles);
     expect(out.subtype?.models).toEqual(['skoda fabia ii', 'skoda fabia']);
+  });
+});
+
+describe('condition words from real titles', () => {
+  it('keeps condition words a majority names and the titles contain', async () => {
+    const { applyCalibration, mergeCalibrations } = await import('../../src/research/decision.mjs');
+    const titles = ['Honda Civic 1.6 na doježdění', 'Škoda Fabia havarovaná', 'Kia Rio 1.4 nová STK'];
+    const reply = (condition: string[]) => ({ data: { not: [], condition, subtype: { label: 'hatchback', models: ['kia rio'], variants: [] } } });
+    const merged = mergeCalibrations([reply(['na doježdění', 'havarovaná']), reply(['na doježdění', 'havarovaná', 'nepojízdné']), reply(['nepojízdné'])]);
+    expect(applyCalibration({ label: 'used car', terms: [] }, merged, titles).kind.condition.sort()).toEqual(['havarovana', 'na dojezdeni']);
   });
 });
