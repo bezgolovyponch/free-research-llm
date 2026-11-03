@@ -39,7 +39,7 @@ function inUnit(row, unit, convert) {
 
 export function screenCandidate(row, brief, options = {}) {
   const convert = options.convert ?? ((v) => v);
-  const verdict = screenItem(row, { ...options, valueRange: brief?.valueRange ?? options.valueRange ?? null, unit: brief?.unit ?? options.unit ?? '', kind: brief?.kind ?? options.kind ?? null });
+  const verdict = screenItem(row, { ...options, valueRange: brief?.valueRange ?? options.valueRange ?? null, unit: brief?.unit ?? options.unit ?? '', kind: brief?.kind ?? options.kind ?? null, kindKnown: Boolean(row.source?.kindPage) });
   const reasons = [...verdict.reasons];
   if (isNewsPage(row.url)) reasons.push('news, blog or guide page');
   const country = itemCountry(row, row.source);

@@ -64,6 +64,31 @@ describe('portal sweep', () => {
     expect(candidates.kept.map((r: { country: string }) => r.country)).toEqual(['Spain', 'Spain', 'Spain']);
   });
 
+  it('marks every page read from a seed portal as a page of that kind, and pages from other starts as not', async () => {
+    const carKind = { label: 'used car', terms: ['used car', 'gebrauchtwagen', 'uzywany samochod', 'pouzite auto'] };
+    const carBrief = buildBrief({ question: 'Used cars, 2000 to 4000 EUR', acceptance: { expected: '20 used cars', itemCount: 20, valueRange: [2000, 4000], unit: 'EUR' }, template: { itemKind: carKind } });
+    const car = (n: number) => ({ title: `Peugeot 208 ${n}`, url: `https://www.autoscout24.de/angebote/peugeot-208-tuev-7-27-2-zonen-leder-tempo-pdc-diesel-silber-cat_ma55gr201150ge1074va3624mt3255tr480648-d0b6741d-3dd5-47ce-804b-718ffdbb750${n}`, value: 2999, unit: 'EUR' });
+    const seedUrl = 'https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000&atype=C';
+    const filteredUrl = `${seedUrl}&page=1`;
+    const nextUrl = `${seedUrl}&page=2`;
+    const pages: Record<string, { listings: unknown[]; next: string; links: unknown[] }> = {
+      [seedUrl]: { listings: [car(1)], next: '', links: [{ url: filteredUrl }] },
+      [filteredUrl]: { listings: [car(2)], next: nextUrl, links: [] },
+      [nextUrl]: { listings: [car(3)], next: '', links: [] },
+      'https://cars.example/es/gebrauchtwagen': { listings: [{ title: 'VW Golf', url: 'https://cars.example/es/anuncio/golf-9-ID1z9zy', value: 3500, unit: 'EUR' }], next: '', links: [] },
+    };
+    const search = { readPage: async (url: string) => ({ status: 200, locale: 'de', text: '', ...(pages[url] ?? { listings: [], next: '', links: [] }) }) };
+    const seeds = () => [{ url: seedUrl, country: 'DE', sample: ['gebrauchtwagen'], count: 20, seed: true }];
+    const project = { nodes: [{ id: 'D1', sources: [{ url: 'https://cars.example/es/gebrauchtwagen', locale: 'es', links: [1, 2, 3].map((n) => ({ url: `https://cars.example/es/anuncio/golf-${n}-ID1q${n}rs`, text: `Gebrauchtwagen Golf ${n}` })) }] }] };
+    const result = await new CandidateSweeper({ search, seeds }).sweep(project, carBrief, {});
+    expect(result?.pages.map((p: { from: string; kindPage: boolean }) => [p.from, p.kindPage])).toEqual([
+      ['seed portal for DE', true],
+      ['price filter found on autoscout24.de', true],
+      ['next page link', true],
+      ['portal page already read', false],
+    ]);
+  });
+
   it('reads a seed portal of every named country before the count target can stop the sweep, one country at a time', async () => {
     const twoCountries = buildBrief({ question: 'Plots near the sea, 20000EUR max', acceptance: { expected: '1 plot in Portugal or Spain', itemCount: 1, valueRange: [0, 20000], unit: 'EUR' }, template: { itemKind: kind } });
     const read: string[] = [];

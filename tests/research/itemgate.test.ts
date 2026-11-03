@@ -61,6 +61,20 @@ describe('item gate: rentals, word ends, broken links', () => {
   });
 });
 
+describe('item gate: listings read from a seed portal page', () => {
+  const carKind = { label: 'used car', terms: ['used car', 'gebrauchtwagen', 'uzywany samochod', 'pouzite auto'] };
+  const url = 'https://www.autoscout24.de/angebote/peugeot-208-tuev-7-27-2-zonen-leder-tempo-pdc-diesel-silber-cat_ma55gr201150ge1074va3624mt3255tr480648-d0b6741d-3dd5-47ce-804b-718ffdbb7507';
+  const car = { title: 'Peugeot 208', url, value: 2999, unit: 'EUR' };
+  const carOptions = { valueRange: [2000, 4000], unit: 'EUR', kind: carKind, kindKnown: true };
+
+  it('keeps a listing of the page kind although its own title and url lack every kind term, still applying the other checks', () => {
+    expect(screenItem(car, carOptions)).toMatchObject({ ok: true, priced: true });
+    expect(screenItem(car, { ...carOptions, kindKnown: false }).reasons).toEqual(['not a used car']);
+    expect(screenItem({ ...car, title: 'Szukam Peugeot 208' }, carOptions).reasons).toEqual(['a wanted ad, not an offer']);
+    expect(screenItem({ ...car, value: 5999 }, carOptions).reasons).toEqual(['price 5999 EUR is outside 2000–4000 EUR']);
+  });
+});
+
 describe('item gate: Czech/Slovak/Polish land terms', () => {
   const glampingKind = { label: 'plot of land', terms: ['land', 'terreno', 'arsa', 'parcela', 'pozemek', 'pozemku', 'pozemky', 'pozemkem', 'parcely', 'parcelu', 'zahrada', 'zahrady', 'louka', 'louky', 'pozemok', 'dzialka', 'dzialki', 'dzialke'] };
   const glampingOptions = { valueRange: [0, 20000], unit: 'EUR', kind: glampingKind, convert: (v: number, from: string) => (from === 'USD' ? v * 0.9 : v) };
