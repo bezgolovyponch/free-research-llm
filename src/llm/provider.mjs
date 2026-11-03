@@ -254,6 +254,8 @@ export class OpenAICompatibleProvider {
           continue;
         }
         throw error;
+      } finally {
+        if (this.minIntervalMs) this.nextSlot = Math.max(this.nextSlot, Date.now() + this.minIntervalMs);
       }
       const choice = body.choices?.[0];
       const content = choice?.message?.content ?? '';

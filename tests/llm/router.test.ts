@@ -170,6 +170,44 @@ describe('ModelRouter.coolDown', () => {
   });
 });
 
+describe('ModelRouter cooldowns keep the longer rest', () => {
+  it('does not let a following 429 shorten a 30-minute failure bench', async () => {
+    let now = 1000000;
+    const samba = provider('sambanova', Array.from({ length: 12 }, () => new ProviderError('sambanova HTTP 429: rate limited', { status: 429 })));
+    const groq = provider('groq', []);
+    const router = new ModelRouter({ providers: [samba, groq], now: () => now });
+    for (let i = 0; i < 12; i++) {
+      if (i) now += 60001;
+      await router.complete({ messages: [] });
+    }
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + 30 * 60 * 1000);
+    router.coolDown(samba, new ProviderError('sambanova HTTP 429: rate limited', { status: 429, retryAfterMs: 60000 }));
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + 30 * 60 * 1000);
+    expect(router.cooldownReason.get('sambanova')).toBe('12 failed calls in a row; rests 30 min');
+  });
+
+  it('skips a provider rested by another call while a long request was in flight', async () => {
+    const now = 1000000;
+    let release = () => {};
+    const inFlight = {
+      id: 'slow',
+      ready: true,
+      describe: () => ({ id: 'slow' }),
+      chat: () => new Promise((_, reject) => {
+        release = () => reject(new ProviderError('slow HTTP 429: rate limited', { status: 429, retryAfterMs: 5000 }));
+      }),
+    };
+    const backup = provider('backup', ['{"ok":true}']);
+    const router = new ModelRouter({ providers: [inFlight, backup], now: () => now, maxWaitMs: 0 });
+    const call = router.complete({ messages: [] });
+    await new Promise((r) => setTimeout(r, 5));
+    router.coolDown({ id: 'backup' }, new ProviderError('backup HTTP 429: rate limited', { status: 429, retryAfterMs: 60000 }));
+    release();
+    await expect(call).rejects.toBeInstanceOf(NoModelAvailableError);
+    expect(backup.calls).toHaveLength(0);
+  });
+});
+
 describe('ModelRouter model switching', () => {
   it('moves a provider to its next model when one model used its own daily quota or was withdrawn, and benches it only when none is left', async () => {
     const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
