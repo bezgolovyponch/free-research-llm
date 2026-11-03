@@ -79,6 +79,8 @@ function publicRow(row, verdict, unit) {
     country: verdict.country.code ? countryByCode(verdict.country.code)?.name ?? verdict.country.code : '',
     countryCode: verdict.country.code ?? '',
     ...(Number.isFinite(row.lat) && Number.isFinite(row.lon) ? { lat: row.lat, lon: row.lon } : {}),
+    ...(Number.isFinite(row.distanceKm) ? { distanceKm: row.distanceKm } : {}),
+    ...(row.attrs && typeof row.attrs === 'object' ? { attrs: row.attrs } : {}),
     countryBy: verdict.country.by,
     coast: mentionsCoast(row),
     sourceUrl: row.sourceUrl ?? '',
