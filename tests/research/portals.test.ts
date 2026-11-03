@@ -48,6 +48,18 @@ describe('seed portals', () => {
     expect(seeds.some((s) => /pozemk|terreno|pisos/.test(s.url))).toBe(false);
   });
 
+  it('offers Slovak and Austrian car seed portals priced in euro', () => {
+    const carKind = { label: 'used car', terms: ['car', 'auto', 'samochod'] };
+    const seeds = seedPortals({ kind: carKind, regions: ['SK', 'AT'], valueRange: [0, 2600], unit: 'EUR' });
+    expect(new Set(seeds.map((s) => s.country))).toEqual(new Set(['SK', 'AT']));
+    expect(seeds.find((s) => s.country === 'SK')?.url).toBe('https://www.autobazar.eu/vysledky/osobne-vozidla/?price-to=2600');
+    expect(seeds.find((s) => s.country === 'AT')?.url).toBe('https://www.willhaben.at/iad/gebrauchtwagen/auto/gebrauchtwagenboerse?PRICE_TO=2600');
+    expect(seeds.every((s) => s.seed === true)).toBe(true);
+    const plain = seedPortals({ kind: carKind, regions: ['SK', 'AT'], valueRange: [0, 2600], unit: 'CZK' });
+    expect(plain.find((s) => s.country === 'SK')?.url).toBe('https://www.autobazar.eu/vysledky/osobne-vozidla/');
+    expect(plain.find((s) => s.country === 'AT')?.url).toBe('https://www.willhaben.at/iad/gebrauchtwagen/auto/gebrauchtwagenboerse');
+  });
+
   it('converts the asked range into each seed portal own currency before building its URL', () => {
     const carKind = { label: 'used car', terms: ['car', 'auto', 'samochod'] };
     const convert = (v: number, from: string, to: string) => (from === 'EUR' && to === 'CZK' ? v * 25 : from === 'EUR' && to === 'PLN' ? v * 4.3 : null);

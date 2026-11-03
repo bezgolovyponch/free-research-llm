@@ -21,6 +21,12 @@ const bazos = (make) => ({ min, max, unit }) => unit === 'CZK' && min !== null &
 const otomoto = ({ min, max, unit }) => unit === 'PLN' && min !== null && max !== null
   ? `https://www.otomoto.pl/osobowe?search%5Bfilter_float_price%3Afrom%5D=${min}&search%5Bfilter_float_price%3Ato%5D=${max}`
   : 'https://www.otomoto.pl/osobowe';
+const autobazar = ({ max, unit }) => unit === 'EUR' && max !== null
+  ? `https://www.autobazar.eu/vysledky/osobne-vozidla/?price-to=${max}`
+  : 'https://www.autobazar.eu/vysledky/osobne-vozidla/';
+const willhaben = ({ max, unit }) => unit === 'EUR' && max !== null
+  ? `https://www.willhaben.at/iad/gebrauchtwagen/auto/gebrauchtwagenboerse?PRICE_TO=${max}`
+  : 'https://www.willhaben.at/iad/gebrauchtwagen/auto/gebrauchtwagenboerse';
 
 const CAR_SAMPLE = ['auto', 'car', 'cars', 'osobowe', 'samochod', 'osobni', 'vozidlo', 'gebrauchtwagen', 'pkw'];
 
@@ -32,6 +38,8 @@ export const SEED_PORTALS = [
   { country: 'DE', kind: 'car', coastal: false, currency: 'EUR', maxPrice: null, url: autoscout, sample: CAR_SAMPLE },
   ...BAZOS_MAKES.map((make) => ({ country: 'CZ', kind: 'car', coastal: false, currency: 'CZK', maxPrice: null, url: bazos(make), sample: CAR_SAMPLE })),
   { country: 'PL', kind: 'car', coastal: false, currency: 'PLN', maxPrice: null, url: otomoto, sample: CAR_SAMPLE },
+  { country: 'SK', kind: 'car', coastal: false, currency: 'EUR', maxPrice: null, url: autobazar, sample: CAR_SAMPLE },
+  { country: 'AT', kind: 'car', coastal: false, currency: 'EUR', maxPrice: null, url: willhaben, sample: CAR_SAMPLE },
 ];
 
 const speaksOf = (portal, kind) => {
