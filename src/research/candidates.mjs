@@ -17,6 +17,109 @@ const hasWord = (text, word) => {
   return Boolean(term) && new RegExp(`(?:^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(text);
 };
 
+const YEAR_MARKED = /\b(?:r\s*\.?\s*v\s*\.?|r\s*\.|rok(?:u|em)?)\s*[.:]?\s*((?:19|20)\d{2})(?!\d)/;
+const YEAR_PLAIN = /(?<!\d)((?:19|20)\d{2})(?!\d)/;
+const KM_TEXT = /(\d{1,3}(?:[ .]\d{3})+|\d+)\s*(t|tis\.?|tis)?\s*km(?!\w)/;
+const KW_TEXT = /(?<![\d.,])(\d{1,3}(?:[.,]\d+)?)\s*kw(?!\w)/;
+
+function textYear(text) {
+  const marked = text.match(YEAR_MARKED);
+  if (marked) return Number(marked[1]);
+  const standalone = text.match(YEAR_PLAIN);
+  return standalone ? Number(standalone[1]) : null;
+}
+
+function textKm(text) {
+  const m = text.match(KM_TEXT);
+  if (!m) return null;
+  const km = Number(m[1].replace(/[ .]/g, '')) * (m[2] ? 1000 : 1);
+  return Number.isFinite(km) ? km : null;
+}
+
+function textKw(text) {
+  const m = text.match(KW_TEXT);
+  return m ? Number(m[1].replace(',', '.')) : null;
+}
+
+function numericValue(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const m = value.match(/-?\d+(?:[.,]\d+)?/);
+  return m ? Number(m[0].replace(',', '.')) : null;
+}
+
+function attrYear(value) {
+  const n = numericValue(value);
+  return n !== null && n >= 1900 && n <= 2099 ? Math.trunc(n) : null;
+}
+
+function attrKm(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const m = value.toLowerCase().match(KM_TEXT);
+  if (m) return Number(m[1].replace(/[ .]/g, '')) * (m[2] ? 1000 : 1);
+  return numericValue(value);
+}
+
+function attrNumber(attrs, pattern, read) {
+  const entries = Object.entries(attrs && typeof attrs === 'object' ? attrs : {})
+    .sort((a, b) => Number(/#n$/.test(b[0])) - Number(/#n$/.test(a[0])));
+  for (const [key, value] of entries) {
+    if (!pattern.test(key)) continue;
+    const found = read(value);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+export function rowFacts(row) {
+  const text = plain(row?.title ?? '');
+  const attrs = row?.attrs ?? {};
+  return {
+    year: textYear(text) ?? attrNumber(attrs, /year/i, attrYear),
+    km: textKm(text) ?? attrNumber(attrs, /mileage|odometer|kilomet/i, attrKm),
+    kw: textKw(text) ?? attrNumber(attrs, /power|kw/i, numericValue),
+  };
+}
+
+function medianOf(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function peerGroup(row, models) {
+  const title = plain(row?.title ?? '');
+  for (const model of models ?? []) {
+    const term = plain(model).trim();
+    if (term && hasWord(title, term)) return term;
+  }
+  return title.split(/\s+/).filter(Boolean).slice(0, 2).join(' ');
+}
+
+export const FAR_BELOW_PEERS = 0.5;
+
+export function valueVsPeers(rows, models = []) {
+  const list = rows ?? [];
+  const groups = list.map((row) => peerGroup(row, models));
+  return list.map((row, index) => {
+    const facts = rowFacts(row);
+    const peers = list.filter((other, i) => groups[i] === groups[index] && Number.isFinite(other?.value));
+    let peerMedian = null;
+    let valueIndex = null;
+    if (Number.isFinite(row?.value) && peers.length >= 3) {
+      const near = facts.year === null ? [] : peers.filter((other) => {
+        const year = rowFacts(other).year;
+        return year !== null && Math.abs(year - facts.year) <= 2;
+      });
+      const sample = near.length >= 3 ? near : peers;
+      peerMedian = medianOf(sample.map((other) => other.value));
+      valueIndex = peerMedian > 0 ? Math.round((row.value / peerMedian) * 100) / 100 : null;
+    }
+    return { ...row, group: groups[index], peerMedian, peers: peers.length, valueIndex, ...facts, ...(valueIndex !== null && valueIndex < FAR_BELOW_PEERS ? { peerNote: 'far below its peers: confirm the full price and condition' } : {}) };
+  });
+}
+
 function rowsFrom(nodes) {
   const rows = [];
   for (const node of nodes ?? []) {
@@ -106,7 +209,7 @@ export function implausiblyLow(rows) {
 
 export function buildCandidates(nodes, brief, options = {}) {
   const unit = brief?.unit ?? '';
-  const kept = [];
+  let kept = [];
   const toCheck = [];
   const screened = {};
   const examples = [];
@@ -141,7 +244,9 @@ export function buildCandidates(nodes, brief, options = {}) {
     const { lowCut, ...rest } = row;
     toCheck.push({ ...rest, toCheck: [rest.toCheck, `price far below what most listings of this kind cost (under ${lowCut} ${unit}): likely a part, a deposit or an instalment`].filter(Boolean).join('; ') });
   }
-  kept.sort((a, b) => Number(b.coast) - Number(a.coast) || (a.value ?? Infinity) - (b.value ?? Infinity));
+  if (brief?.subtype?.models?.length) kept = valueVsPeers(kept, brief.subtype.models);
+  if (kept.some((row) => row.valueIndex !== null && row.valueIndex !== undefined)) kept.sort((a, b) => (a.valueIndex ?? Infinity) - (b.valueIndex ?? Infinity) || (a.km ?? Infinity) - (b.km ?? Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
+  else kept.sort((a, b) => Number(b.coast) - Number(a.coast) || (a.value ?? Infinity) - (b.value ?? Infinity));
   return {
     found,
     kept: kept.slice(0, MAX_KEPT),

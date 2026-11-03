@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildBrief } from '../../src/research/brief.mjs';
-import { buildCandidates, candidateDeliverables, tableVerdict, shortlistText } from '../../src/research/candidates.mjs';
+import { buildCandidates, candidateDeliverables, rowFacts, tableVerdict, shortlistText, valueVsPeers } from '../../src/research/candidates.mjs';
 
 const kind = { label: 'plot of land', terms: ['land', 'terreno', 'zemljiste'] };
 const brief = buildBrief({ question: 'Plots near the sea, 20000EUR max', acceptance: { expected: '50 plots in EU, Vietnam and Turkey', itemCount: 50, valueRange: [0, 20000], unit: 'EUR' }, template: { itemKind: kind } });
@@ -137,6 +137,43 @@ describe('candidate table', () => {
 });
 
 
+describe('price and value read from each kept row', () => {
+  it('reads the year, mileage and power a car title states, leaving what it does not state empty', () => {
+    const rows = [
+      ['Škoda Fabia 1.4 MPI 50kw nová STK', { year: null, km: null, kw: 50 }],
+      ['Kia Rio 1.4 - nová STK, 112 tkm, dobrý stav', { year: null, km: 112000, kw: null }],
+      ['Honda Jazz 1,3 , 139000 km, r.2008, nová cena', { year: 2008, km: 139000, kw: null }],
+      ['Ford Fiesta 1.3i 44kw 2006', { year: 2006, km: null, kw: 44 }],
+      ['Toyota Yaris 1.3, r.v.2006', { year: 2006, km: null, kw: null }],
+    ];
+    for (const [title, facts] of rows) expect(rowFacts({ title, value: 39000, unit: 'CZK' })).toEqual(facts);
+    expect(rowFacts({ title: 'Kia Rio', attrs: { 'vehicle.mileageInKm': '128 830 Km', 'vehicle.year': '2012', 'vehicle.powerKw#n': 81 } })).toEqual({ year: 2012, km: 128830, kw: 81 });
+  });
+
+  it('compares a row with the peers of the same model and sets its value index, and leaves a lone pair without one', () => {
+    const fabias = [30000, 35000, 39000, 45000, 60000].map((value, i) => ({ title: `Škoda Fabia 1.4 MPI ${i}`, value, unit: 'CZK' }));
+    const ranked = valueVsPeers(fabias, ['fabia']);
+    expect(ranked.find((r: { value: number }) => r.value === 30000)).toMatchObject({ group: 'fabia', peers: 5, peerMedian: 39000, valueIndex: 0.77 });
+    expect(ranked.find((r: { value: number }) => r.value === 60000)).toMatchObject({ valueIndex: 1.54 });
+    const pair = valueVsPeers([{ title: 'Škoda Fabia 1', value: 30000 }, { title: 'Škoda Fabia 2', value: 40000 }], ['fabia']);
+    expect(pair.map((r: { valueIndex: number | null }) => r.valueIndex)).toEqual([null, null]);
+    expect(pair[0].peers).toBe(2);
+  });
+
+  it('sorts the built table by value against peers first, then mileage, then price', () => {
+    const carBrief = buildBrief({ question: 'Used hatchbacks within 300 km of Prague, 65000 CZK max', acceptance: { expected: '8 used cars', itemCount: 8, valueRange: [0, 65000], unit: 'CZK' }, template: { itemKind: { label: 'used car', terms: ['auto'] } } });
+    const subtype = { label: 'hatchback', models: ['fabia', 'rio'], source: 'model proposal, matched to listing titles by code' };
+    const listing = (model: string, value: number, km: number, i: number) => ({ title: `${model === 'Rio' ? 'Kia Rio' : 'Škoda Fabia'} 1.4 2008 ${km} km`, url: `https://auto.bazos.cz/inzerat/${model.toLowerCase()}-ID1${i}aaaa`, value, unit: 'CZK' });
+    const listings = [
+      listing('Fabia', 30000, 200000, 1), listing('Fabia', 35000, 180000, 2), listing('Fabia', 39000, 150000, 3), listing('Fabia', 45000, 120000, 4), listing('Fabia', 60000, 100000, 5),
+      listing('Rio', 20000, 160000, 6), listing('Rio', 21000, 120000, 7), listing('Rio', 22000, 140000, 8),
+    ];
+    const out = buildCandidates([{ id: 'D1', sources: [{ id: 'S1', url: 'https://auto.bazos.cz/auto/', listings }] }], { ...carBrief, subtype }, {});
+    expect(out.kept.map((r: { value: number }) => r.value)).toEqual([30000, 35000, 20000, 21000, 39000, 22000, 45000, 60000]);
+    expect(out.kept[0]).toMatchObject({ valueIndex: 0.77, peers: 5, year: 2008, km: 200000 });
+  });
+});
+
 describe('robust low-price rule for any kind of item', () => {
   it('moves a price far below what most listings of the kind cost to the check list (a part, a deposit or an instalment)', async () => {
     const { implausiblyLow, MIN_PRICE_SAMPLE } = await import('../../src/research/candidates.mjs');
@@ -145,5 +182,17 @@ describe('robust low-price rule for any kind of item', () => {
     const low = implausiblyLow([...cars, wheels]);
     expect(low.map((r: { title: string }) => r.title)).toEqual(['Zimní kola Kia Rio']);
     expect(implausiblyLow(cars.slice(0, 5).concat(wheels))).toEqual([]);
+  });
+});
+
+describe('peer value details', () => {
+  it('reads "tis km" as thousands of km and notes a price far below its peers', async () => {
+    const { rowFacts, valueVsPeers } = await import('../../src/research/candidates.mjs');
+    expect(rowFacts({ title: 'Toyota Yaris 1.0 VVTi, 250 tis km' }).km).toBe(250000);
+    expect(rowFacts({ title: 'Kia Rio 1.4 - nová STK, 112 tkm, dobrý stav' }).km).toBe(112000);
+    const fabia = (value: number) => ({ title: `Škoda Fabia ${value}`, value });
+    const out = valueVsPeers([fabia(15000), fabia(40000), fabia(42000), fabia(45000)], ['skoda fabia']);
+    expect(out[0]).toMatchObject({ valueIndex: 0.37, peerNote: 'far below its peers: confirm the full price and condition' });
+    expect(out[2].peerNote).toBeUndefined();
   });
 });
