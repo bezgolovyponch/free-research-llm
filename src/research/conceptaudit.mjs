@@ -134,7 +134,7 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
     add('C12', 'The memo does not contradict the verified record', 'warn', !contradicted.length, contradicted.length ? `${contradicted.length} memo claim(s) contradict the record; first: ${contradicted[0]?.text ?? ''}` : 'The memo does not contradict the record.');
   }
 
-  if (regions.length && kept) {
+  if (regions.length && kept && p.brief?.located !== false) {
     const present = new Set(kept.map((r) => r?.countryCode).filter(Boolean));
     const missing = regions.filter((code) => !present.has(code));
     add('C13', 'Every asked country reached the table', 'warn', !missing.length, missing.length ? `No kept plot from: ${missing.join(', ')}` : `Every asked country reached the table: ${regions.join(', ')}.`);

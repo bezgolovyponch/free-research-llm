@@ -3,6 +3,36 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-11-03 (late) — fundamentals in code, routing audit, unlisted kinds, supplier research b2f5b7
+
+- Asked: write the fundamental logic into the engine and audit the flow; improve routing, look for new solutions and models, suggest, fix, test, merge; observe the current research, route the app's models correctly, help with fcc.
+- **Routing audit (3 days of `model-calls.jsonl`, live `/api/router`):**
+  - Puter (subscription required) was the reserved top provider on its prior alone.
+  - fcc had the best gate pass rate (32%) but ranked last: its last 20 calls had timed out, and a provider at the end of the list never gets the call that would clear it.
+  - Pollinations queued calls behind its 45 s pacing, and the wait was recorded as reply time.
+  - Cerebras (402, no free tier) failed again every day after the midnight reset.
+- **Routing fixes:**
+  - #109: dead providers recover after 30 min; providers that never answered rank last and are never reserved; fcc call timeout 240 s.
+  - #112: paced providers do not queue calls; ledger time excludes queue wait; payment-required providers rest 24 h, kept across restarts; speed is time per useful answer.
+  - Live route back on `max`: Groq is reserved (69% pass, 0.9 s); Puter and Cerebras are off.
+- **Engine (#110):**
+  - A kind no listing portal lists (suppliers, companies) keeps the tree pieces that find the items.
+  - Its asked place is where the result is used, not a filter on sources.
+  - Counts are read past describing words ("20 direct links").
+  - Witness: cars and plots unchanged.
+- **Fundamentals (#113):** F1–F14 in `src/research/fundamentals.mjs`, each with its source and enforcing exports. A test ties them to the code and to FOUNDATIONS.md, and the App chat reads FOUNDATIONS.md.
+- **Concept audit (#111, this PR):** C1 counts with the engine's rule (the false ✗ on 0c750f is gone); C13 skips unlisted kinds.
+- **Supplier research b2f5b7:** the tree was rebuilt under #110 (12 → 16 pieces); still researching at 22:46Z.
+- **Team:**
+  - 4 fcc workers (A–D) on narrow specs. D finished; A, B and C reached the 40-min background limit with their work done, and the lead reviewed, combined and finished them.
+  - The lead wrote #109 and #110 directly, so as not to add load on fcc while the user's research needed it.
+  - Two quality gates run at once collide on e2e port 4610: run gates one at a time.
+- **New providers (checked 2026-11-03):** GitHub Models is retired (2026-07-30). Third-party free-API lists are stale (they list Cerebras as free). The supported options that need the user's own key: NVIDIA (`NVIDIA_API_KEY`, no daily cap), Mistral free plan (`MISTRAL_API_KEY`), Cloudflare Workers AI.
+- **Open:**
+  - The glamping research eb501e still shows a stale 103 kept (66 fit and confirmed; 33 under current code) until it is rebuilt.
+  - The purpose stage still reports "purpose not stated clearly" for b2f5b7.
+  - fcc is ranked by measurement and should climb as it answers again (7 s at 22:45Z).
+
 ## Session 2026-11-03 — universal list research, car research 0c750f, market value and resale
 
 - Asked: fix routing; make the engine universal (purpose first, listings first, community and expert sources, scientific and common-sense rules stored in the engine); run the user's car research 0c750f ("hatchback within 300 km of Prague, ≤ 65,000 CZK, highest price/value") to its acceptance; currency-free table; export every tab; a learned universal scraper; value from community-gathered facts with the most underpriced first and highlighted; resale option (easy to resell, rare, cheap to repair, value-adding steps); run the improvement loop again.
