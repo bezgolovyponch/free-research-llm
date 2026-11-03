@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROVIDER_PRESETS, ROUTE_ORDER, SEARCH_KEYS } from './llm/presets.mjs';
-import { OpenAICompatibleProvider } from './llm/provider.mjs';
+import { AnthropicMessagesProvider, OpenAICompatibleProvider } from './llm/provider.mjs';
 import { ModelRouter } from './llm/router.mjs';
 import { OutcomeBook } from './llm/outcomes.mjs';
 import { ScriptedProvider } from './llm/scripted-provider.mjs';
@@ -98,7 +98,8 @@ export class ProviderFactory {
     const filled = account ? template.replace('{account}', encodeURIComponent(account)) : template;
     const baseURL = preset.local ? localBase(filled) : filled;
     const disabled = Boolean(preset.disableEnv) && this.env[preset.disableEnv] === '0';
-    return new OpenAICompatibleProvider({ preset, apiKey, baseURL, disabled, modelOverrides: modelOverrides(this.env, preset), fetchImpl: this.fetchImpl });
+    const Provider = preset.api === 'anthropic' ? AnthropicMessagesProvider : OpenAICompatibleProvider;
+    return new Provider({ preset, apiKey, baseURL, disabled, modelOverrides: modelOverrides(this.env, preset), fetchImpl: this.fetchImpl });
   }
 
   async buildAll() {

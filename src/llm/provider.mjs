@@ -290,3 +290,46 @@ export class OpenAICompatibleProvider {
     };
   }
 }
+
+export class AnthropicMessagesProvider extends OpenAICompatibleProvider {
+  async discover() {
+    await super.discover();
+    for (const tier of ['fast', 'deep']) if (String(this.selected[tier] ?? '').includes('/')) this.selected[tier] = this.preset.fallbackModels?.[tier] ?? this.selected[tier];
+    if (this.state === 'ready') this.detail = `fast=${this.selected.fast} deep=${this.selected.deep}`;
+    return this;
+  }
+
+  headers() {
+    return {
+      'content-type': 'application/json',
+      'x-api-key': this.apiKey || 'fcc-local',
+      'anthropic-version': '2023-06-01',
+    };
+  }
+
+  async chat({ messages, tier = 'fast', json = true, temperature = 0.2, maxTokens = 4000, timeoutMs }) {
+    const model = this.selected[tier] ?? this.selected.fast;
+    const system = [...messages.filter((m) => m.role === 'system').map((m) => String(m.content ?? '')), ...(json ? ['Answer with JSON only.'] : [])].filter(Boolean).join('\n\n');
+    const turns = messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
+    await this.throttle();
+    const body = await this.request('/messages', {
+      method: 'POST',
+      body: JSON.stringify({ model, max_tokens: Math.min(maxTokens, this.preset.maxOutputTokens ?? maxTokens), temperature, system, messages: turns }),
+      ...(timeoutMs ? { timeoutMs } : {}),
+    });
+    const content = (body.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('');
+    const truncated = body.stop_reason === 'max_tokens';
+    if (!content) throw new ProviderError(`${this.id} returned an empty reply`, { status: 502, provider: this.id });
+    return {
+      content,
+      model,
+      provider: this.id,
+      usage: {
+        prompt_tokens: body.usage?.input_tokens ?? 0,
+        completion_tokens: body.usage?.output_tokens ?? 0,
+        total_tokens: (body.usage?.input_tokens ?? 0) + (body.usage?.output_tokens ?? 0),
+      },
+      truncated,
+    };
+  }
+}

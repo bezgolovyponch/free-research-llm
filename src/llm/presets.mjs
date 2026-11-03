@@ -176,11 +176,24 @@ export const PROVIDER_PRESETS = [
     signup: '',
     prefer: { fast: [], deep: [] },
   },
+  {
+    id: 'fcc',
+    label: 'fcc proxy on this Mac (free-claude-code; routes to the models set in fcc)',
+    api: 'anthropic',
+    baseURL: 'http://127.0.0.1:8082/v1',
+    baseEnv: 'FCC_BASE_URL',
+    keyEnv: null,
+    disableEnv: 'FRL_FCC',
+    signup: '',
+    prefer: { fast: ['claude-haiku-4-5', 'claude-haiku'], deep: ['claude-opus-5-5', 'claude-opus'] },
+    fallbackModels: { fast: 'claude-haiku-4-5-20251001', deep: 'claude-opus-5-5' },
+    maxOutputTokens: 4000,
+  },
 ];
 
 export const ROUTE_ORDER = {
-  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'custom', 'llamacpp-lan', 'llamacpp', 'pollinations', 'ollama'],
-  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'custom', 'llamacpp-lan', 'llamacpp', 'pollinations', 'ollama'],
+  deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'fcc', 'custom', 'llamacpp-lan', 'llamacpp', 'pollinations', 'ollama'],
+  fast: ['groq', 'gemini', 'mistral', 'nvidia', 'cerebras', 'openrouter', 'cloudflare', 'sambanova', 'cohere', 'puter', 'fcc', 'custom', 'llamacpp-lan', 'llamacpp', 'pollinations', 'ollama'],
 };
 
 export const SEARCH_KEYS = [

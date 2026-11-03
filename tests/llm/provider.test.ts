@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PROVIDER_PRESETS } from '../../src/llm/presets.mjs';
-import { OpenAICompatibleProvider, ProviderError, pickModel } from '../../src/llm/provider.mjs';
+import { AnthropicMessagesProvider, OpenAICompatibleProvider, ProviderError, pickModel } from '../../src/llm/provider.mjs';
 import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
 
 const groq = PROVIDER_PRESETS.find((p) => p.id === 'groq')!;
@@ -208,6 +208,115 @@ describe('Ollama with no model', () => {
     const provider = await new OpenAICompatibleProvider({ preset, fetchImpl }).discover();
     expect(provider.state).toBe('no-models');
     expect(provider.detail).toMatch(/ollama pull qwen3:4b/);
+  });
+});
+
+describe('AnthropicMessagesProvider (fcc proxy)', () => {
+  const fcc = PROVIDER_PRESETS.find((p) => p.id === 'fcc')!;
+  const models = ['claude-opus-4-20250514', 'claude-haiku-4-5-20251001', 'claude-opus-5-5', 'claude-fable-5'];
+  const reply = {
+    id: 'msg_1',
+    type: 'message',
+    role: 'assistant',
+    content: [{ type: 'thinking', thinking: 'considering', signature: '' }, { type: 'text', text: '{"ok":true,"n":4}' }],
+    model: 'claude-opus-5-5',
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 47, output_tokens: 41, cache_read_input_tokens: 0 },
+  };
+
+  it('discovers the fcc model list and picks the claude tiers', async () => {
+    const fetchImpl = fakeFetch([[/\/v1\/models$/, () => jsonResponse({ object: 'list', data: models.map((id) => ({ id })) })]]);
+    const p = await new AnthropicMessagesProvider({ preset: fcc, fetchImpl }).discover();
+    expect(p.state).toBe('ready');
+    expect(p.ready).toBe(true);
+    expect(p.selected.fast).toBe('claude-haiku-4-5-20251001');
+    expect(p.selected.deep).toBe('claude-opus-5-5');
+  });
+
+  it('never picks a provider-prefixed id that fcc lists but cannot serve', async () => {
+    const listed = ['anthropic/anthropic/claude-haiku-4-5-20251001', 'anthropic/anthropic/claude-opus-5-5', 'claude-opus-4-20250514'];
+    const fetchImpl = fakeFetch([[/\/v1\/models$/, () => jsonResponse({ object: 'list', data: listed.map((id) => ({ id })) })]]);
+    const p = await new AnthropicMessagesProvider({ preset: fcc, fetchImpl }).discover();
+    expect(p.selected.fast).not.toContain('/');
+    expect(p.selected.deep).not.toContain('/');
+  });
+
+  it('lands on a listed claude-opus when the exact deep id is missing', async () => {
+    const fetchImpl = fakeFetch([[/\/v1\/models$/, () => jsonResponse({ object: 'list', data: [{ id: 'claude-opus-4-20250514' }, { id: 'claude-fable-5' }] })]]);
+    const p = await new AnthropicMessagesProvider({ preset: fcc, fetchImpl }).discover();
+    expect(p.state).toBe('ready');
+    expect(p.selected.deep).toBe('claude-opus-4-20250514');
+  });
+
+  it('posts to /v1/messages with fcc headers, joined system prompt and the text block only', async () => {
+    const fetchImpl = fakeFetch([
+      [/\/v1\/models$/, () => jsonResponse({ object: 'list', data: models.map((id) => ({ id })) })],
+      [/\/v1\/messages$/, () => jsonResponse(reply)],
+    ]);
+    const p = await new AnthropicMessagesProvider({ preset: fcc, fetchImpl }).discover();
+    const result = await p.chat({
+      messages: [
+        { role: 'system', content: 'You are terse.' },
+        { role: 'system', content: 'Cite sources.' },
+        { role: 'user', content: 'what is 2+2?' },
+        { role: 'assistant', content: 'let me think' },
+        { role: 'user', content: 'answer' },
+      ],
+      tier: 'deep',
+    });
+    expect(result).toEqual({
+      content: '{"ok":true,"n":4}',
+      model: 'claude-opus-5-5',
+      provider: 'fcc',
+      usage: { prompt_tokens: 47, completion_tokens: 41, total_tokens: 88 },
+      truncated: false,
+    });
+    const sent = fetchImpl.calls.at(-1)!;
+    expect(sent.url).toBe('http://127.0.0.1:8082/v1/messages');
+    const headers = sent.init.headers as Record<string, string>;
+    expect(headers['content-type']).toBe('application/json');
+    expect(headers['x-api-key']).toBe('fcc-local');
+    expect(headers['anthropic-version']).toBe('2023-06-01');
+    const body = JSON.parse(String(sent.init.body));
+    expect(body.model).toBe('claude-opus-5-5');
+    expect(body.system).toBe('You are terse.\n\nCite sources.\n\nAnswer with JSON only.');
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'what is 2+2?' },
+      { role: 'assistant', content: 'let me think' },
+      { role: 'user', content: 'answer' },
+    ]);
+  });
+
+  it('marks a max_tokens stop as truncated', async () => {
+    const fetchImpl = fakeFetch([
+      [/\/v1\/models$/, () => jsonResponse({ object: 'list', data: models.map((id) => ({ id })) })],
+      [/\/v1\/messages$/, () => jsonResponse({ ...reply, stop_reason: 'max_tokens' })],
+    ]);
+    const p = await new AnthropicMessagesProvider({ preset: fcc, fetchImpl }).discover();
+    await expect(p.chat({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toMatchObject({ truncated: true });
+  });
+
+  it('throws a 429 ProviderError from /v1/messages', async () => {
+    const fetchImpl = fakeFetch([
+      [/\/v1\/models$/, () => jsonResponse({ object: 'list', data: models.map((id) => ({ id })) })],
+      [/\/v1\/messages$/, () => new Response('rate limited', { status: 429 })],
+    ]);
+    const p = await new AnthropicMessagesProvider({ preset: fcc, fetchImpl }).discover();
+    const error = await p.chat({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error.status).toBe(429);
+    expect(error.retryable).toBe(true);
+  });
+
+  it('does not treat a thinking-only reply as content', async () => {
+    const fetchImpl = fakeFetch([
+      [/\/v1\/models$/, () => jsonResponse({ object: 'list', data: models.map((id) => ({ id })) })],
+      [/\/v1\/messages$/, () => jsonResponse({ ...reply, content: [{ type: 'thinking', thinking: 'hmm', signature: '' }] })],
+    ]);
+    const p = await new AnthropicMessagesProvider({ preset: fcc, fetchImpl }).discover();
+    const error = await p.chat({ messages: [{ role: 'user', content: 'hi' }] }).catch((e) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error.status).toBe(502);
   });
 });
 

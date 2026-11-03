@@ -17,6 +17,7 @@ export const CAPABILITY = {
   openrouter: [3, 'whichever :free model is up'],
   cohere: [3, 'Command A'],
   custom: [3, 'depends on your endpoint'],
+  fcc: [4, 'the models the local fcc proxy routes to'],
   cloudflare: [2, 'Llama 3.3 70B fp8, small daily pool'],
   pollinations: [2, 'small keyless model, 1 reply per 30 s'],
   ollama: [1, 'a 7–8B model on this computer'],
