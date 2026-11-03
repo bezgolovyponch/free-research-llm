@@ -18,12 +18,12 @@ import { buildBrief, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
-import { applyModel, modelText, verifyKind, withModelRules } from './decision.mjs';
+import { applyCalibration, applyModel, calibrationPrompt, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
-import { screenItems } from './itemgate.mjs';
+import { plain, screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
 import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
@@ -41,9 +41,28 @@ const ATTACHMENT_TYPES = /\.(csv|tsv|txt|md|json|html?)$/i;
 const SWEEP_PAGES_KEPT = 120;
 export const TEAM_TTL_MS = 24 * 3600 * 1000;
 export const SUPPORT_PARALLEL = 3;
+export const CALIBRATION_TITLES = 60;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
+
+function calibrationTitles(pages, max = CALIBRATION_TITLES) {
+  const lists = (pages ?? []).map((page) => (page.listings ?? []).map((listing) => String(listing.title ?? '')).filter(Boolean));
+  const seen = new Set();
+  const titles = [];
+  const longest = Math.max(0, ...lists.map((list) => list.length));
+  for (let i = 0; i < longest && titles.length < max; i++) {
+    for (const list of lists) {
+      const title = list[i];
+      const key = plain(title);
+      if (!title || seen.has(key)) continue;
+      seen.add(key);
+      titles.push(title);
+      if (titles.length >= max) break;
+    }
+  }
+  return titles;
+}
 
 function strings(value, max = 8) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => String(v).trim()).filter(Boolean).slice(0, max);
@@ -292,7 +311,7 @@ export class ResearchEngine {
     if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
-    project.brief = { ...brief, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    project.brief = { ...brief, subtype: model?.subtype ?? null, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -339,9 +358,30 @@ export class ResearchEngine {
     return topical;
   }
 
+  async calibrateKind(project) {
+    const kind = project.decisionModel?.kind;
+    if (this.router && !this.demo && kind?.verified && kind.verified.share < 0.5 && !project.decisionModel.calibrated && project.sweep?.pages?.length) {
+      const titles = calibrationTitles(project.sweep.pages);
+      if (titles.length) {
+        try {
+          const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: calibrationPrompt({ kind, question: project.question, titles }) });
+          const applied = applyCalibration(kind, reply, titles);
+          project.decisionModel.kind = applied.kind;
+          project.decisionModel.subtype = applied.subtype;
+          project.decisionModel.calibrated = new Date().toISOString();
+          this.emit(project, 'decision', `kind calibrated on ${titles.length} titles: not ${(applied.kind.not ?? []).join(', ') || 'none'}; ${applied.subtype?.label ?? ''}: ${applied.subtype?.models?.length ?? 0} models`);
+        } catch (error) {
+          this.emit(project, 'warn', `item kind not calibrated: ${String(error?.message ?? error).slice(0, 160)}`);
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
   async collectCandidates(project, { sweep = false } = {}) {
     if (sweep || !this.quiet.has(project.id)) await this.ensureDecisionModel(project);
-    const brief = this.briefOf(project);
+    let brief = this.briefOf(project);
     if (!brief.kind) {
       project.candidates = null;
       return null;
@@ -370,8 +410,10 @@ export class ResearchEngine {
         const best = (result.arms ?? []).filter((a) => a.listings > 0).slice(0, 3);
         if (result.arms?.length) this.emit(project, 'candidates', `portal order by Thompson sampling on measured yield: ${result.arms.length} portal(s) read, ${result.arms.filter((a) => a.useful).length} gave new listings within the limits${best.length ? ` (best: ${best.map((a) => `${hostOf(a.url)} ${a.listings}`).join(', ')})` : ''}`);
         this.emit(project, 'candidates', `portal sweep: ${result.pagesRead} listing page(s) read by code (budget ${result.budget}), ${result.pages.reduce((n, p) => n + p.listings.length, 0)} new listing(s)`);
+        if (await this.calibrateKind(project)) brief = this.briefOf(project);
       }
     }
+    if (await this.calibrateKind(project)) brief = this.briefOf(project);
     let table = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
     if (this.sites && !this.demo && needsSiteFit(strategy, project.decisionModel)) {
       const looping = this.quiet.has(project.id);

@@ -172,6 +172,33 @@ export function verifyKind(kind, titles) {
   return { ...kind, terms: terms.length ? terms : kind.terms, dropped: kind.terms.filter((t) => !terms.includes(t)), verified: { titles: texts.length, matched, share: Math.round((matched / texts.length) * 100) / 100 } };
 }
 
+const wordList = (text) => plain(text).split(/[^a-z0-9]+/).filter(Boolean);
+const wordHit = (text, word) => {
+  const term = plain(word).trim();
+  if (!term) return false;
+  return wordList(text).some((w) => w === term || (term.length >= 4 && w.startsWith(term)));
+};
+
+export function calibrationPrompt({ kind, question = '', titles = [] }) {
+  const listed = (titles ?? []).map((title) => `- ${title}`).join('\n');
+  return [
+    { role: 'system', content: `You calibrate the item kind of a listing search against real listing titles. The item is "${kind?.label ?? ''}"${kind?.terms?.length ? ` and the proposed title words for it are: ${kind.terms.join(', ')}` : ''}. Answer with JSON only: {"not": ["..."], "subtype": {"label": "...", "models": ["..."]}}. "not" lists words that appear in the given titles and mark things that are not the item itself: parts, wheels, tyres, lights, accessories, services, wanted ads. "subtype" names the sub-type the question asks for in "label", and "models" lists the model or make+model names that appear in the given titles and are of that sub-type. Copy words exactly as they appear in the titles. Return "" for the label and [] for the models when the question asks for no sub-type or no title shows one.` },
+    { role: 'user', content: `Question: ${question}\n\nListing titles:\n${listed}` },
+  ];
+}
+
+export function applyCalibration(kind, reply, titles) {
+  const data = reply?.data && typeof reply.data === 'object' ? reply.data : reply ?? {};
+  const texts = (titles ?? []).map((title) => String(title ?? ''));
+  const not = [...new Set((Array.isArray(data.not) ? data.not : []).map((word) => plain(String(word)).trim()).filter((word) => word && texts.filter((text) => wordHit(text, word)).length >= 2))];
+  const label = String(data.subtype?.label ?? '').trim();
+  const models = [...new Set((Array.isArray(data.subtype?.models) ? data.subtype.models : []).map((model) => plain(String(model)).trim()).filter((model) => model && texts.some((text) => wordHit(text, model))))];
+  return {
+    kind: { ...kind, not: [...new Set([...(kind?.not ?? []), ...not])] },
+    subtype: models.length ? { label, models, source: 'model proposal, matched to listing titles by code' } : null,
+  };
+}
+
 export function decisionPrompt({ question, guidance = '', expected = '', examples = [] }) {
   const measures = Object.entries(MEASURES).map(([id, m]) => `- ${id}: ${m.label} (${m.unit})`).join('\n');
   const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [] } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
