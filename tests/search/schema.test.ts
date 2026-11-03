@@ -64,3 +64,11 @@ describe('page reading with a stored schema', () => {
     expect(dropped).toEqual([base]);
   });
 });
+
+describe('schema check against the priced generic listings', () => {
+  it('accepts a schema that finds every priced card when the generic reader also counted unpriced promoted links', () => {
+    const items = applySchema(html, base, bazos);
+    const generic = [...items.map(({ place, attrs, ...rest }) => ({ ...rest, place: '' })), ...items.map((i) => ({ title: i.title, url: `${i.url}?top`, value: null, unit: '', place: '' }))];
+    expect(verifySchema(items, generic)).toMatchObject({ ok: true });
+  });
+});

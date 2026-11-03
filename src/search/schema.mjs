@@ -115,7 +115,8 @@ export function verifySchema(items, genericItems = [], { minItems = MIN_SCHEMA_I
   const withFacts = list.filter((i) => i.attrs && Object.keys(i.attrs).length).length;
   const result = (ok, reason) => ({ ok, reason, items: list, priced, placed, facts: withFacts });
   if (list.length < minItems) return result(false, `found ${list.length} listing(s), fewer than ${minItems}`);
-  if (list.length < 0.8 * generic.length) return result(false, `found ${list.length} listing(s), the generic reader found ${generic.length}`);
+  const genericPricedCount = generic.filter((i) => i.value !== null && i.value !== undefined).length;
+  if (list.length < 0.8 * genericPricedCount) return result(false, `found ${list.length} listing(s), the generic reader found ${genericPricedCount} priced`);
   if (share(list, (i) => looksLikeListing(i.url)) < 0.8) return result(false, 'most links are not single listing pages');
   if (priced / list.length < 0.7) return result(false, `only ${priced} of ${list.length} listing(s) have a price`);
   const genericPriced = generic.filter((i) => i.value !== null && i.value !== undefined).length;
