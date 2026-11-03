@@ -1193,3 +1193,20 @@ describe('needsSiteFit', () => {
     expect(needsSiteFit({ id: 'glamping' }, null)).toBe(true);
   });
 });
+
+describe('distance from the asked place', () => {
+  it('measures stated places from the area centre and moves rows beyond the radius to the check list', async () => {
+    const { haversineKm } = await import('../../src/research/site.mjs');
+    expect(Math.abs(haversineKm(50.0875, 14.4213, 49.1951, 16.6068) - 185)).toBeLessThan(6);
+    const events: string[] = [];
+    const engine = new ResearchEngine({ router: null, search: null, store: { cache: new Map(), save: async (p: unknown) => p }, sites: { geocode: async () => null }, onEvent: (_id: string, e: { message: string }) => events.push(e.message) } as never);
+    const row = (title: string, lat: number, lon: number) => ({ title, url: `https://example.org/${title}`, value: 1, lat, lon });
+    const table = { kept: [row('berlin', 52.52, 13.405), row('munich', 48.137, 11.575), row('hamburg', 53.55, 9.99), { title: 'no place', url: 'https://example.org/x', value: 1 }], toCheck: [], keptCount: 4, toCheckCount: 0 };
+    const project = { id: 'p', area: { point: { lat: 50.0875, lon: 14.4213 }, km: 300, place: 'prague' }, log: [] };
+    const out = await (engine as unknown as { measureDistances: (p: unknown, t: unknown) => Promise<typeof table> }).measureDistances(project, table);
+    expect(out.kept.map((r) => r.title)).toEqual(['berlin', 'munich', 'no place']);
+    expect(out.toCheck[0]).toMatchObject({ title: 'hamburg', toCheck: expect.stringMatching(/^farther than 300 km from prague \(\d+ km\)$/) });
+    expect(out.keptCount).toBe(3);
+    expect(events.some((m) => /distance from prague: 3 listing\(s\) measured, 1 farther than 300 km, 1 without a stated place/.test(m))).toBe(true);
+  });
+});

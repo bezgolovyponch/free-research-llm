@@ -16,6 +16,7 @@ import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
+import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
@@ -43,6 +44,7 @@ export const TEAM_TTL_MS = 24 * 3600 * 1000;
 export const SUPPORT_PARALLEL = 3;
 export const CALIBRATION_TITLES = 60;
 export const CALIBRATION_SAMPLES = 3;
+export const MAX_DISTANCE_LOOKUPS = 60;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -340,6 +342,54 @@ export class ResearchEngine {
     }
   }
 
+  async measureDistances(project, table) {
+    const area = project.area;
+    if (!area?.point || !this.sites?.geocode) return table;
+    const origin = area.point;
+    const limit = Number(area.km);
+    const place = String(area.place ?? '');
+    const rows = [...(table.kept ?? []), ...(table.toCheck ?? [])];
+    const keptRows = new Set(table.kept ?? []);
+    const moved = [];
+    let lookups = 0;
+    let measured = 0;
+    let far = 0;
+    let unplaced = 0;
+    for (const row of rows) {
+      let point = Number.isFinite(row.lat) && Number.isFinite(row.lon) ? { lat: row.lat, lon: row.lon } : null;
+      if (!point) {
+        const attrs = row.attrs ?? {};
+        const stated = String(row.place ?? '').trim() || [attrs['location.city'], attrs['location.zip']].filter((v) => typeof v === 'string' && v.trim()).join(', ');
+        if (!stated) {
+          unplaced++;
+          continue;
+        }
+        if (lookups >= MAX_DISTANCE_LOOKUPS) continue;
+        lookups++;
+        try {
+          point = await this.sites.geocode(stated, row.countryCode || attrs['location.countryCode'] || '');
+        } catch {
+          point = null;
+        }
+        if (!point) continue;
+      }
+      const distanceKm = Math.round(haversineKm(origin.lat, origin.lon, point.lat, point.lon));
+      row.distanceKm = distanceKm;
+      measured++;
+      if (!(distanceKm > limit)) continue;
+      far++;
+      if (keptRows.has(row)) moved.push(row);
+    }
+    if (moved.length) {
+      table.kept = (table.kept ?? []).filter((row) => !keptRows.has(row) || !moved.includes(row));
+      table.toCheck = [...(table.toCheck ?? []), ...moved.map((row) => ({ ...row, toCheck: `farther than ${limit} km from ${place} (${row.distanceKm} km)` }))];
+      table.keptCount = (table.keptCount ?? 0) - moved.length;
+      table.toCheckCount = (table.toCheckCount ?? 0) + moved.length;
+    }
+    this.emit(project, 'candidates', `distance from ${place}: ${measured} listing(s) measured, ${far} farther than ${limit} km, ${unplaced} without a stated place`);
+    return table;
+  }
+
   async ensureDecisionModel(project) {
     await this.ensureArea(project);
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
@@ -425,6 +475,7 @@ export class ResearchEngine {
     }
     if (await this.calibrateKind(project)) brief = this.briefOf(project);
     let table = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
+    if (project.area) table = await this.measureDistances(project, table);
     if (this.sites && !this.demo && needsSiteFit(strategy, project.decisionModel)) {
       const looping = this.quiet.has(project.id);
       const mode = looping ? 'cache' : sweep ? 'all' : 'budget';
