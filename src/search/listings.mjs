@@ -146,6 +146,48 @@ function placeOf(value, depth = 0) {
   return '';
 }
 
+const ATTR_NOISE = /(^id$|Id$|^uuid|crossReference|tier|tracking|rating|superDeal|isVat|Formatted$|url|href|link|image|photo|thumb|logo|^is[A-Z].*Enabled$)/i;
+const ATTR_NUMBER = /^[+-]?\d[\d.,\s]*\s*[^\d\s]{0,4}$/;
+const ATTR_LIMIT = 40;
+const ATTR_DEPTH = 3;
+
+function attrValue(value) {
+  if (value.length > 80) return '';
+  return value.trim();
+}
+
+function collectAttributes(node, prefix, depth, out) {
+  for (const [key, value] of Object.entries(node)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (ATTR_NOISE.test(key) || path === 'seller.dealer' || path.startsWith('seller.dealer.')) continue;
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'object') {
+      if (!Array.isArray(value) && depth + 1 < ATTR_DEPTH) collectAttributes(value, path, depth + 1, out);
+      continue;
+    }
+    if (Object.keys(out).length >= ATTR_LIMIT) return;
+    if (typeof value === 'string') {
+      const text = attrValue(value);
+      if (!text) continue;
+      out[path] = text;
+      if (ATTR_NUMBER.test(text) && Object.keys(out).length < ATTR_LIMIT) {
+        const n = numberOf(text);
+        if (n !== null) out[`${path}#n`] = n;
+      }
+      continue;
+    }
+    if (typeof value === 'number' && !Number.isFinite(value)) continue;
+    if (typeof value === 'number' || typeof value === 'boolean') out[path] = value;
+  }
+}
+
+export function attributesOf(record) {
+  const out = {};
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return out;
+  collectAttributes(record, '', 0, out);
+  return out;
+}
+
 function field(record, keys) {
   for (const key of keys) if (typeof record[key] === 'string' && record[key].trim()) return record[key].trim();
   return '';
@@ -214,6 +256,7 @@ function fromRecord(record, base, anchors) {
   const priceCzk = record.priceCzk ?? (record.offers && typeof record.offers === 'object' ? record.offers.priceCzk : undefined);
   const currency = clean(record.priceCurrency ?? record.currency ?? record.offers?.priceCurrency ?? '', 8).toUpperCase();
   const title = sanitizeTitle(field(record, TITLE_KEYS) || url);
+  const attrs = attributesOf(record);
   return {
     title,
     url,
@@ -222,6 +265,7 @@ function fromRecord(record, base, anchors) {
     area: fieldBy(record, AREA_KEY, areaOf),
     place: placeOf(record.location ?? record.address ?? record.geo ?? null) || clean(fieldBy(record, PLACE_KEY, (v) => (typeof v === 'string' ? v : '')) ?? '', 80),
     ...coordsOf(record),
+    ...(Object.keys(attrs).length ? { attrs } : {}),
   };
 }
 
