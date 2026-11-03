@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EVIDENCE_CHARS, bm25, diverseOrder, evidenceQuery, passages, retrievalVerdict, selectEvidence } from '../../src/research/evidence.mjs';
+import { EVIDENCE_CHARS, bm25, diverseOrder, evidenceQuery, passages, retrievalVerdict, selectEvidence, topicCoverage } from '../../src/research/evidence.mjs';
 
 const boilerplate = Array.from({ length: 40 }, (_, i) => `Menu item ${i}. Login. Cookie settings.`).join('\n');
 const page = `${boilerplate}\nThe glamping season in the Algarve runs from March to November.\n${boilerplate}\nAverage July highs in the Algarve reach 28 °C.`;
@@ -29,6 +29,14 @@ describe('evidence selection (BM25, as GPT Researcher and PaperQA2 rank context)
     expect(retrievalVerdict(selectEvidence([web('a', 'Algarve season'), web('b', 'e-bike range')], q))).toBe('ambiguous');
     expect(retrievalVerdict(selectEvidence([web('a', 'e-bike range'), web('b', 'battery')], q))).toBe('incorrect');
     expect(retrievalVerdict(selectEvidence([{ id: 'D1', kind: 'data', url: '', text: 'x' }], q))).toBe('none');
+  });
+
+  it('counts how many distinct content terms of the query a page actually covers', () => {
+    const query = 'What Czech car sites list hatchbacks? used car hatchback';
+    expect(topicCoverage({ title: 'UNESCO World Heritage Centre', snippet: 'World Heritage List', text: 'World Heritage sites in the Czech Republic: Prague historic centre, Cesky Krumlov and the Holašovice village.' }, query)).toBeLessThan(2);
+    expect(topicCoverage({ title: 'Ojeté vozy', snippet: 'Inzerce', text: 'Ojeté hatchbacky Škoda Fabia, used car hatchback listings Czech' }, query)).toBeGreaterThanOrEqual(2);
+    expect(topicCoverage({ title: 'hatchback used', snippet: 'czech', text: 'hatchback used czech' }, query)).toBe(3);
+    expect(topicCoverage({ title: 'used', snippet: '', text: 'used' }, query)).toBe(1);
   });
 
   it('orders sources by relevance but takes the best page of each site first, user data on top', () => {
