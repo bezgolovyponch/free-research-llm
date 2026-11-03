@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { App, ProviderFactory, appNoteFor, buildId, buildSearch, localBase, routeOrderFrom } from '../src/app.mjs';
+import { AnthropicMessagesProvider, OpenAICompatibleProvider } from '../src/llm/provider.mjs';
 import { fakeFetch, jsonResponse } from './helpers/fake-fetch';
 
 describe('App composition', () => {
@@ -10,6 +11,21 @@ describe('App composition', () => {
     expect(providers.map((p) => p.id)).toEqual(['gemini', 'groq']);
     expect(providers[0].state).toBe('not-configured');
     expect(providers[1].selected).toEqual({ fast: 'llama-3.1-8b-instant', deep: 'big', vision: null });
+  });
+
+  it('builds the fcc preset as an Anthropic Messages provider and chats through it', async () => {
+    const fetchImpl = fakeFetch([
+      [/127\.0\.0\.1:8082\/v1\/models$/, () => jsonResponse({ object: 'list', data: [{ id: 'claude-haiku-4-5-20251001' }, { id: 'claude-opus-5-5' }] })],
+      [/127\.0\.0\.1:8082\/v1\/messages$/, () => jsonResponse({ content: [{ type: 'text', text: '{"ok":true}' }], stop_reason: 'end_turn', usage: { input_tokens: 3, output_tokens: 2 } })],
+    ]);
+    const factory = new ProviderFactory({ env: { FRL_PROVIDER_ORDER: 'fcc' }, fetchImpl });
+    const [fcc] = await factory.buildAll();
+    expect(fcc).toBeInstanceOf(AnthropicMessagesProvider);
+    expect(fcc).toMatchObject({ id: 'fcc', state: 'ready', selected: { fast: 'claude-haiku-4-5-20251001', deep: 'claude-opus-5-5' } });
+    await expect(fcc.chat({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toMatchObject({ content: '{"ok":true}', provider: 'fcc', usage: { total_tokens: 5 } });
+    const [custom] = await new ProviderFactory({ env: { FRL_PROVIDER_ORDER: 'custom', CUSTOM_LLM_BASE_URL: 'http://127.0.0.1:3001/v1' }, fetchImpl: fakeFetch([]) }).buildAll();
+    expect(custom).toBeInstanceOf(OpenAICompatibleProvider);
+    expect(custom).not.toBeInstanceOf(AnthropicMessagesProvider);
   });
 
   it('accepts a session key without writing it anywhere and falls back to demo only when asked', async () => {

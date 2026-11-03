@@ -19,6 +19,7 @@ export const FREE_TIERS = {
   ollama: 'runs on this computer, unlimited, no key',
   llamacpp: 'your own GPU, unlimited, no key; start it with node src/frl.mjs local start (LOCAL-GPU.md)',
   custom: 'any OpenAI-compatible endpoint, e.g. FreeLLMAPI on http://localhost:3001/v1 (FREE-ROUTING.md)',
+  fcc: 'the free-claude-code proxy on this Mac at http://127.0.0.1:8082, routes to the models set in fcc',
 };
 
 const LINK_TTL_MS = 6 * 3600 * 1000;
