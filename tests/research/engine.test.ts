@@ -600,6 +600,22 @@ describe('ResearchEngine', () => {
     expect(stopped.report).toBeNull();
   });
 
+  it('honours a stop raised while collecting candidates', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Should I open a bakery in Brno next year?' });
+    let synthesized = false;
+    engine.collectCandidates = async () => {
+      engine.cancel(project.id);
+      return null;
+    };
+    engine.synthesize = async () => {
+      synthesized = true;
+    };
+    const stopped = await engine.run(project.id);
+    expect(stopped.phase).toBe('cancelled');
+    expect(synthesized).toBe(false);
+  });
+
   it('regrades finished pieces whose answers say the evidence does not settle them, and rewrites the memo from the current pieces on request', async () => {
     const { engine } = engineWith(new ScriptedProvider());
     const project = await engine.createProject({ question: 'Should I import e-bikes from Germany to Czechia?' });

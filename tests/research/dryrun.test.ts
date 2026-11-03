@@ -29,4 +29,21 @@ describe('previewMaintenance', () => {
     expect(report.itemsKept).toBe(1);
     expect(report.candidates).toMatchObject({ found: 1, keptCount: 0, tiers: { unverified: 1 }, kept: [{ url: 'https://www.imovirtual.com/pt/anuncio/terreno-rustico-ID1iZBr', value: 18000 }] });
   });
+
+  it('asks collectCandidates for a live sweep when sweep is set', async () => {
+    const calls: unknown[] = [];
+    const engine = {
+      briefOf: () => ({ kind: null }),
+      reground: () => 0,
+      rescreenItems: async () => 0,
+      harvestAll: async () => [],
+      regrade: () => [],
+      collectCandidates: async (_project: unknown, options: unknown) => {
+        calls.push(options);
+        return null;
+      },
+    };
+    await previewMaintenance(engine as never, { nodes: [] } as never, { sweep: true });
+    expect(calls).toEqual([{ sweep: true }]);
+  });
 });

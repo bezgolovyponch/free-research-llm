@@ -781,6 +781,15 @@ export class ResearchEngine {
     return results;
   }
 
+  async stopIfCancelled(project, id, release) {
+    if (!this.cancelled.has(id)) return null;
+    project.phase = 'cancelled';
+    release();
+    this.emit(project, 'phase', 'stopped by user');
+    if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
+    return await this.store.save(project);
+  }
+
   async run(id, { hints = {}, memo = true, sweep = null } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
@@ -834,18 +843,15 @@ export class ResearchEngine {
           await this.store.save(project);
         },
       });
-      if (this.cancelled.has(id)) {
-        project.phase = 'cancelled';
-        release();
-        this.emit(project, 'phase', 'stopped by user');
-        if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
-        return await this.store.save(project);
-      }
+      const stoppedAfterPieces = await this.stopIfCancelled(project, id, release);
+      if (stoppedAfterPieces) return stoppedAfterPieces;
       try {
         await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
       } catch (error) {
         this.emit(project, 'warn', `candidate table not built: ${error.message}`);
       }
+      const stoppedBeforeMemo = await this.stopIfCancelled(project, id, release);
+      if (stoppedBeforeMemo) return stoppedBeforeMemo;
       if (memo || !project.report) await this.synthesize(project);
       else await this.checkAcceptance(project);
       this.checkSpecs(project);
