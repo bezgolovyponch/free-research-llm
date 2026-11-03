@@ -109,7 +109,7 @@ export function rankRole({ role, strategy, providers, stats, customOrder = [], n
     const speed = r.medianMs && fastest ? fastest / r.medianMs : 0.5;
     r.score = w.capability * r.draw + w.reliability * r.reliability + w.speed * speed;
   }
-  const weak = (r) => (r.capability <= 1 ? 2 : 0) + (r.reliability < MIN_RELIABILITY && r.calls >= 4 ? 1 : 0);
+  const weak = (r) => (r.capability <= 1 ? 2 : 0) + (r.reliability < MIN_RELIABILITY && r.calls >= 4 ? 1 : 0) + (r.calls >= NEVER_ANSWERED_AFTER && r.ok === 0 ? 1 : 0);
   const custom = (r) => {
     const i = customOrder.indexOf(r.id);
     return i < 0 ? customOrder.length : i;
@@ -209,6 +209,9 @@ export function familyOf(model, providerId = '') {
   return providerId || 'unknown';
 }
 
+export const NEVER_ANSWERED_AFTER = 1;
+const neverAnswered = (r) => r.calls >= NEVER_ANSWERED_AFTER && r.ok === 0;
+
 function orderBy(rows, compare) {
   return [...rows].sort((a, b) => Number(b.ready) - Number(a.ready) || compare(a, b) || a.id.localeCompare(b.id)).map((r) => r.id);
 }
@@ -219,9 +222,9 @@ export function purposePlan({ providers, stats, usage = {}, enabled, outcomes = 
   const topRows = rank('deep', 'top');
   const deep = rank('deep', 'research');
   const fast = rank('fast', 'volume');
-  const weak = (r) => (r.capability <= 1 && !(r.qualityObserved >= 5 && r.quality >= 0.5) ? 2 : 0) + (r.reliability < 0.5 && r.calls >= 4 ? 1 : 0);
+  const weak = (r) => (r.capability <= 1 && !(r.qualityObserved >= 5 && r.quality >= 0.5) ? 2 : 0) + (r.reliability < 0.5 && r.calls >= 4 ? 1 : 0) + (neverAnswered(r) ? 1 : 0);
   const spent = (r) => ((usage[r.id]?.today?.used ?? 0) >= 0.9 ? 1 : 0);
-  const reserved = topRows.filter((r) => r.ready).sort((a, b) => b.quality - a.quality || b.reliability - a.reliability)[0]?.id;
+  const reserved = topRows.filter((r) => r.ready && !neverAnswered(r)).sort((a, b) => b.quality - a.quality || b.reliability - a.reliability)[0]?.id;
   const reservedTight = reserved && (usage[reserved]?.today?.used ?? 0) >= RESERVE_UNTIL;
   const top = orderBy(topRows, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || b.draw - a.draw || b.reliability - a.reliability);
   const research = orderBy(deep, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved && reservedTight) - Number(b.id === reserved && reservedTight) || b.score - a.score);

@@ -102,6 +102,9 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | D6 | Memory exhaustion from dead live-update connections (2026-10-23) | heap guard, watchdog |
 | D7 | Stop ignored after the pieces: a stopped research kept sweeping and writing its memo (2026-11-03) | `stopIfCancelled` after every stage |
 | D8 | A restart would resume a research the user had stopped | shutdown saves no resume for a stopped run and marks it cancelled |
+| D9 | A provider stayed "dead" for hours after it recovered: fcc's last 20 calls timed out (14:14–18:01Z), so it ranked last and never got the call that would clear it (2026-11-03) | `DEAD_WINDOW_MS`: failures older than 30 min no longer demote |
+| D10 | A provider that never answered was ranked first and reserved for the top calls on its prior alone (Puter, 2026-11-03: "subscription required") | `neverAnswered` in `ranking.mjs` |
+| D11 | A proxy provider timed out at the tier timeout (45/90 s) while it queued behind remote models | preset `callTimeoutMs` (fcc 240 s) |
 
 ### E · Change process
 | # | Failure | How it is caught |

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
-import { ModelRouter, NoModelAvailableError, OVERLOAD_REST_MS, estimateTokens, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { DEAD_WINDOW_MS, ModelRouter, NoModelAvailableError, OVERLOAD_REST_MS, estimateTokens, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -675,5 +675,18 @@ describe('ModelRouter capacity inside one provider', () => {
     expect(calls).toEqual(['m1', 'm2', 'm3', 'm4']);
     expect(busy.selected.fast).toBe('m5');
     expect(router.cooldownUntil.has('gemini')).toBe(false);
+  });
+});
+
+describe('ModelRouter dead providers recover', () => {
+  it('stops treating a provider as dead once its last failure is older than the dead window, so it gets calls again', () => {
+    let time = Date.parse('2026-11-03T14:00:00Z');
+    const fcc = provider('fcc', []);
+    const gemini = provider('gemini', []);
+    const router = new ModelRouter({ providers: [fcc, gemini], routeOrder: { fast: ['fcc', 'gemini'] }, now: () => time });
+    for (let i = 0; i < 20; i++) router.record({ provider: 'fcc', tier: 'fast', ok: false, ms: 90000, error: 'fcc unreachable: timed out' });
+    expect(router.demoteDead([fcc, gemini]).map((p: { id: string }) => p.id)).toEqual(['gemini', 'fcc']);
+    time += DEAD_WINDOW_MS + 1000;
+    expect(router.demoteDead([fcc, gemini]).map((p: { id: string }) => p.id)).toEqual(['fcc', 'gemini']);
   });
 });

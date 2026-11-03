@@ -29,6 +29,7 @@ export const OVERLOAD_REST_MS = 10 * 60 * 1000;
 export const MAX_SWITCHES_PER_CALL = 3;
 export const FAILURE_STREAK_BENCH = 12;
 export const DEAD_AFTER_CALLS = 20;
+export const DEAD_WINDOW_MS = 30 * 60 * 1000;
 export const STREAK_BENCH_MS = 30 * 60 * 1000;
 export const STREAK_BENCH_MAX_MS = 6 * 60 * 60 * 1000;
 
@@ -175,7 +176,8 @@ export class ModelRouter {
     const recent = (id) => this.ledger.filter((r) => r.provider === id && r.purpose !== 'router').slice(-DEAD_AFTER_CALLS);
     const dead = (p) => {
       const rows = recent(p.id);
-      return rows.length >= DEAD_AFTER_CALLS && rows.every((r) => r.ok === false);
+      const last = Date.parse(rows.at(-1)?.ts ?? '');
+      return rows.length >= DEAD_AFTER_CALLS && rows.every((r) => r.ok === false) && !(this.now() - last > DEAD_WINDOW_MS);
     };
     return [...providers.filter((p) => !dead(p)), ...providers.filter(dead)];
   }
