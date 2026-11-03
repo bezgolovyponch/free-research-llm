@@ -117,3 +117,13 @@ describe('portal sweep', () => {
     expect(read).toEqual(['https://seed.example/pt/1', 'https://seed.example/pt/1?p=2', 'https://seed.example/pt/1?p=3', 'https://seed.example/es/1', 'https://seed.example/es/1?p=2', 'https://seed.example/pt/2']);
   });
 });
+
+describe('portalPages with model-named kinds', () => {
+  it('keeps a seed portal already matched to the kind even when the kind terms are narrower than its sample words', async () => {
+    const { portalPages } = await import('../../src/research/sweep.mjs');
+    const brief = { kind: { label: 'used car', terms: ['hatchback'] }, regions: ['CZ'] };
+    const seed = { url: 'https://auto.bazos.cz/', country: 'CZ', sample: ['auto', 'car'], count: 1, seed: true };
+    const plain = { url: 'https://other.cz/auta', country: 'CZ', sample: ['auto', 'car'], count: 1 };
+    expect(portalPages([], brief, [seed, plain]).map((p: { url: string }) => p.url)).toEqual(['https://auto.bazos.cz/']);
+  });
+});

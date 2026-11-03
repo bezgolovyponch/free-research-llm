@@ -250,8 +250,8 @@ describe('ResearchEngine', () => {
       },
       async readPage(url: string) {
         reads.push(url);
-        if (url === 'https://www.imovirtual.com/pt/resultados/comprar/terreno/faro?priceMax=20000&page=2') return { status: 200, text: 'terrenos', locale: 'pt', links: [], listings: [ad(4, 12000), ad(5, 19000)], next: '' };
-        if (url.includes('imovirtual.com')) return { status: 200, text: 'terrenos', locale: 'pt', links: [], listings: [ad(1, 9000), ad(2, 15000), ad(3, 90000)], next: 'https://www.imovirtual.com/pt/resultados/comprar/terreno/faro?priceMax=20000&page=2' };
+        if (url === 'https://imo.example/pt/resultados') return { status: 200, text: 'terrenos', locale: 'pt', links: [], listings: [ad(1, 9000), ad(2, 15000), ad(3, 90000)], next: 'https://imo.example/pt/resultados?page=2' };
+        if (url === 'https://imo.example/pt/resultados?page=2') return { status: 200, text: 'terrenos', locale: 'pt', links: [], listings: [ad(4, 12000), ad(5, 19000)], next: '' };
         return { status: 200, text: `Terreno para venda 9.000 € ${'texto '.repeat(60)}`, links: [], listings: [] };
       },
     };
@@ -263,8 +263,8 @@ describe('ResearchEngine', () => {
     expect(done.brief.regions).toEqual(['PT']);
     expect(done.nodes.flatMap((n: { sources?: Array<{ url: string }> }) => n.sources ?? []).some((s: { url: string }) => s.url.includes('bikes.example'))).toBe(false);
     expect(done.log.some((l: { message: string }) => /source\(s\) dropped before any model call — outside the asked regions \(bikes\.example\)/.test(l.message))).toBe(true);
-    expect(reads.filter((u) => u.includes('imovirtual.com')).slice(0, 2)).toEqual(['https://www.imovirtual.com/pt/resultados/comprar/terreno/viana-do-castelo?priceMax=20000', 'https://www.imovirtual.com/pt/resultados/comprar/terreno/faro?priceMax=20000&page=2']);
-    expect(reads.findIndex((u) => u.includes('ac-arquitetos.com'))).toBeLessThan(reads.findIndex((u) => u.includes('imovirtual.com')));
+    expect(reads.filter((u) => u.includes('imo.example')).slice(0, 2)).toEqual(['https://imo.example/pt/resultados', 'https://imo.example/pt/resultados?page=2']);
+    expect(reads.findIndex((u) => u.includes('ac-arquitetos.com'))).toBeLessThan(reads.indexOf('https://imo.example/pt/resultados'));
     expect(done.brief.text).toContain('Decision model (code checks every listing against it');
     expect(done.log.some((l: { message: string }) => /^strategy "Low-entry glamping/.test(l.message))).toBe(true);
     expect(done.candidates).toMatchObject({ keptCount: 0, tiers: { fits: 0, unverified: 4 }, screened: { 'price outside 0–20000 EUR': 1 } });
@@ -272,7 +272,7 @@ describe('ResearchEngine', () => {
     expect(done.candidates.kept[0].plan.verdict).toContain('location not measured yet');
     expect(done.report.verdict).toContain('Decision model: 0 plots of the 4 asked fit every check; 0 trade-offs with their potential; 4 to confirm; 0 weak; 0 blocked by law — model memo:');
     expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);
-    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 11 listing page\(s\) read by code/.test(l.message))).toBe(true);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 12 listing page\(s\) read by code/.test(l.message))).toBe(true);
     expect(reads).toContain('https://www.imovirtual.com/pt/resultados/comprar/terreno/faro?priceMax=20000');
     const seen: string[][] = [];
     const modes: string[] = [];
@@ -995,7 +995,7 @@ describe('list-first research flow', () => {
     },
   };
 
-  it('reads marketplace listings by code before any piece is researched, then rebuilds the table at the end without a second sweep', async () => {
+  it('reads marketplace listings by code before any piece is researched, then sweeps again at the end for portal pages the pieces found (pages already read come from the page cache)', async () => {
     const provider = new ScriptedProvider();
     const { engine } = engineWith(provider, listingSearch);
     const project = await engine.createProject({ question: 'Find used hatchbacks within 300 km of Prague under 65000 CZK', expected: 'at least 20 cars' });
@@ -1008,9 +1008,10 @@ describe('list-first research flow', () => {
     const done = await engine.run(project.id);
     expect(done.phase).toBe('done');
     expect(calls[0]).toEqual({ sweep: true, research: 0 });
-    expect(calls.at(-1)!.sweep).toBe(false);
+    expect(calls.at(-1)!.sweep).toBe(true);
     expect(calls.at(-1)!.research).toBeGreaterThan(0);
-    expect(calls.filter((c) => c.sweep === true)).toHaveLength(1);
+    expect(calls.at(-1)!.research).toBeGreaterThan(0);
+    expect(calls.filter((c) => c.sweep === true)).toHaveLength(2);
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message === 'listings first: reading marketplace pages by code before any piece is researched')).toBe(true);
   });
 

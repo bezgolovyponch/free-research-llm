@@ -51,6 +51,7 @@ const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const HPI_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hpi_a';
 const HICP_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_aind';
 export const MIN_PLACE_RANK = 12;
+export const COUNTRY_PLACE_RANK = 4;
 const EUROSTAT_CODE = { GR: 'EL' };
 export const EU_AGGREGATE = 'EU27_2020';
 const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"][name]';
@@ -382,8 +383,23 @@ export class SiteAssessor {
     return point;
   }
 
+  async areaCentre(place) {
+    const key = `centre|${place.toLowerCase()}`;
+    const known = this.store.places[key];
+    if (this.fresh(known)) return known.point;
+    const wait = this.lastGeocode + GEOCODE_GAP_MS - this.now();
+    if (wait > 0) await this.sleep(wait);
+    this.lastGeocode = this.now();
+    const found = await this.fetchJson(`${NOMINATIM_URL}?format=json&limit=1&q=${encodeURIComponent(place)}`);
+    const hit = Array.isArray(found) ? found[0] : null;
+    const point = hit && Number(hit.place_rank) > COUNTRY_PLACE_RANK ? { lat: Number(hit.lat), lon: Number(hit.lon), by: `place "${place}"` } : null;
+    this.store.places[key] = { at: this.now(), point };
+    this.persist();
+    return point;
+  }
+
   async areaCountries(place, km) {
-    const point = await this.geocode(place);
+    const point = await this.areaCentre(place);
     if (!point) return null;
     const codes = new Set();
     const sample = async (lat, lon) => {

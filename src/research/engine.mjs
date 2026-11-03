@@ -891,7 +891,7 @@ export class ResearchEngine {
       const stoppedAfterPieces = await this.stopIfCancelled(project, id, release);
       if (stoppedAfterPieces) return stoppedAfterPieces;
       try {
-        await this.collectCandidates(project, { sweep: listingsFirst ? false : sweep ?? !this.quiet.has(id) });
+        await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
       } catch (error) {
         this.emit(project, 'warn', `candidate table not built: ${error.message}`);
       }

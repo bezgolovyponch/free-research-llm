@@ -472,7 +472,8 @@ describe('countries within a radius', () => {
         const code = lon > 15.5 && lat > 50.6 ? 'pl' : lon < 12.5 ? 'de' : lat < 48.8 ? 'at' : 'cz';
         return { address: { country_code: code } };
       }
-      return url.includes('q=prague') ? [{ lat: String(PRAGUE.lat), lon: String(PRAGUE.lon), display_name: 'Prague, Czechia' }] : [];
+      if (url.includes('q=czechia')) return [{ lat: '49.74', lon: '15.33', display_name: 'Česko', place_rank: 4 }];
+      return url.includes('q=prague') ? [{ lat: String(PRAGUE.lat), lon: String(PRAGUE.lon), display_name: 'Praha, Česko', place_rank: 7 }] : [];
     };
     return { fetchJson };
   }
@@ -488,6 +489,11 @@ describe('countries within a radius', () => {
     expect(seen[0]).toBe('50.08,14.44');
     expect(seen).toContain('50.00,10.24');
     expect(seen).toContain('47.38,14.44');
+  });
+
+  it('takes a capital that Nominatim ranks as a region as the centre, but never a whole country', async () => {
+    expect((await new SiteAssessor({ fetchJson: radiusNet().fetchJson, sleep: noSleep }).areaCentre('prague'))).toMatchObject({ lat: PRAGUE.lat, lon: PRAGUE.lon });
+    expect(await new SiteAssessor({ fetchJson: radiusNet().fetchJson, sleep: noSleep }).areaCentre('czechia')).toBeNull();
   });
 
   it('is null when the place cannot be geocoded', async () => {

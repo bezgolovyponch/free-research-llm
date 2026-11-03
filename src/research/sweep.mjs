@@ -57,7 +57,7 @@ export function portalPages(nodes, brief, extra = []) {
   for (const page of extra) {
     if (pages.has(page.url)) continue;
     if (brief?.regions?.length && !brief.regions.includes(page.country)) continue;
-    if (!isKind({ title: (page.sample ?? []).join(' '), url: page.url }, brief?.kind)) continue;
+    if (!page.seed && !isKind({ title: (page.sample ?? []).join(' '), url: page.url }, brief?.kind)) continue;
     pages.set(page.url, { url: page.url, listings: page.count ?? 0, country: page.country, seed: Boolean(page.seed) });
   }
   return [...pages.values()].sort((a, b) => b.listings - a.listings);
