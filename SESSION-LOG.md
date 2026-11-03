@@ -3,6 +3,16 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-11-03 — universal list research, car research 0c750f, market value and resale
+
+- Asked: fix routing; make the engine universal (purpose first, listings first, community and expert sources, scientific and common-sense rules stored in the engine); run the user's car research 0c750f ("hatchback within 300 km of Prague, ≤ 65,000 CZK, highest price/value") to its acceptance; currency-free table; export every tab; a learned universal scraper; value from community-gathered facts with the most underpriced first and highlighted; resale option (easy to resell, rare, cheap to repair, value-adding steps); run the improvement loop again.
+- **Routing (#94, #98, #106):** rests hold; app provider `fcc` (Anthropic Messages, thinking off, truncation retry); dead providers last; failure benches survive restarts.
+- **Universal list research (#95–#105):** stage 0 purpose and value; item count from the user's words; listings first by code; place + radius → measured countries; seeds matched by kind words (car seeds DE/CZ/PL/SK/AT, bazos make pages, price in the portal currency); listings from seed pages inherit the kind; kind calibrated on real titles by 3-sample majority; Stop honoured at every stage; stopped runs never resume; plot site fit only when asked; relevance gate before model calls; per-listing pieces removed by code; memo cannot overrule the table; numbered pagination; learned site schemas (crawl4ai method); value vs peers; distance per stated place; every tab as CSV (fflate, csv-stringify); concept audit C15–C19.
+- **Market value and resale (#106, #107):** comparable-sales valuation (IVS 105) with Theil–Sen year/mileage adjustment, facts from each listing's own description, quoted owner/expert facts per model and engine, underpricing sort and highlight; resale option with market depth, measured value steps (only with 10+ each side), repair/parts facts.
+- **Result for 0c750f:** acceptance 100%; 3,269 listings found from 5 portals; 226 hatchbacks kept within 65,000 CZK with 219 places; value ranking against comparables.
+- **Process lessons** (AUDIT-PROTOCOL E8–E11, A11–A18): act on the user's own research, not a copy; replay offline before live runs; batch a round into one PR; state why before scraping; consent and bot walls are never passed (sauto.cz, otomoto.pl, Facebook Marketplace); fcc concurrency 4 and thinking off.
+- **Open:** fcc upstream (DeepSeek) slow today (25–44 s per call), so fcc is benched in the app after timeouts; value-step uplifts need more dated listings per model before any is measurable; the community fact step still needs its first live result; recipes store 2-digit years ("r.v. 3-06") not yet parsed.
+
 ## Session 2026-11-02 (night) — Notifications tab, concept audit, router failure bench
 
 - Asked: result alerts in a separate Notifications tab with an unchecked sign, not at the top of Results; after all changes are deployed, a full audit from the engine's fundamentals to its details that verifies the concept as a whole and goes through the mistakes that happened or might, stored as a mandatory part of the regular audit.
