@@ -198,6 +198,11 @@ describe('concept audit', () => {
     expect(audit.warnings).toBe(1);
   });
 
+  it('C13: does not apply when the kind is not sold on listing portals and the asked country is where the result is used', () => {
+    const project = passingProject({ brief: { regions: ['PT', 'VN'], valueRange: [5000, 20000], unit: 'EUR', located: false } });
+    expect(finding(conceptAudit(project, { now: NOW }), 'C13')).toBeUndefined();
+  });
+
   it('C13: warns when an asked country never reached the table', () => {
     const project = passingProject({ brief: { regions: ['PT', 'VN'], valueRange: [5000, 20000], unit: 'EUR' } });
     const audit = conceptAudit(project, { now: NOW });
