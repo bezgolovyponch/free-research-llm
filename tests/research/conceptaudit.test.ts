@@ -225,3 +225,21 @@ describe('claim logic check without a stored summary', () => {
     expect(c9).toMatchObject({ ok: false, detail: '1 claim(s) were checked under older logic.' });
   });
 });
+
+describe('universal list-research rules on stored researches', () => {
+  it('C18 flags a list research whose tree does per-listing work and passes a knowledge-only tree', () => {
+    const base = { acceptance: { itemCount: 20 } };
+    const bad = conceptAudit({ ...base, nodes: [{ id: 'D2', parentId: null, question: 'Checks' }, { id: 'D2.2', parentId: 'D2', question: 'Verify each listing is explicitly classified as a hatchback.' }] });
+    expect(bad.findings.find((f: { id: string }) => f.id === 'C18')).toMatchObject({ ok: false, detail: '1 piece(s) do per-listing work code should do: D2.2' });
+    const good = conceptAudit({ ...base, nodes: [{ id: 'D3', parentId: null, question: 'Reliability' }, { id: 'D3.1', parentId: 'D3', question: 'What are known failure modes for candidate engines?' }] });
+    expect(good.findings.find((f: { id: string }) => f.id === 'C18')).toMatchObject({ ok: true });
+  });
+
+  it('C19 flags a memo that states fewer results than the table keeps', () => {
+    const table = { candidates: { keptCount: 70, kept: [] }, acceptance: { itemCount: 20 } };
+    const bad = conceptAudit({ ...table, report: { verdict: 'GO-IF: 15 verified hatchback listings under 65,000 CZK were found' } });
+    expect(bad.findings.find((f: { id: string }) => f.id === 'C19')).toMatchObject({ ok: false, detail: 'memo states 15 results, the table keeps 70' });
+    const good = conceptAudit({ ...table, report: { verdict: 'Table (computed by code): 70 results kept — the 20 asked are met' } });
+    expect(good.findings.find((f: { id: string }) => f.id === 'C19')).toMatchObject({ ok: true });
+  });
+});
