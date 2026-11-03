@@ -264,7 +264,7 @@ export function hostCountries(url) {
 }
 
 export function onConcept(source, brief) {
-  if (!brief?.kind || !brief?.regions?.length || source?.kind === 'data' || !source?.url) return true;
+  if (!brief?.kind || brief.located === false || !brief?.regions?.length || source?.kind === 'data' || !source?.url) return true;
   const named = textCountries(`${source.title ?? ''} ${source.snippet ?? ''} ${(source.text ?? '').slice(0, 3000)} ${decodedUrl(source.url)}`);
   return [tldCountry(source.url), localeCountry(source.locale), ...hostCountries(source.url), ...named].some((code) => code && brief.regions.includes(code));
 }

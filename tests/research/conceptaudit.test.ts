@@ -243,3 +243,13 @@ describe('universal list-research rules on stored researches', () => {
     expect(good.findings.find((f: { id: string }) => f.id === 'C19')).toMatchObject({ ok: true });
   });
 });
+
+describe('C18 for kinds not sold on listing portals', () => {
+  it('does not ask code to do the identifying pieces when no listing portal is known for the kind', () => {
+    const nodes = [{ id: 'Q', parentId: null, question: 'Which suppliers?' }, { id: 'D1', parentId: 'Q', question: 'List wholesale suppliers of branded second-hand clothing that ship to Czechia.' }];
+    const base = { id: 'x', phase: 'researching', acceptance: { itemCount: 20 }, nodes };
+    const c18 = (p: Record<string, unknown>) => conceptAudit(p).findings.find((f: { id: string }) => f.id === 'C18');
+    expect(c18({ ...base, brief: { located: true } })?.ok).toBe(false);
+    expect(c18({ ...base, brief: { located: false } })).toBeUndefined();
+  });
+});

@@ -61,6 +61,10 @@ const seedRange = (portal, { min, max }, unit, convert) => {
   return { min: low === null ? null : Math.floor(low), max: high === null ? null : Math.ceil(high), unit: portal.currency };
 };
 
+export function listedKind(kind) {
+  return Boolean(kind) && SEED_PORTALS.some((p) => speaksOf(p, kind));
+}
+
 export function seedPortals(brief, convert = null) {
   if (!brief?.kind || !brief.regions?.length) return [];
   const [min = null, max = null] = brief.valueRange ?? [];

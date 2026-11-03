@@ -501,6 +501,36 @@ describe('ResearchEngine', () => {
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'tree' && l.message === 'pieces covered by code on the candidate table, not researched: D1, D1.1, D1.2, D1.3, D2, D2.1, D2.2, D3, D3.1, D3.2, D5.1')).toBe(true);
   });
 
+  it('keeps the pieces that find the items when no listing portal is known for the kind, such as wholesale suppliers', async () => {
+    const proposal = { concept: 'wholesale suppliers of branded second-hand clothing', kind: { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing', 'used clothing wholesale'] }, criteria: [] };
+    const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
+      p.decisionModel = { ...aggregate([normalizeSample(proposal), normalizeSample(proposal)], { question: String(p.question) }), caseIds: [] };
+      return p.decisionModel;
+    } };
+    const tree = {
+      decision: 'Choose wholesale suppliers for a branded second-hand shop in Prague',
+      successCriteria: '20 supplier links with proof of quality and price',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: 20, urlsLive: false, valueRange: null, unit: '', mustMention: [] },
+      nodes: [
+        { id: 'D1', parentId: null, title: 'Suppliers', question: 'Which wholesale suppliers sell branded second-hand clothing?', method: 'lookup', searchQueries: ['branded second-hand clothing wholesale'] },
+        { id: 'D1.1', parentId: 'D1', title: 'EU suppliers', question: 'List wholesale suppliers of branded second-hand clothing that ship to Czechia.', method: 'lookup', searchQueries: ['vintage clothing wholesale EU'] },
+        { id: 'D1.2', parentId: 'D1', title: 'Grades', question: 'Which grading systems do these suppliers use?', method: 'lookup', searchQueries: ['second-hand clothing grade A cream'] },
+        { id: 'D2', parentId: null, title: 'Value', question: 'Which suppliers give the best price for quality?', method: 'comparison', searchQueries: ['vintage wholesale price per kg'] },
+        { id: 'D2.1', parentId: 'D2', title: 'Prices', question: 'What do suppliers charge per kilo or per piece?', method: 'lookup', searchQueries: ['wholesale vintage price per kg'] },
+        { id: 'D2.2', parentId: 'D2', title: 'Reviews', question: 'What do shop owners report about these suppliers?', method: 'lookup', searchQueries: ['vintage wholesaler review'] },
+      ],
+    };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Find wholesale branded second hand clothing providers for a retail second hand shop in Czech Republic', templateId: 'generic', expected: '20 direct links to the providers with proposal and proof' });
+    await engine.decompose(project);
+    expect(project.nodes.map((n: { id: string }) => n.id)).toEqual(['D1', 'D1.1', 'D1.2', 'D2', 'D2.1', 'D2.2']);
+    expect(project.brief.located).toBe(false);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'tree' && l.message.startsWith('no listing portal is known for "wholesale clothing provider"'))).toBe(true);
+  });
+
   it('reads the item count from the user words, so the decision model is built before the tree is decomposed', async () => {
     const proposal = { concept: 'used cars within budget', kind: { label: 'used car', terms: ['car', 'used car'] }, criteria: [{ clause: 'under 50000 EUR', measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000 EUR' }] };
     const order: string[] = [];

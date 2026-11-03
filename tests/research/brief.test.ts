@@ -171,3 +171,12 @@ describe('buildBrief derives valueRange from question when acceptance lacks it',
     expect(brief.valueFrom).toBe('question');
   });
 });
+
+describe('onConcept for kinds not sold on listing portals', () => {
+  it('keeps a source that names no asked country when the asked place is where the result is used, not where the items are', () => {
+    const source = { url: 'https://vintage-wholesale.example.de/brands', title: 'Branded second-hand clothing wholesale by the kilo', text: 'Ralph Lauren, Barbour, The North Face grade A bales shipped across the EU' };
+    const kind = { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing'] };
+    expect(onConcept(source, { kind, regions: ['CZ'], located: true })).toBe(false);
+    expect(onConcept(source, { kind, regions: ['CZ'], located: false })).toBe(true);
+  });
+});

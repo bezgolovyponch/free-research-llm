@@ -15,6 +15,7 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn } from './brief.mjs';
+import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
@@ -357,15 +358,15 @@ export class ResearchEngine {
     const proposed = project.acceptance?.locked ? { spec: project.acceptance, dropped: [] } : groundAcceptance(normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected), { expected: project.acceptance?.expected, question: project.question, constraints: project.constraints });
     const acceptance = proposed.spec;
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
-    if (acceptance?.itemCount) {
-      const pruned = dropListingWork(tree.nodes);
-      tree.nodes = pruned.nodes;
-      if (pruned.dropped.length) this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${pruned.dropped.join(', ')}`);
-    }
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
     if (acceptance?.itemCount) {
       await this.ensureDecisionModel(project);
-      this.briefOf(project);
+      const brief = this.briefOf(project);
+      if (brief.located) {
+        const pruned = dropListingWork(project.nodes);
+        project.nodes = pruned.nodes;
+        if (pruned.dropped.length) this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${pruned.dropped.join(', ')}`);
+      } else this.emit(project, 'tree', `no listing portal is known for "${brief.kind?.label ?? 'this item'}": the pieces that find the items are researched, and ${brief.regions.join(', ') || 'the asked place'} is where the result is used, not a filter on sources`);
     }
     const model = project.decisionModel;
     if (model) {
@@ -398,7 +399,7 @@ export class ResearchEngine {
     if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
-    project.brief = { ...brief, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    project.brief = { ...brief, located: !kind || Boolean(template.itemKind) || listedKind(kind), subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
