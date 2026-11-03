@@ -15,7 +15,7 @@ The list lives in `src/research/fundamentals.mjs`; its test fails when an enforc
 | F5 | Generic readers first, a learned schema only when proven | `needsSchema` (`src/research/sweep.mjs`), `verifySchema` (`src/search/schema.mjs`) | crawl4ai schema method; extruct |
 | F6 | What counts as an item is calibrated on real titles | `mergeCalibrations`, `applyCalibration` (`src/research/decision.mjs`) | Self-consistency arXiv 2203.11171 |
 | F7 | Outliers by robust statistics | `implausiblyLow` (`src/research/candidates.mjs`), `implausiblyCheap` (`src/research/strategy.mjs`) | Leys et al. 2013, J. Exp. Soc. Psychol. 49(4) |
-| F8 | Value from adjusted comparables, never from thin facts | `valueListing`, `theilSen` (`src/research/valuation.mjs`) | IVS 105 sales comparison; Theil 1950, Sen 1968 |
+| F8 | Value from adjusted comparables, never from thin facts | `valueListing`, `theilSen`, `pooledSlopes` (`src/research/valuation.mjs`) | IVS 105 sales comparison; Theil 1950, Sen 1968 |
 | F9 | Owner and expert facts only when quoted | `verifiedGroupFacts` (`src/research/engine.mjs`) | Chain-of-Verification arXiv 2309.11495 |
 | F10 | Evidence must be on topic | `topicCoverage`, `retrievalVerdict` (`src/research/evidence.mjs`) | Corrective RAG arXiv 2401.15884 |
 | F11 | The table is the result; the memo cannot overrule it | `shortlistText`, `tableVerdict` (`src/research/candidates.mjs`), `checkMemoClaims` (`src/research/memocheck.mjs`) | DeLLMa arXiv 2402.02392 |

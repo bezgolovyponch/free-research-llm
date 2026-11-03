@@ -165,14 +165,14 @@ describe('price and value read from each kept row', () => {
     const subtype = { label: 'hatchback', models: ['fabia', 'rio'], source: 'model proposal, matched to listing titles by code' };
     const listing = (model: string, value: number, km: number, i: number) => ({ title: `${model === 'Rio' ? 'Kia Rio' : 'Škoda Fabia'} 1.4 2008 ${km} km`, url: `https://auto.bazos.cz/inzerat/${model.toLowerCase()}-ID1${i}aaaa`, value, unit: 'CZK' });
     const listings = [
-      listing('Fabia', 30000, 200000, 1), listing('Fabia', 35000, 180000, 2), listing('Fabia', 39000, 150000, 3), listing('Fabia', 45000, 120000, 4), listing('Fabia', 60000, 100000, 5),
-      listing('Rio', 20000, 160000, 6), listing('Rio', 21000, 120000, 7), listing('Rio', 22000, 140000, 8),
+      listing('Fabia', 30000, 200000, 1), listing('Fabia', 35000, 180000, 2), listing('Fabia', 39000, 150000, 3), listing('Fabia', 45000, 120000, 4), listing('Fabia', 60000, 100000, 5), listing('Fabia', 41000, 140000, 9), listing('Fabia', 43000, 130000, 10),
+      listing('Rio', 20000, 160000, 6), listing('Rio', 21000, 120000, 7), listing('Rio', 22000, 140000, 8), listing('Rio', 24000, 110000, 11), listing('Rio', 23000, 130000, 12), listing('Rio', 26000, 100000, 13),
     ];
     const out = buildCandidates([{ id: 'D1', sources: [{ id: 'S1', url: 'https://auto.bazos.cz/auto/', listings }] }], { ...carBrief, subtype }, {});
     const ratios = out.kept.map((r: { underpriced?: number }) => r.underpriced ?? -Infinity);
     expect(ratios).toEqual([...ratios].sort((a, b) => b - a));
     expect(out.kept.every((r: { marketValue?: number; valueIndex?: number }) => Number.isFinite(r.marketValue) && Number.isFinite(r.valueIndex))).toBe(true);
-    expect(out.kept.find((r: { value: number }) => r.value === 30000)).toMatchObject({ year: 2008, km: 200000, peers: 5 });
+    expect(out.kept.find((r: { value: number }) => r.value === 30000)).toMatchObject({ year: 2008, km: 200000, peers: 7, comparables: 5 });
   });
 });
 

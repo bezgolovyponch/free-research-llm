@@ -74,11 +74,12 @@ const ITEMS = [
   {
     id: 'F8',
     rule: 'Value from adjusted comparables, never from thin facts',
-    why: 'Market value from the nearest comparable sales with Theil-Sen adjustment; no value without the facts that drive it',
+    why: 'A value is the 25–75% range of asking prices of at least 5 other listings of the same model within ±2 years, adjusted by age and mileage effects measured on at least 30 dated listings; facts come from each ad page; no value without the year',
     source: 'IVS 105 sales comparison; Theil 1950, Sen 1968',
     enforcedBy: [
       ['src/research/valuation.mjs', 'valueListing'],
       ['src/research/valuation.mjs', 'theilSen'],
+      ['src/research/valuation.mjs', 'pooledSlopes'],
     ],
   },
   {

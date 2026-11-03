@@ -1282,3 +1282,18 @@ describe('recalibration after the market grows', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('listing facts read from each ad page', () => {
+  it('reads year and mileage from the ad text of listings whose titles do not state them, once, and stores them for valuation', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-facts-'));
+    const url = 'https://auto.bazos.cz/inzerat/225964208/skoda-fabia.php';
+    const reads: string[] = [];
+    const search = { readPage: async (u: string) => { reads.push(u); return { text: 'Škoda Fabia 1.2 HTP | bazos.cz menu Škoda Fabia 1.2 HTP - [3.11. 2026] prodám fabii, rok výroby 2008, najeto 165 000 km. Cena: 39 900 Kč další inzeráty BMW 2005' }; } };
+    const engine = new ResearchEngine({ router: null, search, store: new ProjectStore({ dir }) } as never);
+    const project = { id: 'p', nodes: [{ id: 'D1', sources: [{ url: 'https://auto.bazos.cz/skoda/', listings: [{ title: 'Škoda Fabia 1.2 HTP', url, value: 39900 }, { title: 'Škoda Fabia 2010 1.4', url: 'https://auto.bazos.cz/inzerat/225964209/x.php', value: 50000 }] }] }], brief: { subtype: { models: ['skoda fabia'] } }, candidates: { kept: [] } };
+    expect(await engine.readListingFacts(project as never)).toBe(1);
+    expect(reads).toEqual([url]);
+    expect(Object.values((project as { listingFacts: Record<string, unknown> }).listingFacts)[0]).toMatchObject({ year: 2008, km: 165000, read: true });
+    expect(await engine.readListingFacts(project as never)).toBe(0);
+  });
+});

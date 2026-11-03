@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conditionOf, listingFacts, marketSample, theilSen, valueListing, valueTable } from '../../src/research/valuation.mjs';
+import { MIN_SLOPE_POINTS, adText, conditionOf, listingFacts, marketSample, pooledSlopes, theilSen, valueListing, valueTable } from '../../src/research/valuation.mjs';
 import { verifiedGroupFacts } from '../../src/research/engine.mjs';
 
 describe('facts a listing states', () => {
@@ -18,33 +18,71 @@ describe('facts a listing states', () => {
 
 describe('market value from comparable listings', () => {
   const ad = (title: string, value: number, i: number) => ({ title, value, unit: 'CZK', url: `https://auto.bazos.cz/inzerat/2259${i}0000/x.php` });
-  const market = [
-    ad('Dacia Sandero 2009 160000 km', 45000, 1), ad('Dacia Sandero 2009 170000 km', 47000, 2), ad('Dacia Sandero 2009 150000 km', 46000, 3),
-    ad('Dacia Sandero 2013 90000 km', 85000, 4), ad('Dacia Sandero 2012 100000 km', 80000, 5), ad('Dacia Sandero 2008 200000 km', 38000, 6),
-    ad('Dacia Sandero 2010 140000 km', 52000, 7), ad('Dacia Sandero 2015 60000 km', 120000, 8),
-  ];
+  const priced = (year: number, km: number) => Math.round(100000 * 1.1 ** (year - 2012) * (km / 100000) ** -0.3);
+  const market = Array.from({ length: 36 }, (_, i) => {
+    const year = 2006 + (i % 7);
+    const km = 90000 + ((i * 37) % 11) * 15000;
+    return ad(`Dacia Sandero ${year} ${km} km`, priced(year, km) + ((i % 3) - 1) * 500, 100 + i);
+  });
 
-  it('estimates a robust per-year slope from the market (Theil–Sen)', () => {
+  it('measures age and mileage effects within each model only from enough dated listings (Theil–Sen)', () => {
     expect(theilSen([[1, 1], [2, 2], [3, 3], [4, 4], [5, 50]])).toBe(1);
     const sample = marketSample(market, ['dacia sandero']);
-    expect(sample.get('dacia sandero')!.slopes.year).toBeGreaterThan(0.05);
+    expect(Math.exp(sample.slopes.year!) - 1).toBeGreaterThan(0.08);
+    expect(Math.exp(sample.slopes.year!) - 1).toBeLessThan(0.12);
+    expect(sample.slopes.km!).toBeLessThan(-0.2);
+    expect(sample.slopes.km!).toBeGreaterThan(-0.4);
+    const thin = pooledSlopes(marketSample(market.slice(0, MIN_SLOPE_POINTS - 1), ['dacia sandero']).values());
+    expect(thin.year).toBeNull();
+    expect(thin.km).toBeNull();
   });
 
-  it('values a listing from comparables adjusted to its own year and mileage, and highlights a confident bargain', () => {
+  it('values a listing from other listings of nearby years as a rounded range and flags it only below three of four comparables', () => {
     const sample = marketSample(market, ['dacia sandero']);
     const row = valueListing(ad('Dacia Sandero 2009 165000 km', 25000, 9), sample, { models: ['dacia sandero'] });
-    expect(row.marketValue).toBeGreaterThan(40000);
-    expect(row.marketValue).toBeLessThan(55000);
-    expect(row.underpriced).toBeGreaterThan(1.6);
-    expect(row.highlight).toMatch(/^underpriced: worth about/);
-    expect(row.valueNotes[0]).toMatch(/adjusted to this listing's year and mileage/);
+    expect(row.marketValue! % 1000).toBe(0);
+    expect(row.marketRange![0]).toBeLessThanOrEqual(row.marketValue!);
+    expect(row.marketRange![1]).toBeGreaterThanOrEqual(row.marketValue!);
+    expect(Math.abs(row.marketValue! - priced(2009, 165000))).toBeLessThan(5000);
+    expect(row.valueConfidence).toBe('high');
+    expect(row.highlight).toMatch(/^asks less than 3 of 4 comparable listings/);
+    expect(row.valueNotes[0]).toMatch(/^asking prices of 7 other dacia sandero listings from 20(07|08)–20(10|11)/);
+    expect(row.valueNotes[1]).toMatch(/per year of age/);
+    const fair = valueListing(ad('Dacia Sandero 2009 165000 km', priced(2009, 165000), 8), sample, { models: ['dacia sandero'] });
+    expect(fair.highlight).toBeUndefined();
   });
 
-  it('does not value a listing that states neither year nor mileage', () => {
+  it('never counts a listing as its own comparable, even when the market holds copies of it', () => {
+    const row = ad('Dacia Sandero 2009 165000 km', 25000, 9);
+    const clean = valueListing(row, marketSample(market, ['dacia sandero']), { models: ['dacia sandero'] });
+    const copies = valueListing(row, marketSample([...market, row, row, { ...row, url: `${row.url}?ref=list` }], ['dacia sandero']), { models: ['dacia sandero'] });
+    expect(copies.marketValue).toBe(clean.marketValue);
+    expect(copies.marketRange).toEqual(clean.marketRange);
+  });
+
+  it('gives no value without the listing year or without five dated comparables of nearby years', () => {
     const sample = marketSample(market, ['dacia sandero']);
-    const row = valueListing(ad('Dacia Sandero', 25000, 10), sample, { models: ['dacia sandero'] });
+    expect(valueListing(ad('Dacia Sandero', 25000, 10), sample, { models: ['dacia sandero'] })).toMatchObject({ valueNotes: ['no value: the listing does not state its year, and age drives the price'] });
+    const few = marketSample(market.slice(0, 8), ['dacia sandero']);
+    const row = valueListing(ad('Dacia Sandero 2009 165000 km', 25000, 9), few, { models: ['dacia sandero'] });
     expect(row.marketValue).toBeUndefined();
-    expect(row.valueNotes).toEqual(['not enough facts stated to value: the listing gives neither the year nor the mileage']);
+    expect(row.valueNotes[0]).toMatch(/^no value: \d other dacia sandero listing\(s\) state a year within ±1 of 2009; 5 are needed$/);
+  });
+
+  it('reads year and mileage from the ad text after its title and stops at its price, not from the seller\'s other ads', () => {
+    const page = 'Škoda Fabia 2 facelift 2013 | bazos.cz menu auto ... Škoda Fabia 2 facelift 2013 - [3.11. 2026] prodám pěknou fabii, najeto 165000km, technická do 5/27. Cena: 49 990 Kč další inzeráty uživatele BMW 3 E90 325i 2005 najeto 300 000 km';
+    expect(adText(page, 'Škoda Fabia 2 facelift 2013', 49990)).not.toContain('bmw');
+    expect(listingFacts({ title: '', attrs: { description: adText(page, 'Škoda Fabia 2 facelift 2013', 49990) } })).toMatchObject({ year: 2013, km: 165000 });
+    expect(adText(page, 'Toyota Yaris', 30000)).toBe('');
+  });
+
+  it('reads the year and mileage forms real ads use, and never an inspection date', () => {
+    const facts = (d: string) => listingFacts({ title: '', attrs: { description: d } });
+    for (const [d, year] of [['uvedení do provozu 04/2009', 2009], ['vyrobenou v roce 2009', 2009], ['rok výroby 7/2012', 2012], ['modelový rok 2007', 2007], ['r.v.3-06', 2006], ['r.v. 11/05', 2005], ['m.2011', 2011], ['Erstzulassung 05/2010', 2010], ['rok produkcji 2009', 2009]] as const) expect(facts(d).year).toBe(year);
+    for (const [d, km] of [['najeto 164.000km', 164000], ['Stav tachometru: 262 000 km', 262000], ['107xxx km', 107000], ['naj 170tis', 170000], ['142 tis. km', 142000], ['przebieg 185 000 km', 185000], ['najeto 240-tis', 240000]] as const) expect(facts(d).km).toBe(km);
+    expect(facts('STK do 04/2027').year).toBeNull();
+    expect(facts('1198 cm³ 67ps 44kw').kw).toBe(44);
+    expect(facts('rok 2004, najeto 2000 km').km).toBeNull();
   });
 
   it('never highlights a listing whose own text states a bad condition, and ranks it last', () => {
@@ -56,14 +94,14 @@ describe('market value from comparable listings', () => {
     expect(table[1].valueNotes).toContain('condition stated in the listing: na dojezdeni — the price reflects it, so it is not shown as underpriced');
   });
 
-  it('applies owner and expert facts for the listing engine with their source, as a labelled adjustment', () => {
+  it('shows quoted owner and expert facts with their source but never changes the value with them', () => {
     const sample = marketSample(market, ['dacia sandero']);
     const groupFacts = { 'dacia sandero': { at: '2026-11-03', facts: [{ engine: '1.4', verdict: 'reliable', note: 'simple MPI engine, long life', quote: 'The 1.4 MPI is a simple and long-lived engine.', source: 'https://forum.example/sandero' }] } };
     const plain = valueListing(ad('Dacia Sandero 1.4 MPI 2009 165000 km', 25000, 13), sample, { models: ['dacia sandero'] });
     const known = valueListing(ad('Dacia Sandero 1.4 MPI 2009 165000 km', 25000, 13), sample, { models: ['dacia sandero'], groupFacts });
-    expect(known.marketValue).toBe(Math.round(plain.marketValue! * 1.1));
+    expect(known.marketValue).toBe(plain.marketValue);
     expect(known.valueNotes.join(' ')).toContain('https://forum.example/sandero');
-    expect(known.valueNotes.join(' ')).toContain('assumption');
+    expect(known.valueNotes.join(' ')).toContain('not used in the value');
   });
 });
 
