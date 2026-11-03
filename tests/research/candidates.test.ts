@@ -67,19 +67,19 @@ describe('candidate table', () => {
   it('hands the kept rows to the expected-result check and a short table to the memo', () => {
     expect(candidateDeliverables(table)[0]).toEqual({ title: 'Terreno rústico junto à praia', url: 'https://imo.example/pt/anuncio/terreno-praia-ID1aaaa', value: 14000, unit: 'EUR', nodeId: 'D1.1', harvested: true, candidate: true });
     const text = shortlistText(table, 1);
-    expect(text.split('\n')).toEqual(['found 9, kept 3, to check 2, screened out 4 (price outside 0–20000 EUR 1, offered for rent, not for sale 1, not a plot of land 1, offered as a swap, not for sale 1, outside the asked regions 1)', '- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated']);
+    expect(text.split('\n')).toEqual(['TABLE COUNTS (computed by code, final): found 9, kept 3 (the result list), to check 2, screened out 4 (price outside 0–20000 EUR 1, offered for rent, not for sale 1, not a plot of land 1, offered as a swap, not for sale 1, outside the asked regions 1)', 'First 1 of the 3 kept rows:', '- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated']);
     expect(shortlistText(null)).toBe('');
     expect(tableVerdict({ tiers: { fits: 3, 'trade-off': 44, unverified: 24, blocked: 34 } }, 50)).toBe('Decision model: 3 plots of the 50 asked fit every check; 44 trade-offs with their potential; 24 to confirm; 0 weak; 34 blocked by law');
     expect(tableVerdict({ tiers: { fits: 1, 'trade-off': 1, unverified: 0, blocked: 0 } })).toBe('Decision model: 1 plot fit every check; 1 trade-off with their potential; 0 to confirm; 0 weak; 0 blocked by law');
     expect(tableVerdict({})).toBe('');
     const tiered = { ...table, kept: [{ ...table.kept[0], plan: { tier: 'fits', verdict: 'fits every criterion', why: ['sea 2.5 km'], risks: ['ask the Câmara'] } }, { ...table.kept[0], url: 'https://imo.example/far', plan: { tier: 'trade-off', verdict: 'trade-off', why: [], risks: [] } }] };
     expect(candidateDeliverables(tiered).map((d: { url: string }) => d.url)).toEqual([table.kept[0].url]);
-    expect(shortlistText(tiered, 1).split('\n')[1]).toContain('| fits: fits every criterion | why: sea 2.5 km | risks: ask the Câmara');
+    expect(shortlistText(tiered, 1).split('\n')[2]).toContain('| fits: fits every criterion | why: sea 2.5 km | risks: ask the Câmara');
     expect(table.kept[0]).toMatchObject({ countryCode: 'PT' });
     const measured = { ...table, sites: { assessed: 1 }, kept: [{ ...table.kept[0], site: { coastKm: 2.5, beachKm: 3, beaches: 4, viewpoints: 6, attractions: 2, reserves: 1, protectedAreas: 1, hikingRoutes: 2, lodging: 30, campsites: 2, climate: { workable: 9, comfortable: 6, hottest: 27.5, coldest: 7 } }, fit: { score: 0.71, zoning: 'agricultural', pitches: 30 } }] };
     const lines = shortlistText(measured, 1).split('\n');
-    expect(lines[0]).toContain('kept 3, ranked by code-measured fit');
-    expect(lines[1]).toBe('- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated | sea 2.5 km, beach 3 km | 9 workable months (6 comfortable), hottest month max 27.5°C | 16 beaches, viewpoints, sights, reserves and trails within 15 km | zoning agricultural | about 30 pitches');
+    expect(lines[0]).toContain('kept 3 (the result list), ranked by code-measured fit');
+    expect(lines[2]).toBe('- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated | sea 2.5 km, beach 3 km | 9 workable months (6 comfortable), hottest month max 27.5°C | 16 beaches, viewpoints, sights, reserves and trails within 15 km | zoning agricultural | about 30 pitches');
   });
 
   it('keeps an autoscout listing read from a seed portal page and screens the same listing from a plain page as another kind', () => {
@@ -145,5 +145,14 @@ describe('robust low-price rule for any kind of item', () => {
     const low = implausiblyLow([...cars, wheels]);
     expect(low.map((r: { title: string }) => r.title)).toEqual(['Zimní kola Kia Rio']);
     expect(implausiblyLow(cars.slice(0, 5).concat(wheels))).toEqual([]);
+  });
+});
+
+describe('tableVerdict for any kind of item', () => {
+  it('states the kept count against the asked number when the table has no plot tiers', async () => {
+    const { tableVerdict } = await import('../../src/research/candidates.mjs');
+    expect(tableVerdict({ found: 623, keptCount: 70, toCheckCount: 547, screenedCount: 6 }, 20)).toBe('Table (computed by code): 70 results kept — the 20 asked are met; 547 to check; 6 screened out of 623 found');
+    expect(tableVerdict({ found: 30, keptCount: 12, toCheckCount: 3, screenedCount: 15 }, 20)).toContain('8 short of the 20 asked');
+    expect(tableVerdict(null, 20)).toBe('');
   });
 });
