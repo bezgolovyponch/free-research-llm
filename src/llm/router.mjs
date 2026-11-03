@@ -233,9 +233,10 @@ export class ModelRouter {
   coolDown(provider, error) {
     const { until, reason } = this.cooldownFor(provider, error);
     const keyBack = provider.nextKeyAt?.() ?? 0;
-    const back = keyBack > this.now() && keyBack < until ? keyBack : until;
+    const proposed = keyBack > this.now() && keyBack < until ? keyBack : until;
+    const back = Math.max(this.cooldownUntil.get(provider.id) ?? 0, proposed);
     this.cooldownUntil.set(provider.id, back);
-    this.cooldownReason.set(provider.id, back < until ? `every key rests; the first is back in ${Math.ceil((back - this.now()) / 60000)} min` : reason);
+    if (back === proposed) this.cooldownReason.set(provider.id, proposed < until ? `every key rests; the first is back in ${Math.ceil((back - this.now()) / 60000)} min` : reason);
   }
 
   benchComputeError(provider, error) {
@@ -289,6 +290,7 @@ export class ModelRouter {
       let repairs = 0;
       let switches = 0;
       while (repairs < 2) {
+        if ((this.cooldownUntil.get(provider.id) ?? 0) > this.now()) break;
         const started = this.now();
         const model = provider.selected?.[tier] ?? provider.selected?.fast;
         this.inflight.set(provider.id, (this.inflight.get(provider.id) ?? 0) + 1);

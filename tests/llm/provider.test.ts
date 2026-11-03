@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PROVIDER_PRESETS } from '../../src/llm/presets.mjs';
 import { OpenAICompatibleProvider, ProviderError, pickModel } from '../../src/llm/provider.mjs';
 import { fakeFetch, jsonResponse } from '../helpers/fake-fetch';
@@ -131,6 +131,40 @@ describe('provider limits', () => {
     const error = await p.chat({ messages: [] }).catch((e) => e);
     expect(error.retryable).toBe(true);
     expect(error.retryAfterMs).toBe(45000);
+  });
+
+  it('waits a full minIntervalMs after the previous reply finished before starting the next request', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000);
+      const pollinations = PROVIDER_PRESETS.find((p) => p.id === 'pollinations')!;
+      const replyMs = 30000;
+      const starts: number[] = [];
+      const fetchImpl = fakeFetch([
+        [/\/models$/, () => jsonResponse({ data: [{ id: 'openai-fast' }] })],
+        [/\/chat\/completions$/, async () => {
+          starts.push(Date.now());
+          await new Promise((r) => setTimeout(r, replyMs));
+          return jsonResponse({ choices: [{ message: { content: '{"ok":true}' } }] });
+        }],
+      ]);
+      const p = await new OpenAICompatibleProvider({ preset: { ...pollinations, minIntervalMs: 45000 }, fetchImpl }).discover();
+      const first = p.chat({ messages: [] });
+      await vi.advanceTimersByTimeAsync(replyMs);
+      await first;
+      const finishedAt = Date.now();
+      expect(p.nextSlot).toBe(finishedAt + 45000);
+      const second = p.chat({ messages: [] });
+      await vi.advanceTimersByTimeAsync(44999);
+      expect(starts).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(starts).toHaveLength(2);
+      expect(starts[1] - finishedAt).toBeGreaterThanOrEqual(45000);
+      await vi.advanceTimersByTimeAsync(replyMs);
+      await second;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retries with a doubled token budget when the reply was cut off', async () => {
