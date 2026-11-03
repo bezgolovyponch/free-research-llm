@@ -74,7 +74,7 @@ export function normalizeAcceptance(raw, expected = '') {
   };
 }
 
-const COUNT_NOUNS = 'links?|listings?|items?|results?|offers?|cars?|plots?|properties?|options?|[a-z]{3,}s';
+const COUNT_NOUNS = 'links?|listings?|items?|results?|offers?|ads?|cars?|vehicles?|plots?|properties|property|options?|candidates?|suppliers?';
 const COUNT_PHRASE = /\b(?:at least|top|list of)\s+(\d{1,4})(?!\d)/gi;
 const COUNT_NOUN = new RegExp(`(?<![\\d.,])(\\d{1,4})(?![\\d.,])\\s+(?:${COUNT_NOUNS})(?![a-z])`, 'gi');
 const COUNT_UNIT_AFTER = /^\s*(?:[€$£₺₫]|(?:eur|euro|euros|czk|pln|usd|gbp|try|vnd|kč|kc|zl|zł|km|m2|m²|sqm|%|percent|years?|months?|weeks?|days?|hours?|minutes?)(?![a-zà-ÿ]))/i;

@@ -6,7 +6,7 @@ import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
-import { ResearchEngine, TEAM_TTL_MS } from '../../src/research/engine.mjs';
+import { ResearchEngine, TEAM_TTL_MS, needsSiteFit } from '../../src/research/engine.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
@@ -460,7 +460,7 @@ describe('ResearchEngine', () => {
       ...fakeSearch,
       async search(q: string[]) {
         queries.push(q);
-        if (queries.length === 1) return [{ kind: 'web', title: 'Bikes', url: 'https://bikes.example/a', domain: 'bikes.example', snippet: 's', text: 'battery range' }, { kind: 'web', title: 'Shop', url: 'https://shop.example/b', domain: 'shop.example', snippet: 's', text: 'free delivery' }];
+        if (queries.length === 1) return [{ kind: 'web', title: 'Bikes', url: 'https://bikes.example/a', domain: 'bikes.example', snippet: 's', text: 'battery range of electric bikes on a full charge, '.repeat(8) }, { kind: 'web', title: 'Shop', url: 'https://shop.example/b', domain: 'shop.example', snippet: 's', text: 'free delivery on orders over fifty, '.repeat(10) }];
         return [{ kind: 'web', title: 'Answer', url: 'https://answer.example/c', domain: 'answer.example', snippet: 's', text: `${q.join(' ')} documented here` }];
       },
     };
@@ -978,7 +978,7 @@ describe('meaning check of claims', () => {
     const project = await engine.createProject({ question: 'What Czech car sites list used hatchbacks near Prague?' });
     const node = { id: 'D1', title: 'What Czech car sites list hatchbacks?', question: 'used car hatchback', metric: 'count' };
     const sources = [
-      { kind: 'web', title: 'UNESCO World Heritage Centre', url: 'https://whc.unesco.org/en/list/', domain: 'whc.unesco.org', snippet: 'World Heritage List', text: 'World Heritage sites in the Czech Republic: Prague historic centre, Cesky Krumlov and the Holašovice village.' },
+      { kind: 'web', title: 'UNESCO World Heritage Centre', url: 'https://whc.unesco.org/en/list/', domain: 'whc.unesco.org', snippet: 'World Heritage List', text: 'World Heritage sites in the Czech Republic: Prague historic centre, Cesky Krumlov and the Holašovice village.'.repeat(5) },
       { kind: 'web', title: 'Ojeté vozy', url: 'https://www.sauto.cz/ojete', domain: 'sauto.cz', snippet: 'Inzerce', text: 'Ojeté hatchbacky Škoda Fabia, used car hatchback listings Czech' },
     ];
     const kept = engine.onConceptOnly(project, node, sources);
@@ -1028,5 +1028,15 @@ describe('list-first research flow', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].research).toBeGreaterThan(0);
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('listings first:'))).toBe(false);
+  });
+});
+
+describe('needsSiteFit', () => {
+  it('measures sites only when a strategy or a decision criterion needs a place measurement', () => {
+    expect(needsSiteFit(null, { criteria: [] })).toBe(false);
+    expect(needsSiteFit(null, { criteria: [{ measure: 'priceEur' }] })).toBe(false);
+    expect(needsSiteFit(null, null)).toBe(false);
+    expect(needsSiteFit(null, { criteria: [{ measure: 'coastKm' }] })).toBe(true);
+    expect(needsSiteFit({ id: 'glamping' }, null)).toBe(true);
   });
 });

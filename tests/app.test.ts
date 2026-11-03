@@ -202,6 +202,28 @@ describe('App composition', () => {
 });
 
 describe('App save and resume', () => {
+  it('never resumes a run the user stopped before the app shut down, and marks it cancelled', async () => {
+    const fsp = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { App } = await import('../src/app.mjs');
+    const { ScriptedProvider } = await import('../src/llm/scripted-provider.mjs');
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'frl-app-stopped-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ backends: [] }) };
+    const first = new App({ env: { FRL_MARKETPLACES: '0' }, dataDir: dir, providers: [new ScriptedProvider()], search });
+    const project = await first.engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    first.engine.running.add(project.id);
+    first.engine.cancel(project.id);
+    await first.shutdown();
+    first.engine.running.delete(project.id);
+    expect((await first.handoffs.read(project.id)).resume).toEqual({});
+    expect((await first.engine.load(project.id)).phase).toBe('cancelled');
+    const second = new App({ env: { FRL_MARKETPLACES: '0' }, dataDir: dir, providers: [new ScriptedProvider()], search });
+    expect(await second.resumeInterrupted()).toEqual([]);
+    await second.logs.queue;
+    await fsp.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+
   it('saves a handoff for an interrupted run on shutdown and resumes it on the next start', async () => {
     const fsp = await import('node:fs/promises');
     const os = await import('node:os');

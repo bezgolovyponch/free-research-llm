@@ -104,6 +104,13 @@ export function normalizeEstimate(raw) {
   return e.value ? e : null;
 }
 
+const MIN_JUDGED_TEXT = 300;
+const SITE_MEASURES = new Set(['coastKm', 'beachKm', 'lakeKm', 'workableMonths', 'comfortableMonths', 'optimalDays', 'hotDays', 'hottestC', 'coldestC', 'explorePoints', 'staysNearby', 'realTrendVsEu']);
+
+export function needsSiteFit(strategy, decisionModel) {
+  return Boolean(strategy) || (decisionModel?.criteria ?? []).some((c) => SITE_MEASURES.has(c.measure));
+}
+
 export class ResearchEngine {
   constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null }) {
     this.verifier = verifier;
@@ -321,7 +328,7 @@ export class ResearchEngine {
     const dropped = sources.length - kept.length;
     if (dropped) this.emit(project, 'node', `${node.id}: ${dropped} source(s) dropped before any model call — outside the asked regions (${sources.filter((s) => !kept.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
     const query = evidenceQuery(node, brief);
-    const topical = kept.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || topicCoverage(s, query) >= 2);
+    const topical = kept.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= 2);
     const offTopic = kept.length - topical.length;
     if (offTopic) this.emit(project, 'node', `${node.id}: ${offTopic} source(s) dropped before any model call — off topic (${kept.filter((s) => !topical.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
     return topical;
@@ -361,7 +368,7 @@ export class ResearchEngine {
       }
     }
     let table = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
-    if (this.sites && !this.demo) {
+    if (this.sites && !this.demo && needsSiteFit(strategy, project.decisionModel)) {
       const looping = this.quiet.has(project.id);
       const mode = looping ? 'cache' : sweep ? 'all' : 'budget';
       const raw = table;
