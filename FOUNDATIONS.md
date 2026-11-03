@@ -2,6 +2,27 @@
 
 Audit of 2026-10-26. The user's rule: every process rests on a published method that was tested against alternatives, taking the newest work that has peer review, a public benchmark or released code (a 2026 preprint without code is a reference only); nothing rests on a developer's opinion; the app improves itself from its own data. "Same mistake" means the process rests on values or logic that a developer wrote by hand instead of on data, sources or a proven method.
 
+## Fundamentals (the engine's rules, in code)
+
+The list lives in `src/research/fundamentals.mjs`; its test fails when an enforcer is renamed or this table drifts.
+
+| # | Rule | Enforced by | Source |
+|---|---|---|---|
+| F1 | Purpose before sources | `DecisionModeler`, `decisionPrompt` (`src/research/decision.mjs`) | Keeney value-focused thinking; Cochrane MECIR C5-C13 |
+| F2 | A model proposes, code decides | `verifyFinding` (`src/research/verify.mjs`), `familyOf` (`src/llm/ranking.mjs`) | ALCE citation checking; self-preference bias arXiv 2404.13076 |
+| F3 | Criteria and counts come from the user's words | `groundAcceptance` (`src/research/grounding.mjs`), `askedCriteria` (`src/research/strategy.mjs`), `itemCountFromWords` (`src/research/acceptance.mjs`) | PRISMA eligibility criteria |
+| F4 | Listings first, tree pieces only for what listings cannot show; a kind no portal lists is found by the pieces | `CandidateSweeper` (`src/research/sweep.mjs`), `dropListingWork` (`src/research/treeaudit.mjs`), `listedKind` (`src/research/portals.mjs`) | Systematic review flow: identification, screening, appraisal |
+| F5 | Generic readers first, a learned schema only when proven | `needsSchema` (`src/research/sweep.mjs`), `verifySchema` (`src/search/schema.mjs`) | crawl4ai schema method; extruct |
+| F6 | What counts as an item is calibrated on real titles | `mergeCalibrations`, `applyCalibration` (`src/research/decision.mjs`) | Self-consistency arXiv 2203.11171 |
+| F7 | Outliers by robust statistics | `implausiblyLow` (`src/research/candidates.mjs`), `implausiblyCheap` (`src/research/strategy.mjs`) | Leys et al. 2013, J. Exp. Soc. Psychol. 49(4) |
+| F8 | Value from adjusted comparables, never from thin facts | `valueListing`, `theilSen` (`src/research/valuation.mjs`) | IVS 105 sales comparison; Theil 1950, Sen 1968 |
+| F9 | Owner and expert facts only when quoted | `verifiedGroupFacts` (`src/research/engine.mjs`) | Chain-of-Verification arXiv 2309.11495 |
+| F10 | Evidence must be on topic | `topicCoverage`, `retrievalVerdict` (`src/research/evidence.mjs`) | Corrective RAG arXiv 2401.15884 |
+| F11 | The table is the result; the memo cannot overrule it | `shortlistText`, `tableVerdict` (`src/research/candidates.mjs`), `checkMemoClaims` (`src/research/memocheck.mjs`) | DeLLMa arXiv 2402.02392 |
+| F12 | Ranking without hand weights | `paretoLayers` (`src/research/proposal.mjs`) | NSGA-II, Deb et al. 2002 |
+| F13 | Models are routed by measured outcomes | `OutcomeBook` (`src/llm/outcomes.mjs`), `purposePlan` (`src/llm/ranking.mjs`) | Thompson sampling arXiv 1111.1797; FrugalGPT arXiv 2305.05176 |
+| F14 | Results are audited on live data | `conceptAudit` (`src/research/conceptaudit.mjs`) | Chain-of-Verification arXiv 2309.11495 |
+
 ## Audit
 
 | # | Process | File | What it rests on today | Same mistake? | Proven method to rest on | Change |
