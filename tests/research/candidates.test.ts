@@ -82,6 +82,17 @@ describe('candidate table', () => {
     expect(lines[1]).toBe('- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated | sea 2.5 km, beach 3 km | 9 workable months (6 comfortable), hottest month max 27.5°C | 16 beaches, viewpoints, sights, reserves and trails within 15 km | zoning agricultural | about 30 pitches');
   });
 
+  it('keeps an autoscout listing read from a seed portal page and screens the same listing from a plain page as another kind', () => {
+    const carKind = { label: 'used car', terms: ['used car', 'gebrauchtwagen', 'uzywany samochod', 'pouzite auto'] };
+    const carBrief = buildBrief({ question: 'Used cars, 2000 to 4000 EUR', acceptance: { expected: '20 used cars', itemCount: 20, valueRange: [2000, 4000], unit: 'EUR' }, template: { itemKind: carKind } });
+    const row = { title: 'Peugeot 208', url: 'https://www.autoscout24.de/angebote/peugeot-208-tuev-7-27-2-zonen-leder-tempo-pdc-diesel-silber-cat_ma55gr201150ge1074va3624mt3255tr480648-d0b6741d-3dd5-47ce-804b-718ffdbb7507', value: 2999, unit: 'EUR' };
+    const seeded = buildCandidates([{ id: 'D1', sources: [{ id: 'S1', url: 'https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000&atype=C', kindPage: true, listings: [row] }] }], carBrief, {});
+    expect(seeded.kept.map((r: { url: string }) => r.url)).toEqual([row.url]);
+    const plain = buildCandidates([{ id: 'D1', sources: [{ id: 'S1', url: 'https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000&atype=C', listings: [row] }] }], carBrief, {});
+    expect(plain.keptCount).toBe(0);
+    expect(plain.screened).toEqual({ 'not a used car': 1 });
+  });
+
   it('counts a row toward the result only when it still fits every check and the verifier confirmed it', () => {
     const confirmed = { verdict: 'confirmed', failed: [], at: '2026-10-26T18:00:00Z' };
     const stale = {
