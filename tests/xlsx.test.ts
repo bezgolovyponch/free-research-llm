@@ -1,7 +1,14 @@
+import { unzipSync } from 'fflate';
 import { crc32, inflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { MAX_CELL_CHARS, columnName, isLink, sheetName, sheetXml, workbook, xmlText, zip } from '../src/xlsx.mjs';
-import { unzip } from './helpers/unzip';
+
+function unzip(buffer: Buffer): Record<string, string> {
+  const files = unzipSync(new Uint8Array(buffer));
+  const out: Record<string, string> = {};
+  for (const [name, content] of Object.entries(files)) out[name] = new TextDecoder().decode(content);
+  return out;
+}
 
 describe('xlsx writer: a workbook Excel and Google Sheets open, with no dependency', () => {
   it('names columns past Z and keeps sheet names legal and unique', () => {
@@ -33,12 +40,17 @@ describe('xlsx writer: a workbook Excel and Google Sheets open, with no dependen
     expect(xml.match(/>(x+)</)![1].length).toBe(MAX_CELL_CHARS);
   });
 
-  it('packs a valid zip: every entry inflates to its content and matches its CRC', () => {
+  it('packs a valid zip: every entry inflates to its content and matches its CRC, checked by Node zlib', () => {
     const buffer = zip([['a.txt', 'hello'], ['b/c.xml', '<x/>']]);
     const files = unzip(buffer);
     expect(files).toEqual({ 'a.txt': 'hello', 'b/c.xml': '<x/>' });
+    expect(buffer.readUInt32LE(0)).toBe(0x04034b50);
     expect(buffer.readUInt32LE(14)).toBe(crc32(Buffer.from('hello')));
-    expect(inflateRawSync(buffer.subarray(30 + 5, 30 + 5 + buffer.readUInt32LE(18))).toString()).toBe('hello');
+    const nameLength = buffer.readUInt16LE(26);
+    const extraLength = buffer.readUInt16LE(28);
+    const start = 30 + nameLength + extraLength;
+    const packed = buffer.subarray(start, start + buffer.readUInt32LE(18));
+    expect((buffer.readUInt16LE(8) === 8 ? inflateRawSync(packed) : packed).toString()).toBe('hello');
   });
 
   it('holds the parts a spreadsheet needs: content types, workbook, styles and one sheet per table', () => {
@@ -48,5 +60,7 @@ describe('xlsx writer: a workbook Excel and Google Sheets open, with no dependen
     expect(files['xl/workbook.xml']).toContain("'Listings'!$A$1:$A$2");
     expect(files['[Content_Types].xml']).toContain('/xl/worksheets/sheet2.xml');
     expect(files['xl/styles.xml']).toContain('<cellStyle name="Normal" xfId="0" builtinId="0"/>');
+    expect(files['xl/worksheets/_rels/sheet2.xml.rels']).toContain('Target="https://a.example/1"');
+    expect(files['xl/worksheets/sheet1.xml']).toContain('<sheetData>');
   });
 });

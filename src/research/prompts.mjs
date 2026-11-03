@@ -29,6 +29,7 @@ export const TASK_MARKERS = {
   appChat: 'TASK=APP_CHAT',
   resultsChat: 'TASK=RESULTS_CHAT',
   readFile: 'TASK=READ_FILE',
+  queryPlan: 'TASK=PLAN_KNOWLEDGE_QUERIES',
 };
 
 function constraintsText(constraints = {}) {
@@ -79,6 +80,39 @@ Build an issue tree that answers the QUESTION:
 
 JSON shape:
 {"decision":"","successCriteria":"","assumptionsToConfirm":[""],"acceptance":{"itemCount":null,"urlsLive":false,"valueRange":null,"unit":"","mustMention":[]},"nodes":[{"id":"D1","parentId":null,"title":"","question":"","why":"","hypothesis":"","metric":"","unit":"","method":"lookup","searchQueries":[""],"sourceUrls":[],"dependsOn":[],"impact":3,"uncertainty":3}]}${feedback ? `\n\n${feedback}` : ''}`,
+    },
+  ];
+}
+
+export function queryPlanPrompt({ question, pieces = [], groups = [], languages = [] }) {
+  const groupList = groups.filter(Boolean).join(', ') || 'none known';
+  const langs = languages.filter(Boolean);
+  const spoken = langs.filter((language) => !/^english$/i.test(language));
+  return [
+    { role: 'system', content: SYSTEM },
+    {
+      role: 'user',
+      content: `${TASK_MARKERS.queryPlan}
+The item search for this question already read the listings: these are the most common item groups actually found in the candidate table:
+${groupList}
+
+The knowledge pieces below were written before that table existed. Write the web queries that research every piece about the items actually found, aimed at owner communities and at expert or statistical sources, in the languages of the asked countries and in English.
+
+QUESTION:
+${question}
+
+LANGUAGES (the asked countries' languages, plus English):
+${langs.join(', ') || 'English'}
+
+PIECES:
+${pieces.map((p) => `- ${p.id}: ${p.question}`).join('\n') || 'none'}
+
+Return 3-4 queries for every piece:
+- one names 1-3 of the item groups (${groupList}) and asks for expert or statistical sources (for cars: defect statistics, breakdown statistics, reliability surveys, official statistics);
+- one owner-community query for each listed non-English language (${spoken.join(', ') || 'none'}), naming one of the item groups and the words for forum, club, owners' experiences or reviews in that language;
+- one names one of the item groups together with the measure or metric the piece asks about, so the answer is about these items and not about the topic in general.
+Every query names an item group or an entity of the piece's own question. Never write generic how-to queries ("how to check a used car", "what to look for when buying", "tips for buyers").
+Reply with a single JSON object only: {"queries":{"<pieceId>":["query","query"]}} with 3-4 queries for every piece id listed above.`,
     },
   ];
 }
@@ -222,7 +256,7 @@ DECISION RULE: ${template.decisionRule}
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
 ${lines.join('\n')}
 ${itemsBlock(nodes)}
-${shortlist ? `\nCANDIDATE TABLE (screened by code against the hard limits; cite counts from it, never invent items):\n${shortlist}\n` : ''}
+${shortlist ? `\nCANDIDATE TABLE (screened by code against the hard limits; cite counts from it, never invent items):\n${shortlist}\nThe table counts are final and computed by code. Use the kept count as the number of results; never state a different count of results or say the target is not met when kept >= the expected item count.\n` : ''}
 ${KIND_RULE[kind] ?? KIND_RULE.decision}
 Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a result of the type asked above and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:

@@ -1,5 +1,19 @@
 import { supportAudit } from './support.mjs';
 import { TEMPLATES } from './templates.mjs';
+import { listingWork } from './treeaudit.mjs';
+
+const RESULT_WORD = /^(?:listings?|results?|items?|cars?|plots?|candidates?|offers?|properties|property|links?)$/i;
+
+export function statedResultCounts(text) {
+  const words = String(text ?? '').replace(/(\d)[ ,.](?=\d{3}\b)/g, '$1').split(/\s+/);
+  const counts = [];
+  words.forEach((word, i) => {
+    const n = Number(word.replace(/[^\d]/g, ''));
+    if (!/^\d+[,.;:]?$/.test(word) || !Number.isFinite(n)) return;
+    if (words.slice(i + 1, i + 5).some((w) => RESULT_WORD.test(w.replace(/[^a-z]/gi, '')))) counts.push(n);
+  });
+  return counts;
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DETAIL = 200;
@@ -138,6 +152,18 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
   if (itemCount > 0 && p.phase !== 'created' && p.phase !== 'decomposing') {
     const label = p.brief?.kind?.label || p.decisionModel?.kind?.label;
     add('C17', 'A list research knows what item it lists', 'warn', Boolean(label), label ? `Item kind: ${label}.` : 'no item kind: the research prompts ask for a decision memo instead of listing pages');
+  }
+
+  if (Number(p.acceptance?.itemCount) > 0 && Array.isArray(p.nodes)) {
+    const leaves = p.nodes.filter((n) => !p.nodes.some((m) => m.parentId === n.id));
+    const ids = leaves.filter((n) => listingWork(n.question)).map((n) => n.id);
+    add('C18', 'A list research leaves per-listing work to code', 'warn', !ids.length, ids.length ? `${ids.length} piece(s) do per-listing work code should do: ${ids.slice(0, 6).join(', ')}` : 'No piece does per-listing work.');
+  }
+
+  if (typeof c?.keptCount === 'number' && typeof p.report?.verdict === 'string') {
+    const asked = Number(p.acceptance?.itemCount) || 0;
+    const wrong = c.keptCount >= asked ? statedResultCounts(p.report.verdict).find((n) => n < c.keptCount) : undefined;
+    add('C19', 'The memo states the table count', 'warn', wrong === undefined, wrong === undefined ? `memo agrees with the table (${c.keptCount} kept).` : `memo states ${wrong} results, the table keeps ${c.keptCount}`);
   }
 
   return {

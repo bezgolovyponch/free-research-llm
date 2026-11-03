@@ -1,3 +1,4 @@
+import { MIN_SCHEMA_ITEMS, applySchema } from './schema.mjs';
 import { absoluteUrl, domainOf, htmlToText } from './html.mjs';
 import { sourceCountry } from '../research/brief.mjs';
 import { extractListings, listingKey, pagePlace } from './listings.mjs';
@@ -359,6 +360,12 @@ export class SearchService {
 
   parsePage(body, { html, base, status }) {
     const found = extractListings(body, base, { isHtml: html, recipe: this.recipes?.get(base) ?? null });
+    const schema = html ? this.recipes?.schemaFor?.(base) : null;
+    if (schema) {
+      const items = applySchema(body, base, schema);
+      if (items.length >= MIN_SCHEMA_ITEMS) Object.assign(found, { items, methods: ['schema'] });
+      else this.recipes.dropSchema(base);
+    }
     return {
       text: (html ? htmlToText(body) : body.trim()).slice(0, READ_TEXT_LIMIT),
       links: html ? extractLinks(body, base) : extractMarkdownLinks(body, base),
@@ -371,6 +378,11 @@ export class SearchService {
       place: pagePlace(body),
       status,
     };
+  }
+
+  async fetchHtml(url) {
+    const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept: 'text/html' }, signal: AbortSignal.timeout(20000) });
+    return res.ok ? await res.text() : '';
   }
 
   async readRaw(url) {

@@ -96,6 +96,21 @@ describe('listing extraction', () => {
     expect(nextPageUrl('<a href="/other">x</a>', BASE)).toBe('');
   });
 
+  it('pages through numbered pagination whose links carry offsets instead of page numbers', () => {
+    const query = 'hledat=&hlokalita=&humkreis=&cenaod=0&cenado=65000&order=';
+    const page1 = 'https://auto.bazos.cz/skoda/?hledat=&cenaod=0&cenado=65000';
+    const links = [[2, 40], [3, 80], [4, 120], [5, 160], [6, 200], [7, 240], [8, 280]]
+      .map(([n, offset]) => `<a href="/skoda/${offset}/?${query}">${n}</a>`).join(' ');
+    expect(nextPageUrl(links, page1)).toBe(`https://auto.bazos.cz/skoda/40/?${query}`);
+
+    const page2 = `https://auto.bazos.cz/skoda/40/?${query}`;
+    const links2 = `<a href="/skoda/?hledat=&cenaod=0&cenado=65000">1</a> <a href="/skoda/80/?${query}">3</a> <a href="/skoda/120/?${query}">4</a>`;
+    expect(nextPageUrl(links2, page2)).toBe(`https://auto.bazos.cz/skoda/80/?${query}`);
+
+    const other = `<a href="/pneumatiky/40/?${query}">2</a> <a href="/pneumatiky/80/?${query}">3</a>`;
+    expect(nextPageUrl(other, page1)).toBe('');
+  });
+
   it('keys a listing by its site id, so the same ad under two paths counts once', () => {
     expect(listingKey('https://www.imo.example/pt/comprar/terreno-x-ID1hlDh')).toBe(listingKey('https://imo.example/pt/anuncio/terreno-x-ID1hlDh'));
     expect(listingKey('https://a.example/real_estate/125161-gpt')).toBe(listingKey('https://a.example/real_estate/125161-orange-grove'));

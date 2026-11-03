@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decomposePrompt, researchPrompt, synthesizePrompt, variantPrompt } from '../../src/research/prompts.mjs';
+import { decomposePrompt, queryPlanPrompt, researchPrompt, synthesizePrompt, variantPrompt } from '../../src/research/prompts.mjs';
 
 const project = { question: 'Find glamping plots under 20000 EUR', acceptance: { expected: '50 plots' }, acceptanceResult: null, nodes: [{ id: 'D4', parentId: 'Q', status: 'weak', question: 'zoning?' }] };
 const text = (stall: object | null) => variantPrompt({ project, node: { id: 'Q' }, score: { score: 0.28, acceptance: 0.1 }, trials: [], stall } as never)[1].content;
@@ -37,6 +37,38 @@ describe('list-first decomposition', () => {
     const prompt = decomposePrompt({ question: 'Find 20 hatchbacks within 300 km of Prague', template, constraints: {}, expected: 'at least 20 cars', brief: 'Why: A buyer wants a used hatchback so that they buy the best value car\nValue: a shortlist of 20 hatchbacks\nNeeds: reliability (knowledge: adac.de); price (computed: listings table)' })[1].content;
     expect(prompt).toContain('Create pieces only for needs of kind knowledge; listings and computed needs are done by code.');
     expect(decomposePrompt({ question: 'Find 20 hatchbacks', template, constraints: {}, expected: '' })[1].content).not.toContain('Create pieces only for needs of kind knowledge');
+  });
+});
+
+describe('queryPlanPrompt', () => {
+  const prompt = queryPlanPrompt({
+    question: 'Find 20 hatchbacks within 300 km of Prague under 65000 CZK',
+    pieces: [{ id: 'D1.1', question: 'Which engines are reliable in this price segment?' }],
+    groups: ['skoda fabia', 'kia rio'],
+    languages: ['Czech', 'English'],
+  })[1].content;
+
+  it('names the groups actually found and the asked countries\' languages', () => {
+    expect(prompt).toContain('skoda fabia');
+    expect(prompt).toContain('kia rio');
+    expect(prompt).toContain('Czech');
+    expect(prompt).toContain('English');
+  });
+
+  it('asks for queries per piece aimed at expert sources and owner communities in every non-English language', () => {
+    expect(prompt).toContain('D1.1');
+    expect(prompt).toContain('Which engines are reliable in this price segment?');
+    expect(prompt).toMatch(/expert or statistical sources/);
+    expect(prompt).toMatch(/defect statistics/);
+    expect(prompt).toMatch(/owner-community query for each listed non-English language \(Czech\)/);
+    expect(prompt).toMatch(/forum, club, owners' experiences or reviews/);
+    expect(prompt).toMatch(/Never write generic how-to queries/);
+    expect(prompt).toContain('{"queries":{"<pieceId>":["query","query"]}}');
+  });
+
+  it('keeps English out of the owner-community language list', () => {
+    const one = queryPlanPrompt({ question: 'q', pieces: [{ id: 'D1', question: 'p' }], groups: ['a'], languages: ['English'] })[1].content;
+    expect(one).toContain('one owner-community query for each listed non-English language (none)');
   });
 });
 

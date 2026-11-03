@@ -48,3 +48,20 @@ describe('SiteRecipes', () => {
     expect(second.describe()).toEqual([{ host: 'portal.example', template: 't', methods: ['cards'], count: 5, country: '', verified: false, misses: 0 }]);
   });
 });
+
+describe('learned schemas in the site recipe', () => {
+  it('keeps a schema when the recipe is relearned, drops it when it breaks, and remembers a failed attempt for a week', async () => {
+    const { SiteRecipes } = await import('../../src/search/recipes.mjs');
+    let now = Date.parse('2026-11-03T12:00:00Z');
+    const recipes = new SiteRecipes({ now: () => now });
+    const schema = { baseSelector: 'div.inzeraty', fields: [{ name: 'url', selector: 'a', type: 'attribute', attribute: 'href' }, { name: 'title', selector: 'a', type: 'text' }] };
+    recipes.saveSchema('https://auto.bazos.cz/skoda/', schema);
+    recipes.learn('https://auto.bazos.cz/skoda/40/', { template: 'auto.bazos.cz/inzerat/*', methods: ['schema'], count: 20 });
+    expect(recipes.schemaFor('https://auto.bazos.cz/kia/')).toEqual(schema);
+    recipes.dropSchema('https://auto.bazos.cz/kia/');
+    expect(recipes.schemaFor('https://auto.bazos.cz/kia/')).toBeNull();
+    expect(recipes.schemaFailedRecently('https://auto.bazos.cz/')).toBe(true);
+    now += 8 * 24 * 3600 * 1000;
+    expect(recipes.schemaFailedRecently('https://auto.bazos.cz/')).toBe(false);
+  });
+});

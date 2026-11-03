@@ -4,7 +4,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, itemCountFromWords, normalizeAcceptance } from './acceptance.mjs';
-import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
+import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding, withMeaning } from './verify.mjs';
@@ -14,13 +14,15 @@ import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
-import { buildBrief, describeBrief, onConcept, radiusIn } from './brief.mjs';
+import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
+import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
+import { applySchema, schemaPrompt, schemaSample, verifySchema } from '../search/schema.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { plain, screenItems } from './itemgate.mjs';
@@ -43,6 +45,8 @@ export const TEAM_TTL_MS = 24 * 3600 * 1000;
 export const SUPPORT_PARALLEL = 3;
 export const CALIBRATION_TITLES = 60;
 export const CALIBRATION_SAMPLES = 3;
+export const QUERY_PLAN_GROUPS = 6;
+export const MAX_DISTANCE_LOOKUPS = 60;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -68,6 +72,50 @@ function calibrationTitles(pages, max = CALIBRATION_TITLES) {
 
 function strings(value, max = 8) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => String(v).trim()).filter(Boolean).slice(0, max);
+}
+
+function queryLanguages(regions = []) {
+  const names = [...new Set((regions ?? []).map((code) => countryByCode(String(code ?? '').toUpperCase())?.name).filter(Boolean))];
+  return [...names.map((name) => `the main language of ${name}`), 'English'];
+}
+
+function mentionsModel(title, name) {
+  const text = plain(title);
+  const key = plain(name);
+  if (!text || !key) return false;
+  if (text.includes(key)) return true;
+  const words = key.split(/[^a-z0-9]+/).filter((word) => word.length >= 3);
+  if (!words.length) return false;
+  if (words.length === 1) return text.includes(words[0]);
+  return words.every((word) => text.includes(word));
+}
+
+function mentionedModels(models = [], rows = []) {
+  const titles = rows.map((row) => plain(row?.title ?? '')).filter(Boolean);
+  const counts = new Map();
+  for (const model of models ?? []) {
+    const name = String(model ?? '').trim();
+    const key = plain(name);
+    if (!key || counts.has(key)) continue;
+    counts.set(key, { name, count: titles.filter((title) => mentionsModel(title, name)).length });
+  }
+  return [...counts.values()].filter((row) => row.count > 0).sort((a, b) => b.count - a.count).map((row) => row.name);
+}
+
+function namesGroup(query, groups) {
+  const text = plain(query);
+  return groups.some((group) => {
+    const name = plain(group);
+    if (!name) return false;
+    if (text.includes(name)) return true;
+    return name.split(/[^a-z0-9]+/).filter((word) => word.length >= 4).some((word) => text.includes(word));
+  });
+}
+
+function contentWordHits(query, question) {
+  const text = plain(query);
+  const words = [...new Set(plain(question).split(/[^a-z0-9]+/).filter((word) => word.length >= 4))];
+  return words.filter((word) => text.includes(word)).length;
 }
 
 export function normalizeFinding(raw) {
@@ -340,6 +388,54 @@ export class ResearchEngine {
     }
   }
 
+  async measureDistances(project, table) {
+    const area = project.area;
+    if (!area?.point || !this.sites?.geocode) return table;
+    const origin = area.point;
+    const limit = Number(area.km);
+    const place = String(area.place ?? '');
+    const rows = [...(table.kept ?? []), ...(table.toCheck ?? [])];
+    const keptRows = new Set(table.kept ?? []);
+    const moved = [];
+    let lookups = 0;
+    let measured = 0;
+    let far = 0;
+    let unplaced = 0;
+    for (const row of rows) {
+      let point = Number.isFinite(row.lat) && Number.isFinite(row.lon) ? { lat: row.lat, lon: row.lon } : null;
+      if (!point) {
+        const attrs = row.attrs ?? {};
+        const stated = String(row.place ?? '').trim() || [attrs['location.city'], attrs['location.zip']].filter((v) => typeof v === 'string' && v.trim()).join(', ');
+        if (!stated) {
+          unplaced++;
+          continue;
+        }
+        if (lookups >= MAX_DISTANCE_LOOKUPS) continue;
+        lookups++;
+        try {
+          point = await this.sites.geocode(stated, row.countryCode || attrs['location.countryCode'] || '');
+        } catch {
+          point = null;
+        }
+        if (!point) continue;
+      }
+      const distanceKm = Math.round(haversineKm(origin.lat, origin.lon, point.lat, point.lon));
+      row.distanceKm = distanceKm;
+      measured++;
+      if (!(distanceKm > limit)) continue;
+      far++;
+      if (keptRows.has(row)) moved.push(row);
+    }
+    if (moved.length) {
+      table.kept = (table.kept ?? []).filter((row) => !keptRows.has(row) || !moved.includes(row));
+      table.toCheck = [...(table.toCheck ?? []), ...moved.map((row) => ({ ...row, toCheck: `farther than ${limit} km from ${place} (${row.distanceKm} km)` }))];
+      table.keptCount = (table.keptCount ?? 0) - moved.length;
+      table.toCheckCount = (table.toCheckCount ?? 0) + moved.length;
+    }
+    this.emit(project, 'candidates', `distance from ${place}: ${measured} listing(s) measured, ${far} farther than ${limit} km, ${unplaced} without a stated place`);
+    return table;
+  }
+
   async ensureDecisionModel(project) {
     await this.ensureArea(project);
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
@@ -389,6 +485,31 @@ export class ResearchEngine {
     return false;
   }
 
+  async learnSiteSchema(project, { url, generic }) {
+    const recipes = this.search?.recipes;
+    if (!recipes?.saveSchema || recipes.schemaFailedRecently(url)) return null;
+    const host = hostOf(url);
+    try {
+      const html = await this.search.fetchHtml(url);
+      if (!html) throw new Error('the page could not be fetched again');
+      const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: schemaPrompt({ host, kind: project.brief?.kind?.label ?? '', sample: schemaSample(html, url) }) });
+      const schema = reply?.data;
+      const verdict = verifySchema(applySchema(html, url, schema), generic);
+      if (!verdict.ok) {
+        recipes.schemaFailed(url, verdict.reason);
+        this.emit(project, 'candidates', `listing schema for ${host} not kept: ${verdict.reason}`);
+        return null;
+      }
+      recipes.saveSchema(url, schema);
+      this.emit(project, 'candidates', `learned a listing schema for ${host}: ${verdict.items.length} listings, ${verdict.priced} priced, ${verdict.placed} with a place, ${schema.fields.length} fields`);
+      return verdict;
+    } catch (error) {
+      recipes.schemaFailed(url, error.message);
+      this.emit(project, 'warn', `listing schema for ${host} not learned: ${String(error.message).slice(0, 160)}`);
+      return null;
+    }
+  }
+
   async collectCandidates(project, { sweep = false } = {}) {
     if (sweep || !this.quiet.has(project.id)) await this.ensureDecisionModel(project);
     let brief = this.briefOf(project);
@@ -405,7 +526,7 @@ export class ResearchEngine {
       this.emit(project, 'candidates', `strategy "${strategy.label}": ${confirmed} of ${quoted.length} sources re-read online with their quotes found (${project.strategyCheck.at})`);
     }
     if (sweep && this.search?.readPage) {
-      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null, arms: this.arms });
+      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null, arms: this.arms, learnSchema: this.router && !this.demo && this.search.fetchHtml ? (args) => this.learnSiteSchema(project, args) : null });
       const result = await sweeper.sweep(project, brief, options);
       if (result) {
         const fresh = new Set(result.pages.map((page) => page.url));
@@ -425,6 +546,7 @@ export class ResearchEngine {
     }
     if (await this.calibrateKind(project)) brief = this.briefOf(project);
     let table = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
+    if (project.area) table = await this.measureDistances(project, table);
     if (this.sites && !this.demo && needsSiteFit(strategy, project.decisionModel)) {
       const looping = this.quiet.has(project.id);
       const mode = looping ? 'cache' : sweep ? 'all' : 'budget';
@@ -459,6 +581,51 @@ export class ResearchEngine {
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
     return c;
+  }
+
+  async planKnowledgeQueries(project) {
+    if (!this.router || !project?.acceptance?.itemCount || project.queryPlanAt) return null;
+    const kept = project.candidates?.kept ?? [];
+    const models = project.decisionModel?.subtype?.models ?? [];
+    if (!kept.length || !models.length) return null;
+    const groups = mentionedModels(models, kept).slice(0, QUERY_PLAN_GROUPS);
+    if (!groups.length) return null;
+    const nodes = project.nodes ?? [];
+    const pieces = nodes.filter((node) => node.status === 'pending' && isLeaf(nodes, node));
+    if (!pieces.length) return null;
+    try {
+      const brief = project.brief ?? this.briefOf(project);
+      const reply = await this.router.complete({
+        purpose: 'decompose',
+        tier: 'deep',
+        messages: queryPlanPrompt({
+          question: project.question,
+          pieces: pieces.map((node) => ({ id: node.id, question: node.question })),
+          groups,
+          languages: queryLanguages(brief.regions),
+        }),
+      });
+      const queries = reply?.data?.queries;
+      if (!queries || typeof queries !== 'object') throw new Error('the reply named no queries');
+      const plan = new Map();
+      for (const node of pieces) {
+        const offered = (Array.isArray(queries[node.id]) ? queries[node.id] : []).map((query) => String(query ?? '').trim()).filter(Boolean);
+        const useful = [...new Set(offered)].filter((query) => namesGroup(query, groups) || contentWordHits(query, node.question) >= 2);
+        if (!useful.length) continue;
+        const existing = Array.isArray(node.searchQueries) ? node.searchQueries : [];
+        plan.set(node.id, [...useful, ...existing].slice(0, 4));
+      }
+      for (const [id, list] of plan) {
+        const node = nodes.find((n) => n.id === id);
+        if (node) node.searchQueries = list;
+      }
+      project.queryPlanAt = new Date().toISOString();
+      this.emit(project, 'tree', `knowledge queries planned for ${plan.size} pieces around: ${groups.join(', ')}`);
+      return plan.size;
+    } catch (error) {
+      this.emit(project, 'warn', `knowledge queries not planned: ${String(error?.message ?? error).slice(0, 160)}`);
+      return null;
+    }
   }
 
   startSiteWarm(id, raw, brief) {
@@ -924,6 +1091,7 @@ export class ResearchEngine {
       if (listingsFirst) {
         this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
         await this.collectCandidates(project, { sweep: true });
+        await this.planKnowledgeQueries(project);
         await this.store.save(project);
         const stoppedAfterListings = await this.stopIfCancelled(project, id, release);
         if (stoppedAfterListings) return stoppedAfterListings;

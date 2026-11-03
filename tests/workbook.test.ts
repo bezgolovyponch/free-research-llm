@@ -119,3 +119,17 @@ describe('Without ownership sheet', () => {
     expect(resultsSheets({ ...project, question: 'q', nodes: [], log: [] } as never).map((s: { name: string }) => s.name)).toContain('Without ownership');
   });
 });
+
+describe('listing columns follow the data', () => {
+  it('drops empty plot columns for a car table and adds the facts each listing states', async () => {
+    const { plotRows } = await import('../src/workbook.mjs');
+    const car = (title: string, value: number, fuel?: string) => ({ title, url: `https://auto.bazos.cz/inzerat/${value}/x.php`, price: value, currency: 'CZK', value, unit: 'CZK', year: 2008, km: 139000, kw: 50, valueIndex: 0.82, peers: 7, ...(fuel ? { attrs: { 'vehicle.fuel': fuel, 'vehicle.mileage': '139 000 km', 'vehicle.mileage#n': 139000 } } : {}) });
+    const project = { acceptance: { unit: 'CZK' }, candidates: { kept: [car('Škoda Fabia 1.4 MPI 50kw', 39000, 'Diesel'), car('Kia Rio 1.4', 29500, 'Benzin'), car('Honda Jazz 1,3', 49000, 'Benzin'), car('Ford Fiesta', 26000)], toCheck: [], outside: [] } };
+    const [header] = plotRows(project);
+    expect(header).not.toContain('sea km');
+    expect(header).not.toContain('glamping units');
+    expect(header).not.toContain('entry cost EUR');
+    expect(header).toEqual(expect.arrayContaining(['title', 'url', 'price in CZK', 'year', 'mileage km', 'power kW', 'value vs peers', 'fact: vehicle.fuel', 'fact: vehicle.mileage']));
+    expect(header).not.toContain('fact: vehicle.mileage#n');
+  });
+});

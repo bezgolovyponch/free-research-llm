@@ -428,6 +428,32 @@ function merge(lists, onPage) {
   return [...byKey.values()].slice(0, MAX_LISTINGS);
 }
 
+function firstPathSegment(url) {
+  try {
+    return new URL(url).pathname.split('/').filter(Boolean)[0] ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function numberedNextUrl(anchors, base) {
+  const segment = firstPathSegment(base);
+  const host = domainOf(base);
+  const here = absoluteUrl(base, base);
+  if (!segment || !host) return '';
+  const numbered = anchors
+    .filter((a) => domainOf(a.url) === host && /^\d{1,3}$/.test(a.text) && Number(a.text) >= 1 && firstPathSegment(a.url) === segment)
+    .map((a) => ({ url: a.url, n: Number(a.text) }));
+  if (!numbered.length) return '';
+  const present = new Set(numbered.map((a) => a.n));
+  const largest = Math.max(...present);
+  let current = 1;
+  while (current <= largest && present.has(current)) current++;
+  const next = numbered.find((a) => a.n === current + 1);
+  if (!next || next.url === here) return '';
+  return next.url;
+}
+
 export function nextPageUrl(source, base, { isHtml = true } = {}) {
   const text = String(source ?? '');
   if (isHtml) {
@@ -443,7 +469,8 @@ export function nextPageUrl(source, base, { isHtml = true } = {}) {
     const n = a.url.match(PAGE_PARAM)?.[2] ?? a.url.match(PAGE_PATH)?.[2];
     return n === wanted && domainOf(a.url) === domainOf(base);
   });
-  return byNumber?.url ?? '';
+  if (byNumber) return byNumber.url;
+  return numberedNextUrl(anchors, base);
 }
 
 export function extractListings(source, base, { isHtml = true, recipe = null } = {}) {

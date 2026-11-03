@@ -127,3 +127,20 @@ describe('portalPages with model-named kinds', () => {
     expect(portalPages([], brief, [seed, plain]).map((p: { url: string }) => p.url)).toEqual(['https://auto.bazos.cz/']);
   });
 });
+
+describe('learning a listing schema during the sweep', () => {
+  it('asks once per site when card listings lack places, never when a schema exists or the page came from structured data', async () => {
+    const { needsSchema, CandidateSweeper } = await import('../../src/research/sweep.mjs');
+    const cards = (n: number, place = '') => ({ methods: ['cards'], listings: Array.from({ length: n }, (_, i) => ({ title: `Car ${i}`, url: `https://auto.bazos.cz/inzerat/22595${i}000/car.php`, value: 30000, unit: 'CZK', place })) });
+    expect(needsSchema(cards(5))).toBe(true);
+    expect(needsSchema(cards(5, 'Praha'))).toBe(false);
+    expect(needsSchema({ ...cards(5), methods: ['json-ld'] })).toBe(false);
+    const asked: string[] = [];
+    const search = { readPage: async () => ({ ...cards(5), links: [], text: 'auta', locale: 'cs', next: 'https://auto.bazos.cz/skoda/40/', status: 200 }) };
+    const learnSchema = async ({ url }: { url: string }) => { asked.push(url); return { items: cards(5, 'Vsetín').listings }; };
+    const sweeper = new CandidateSweeper({ search, recipes: { schemaFor: () => null, verifiedSearchPages: () => [] }, budget: 3, perSite: 2, seeds: () => [{ url: 'https://auto.bazos.cz/skoda/', country: 'CZ', sample: ['auto'], count: 1, seed: true }], learnSchema } as never);
+    const result = await sweeper.sweep({ nodes: [] }, { kind: { label: 'used car', terms: ['auto'] }, regions: ['CZ'], valueRange: [0, 65000], unit: 'CZK', itemCount: 20 });
+    expect(asked).toEqual(['https://auto.bazos.cz/skoda/']);
+    expect(result.pages[0].listings[0].place).toBe('Vsetín');
+  });
+});
