@@ -1,3 +1,5 @@
+import { stringify } from 'csv-stringify/sync';
+import { zipSync, strToU8 } from 'fflate';
 import { templateById } from './research/templates.mjs';
 import { ROOT_ID, childrenOf } from './research/tree.mjs';
 import { actionPlan, resultStatus } from './research/gaps.mjs';
@@ -33,14 +35,32 @@ function cell(text) {
   return String(text ?? '').replace(/\|/g, '/').replace(/\s+/g, ' ').trim();
 }
 
-export function csvField(value) {
-  const text = String(value ?? '');
-  const safe = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(?:\.\d+)?$/.test(text) ? `'${text}` : text;
-  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+const CSV_OPTIONS = { header: false, record_delimiter: '\r\n', quoted_match: /[",\r\n]|^\s|\s$/ };
+
+function csvSafe(text) {
+  return /^[=+\-@\t\r]/.test(text) && !/^-?\d+(?:\.\d+)?$/.test(text) ? `'${text}` : text;
 }
 
-function csv(rows) {
-  return `${rows.map((r) => r.map(csvField).join(',')).join('\r\n')}\r\n`;
+export function csvField(value) {
+  const text = String(value ?? '');
+  const safe = csvSafe(text);
+  return stringify([[safe]], CSV_OPTIONS).replace(/\r\n$/, '');
+}
+
+export function csv(rows) {
+  return stringify(rows, { ...CSV_OPTIONS, cast: { string: (value) => csvSafe(value) } });
+}
+
+function csvSlug(name) {
+  return String(name ?? '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'sheet';
+}
+
+export function sheetsCsvZip(sheets) {
+  const files = {};
+  for (const [index, sheet] of (sheets ?? []).entries()) {
+    files[`${index + 1}-${csvSlug(sheet.name)}.csv`] = strToU8(`\ufeff${csv(sheet.rows ?? [])}`);
+  }
+  return Buffer.from(zipSync(files, { level: 6 }));
 }
 
 export function piecesCsv(project) {
