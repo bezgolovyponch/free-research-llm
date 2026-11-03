@@ -19,6 +19,21 @@ describe('variantPrompt', () => {
   });
 });
 
+describe('list-first decomposition', () => {
+  const template = { label: 't', drivers: 'd', metrics: 'm', sources: 's', decisionRule: 'r' };
+
+  it('keeps pieces away from finding, pricing, filtering, locating, ranking or verifying listings when code does that work', () => {
+    const prompt = decomposePrompt({ question: 'Find 20 hatchbacks within 300 km of Prague under 65000 CZK', template, constraints: {}, expected: 'at least 20 cars', listsItems: true })[1].content;
+    expect(prompt).toContain('Do not create pieces that search for, price, filter');
+    expect(prompt).toContain('Create pieces only for knowledge a listing cannot show');
+  });
+
+  it('adds no such rule when the research does not ask for items', () => {
+    const prompt = decomposePrompt({ question: 'Should I import e-bikes from Germany to Czechia?', template, constraints: {}, expected: '' })[1].content;
+    expect(prompt).not.toContain('Do not create pieces that search for, price, filter');
+  });
+});
+
 describe('concept brief in prompts', () => {
   const template = { label: 't', drivers: 'd', metrics: 'm', sources: 's', decisionRule: 'r' };
   it('puts the code-built brief into decomposition and research, and the screened table into the memo', () => {
