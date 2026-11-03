@@ -420,6 +420,44 @@ describe('ResearchEngine', () => {
     expect(project.brief.text).not.toContain('Deliver: a decision memo');
   });
 
+  it('drops tree pieces that do per-listing work when the project lists items, since code does that work on the candidate table', async () => {
+    const question = 'Find hatchback car listings within 300km from Prague up to 65000 CZK';
+    const piece = (id: string, parentId: string, question: string) => ({ id, parentId, title: question, question, method: 'lookup', searchQueries: [] });
+    const tree = {
+      decision: 'Choose hatchback listings within 300km of Prague up to 65000 CZK',
+      successCriteria: 'live hatchback listings within 300km of Prague up to 65000 CZK',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: 10, valueRange: [0, 65000], unit: 'CZK' },
+      nodes: [
+        piece('D1', 'Q', 'Which specific hatchback listings exist on major Austria and Czechia and Germany and Poland and Slovakia marketplaces?'),
+        piece('D1.1', 'D1', 'List hatchbacks <= 65,000 CZK on auto.cz, bazos.cz, inradius.cz within 300km.'),
+        piece('D1.2', 'D1', 'List hatchbacks <= 65,000 CZK equivalent on mobile.de, autoscout24.de within 300km.'),
+        piece('D1.3', 'D1', 'List hatchbacks <= 65,000 CZK equivalent on at, pl, sk sites within 300km.'),
+        piece('D2', 'Q', 'Do candidates meet the 300km radius and hatchback body type criteria?'),
+        piece('D2.1', 'D2', 'Calculate road distance from Prague to each listing location.'),
+        piece('D2.2', 'D2', 'Verify each listing is explicitly classified as a hatchback.'),
+        piece('D3', 'Q', 'Are all candidates priced at or below 65,000 CZK equivalent?'),
+        piece('D3.1', 'D3', 'Verify CZK listings are <= 65,000 CZK.'),
+        piece('D3.2', 'D3', 'Convert EUR/PLN/CHF prices to CZK and check <= 65,000 CZK.'),
+        piece('D4', 'Q', 'Which candidates offer the highest price-to-value ratio based on specs?'),
+        piece('D4.1', 'D4', 'Compare engine types and mileage against market norms for the price.'),
+        piece('D4.2', 'D4', 'Check empirical reliability data for specific models in the candidate pool.'),
+        piece('D5', 'Q', 'Are the listings live, accurate, and from reputable sellers?'),
+        piece('D5.1', 'D5', 'Verify that all candidate URLs are live and not 404 errors.'),
+        piece('D5.2', 'D5', 'Assess seller reputation based on reviews or dealer status.'),
+      ],
+    };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
+    const project = await engine.createProject({ question, templateId: 'generic', expected: '10 live hatchback listings within 300km of Prague up to 65000 CZK' });
+    await engine.decompose(project);
+    expect(project.acceptance.itemCount).toBe(10);
+    expect(project.nodes.map((n: { id: string }) => n.id)).toEqual(['D4', 'D4.1', 'D4.2', 'D5', 'D5.2']);
+    expect(project.nodes.every((n: { question: string }) => !/\b(?:List|Verify|Convert|Calculate)\b/.test(n.question))).toBe(true);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'tree' && l.message === 'pieces covered by code on the candidate table, not researched: D1, D1.1, D1.2, D1.3, D2, D2.1, D2.2, D3, D3.1, D3.2, D5.1')).toBe(true);
+  });
+
   it('reads the item count from the user words, so the decision model is built before the tree is decomposed', async () => {
     const proposal = { concept: 'used cars within budget', kind: { label: 'used car', terms: ['car', 'used car'] }, criteria: [{ clause: 'under 50000 EUR', measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000 EUR' }] };
     const order: string[] = [];

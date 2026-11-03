@@ -121,6 +121,49 @@ describe('funnel grouping', () => {
 });
 
 
+describe('listing work that code does on the candidate table', () => {
+  const node = (id: string, parentId: string, question: string) => ({ id, parentId, title: question, question });
+  const carTree = () => [
+    node('Q', 'Q', 'Find hatchback car listings within 300km from Prague up to 65000 CZK'),
+    node('D1', 'Q', 'Which specific hatchback listings exist on major Austria and Czechia and Germany and Poland and Slovakia marketplaces?'),
+    node('D1.1', 'D1', 'List hatchbacks <= 65,000 CZK on auto.cz, bazos.cz, inradius.cz within 300km.'),
+    node('D1.2', 'D1', 'List hatchbacks <= 65,000 CZK equivalent on mobile.de, autoscout24.de within 300km.'),
+    node('D1.3', 'D1', 'List hatchbacks <= 65,000 CZK equivalent on at, pl, sk sites within 300km.'),
+    node('D2', 'Q', 'Do candidates meet the 300km radius and hatchback body type criteria?'),
+    node('D2.1', 'D2', 'Calculate road distance from Prague to each listing location.'),
+    node('D2.2', 'D2', 'Verify each listing is explicitly classified as a hatchback.'),
+    node('D3', 'Q', 'Are all candidates priced at or below 65,000 CZK equivalent?'),
+    node('D3.1', 'D3', 'Verify CZK listings are <= 65,000 CZK.'),
+    node('D3.2', 'D3', 'Convert EUR/PLN/CHF prices to CZK and check <= 65,000 CZK.'),
+    node('D4', 'Q', 'Which candidates offer the highest price-to-value ratio based on specs?'),
+    node('D4.1', 'D4', 'Compare engine types and mileage against market norms for the price.'),
+    node('D4.2', 'D4', 'Check empirical reliability data for specific models in the candidate pool.'),
+    node('D5', 'Q', 'Are the listings live, accurate, and from reputable sellers?'),
+    node('D5.1', 'D5', 'Verify that all candidate URLs are live and not 404 errors.'),
+    node('D5.2', 'D5', 'Assess seller reputation based on reviews or dealer status.'),
+  ];
+
+  it('drops the per-listing pieces and keeps the knowledge and judgment ones', async () => {
+    const { dropListingWork } = await import('../../src/research/treeaudit.mjs');
+    const { nodes, dropped } = dropListingWork(carTree());
+    expect(dropped).toEqual(['D1', 'D1.1', 'D1.2', 'D1.3', 'D2', 'D2.1', 'D2.2', 'D3', 'D3.1', 'D3.2', 'D5.1']);
+    expect(nodes.map((n: { id: string }) => n.id)).toEqual(['Q', 'D4', 'D4.1', 'D4.2', 'D5', 'D5.2']);
+  });
+
+  it('tells listing work apart from knowledge a listing cannot show, and never drops the root', async () => {
+    const { listingWork, dropListingWork } = await import('../../src/research/treeaudit.mjs');
+    expect(listingWork('List hatchbacks <= 65,000 CZK on auto.cz within 300km.')).toBe(true);
+    expect(listingWork('Which specific hatchback listings exist on German marketplaces?')).toBe(true);
+    expect(listingWork('Do candidates meet the 300km radius and hatchback body type criteria?')).toBe(true);
+    expect(listingWork('Which candidates offer the highest price-to-value ratio based on specs?')).toBe(false);
+    expect(listingWork('Compare engine types and mileage against market norms for the price.')).toBe(false);
+    expect(listingWork('Check empirical reliability data for specific models in the candidate pool.')).toBe(false);
+    expect(listingWork('Assess seller reputation based on reviews or dealer status.')).toBe(false);
+    expect(dropListingWork([node('Q', 'Q', 'Which specific listings exist?')]).nodes.map((n: { id: string }) => n.id)).toEqual(['Q']);
+  });
+});
+
+
 describe('tree audit against the decision model', () => {
   it('flags pieces that name countries outside the brief and drivers that serve no check, and blocks the loop from adding them', async () => {
     const { auditModel, modelOf, BLOCKING } = await import('../../src/research/treeaudit.mjs');
