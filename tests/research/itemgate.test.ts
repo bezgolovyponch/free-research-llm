@@ -75,6 +75,17 @@ describe('item gate: listings read from a seed portal page', () => {
   });
 });
 
+describe('item gate: a known page kind still rejects what is sold beside the item', () => {
+  const carKind = { label: 'used car', terms: ['hatchback'], not: ['kola', 'pneu', 'svetlo', 'naraznik', 'rafky', 'karburator', 'matky'] };
+  const carOptions = { valueRange: [0, 65000], unit: 'CZK', kind: carKind, kindKnown: true };
+
+  it('keeps the car and turns away parts and accessories for it', () => {
+    expect(screenItem({ title: 'ŠKODA FABIA II COMFORT 2008', url: 'https://auto.bazos.cz/inzerat/225000001/skoda-fabia-ii-comfort.php', value: 49999, unit: 'CZK' }, carOptions)).toMatchObject({ ok: true, priced: true });
+    expect(screenItem({ title: 'Alu kola 215x65R16', url: 'https://auto.bazos.cz/inzerat/225000002/alu-kola-215x65r16.php', value: 3500, unit: 'CZK' }, carOptions).reasons).toEqual(['not a used car']);
+    expect(screenItem({ title: 'Levé zadní světlo Honda Accord 7g', url: 'https://auto.bazos.cz/inzerat/225000003/leve-zadni-svetlo-honda-accord-7g.php', value: 1500, unit: 'CZK' }, carOptions).reasons).toEqual(['not a used car']);
+  });
+});
+
 describe('item gate: Czech/Slovak/Polish land terms', () => {
   const glampingKind = { label: 'plot of land', terms: ['land', 'terreno', 'arsa', 'parcela', 'pozemek', 'pozemku', 'pozemky', 'pozemkem', 'parcely', 'parcelu', 'zahrada', 'zahrady', 'louka', 'louky', 'pozemok', 'dzialka', 'dzialki', 'dzialke'] };
   const glampingOptions = { valueRange: [0, 20000], unit: 'EUR', kind: glampingKind, convert: (v: number, from: string) => (from === 'USD' ? v * 0.9 : v) };

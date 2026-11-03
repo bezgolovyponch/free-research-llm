@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyModel, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
+import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyModel, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
 import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
 
 const question = 'Find plots for a glamping site under 30000 EUR, at most 15 km from the sea, hottest month under 29 °C, with a strong price trend';
@@ -50,6 +50,14 @@ describe('decision model per request: criteria kept by agreement, limits only fr
     expect(checked.dropped).toEqual(['plot']);
     expect(checked.verified).toEqual({ titles: 3, matched: 2, share: 0.67 });
     expect(verifyKind(model.kind, []).verified).toBeNull();
+  });
+
+  it('keeps the words a majority proposed for things sold beside the item, and asks for them', () => {
+    const withNot = (not: string[]) => normalizeSample({ concept: 'c', kind: { label: 'used car', terms: ['hatchback'], not }, criteria: [] });
+    const model = aggregate([withNot(['kola', 'pneu', 'naraznik']), withNot(['kola', 'pneu', 'naraznik']), withNot(['svetlo'])], { question });
+    expect(model.kind.not).toEqual(['kola', 'pneu', 'naraznik']);
+    expect(aggregate([withNot(['kola']), withNot(['pneu']), withNot(['svetlo'])], { question }).kind.not).toBeUndefined();
+    expect(decisionPrompt({ question })[0].content).toContain('"not"');
   });
 
   it('measures every listing by code: fits, to confirm when unmeasured, weak when a limit fails', () => {

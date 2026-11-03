@@ -59,9 +59,10 @@ export function normalizeSample(raw) {
     quote: String(c?.quote ?? '').slice(0, 200),
   })).filter((c) => MEASURES[c.measure] && c.op);
   const terms = (Array.isArray(raw?.kind?.terms) ? raw.kind.terms : []).map((t) => plain(String(t)).trim()).filter((t) => t && t.length <= 30).slice(0, 30);
+  const not = (Array.isArray(raw?.kind?.not) ? raw.kind.not : []).map((t) => plain(String(t)).trim()).filter((t) => t && t.length <= 40).slice(0, 40);
   return {
     concept: String(raw?.concept ?? '').slice(0, 300),
-    kind: { label: String(raw?.kind?.label ?? '').slice(0, 60), terms },
+    kind: { label: String(raw?.kind?.label ?? '').slice(0, 60), terms, not },
     criteria,
     unmodelled: (Array.isArray(raw?.unmodelled) ? raw.unmodelled : []).map((u) => String(u).slice(0, 200)).filter(Boolean).slice(0, 12),
   };
@@ -116,12 +117,15 @@ export function aggregate(samples, { question = '', guidance = '', cases = [] } 
   const termVotes = new Map();
   for (const sample of samples) for (const t of new Set(sample.kind.terms)) termVotes.set(t, (termVotes.get(t) ?? 0) + 1);
   const terms = [...termVotes].filter(([, v]) => v >= majority).map(([t]) => t);
+  const notVotes = new Map();
+  for (const sample of samples) for (const t of new Set(sample.kind.not ?? [])) notVotes.set(t, (notVotes.get(t) ?? 0) + 1);
+  const not = [...notVotes].filter(([, v]) => v >= majority).map(([t]) => t);
   const labels = samples.map((s) => s.kind.label).filter(Boolean);
   const label = labels.sort((a, b) => labels.filter((x) => x === b).length - labels.filter((x) => x === a).length)[0] ?? '';
   const clauses = clausesOf(question).map((text) => ({ text, criteria: criteria.filter((c) => (c.quote && quoteFound(text, c.quote)) || (c.clause && quoteFound(text, c.clause)) || (c.clause && quoteFound(c.clause, text))).map((c) => c.id) }));
   return {
     concept: samples.map((s) => s.concept).find(Boolean) ?? '',
-    kind: terms.length ? { label: label || terms[0], terms, verified: null } : null,
+    kind: terms.length ? { label: label || terms[0], terms, ...(not.length ? { not } : {}), verified: null } : null,
     criteria,
     noLimit,
     clauses,
@@ -142,9 +146,9 @@ export function verifyKind(kind, titles) {
 
 export function decisionPrompt({ question, guidance = '', expected = '', examples = [] }) {
   const measures = Object.entries(MEASURES).map(([id, m]) => `- ${id}: ${m.label} (${m.unit})`).join('\n');
-  const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
+  const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [] } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
   return [
-    { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label and the words (in English and in the languages of the named countries) that listing titles use for it. Answer with JSON only: {"concept": "...", "kind": {"label": "...", "terms": ["..."]}, "criteria": [...], "unmodelled": ["..."]}` },
+    { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label, the words (in English and in the languages of the named countries) that listing titles use for it, and "not", the words (in English and in the languages of the named countries, and of the countries around a named place) that listing titles use for things sold alongside the item that are not the item itself (parts, accessories, wanted ads, services). Answer with JSON only: {"concept": "...", "kind": {"label": "...", "terms": ["..."], "not": ["..."]}, "criteria": [...], "unmodelled": ["..."]}` },
     { role: 'user', content: `${shots ? `Approved examples:\n${shots}\n\n` : ''}Question: ${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
   ];
 }
