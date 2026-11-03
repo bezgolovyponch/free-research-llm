@@ -11,6 +11,7 @@ export const MAX_TO_CHECK = 100;
 export const MAX_SCREENED_EXAMPLES = 30;
 export const MAX_OUTSIDE = 150;
 const OUTSIDE_REASON = /^in .*, outside the asked regions$/;
+const SUSPECT_PRICE = /far below what most listings|peers' median/;
 export const MIN_PLAUSIBLE_SHARE = 0.01;
 
 const hasWord = (text, word) => {
@@ -230,7 +231,7 @@ export function buildCandidates(nodes, brief, options = {}) {
   for (const row of unique.values()) {
     found++;
     const verdict = screenCandidate(row, brief, options);
-    if (verdict.value !== null && verdict.country.code && verdict.reasons.every((r) => /^price .* is outside|outside the asked regions$/.test(r))) market.push({ countryCode: verdict.country.code, value: verdict.value, area: row.area ?? null, areaUnit: row.areaUnit ?? '', title: row.title ?? '', place: row.place ?? '' });
+    if (verdict.value !== null && verdict.country.code && verdict.reasons.every((r) => /^price .* is outside|outside the asked regions$/.test(r))) market.push({ url: row.url, countryCode: verdict.country.code, value: verdict.value, area: row.area ?? null, areaUnit: row.areaUnit ?? '', title: row.title ?? '', place: row.place ?? '', attrs: row.attrs ?? {} });
     if (verdict.reasons.length) {
       for (const reason of verdict.reasons) {
         const label = reason.replace(/^price .* is outside/, 'price outside').replace(/^in .*, outside the asked regions$/, 'outside the asked regions');
@@ -251,7 +252,7 @@ export function buildCandidates(nodes, brief, options = {}) {
     const compared = valueVsPeers(kept, brief.subtype.models);
     kept = compared.filter((row) => !row.peerNote);
     for (const row of compared.filter((r) => r.peerNote)) toCheck.push({ ...row, toCheck: [row.toCheck, `price ${row.valueIndex} of its ${row.peers} peers' median: ${row.peerNote}`].filter(Boolean).join('; ') });
-    kept = valueTable(kept, [...kept, ...toCheck, ...market.filter((m) => m.title)], { models: brief.subtype.models, groupFacts: brief.groupFacts ?? {}, condition: brief.kind?.condition ?? [], upgrades: brief.kind?.upgrades ?? [] });
+    kept = valueTable(kept, [...kept, ...toCheck.filter((r) => !SUSPECT_PRICE.test(r.toCheck ?? '')), ...market.filter((m) => m.title)], { models: brief.subtype.models, groupFacts: brief.groupFacts ?? {}, condition: brief.kind?.condition ?? [], upgrades: brief.kind?.upgrades ?? [], pageFacts: options.pageFacts ?? null });
   }
   if (kept.some((row) => Number.isFinite(row.underpriced))) kept.sort(() => 0);
   else if (kept.some((row) => row.valueIndex !== null && row.valueIndex !== undefined)) kept.sort((a, b) => (a.valueIndex ?? Infinity) - (b.valueIndex ?? Infinity) || (a.km ?? Infinity) - (b.km ?? Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));

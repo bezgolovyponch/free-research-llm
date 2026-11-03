@@ -17,6 +17,8 @@ import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
+import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
+import { listingKey } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
@@ -212,6 +214,9 @@ const SITE_MEASURES = new Set(['coastKm', 'beachKm', 'lakeKm', 'workableMonths',
 export function needsSiteFit(strategy, decisionModel) {
   return Boolean(strategy) || (decisionModel?.criteria ?? []).some((c) => SITE_MEASURES.has(c.measure));
 }
+
+export const FACT_PAGES = 400;
+export const FACT_READS_AT_ONCE = 6;
 
 export class ResearchEngine {
   constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null }) {
@@ -1045,7 +1050,34 @@ export class ResearchEngine {
 
   async itemGateOptions(project) {
     const convert = this.rates ? await this.rates.converter().catch(() => undefined) : undefined;
-    return { valueRange: project.acceptance?.valueRange ?? null, unit: project.acceptance?.unit ?? '', kind: templateById(project.templateId)?.itemKind ?? null, ...(convert ? { convert } : {}) };
+    return { valueRange: project.acceptance?.valueRange ?? null, unit: project.acceptance?.unit ?? '', kind: templateById(project.templateId)?.itemKind ?? null, pageFacts: project.listingFacts ?? null, ...(convert ? { convert } : {}) };
+  }
+
+  async readListingFacts(project) {
+    const models = project.brief?.subtype?.models ?? [];
+    if (!models.length || !this.search?.readPage || this.demo) return 0;
+    const known = { ...(project.listingFacts ?? {}) };
+    const kept = new Set((project.candidates?.kept ?? []).map((r) => listingKey(r.url)));
+    const rows = [...project.nodes, { sources: project.sweep?.pages ?? [] }].flatMap((n) => (n.sources ?? []).flatMap((s) => s.listings ?? []));
+    const wanted = [...new Map(rows.filter((r) => r?.url && groupOf(r, models) && listingFacts(r).year === null).map((r) => [listingKey(r.url), r])).entries()]
+      .filter(([key]) => !known[key])
+      .sort(([a], [b]) => Number(kept.has(b)) - Number(kept.has(a)))
+      .slice(0, FACT_PAGES);
+    let read = 0;
+    let dated = 0;
+    for (let i = 0; i < wanted.length; i += FACT_READS_AT_ONCE) {
+      if (this.cancelled?.has?.(project.id)) break;
+      await Promise.all(wanted.slice(i, i + FACT_READS_AT_ONCE).map(async ([key, row]) => {
+        const page = await this.search.readPage(row.url).catch(() => null);
+        const facts = page?.text ? pageFactsFrom(page.text, row) : null;
+        known[key] = { ...(facts ?? { year: null, km: null, kw: null, engine: null, fuel: null }), at: new Date().toISOString(), read: Boolean(facts) };
+        read++;
+        if (facts?.year) dated++;
+      }));
+    }
+    project.listingFacts = known;
+    if (wanted.length) this.emit(project, 'candidates', `listing facts: ${read} listing page(s) read by code for year and mileage (budget ${FACT_PAGES}), ${dated} state a year in the ad's own text`);
+    return read;
   }
 
   async screenFinding(project, finding) {
@@ -1165,7 +1197,8 @@ export class ResearchEngine {
         this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
         await this.collectCandidates(project, { sweep: true });
         await this.planKnowledgeQueries(project);
-        if (await this.gatherGroupKnowledge(project)) await this.collectCandidates(project, { sweep: false });
+        const knew = await this.gatherGroupKnowledge(project);
+        if ((await this.readListingFacts(project)) || knew) await this.collectCandidates(project, { sweep: false });
         await this.store.save(project);
         const stoppedAfterListings = await this.stopIfCancelled(project, id, release);
         if (stoppedAfterListings) return stoppedAfterListings;
