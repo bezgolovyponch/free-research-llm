@@ -1297,3 +1297,18 @@ describe('listing facts read from each ad page', () => {
     expect(await engine.readListingFacts(project as never)).toBe(0);
   });
 });
+
+describe('value facts calibrated on ad texts', () => {
+  it('keeps phrases most of three proposals name and at least two ads state, once per market', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-vfacts-'));
+    const reply = { for: ['servisní kniha', 'nové rozvody'], against: ['koroze'] };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { return { content: JSON.stringify(reply), model: 'stub', provider: 'stub', usage: {} }; } };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [provider] }), search: fakeSearch, store: new ProjectStore({ dir }) } as never);
+    const texts = Array.from({ length: 24 }, (_, i) => (i % 2 ? 'prodám, servisní kniha, koroze minimální' : 'prodám, nové rozvody'));
+    const project = { id: 'p', question: 'Which used cars are worth buying?', listingFacts: Object.fromEntries(texts.map((text, i) => [`auto.bazos.cz#${i}`, { text, read: true }])), candidates: { kept: [] } };
+    expect(await engine.calibrateValueFacts(project as never)).toBe(true);
+    expect((project as { valueFacts: unknown }).valueFacts).toEqual({ for: ['servisni kniha', 'nove rozvody'], against: ['koroze'], calibratedOn: 24 });
+    expect(await engine.calibrateValueFacts(project as never)).toBe(false);
+  });
+});
+

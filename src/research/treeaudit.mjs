@@ -80,7 +80,7 @@ export function dropListingWork(nodes) {
   const removed = new Set();
   for (const n of nodes) {
     if (n.id === ROOT_ID || hadChildren.has(n.id)) continue;
-    if (listingWork(textOf(n))) removed.add(n.id);
+    if (listingWork(n.question) || listingWork(textOf(n))) removed.add(n.id);
   }
   for (let changed = true; changed;) {
     changed = false;

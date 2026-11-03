@@ -235,3 +235,17 @@ describe('per-listing yes/no checks go to code, knowledge stays', () => {
     for (const q of ['Which engines in these models are most reliable?', 'What do owner communities report about the Fabia 1.2 HTP engine?', 'What are typical repair costs for a 2008 Kia Rio?']) expect(listingWork(q)).toBe(false);
   });
 });
+
+describe('per-listing yes/no checks behind a title', () => {
+  it('drops a yes/no check on listings even when its title comes first (car research 0c750f, D3.2)', async () => {
+    const { dropListingWork } = await import('../../src/research/treeaudit.mjs');
+    const nodes = [
+      { id: 'Q', parentId: null, title: 'Q', question: 'Which cars?' },
+      { id: 'D3', parentId: 'Q', title: 'Screen body type', question: 'Are remaining ads confirmed hatchbacks?' },
+      { id: 'D3.2', parentId: 'D3', title: 'Exclude ambiguous bodies', question: 'Is body style ambiguous or non\u2011hatchback?' },
+      { id: 'D4', parentId: 'Q', title: 'Engine reliability', question: 'Which engines of these models do owners report as durable?' },
+    ];
+    expect(dropListingWork(nodes).dropped.sort()).toEqual(['D3', 'D3.2']);
+  });
+});
+
