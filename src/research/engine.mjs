@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { withProposals } from './proposal.mjs';
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
@@ -85,11 +86,20 @@ const GROUP_SOURCES = 12;
 const GROUP_PAGES_PER_CALL = 4;
 const GROUP_FACTS_TTL_MS = 30 * 24 * 3600 * 1000;
 
-function groupQueryPrompt({ group, engines, languages, kind }) {
+const KNOWLEDGE_SOURCES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8'));
+const MAKE_LANGUAGES = KNOWLEDGE_SOURCES.makeLanguages ?? {};
+const REGION_LANGUAGES = KNOWLEDGE_SOURCES.regionLanguages ?? {};
+
+export function knowledgeSourcesFor(concept) {
+  return (KNOWLEDGE_SOURCES.sources ?? []).filter((source) => source.concept === concept);
+}
+
+export function groupQueryPrompt({ group, engines, languages, kind, sources = [] }) {
+  const domains = [...new Set(sources.map((source) => source.site).filter(Boolean))];
   return [
     { role: 'system', content: 'You write web search queries. Answer with JSON only: {"queries": ["..."]}.' },
     { role: 'user', content: `Item: ${kind || 'item'} "${group}"${engines.length ? `, engines or variants seen in listings: ${engines.join(', ')}` : ''}.
-Write ${GROUP_QUERIES} queries that find owner experiences and expert or statistical evidence about which engines or variants of "${group}" are reliable, durable or problematic, what typically fails and at what mileage, what a buyer should check, and how costly repairs and parts are (owner forums and clubs; defect and breakdown statistics by model and age: TÜV Report, ADAC Pannenstatistik, DEKRA Gebrauchtwagenreport; national used-car statistics such as Cebia where they exist). Give at least one query per engine listed. Write them in: ${languages.join(', ')}. Every query names "${group}".` },
+Write ${GROUP_QUERIES} queries that find owner experiences and expert or statistical evidence about which engines or variants of "${group}" are reliable, durable or problematic, what typically fails and at what mileage, what a buyer should check, and how costly repairs and parts are. Spread them across these languages: ${languages.join(', ')}. Restrict at least ${Math.ceil(GROUP_QUERIES / 2)} of them with site: to one of these owner and expert sources: ${domains.map((domain) => `site:${domain}`).join(', ')}. Give at least one query per engine listed. Every query names "${group}".` },
   ];
 }
 
@@ -113,9 +123,23 @@ export function verifiedGroupFacts(facts, sources) {
   }).filter(Boolean).slice(0, 10);
 }
 
-function queryLanguages(regions = []) {
-  const names = [...new Set((regions ?? []).map((code) => countryByCode(String(code ?? '').toUpperCase())?.name).filter(Boolean))];
-  return [...names.map((name) => `the main language of ${name}`), 'English'];
+export function queryLanguages(regions = [], group = '') {
+  const languages = ['English', 'German'];
+  for (const code of regions ?? []) {
+    const key = String(code ?? '').toUpperCase();
+    const country = countryByCode(key);
+    const language = REGION_LANGUAGES[key] ?? (country ? `the main language of ${country.name}` : '');
+    if (language) languages.push(language);
+  }
+  const make = plain(group).trim().split(/\s+/)[0];
+  if (MAKE_LANGUAGES[make]) languages.push(MAKE_LANGUAGES[make]);
+  const seen = new Set();
+  return languages.filter((language) => {
+    const key = language.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function mentionsModel(title, name) {
@@ -641,12 +665,13 @@ export class ResearchEngine {
     for (const row of kept) if (row.group) counts.set(row.group, (counts.get(row.group) ?? 0) + 1);
     const groups = [...counts].sort((a, b) => b[1] - a[1]).map(([g]) => g).filter((g) => !(known[g] && now - Date.parse(known[g].at) < GROUP_FACTS_TTL_MS)).slice(0, GROUP_KNOWLEDGE_GROUPS);
     if (!groups.length) return 0;
-    const languages = queryLanguages((project.brief ?? this.briefOf(project)).regions);
+    const knowledgeSources = knowledgeSourcesFor('used-vehicle');
     let added = 0;
     for (const group of groups) {
       try {
+        const languages = queryLanguages((project.brief ?? this.briefOf(project)).regions, group);
         const engines = [...new Set(kept.filter((r) => r.group === group && r.engine).map((r) => r.engine))].slice(0, 6);
-        const plan = await this.router.complete({ purpose: 'decompose', tier: 'deep', messages: groupQueryPrompt({ group, engines, languages, kind: project.brief?.kind?.label ?? '' }) });
+        const plan = await this.router.complete({ purpose: 'decompose', tier: 'deep', messages: groupQueryPrompt({ group, engines, languages, kind: project.brief?.kind?.label ?? '', sources: knowledgeSources }) });
         const queries = (Array.isArray(plan?.data?.queries) ? plan.data.queries : []).map((q) => String(q ?? '').trim()).filter((q) => q && plain(q).includes(plain(group).split(' ').at(-1))).slice(0, GROUP_QUERIES);
         if (!queries.length) continue;
         const sources = (await this.search.search(queries, { maxSources: GROUP_SOURCES })).filter((s) => String(s.text ?? '').length > 200);

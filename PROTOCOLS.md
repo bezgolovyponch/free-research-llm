@@ -169,6 +169,8 @@ Not yet used and the next step: equipment, trim, transmission, body, accident an
 
 ## 7c-example. Example of value composition: used cars (sources checked 2026-11-04)
 
+Owner and expert sources are searched worldwide (English, German, the make's home language, the asked country's language) and in the source register knowledgesources.json.
+
 | Driver | How it moves the value | Trustworthy source | How the engine uses it |
 |---|---|---|---|
 | Age | Roughly geometric decline (OECD average about 31% a year over a car's life); on 0c750f, 6.8% a year at fixed mileage for cars 10–20 years old | Storchmann, *Transportation* 31(4), 2004; measured per market | pooled Theil–Sen age effect (≥ 30 dated listings) |
