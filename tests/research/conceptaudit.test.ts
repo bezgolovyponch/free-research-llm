@@ -97,6 +97,75 @@ describe('concept audit', () => {
     expect(finding(audit, 'C14')).toMatchObject({ severity: 'error', ok: false });
   });
 
+  it('C15: passes when the count check passed', () => {
+    const project = passingProject({ acceptance: { itemCount: 10 }, acceptanceResult: { checks: [{ id: 'count', label: 'At least 10 valid items', value: 1, passed: true }] } });
+    const audit = conceptAudit(project, { now: NOW });
+    expect(finding(audit, 'C15')).toMatchObject({ severity: 'warn', ok: true, detail: '10 item(s) delivered.' });
+  });
+
+  it('C15: warns when a list research delivered nothing', () => {
+    const project = passingProject({ acceptance: { itemCount: 10 }, acceptanceResult: { checks: [{ id: 'count', label: 'At least 10 valid items', value: 0, passed: false }] } });
+    const audit = conceptAudit(project, { now: NOW });
+    expect(finding(audit, 'C15')).toMatchObject({ severity: 'warn', ok: false, detail: '0 of 10 item(s) delivered' });
+  });
+
+  it('C15: reads the count check value as the delivered share of the asked items', () => {
+    const project = passingProject({ acceptance: { itemCount: 50 }, acceptanceResult: { checks: [{ id: 'count', label: 'At least 50 valid items', value: 0.38, passed: false }] } });
+    const audit = conceptAudit(project, { now: NOW });
+    expect(finding(audit, 'C15')).toMatchObject({ ok: false, detail: '19 of 50 item(s) delivered' });
+  });
+
+  it('C16: passes when the template still exists', () => {
+    const audit = conceptAudit(passingProject({ templateId: 'generic' }), { now: NOW });
+    expect(finding(audit, 'C16')).toMatchObject({ severity: 'warn', ok: true });
+  });
+
+  it('C16: warns when the research kept a removed template', () => {
+    const audit = conceptAudit(passingProject({ templateId: 'car-arbitrage' }), { now: NOW });
+    expect(finding(audit, 'C16')).toMatchObject({
+      severity: 'warn',
+      ok: false,
+      detail: 'template "car-arbitrage" was removed; the research runs as a generic question',
+    });
+  });
+
+  it('C17: passes when a list research names its item kind', () => {
+    const project = passingProject({ acceptance: { itemCount: 10 }, phase: 'researching', brief: { regions: ['PT'], kind: { label: 'car listing' } } });
+    const audit = conceptAudit(project, { now: NOW });
+    expect(finding(audit, 'C17')).toMatchObject({ severity: 'warn', ok: true });
+  });
+
+  it('C17: warns when a list research has no item kind', () => {
+    const project = passingProject({ acceptance: { itemCount: 10 }, phase: 'researching', brief: { regions: ['PT'] } });
+    const audit = conceptAudit(project, { now: NOW });
+    expect(finding(audit, 'C17')).toMatchObject({
+      severity: 'warn',
+      ok: false,
+      detail: 'no item kind: the research prompts ask for a decision memo instead of listing pages',
+    });
+  });
+
+  it('keeps C1-C14 unchanged for a plot project with a full candidates table', () => {
+    const audit = conceptAudit(passingProject(), { now: NOW });
+    const before = audit.findings.filter((f: { id: string }) => /^C(?:[1-9]|1[0-4])$/.test(f.id)).map((f: { id: string; severity: string; ok: boolean; detail: string }) => [f.id, f.severity, f.ok, f.detail]);
+    expect(before).toEqual([
+      ['C1', 'error', true, '2 kept plot(s) fit every check and are confirmed.'],
+      ['C2', 'error', true, 'All 2 fit(s) have every asked check met.'],
+      ['C3', 'error', true, 'No fit fails the legal check.'],
+      ['C4', 'error', true, 'Every kept plot is in PT.'],
+      ['C5', 'error', true, 'All 2 fit(s) are within 20000 EUR.'],
+      ['C6', 'warn', true, 'The outside check is current.'],
+      ['C7', 'warn', true, '0 of 2 checked fit(s) are refuted by the outside check.'],
+      ['C8', 'warn', true, '0 of 2 recent trial(s) were provider outages.'],
+      ['C9', 'warn', true, 'Every claim is checked under the current logic.'],
+      ['C10', 'error', true, 'No verified piece has a failed meaning check.'],
+      ['C11', 'warn', true, 'Strategy sources are fresh and confirmed.'],
+      ['C12', 'warn', true, 'The memo does not contradict the record.'],
+      ['C13', 'warn', true, 'Every asked country reached the table: PT.'],
+      ['C14', 'error', true, 'The table and its count agree.'],
+    ]);
+  });
+
   it('C8: warns when most recent trials were provider outages', () => {
     const trials = Array.from({ length: 30 }, (_, i) => ({ outcome: i < 20 ? 'provider-outage' : 'kept' }));
     const audit = conceptAudit(passingProject({ improve: { active: true, trials } }), { now: NOW });

@@ -1,4 +1,5 @@
 import { supportAudit } from './support.mjs';
+import { TEMPLATES } from './templates.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DETAIL = 200;
@@ -120,6 +121,23 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
   if (c && kept && typeof c.keptCount === 'number') {
     const ok = !(c.keptCount > 0 && kept.length === 0);
     add('C14', 'Nothing is counted while the table is empty', 'error', ok, ok ? 'The table and its count agree.' : `The table shows ${c.keptCount} kept while it holds no rows.`);
+  }
+
+  const itemCount = Number(p.acceptance?.itemCount);
+  if (itemCount > 0 && Array.isArray(p.acceptanceResult?.checks)) {
+    const countCheck = p.acceptanceResult.checks.find((entry) => entry?.id === 'count');
+    const ok = countCheck?.passed === true;
+    add('C15', 'A list research delivers the items it asked for', 'warn', ok, ok ? `${itemCount} item(s) delivered.` : `${Math.round((countCheck?.value ?? 0) * itemCount)} of ${itemCount} item(s) delivered`);
+  }
+
+  if (typeof p.templateId === 'string' && p.templateId) {
+    const ok = TEMPLATES.some((template) => template.id === p.templateId);
+    add('C16', 'The research uses a template the app still has', 'warn', ok, ok ? `template "${p.templateId}" is still available.` : `template "${p.templateId}" was removed; the research runs as a generic question`);
+  }
+
+  if (itemCount > 0 && p.phase !== 'created' && p.phase !== 'decomposing') {
+    const label = p.brief?.kind?.label || p.decisionModel?.kind?.label;
+    add('C17', 'A list research knows what item it lists', 'warn', Boolean(label), label ? `Item kind: ${label}.` : 'no item kind: the research prompts ask for a decision memo instead of listing pages');
   }
 
   return {
