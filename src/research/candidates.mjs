@@ -180,12 +180,18 @@ export function shortlistText(candidates, limit = 15) {
   const reasons = Object.entries(candidates.screened ?? {}).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(', ');
   const rows = (candidates.kept ?? []).slice(0, limit).map((r) => `- ${r.title} | ${r.value ?? r.price} ${r.unit || r.currency} | ${r.area ? `${r.area} ${r.areaUnit}` : 'area n/a'} | ${r.place || r.country || 'place n/a'}${r.coast ? ' | coast stated' : ''}${siteText(r)}`);
   const ranked = candidates.sites ? `, ranked by code-measured fit (sea distance, workable months, no-AC heat, things to explore, price trend, cost, zoning)` : '';
-  return [`found ${candidates.found}, kept ${candidates.keptCount}${ranked}, to check ${candidates.toCheckCount}, screened out ${candidates.screenedCount}${reasons ? ` (${reasons})` : ''}`, ...rows].join('\n');
+  const kept = candidates.keptCount ?? 0;
+  return [`TABLE COUNTS (computed by code, final): found ${candidates.found}, kept ${kept} (the result list)${ranked}, to check ${candidates.toCheckCount}, screened out ${candidates.screenedCount}${reasons ? ` (${reasons})` : ''}`, `First ${Math.min(limit, kept)} of the ${kept} kept rows:`, ...rows].join('\n');
 }
 
 export function tableVerdict(candidates, itemCount = null) {
   const t = candidates?.tiers;
-  if (!t) return '';
+  if (!t) {
+    if (!candidates || typeof candidates.keptCount !== 'number') return '';
+    const kept = candidates.keptCount;
+    const met = itemCount ? (kept >= itemCount ? ` — the ${itemCount} asked are met` : ` — ${itemCount - kept} short of the ${itemCount} asked`) : '';
+    return `Table (computed by code): ${kept} result${kept === 1 ? '' : 's'} kept${met}; ${candidates.toCheckCount ?? 0} to check; ${candidates.screenedCount ?? 0} screened out of ${candidates.found ?? 0} found`;
+  }
   const target = itemCount ? ` of the ${itemCount} asked` : '';
   const v = candidates.verification;
   const verified = v ? ` (externally verified: ${v.confirmed} confirmed, ${v.refuted} refuted, ${v.unconfirmed + v.pending} not yet confirmed; a plot counts only when it fits every check and is confirmed)` : '';

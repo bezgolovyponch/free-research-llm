@@ -256,7 +256,7 @@ DECISION RULE: ${template.decisionRule}
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
 ${lines.join('\n')}
 ${itemsBlock(nodes)}
-${shortlist ? `\nCANDIDATE TABLE (screened by code against the hard limits; cite counts from it, never invent items):\n${shortlist}\n` : ''}
+${shortlist ? `\nCANDIDATE TABLE (screened by code against the hard limits; cite counts from it, never invent items):\n${shortlist}\nThe table counts are final and computed by code. Use the kept count as the number of results; never state a different count of results or say the target is not met when kept >= the expected item count.\n` : ''}
 ${KIND_RULE[kind] ?? KIND_RULE.decision}
 Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a result of the type asked above and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:
