@@ -146,6 +146,7 @@ Audit of the car researches (0c750f, b4f648): 62 pages read, none on a marketpla
 
 | Stage | Who does it | Rule | Code |
 |---|---|---|---|
+| 0. Why and value | the user's words, then the decision model | State why the research is made, what decision it serves and what result is worth having, before anything is searched; then list what must be known and the source for each need (portal, reference, community, the table itself) and how it will be read. Generic readers first (JSON-LD, embedded JSON, cards, the page renderer); a site-specific scraper is built only when that source is proven necessary for the target and the generic reader is shown to fail on it | decision model `concept`; source plan in the brief |
 | 1. Eligibility | the user's words, then the decision model | The item count is read from the user's words before the tree; the decision model (kind, criteria with the user's quote) is built before any search | `itemCountFromWords`, `ensureDecisionModel` |
 | 2. Where to look | code | Named countries; a place with a radius becomes the countries measured on a ring of geocoded points around it | `radiusIn`, `areaCountries` |
 | 3. Identify | code | Seed portals matched by the kind's words, portal pages from search, recipes; read before any piece is researched | `CandidateSweeper`, `seedPortals` |
