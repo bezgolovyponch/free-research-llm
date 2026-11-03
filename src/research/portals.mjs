@@ -24,13 +24,13 @@ const otomoto = ({ min, max, unit }) => unit === 'PLN' && min !== null && max !=
 const CAR_SAMPLE = ['auto', 'car', 'cars', 'osobowe', 'samochod', 'osobni', 'vozidlo', 'gebrauchtwagen', 'pkw'];
 
 export const SEED_PORTALS = [
-  ...['galicia', 'asturias', 'cantabria', 'andalucia', 'valencia', 'murcia', 'canarias', 'baleares'].map((r) => ({ country: 'ES', kind: 'plot of land', coastal: true, maxPrice: 20000, url: pisos(r), sample: ['terreno'] })),
-  ...['mugla', 'aydin', 'izmir', 'antalya', 'mersin', 'canakkale', 'balikesir', 'tekirdag', 'sinop', 'samsun', 'trabzon'].map((p) => ({ country: 'TR', kind: 'plot of land', coastal: true, maxPrice: null, url: emlakjet(p), sample: ['tarla'] })),
-  ...['viana-do-castelo', 'braga', 'porto', 'aveiro', 'coimbra', 'leiria', 'lisboa', 'setubal', 'beja', 'faro'].map((d) => ({ country: 'PT', kind: 'plot of land', coastal: true, maxPrice: 20000, url: imovirtual(d), sample: ['terreno'] })),
-  ...[sreality, bezrealitky].map((url) => ({ country: 'CZ', kind: 'plot of land', coastal: false, maxPrice: null, url, sample: ['pozemek', 'pozemky'] })),
-  { country: 'DE', kind: 'car', coastal: false, maxPrice: null, url: autoscout, sample: CAR_SAMPLE },
-  { country: 'CZ', kind: 'car', coastal: false, maxPrice: null, url: bazos, sample: CAR_SAMPLE },
-  { country: 'PL', kind: 'car', coastal: false, maxPrice: null, url: otomoto, sample: CAR_SAMPLE },
+  ...['galicia', 'asturias', 'cantabria', 'andalucia', 'valencia', 'murcia', 'canarias', 'baleares'].map((r) => ({ country: 'ES', kind: 'plot of land', coastal: true, currency: 'EUR', maxPrice: 20000, url: pisos(r), sample: ['terreno'] })),
+  ...['mugla', 'aydin', 'izmir', 'antalya', 'mersin', 'canakkale', 'balikesir', 'tekirdag', 'sinop', 'samsun', 'trabzon'].map((p) => ({ country: 'TR', kind: 'plot of land', coastal: true, currency: 'TRY', maxPrice: null, url: emlakjet(p), sample: ['tarla'] })),
+  ...['viana-do-castelo', 'braga', 'porto', 'aveiro', 'coimbra', 'leiria', 'lisboa', 'setubal', 'beja', 'faro'].map((d) => ({ country: 'PT', kind: 'plot of land', coastal: true, currency: 'EUR', maxPrice: 20000, url: imovirtual(d), sample: ['terreno'] })),
+  ...[sreality, bezrealitky].map((url) => ({ country: 'CZ', kind: 'plot of land', coastal: false, currency: 'CZK', maxPrice: null, url, sample: ['pozemek', 'pozemky'] })),
+  { country: 'DE', kind: 'car', coastal: false, currency: 'EUR', maxPrice: null, url: autoscout, sample: CAR_SAMPLE },
+  { country: 'CZ', kind: 'car', coastal: false, currency: 'CZK', maxPrice: null, url: bazos, sample: CAR_SAMPLE },
+  { country: 'PL', kind: 'car', coastal: false, currency: 'PLN', maxPrice: null, url: otomoto, sample: CAR_SAMPLE },
 ];
 
 const speaksOf = (portal, kind) => {
@@ -39,12 +39,25 @@ const speaksOf = (portal, kind) => {
   return asked.some((word) => offered.has(word));
 };
 
-export function seedPortals(brief) {
+const convertedBound = (value, unit, currency, convert) => {
+  if (value === null || value === undefined) return null;
+  const converted = convert(value, unit, currency);
+  return converted === null || converted === undefined || Number.isNaN(Number(converted)) ? null : Number(converted);
+};
+
+const seedRange = (portal, { min, max }, unit, convert) => {
+  if (!unit || !portal.currency || unit === portal.currency || typeof convert !== 'function') return { min, max, unit };
+  const low = convertedBound(min, unit, portal.currency, convert);
+  const high = convertedBound(max, unit, portal.currency, convert);
+  return { min: low === null ? null : Math.floor(low), max: high === null ? null : Math.ceil(high), unit: portal.currency };
+};
+
+export function seedPortals(brief, convert = null) {
   if (!brief?.kind || !brief.regions?.length) return [];
   const [min = null, max = null] = brief.valueRange ?? [];
   const unit = currencyOf(brief.unit);
   return SEED_PORTALS.filter((p) => speaksOf(p, brief.kind) && brief.regions.includes(p.country) && (!brief.coastal || p.coastal) && (p.maxPrice === null || max === null || p.maxPrice >= max)).map((p) => {
-    const url = typeof p.url === 'function' ? p.url({ min, max, unit }) : p.url;
+    const url = typeof p.url === 'function' ? p.url(seedRange(p, { min, max }, unit, convert)) : p.url;
     return { url, country: p.country, sample: p.sample, count: 1, seed: true };
   });
 }

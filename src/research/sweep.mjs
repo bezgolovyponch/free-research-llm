@@ -78,7 +78,7 @@ export class CandidateSweeper {
     if (!brief?.kind || !this.search?.readPage) return null;
     const target = Math.ceil((brief.itemCount ?? 20) * 1.5);
     await this.arms?.load?.();
-    const found = portalPages(project.nodes, brief, [...this.seeds(brief), ...(this.recipes?.verifiedSearchPages?.() ?? [])]);
+    const found = portalPages(project.nodes, brief, [...this.seeds(brief, options.convert ?? null), ...(this.recipes?.verifiedSearchPages?.() ?? [])]);
     const starts = roundRobin(this.arms ? this.arms.order(found, this.rng) : found, (p) => p.country);
     const yields = new Map();
     const visited = new Set();
