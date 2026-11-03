@@ -1,5 +1,6 @@
 import { currencyOf } from './acceptance.mjs';
 import { countryByCode, isNewsPage, itemCountry, mentionsCoast } from './brief.mjs';
+import { valueTable } from './valuation.mjs';
 import { plain, screenItem } from './itemgate.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { explorePoints } from './site.mjs';
@@ -250,8 +251,10 @@ export function buildCandidates(nodes, brief, options = {}) {
     const compared = valueVsPeers(kept, brief.subtype.models);
     kept = compared.filter((row) => !row.peerNote);
     for (const row of compared.filter((r) => r.peerNote)) toCheck.push({ ...row, toCheck: [row.toCheck, `price ${row.valueIndex} of its ${row.peers} peers' median: ${row.peerNote}`].filter(Boolean).join('; ') });
+    kept = valueTable(kept, [...kept, ...toCheck, ...market.filter((m) => m.title)], { models: brief.subtype.models, groupFacts: brief.groupFacts ?? {}, condition: brief.kind?.condition ?? [] });
   }
-  if (kept.some((row) => row.valueIndex !== null && row.valueIndex !== undefined)) kept.sort((a, b) => (a.valueIndex ?? Infinity) - (b.valueIndex ?? Infinity) || (a.km ?? Infinity) - (b.km ?? Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
+  if (kept.some((row) => Number.isFinite(row.underpriced))) kept.sort(() => 0);
+  else if (kept.some((row) => row.valueIndex !== null && row.valueIndex !== undefined)) kept.sort((a, b) => (a.valueIndex ?? Infinity) - (b.valueIndex ?? Infinity) || (a.km ?? Infinity) - (b.km ?? Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
   else kept.sort((a, b) => Number(b.coast) - Number(a.coast) || (a.value ?? Infinity) - (b.value ?? Infinity));
   return {
     found,

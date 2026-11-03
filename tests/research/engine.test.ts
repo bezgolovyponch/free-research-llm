@@ -1232,3 +1232,23 @@ describe('distance from the asked place', () => {
     expect(events.some((m) => /distance from prague: 3 listing\(s\) measured, 1 farther than 300 km, 1 without a stated place/.test(m))).toBe(true);
   });
 });
+
+describe('recalibration after the market grows', () => {
+  it('calibrates again when the swept market is three times larger, and unions the models', async () => {
+    const calls: unknown[] = [];
+    const reply = { data: { not: ['motor'], condition: [], subtype: { label: 'hatchback', models: ['dacia sandero'], variants: ['combi'] } } };
+    const router = { complete: async (args: unknown) => { calls.push(args); return reply; } };
+    const engine = new ResearchEngine({ router, search: null, store: { cache: new Map(), save: async (p: unknown) => p } } as never);
+    const listing = (i: number) => ({ title: i % 2 ? `Dacia Sandero ${i}` : `Motor dacia sandero ${i}`, url: `https://auto.bazos.cz/inzerat/${i}/x.php` });
+    const page = (n: number) => ({ listings: Array.from({ length: n }, (_, i) => listing(i)) });
+    const project = { id: 'p', question: 'q', log: [], sweep: { pages: [page(1900)] }, decisionModel: { kind: { label: 'used car', terms: ['hatchback'], verified: { share: 0.9 } }, subtype: { label: 'hatchback', models: ['skoda fabia'], variants: [] }, calibrated: '2026-11-03T12:00:00Z', calibratedOn: 600 } };
+    expect(await (engine as unknown as { calibrateKind: (p: unknown) => Promise<boolean> }).calibrateKind(project)).toBe(true);
+    expect(calls).toHaveLength(3);
+    expect(project.decisionModel.subtype.models).toEqual(['skoda fabia', 'dacia sandero']);
+    expect(project.decisionModel.kind.not).toContain('motor');
+    calls.length = 0;
+    project.sweep.pages = [page(2500)];
+    await (engine as unknown as { calibrateKind: (p: unknown) => Promise<boolean> }).calibrateKind(project);
+    expect(calls).toHaveLength(0);
+  });
+});

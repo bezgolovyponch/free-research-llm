@@ -227,3 +227,11 @@ describe('narrowing pieces to the asked countries', () => {
     expect(nodes.map((n) => n.id)).toEqual(['Q', 'D1', 'D2', 'D2.1']);
   });
 });
+
+describe('per-listing yes/no checks go to code, knowledge stays', () => {
+  it('drops checks phrased as questions and keeps engine, owner and repair knowledge', async () => {
+    const { listingWork } = await import('../../src/research/treeaudit.mjs');
+    for (const q of ['Do identified ads respect the ≤65,000 CZK price ceiling?', 'Is listed price ≤65,000 CZK or equivalent EUR?', 'Are remaining ads confirmed hatchbacks?', 'Is body style ambiguous or non-hatchback?']) expect(listingWork(q)).toBe(true);
+    for (const q of ['Which engines in these models are most reliable?', 'What do owner communities report about the Fabia 1.2 HTP engine?', 'What are typical repair costs for a 2008 Kia Rio?']) expect(listingWork(q)).toBe(false);
+  });
+});

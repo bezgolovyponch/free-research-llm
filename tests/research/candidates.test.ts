@@ -160,7 +160,7 @@ describe('price and value read from each kept row', () => {
     expect(pair[0].peers).toBe(2);
   });
 
-  it('sorts the built table by value against peers first, then mileage, then price', () => {
+  it('sorts the built table by how far each price falls below its market value from comparables, keeping the peer index', () => {
     const carBrief = buildBrief({ question: 'Used hatchbacks within 300 km of Prague, 65000 CZK max', acceptance: { expected: '8 used cars', itemCount: 8, valueRange: [0, 65000], unit: 'CZK' }, template: { itemKind: { label: 'used car', terms: ['auto'] } } });
     const subtype = { label: 'hatchback', models: ['fabia', 'rio'], source: 'model proposal, matched to listing titles by code' };
     const listing = (model: string, value: number, km: number, i: number) => ({ title: `${model === 'Rio' ? 'Kia Rio' : 'Škoda Fabia'} 1.4 2008 ${km} km`, url: `https://auto.bazos.cz/inzerat/${model.toLowerCase()}-ID1${i}aaaa`, value, unit: 'CZK' });
@@ -169,8 +169,10 @@ describe('price and value read from each kept row', () => {
       listing('Rio', 20000, 160000, 6), listing('Rio', 21000, 120000, 7), listing('Rio', 22000, 140000, 8),
     ];
     const out = buildCandidates([{ id: 'D1', sources: [{ id: 'S1', url: 'https://auto.bazos.cz/auto/', listings }] }], { ...carBrief, subtype }, {});
-    expect(out.kept.map((r: { value: number }) => r.value)).toEqual([30000, 35000, 20000, 21000, 39000, 22000, 45000, 60000]);
-    expect(out.kept[0]).toMatchObject({ valueIndex: 0.77, peers: 5, year: 2008, km: 200000 });
+    const ratios = out.kept.map((r: { underpriced?: number }) => r.underpriced ?? -Infinity);
+    expect(ratios).toEqual([...ratios].sort((a, b) => b - a));
+    expect(out.kept.every((r: { marketValue?: number; valueIndex?: number }) => Number.isFinite(r.marketValue) && Number.isFinite(r.valueIndex))).toBe(true);
+    expect(out.kept.find((r: { value: number }) => r.value === 30000)).toMatchObject({ year: 2008, km: 200000, peers: 5 });
   });
 });
 

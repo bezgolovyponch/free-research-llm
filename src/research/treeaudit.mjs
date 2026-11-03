@@ -63,11 +63,15 @@ const textOf = (n) => `${String(n.title ?? '').replace(ID_PREFIX, '')} ${n.quest
 
 const LISTING_ACTION = /\b(?:list|find|identify|search|scrape|collect|calculate|compute|convert|verify|check|confirm|assess)\b/i;
 const LISTING_TARGET = /\b(?:listings?|urls?|links?|ads?|items?|each|every|priced|distances?|body\s*types?)\b/i;
-const NOT_LISTING_KNOWLEDGE = /\b(?:reliab|fault|defect|problem|issue|cost|norm|rule|law|legal|tax|insurance|trend|depreciat|review|reput|communit|forum|empirical|statistic|typical)\w*|\bmarket(?!place)\w*/i;
+const NOT_LISTING_KNOWLEDGE = /\b(?:reliab|fault|defect|problem|issue|cost|norm|rule|law|legal|tax|insurance|trend|depreciat|review|reput|communit|forum|empirical|statistic|typical|engine|motor|gearbox|transmission|durab|longevity|owner|experience|maintenance|repair|recall|safety|consumption|resale)\w*|\bmarket(?!place)\w*/i;
+
+const YES_NO_CHECK = /^\s*(?:is|are|do|does|has|have)\b/i;
+const CHECKED_BY_CODE = /\b(?:ads?|listings?|listed price|price ceiling|prices?|body\s*(?:style|type)|confirmed|distance|within|km\b)|[≤≥<>]/i;
 
 export function listingWork(question) {
   const text = String(question ?? '');
   if (!text.trim() || NOT_LISTING_KNOWLEDGE.test(text)) return false;
+  if (YES_NO_CHECK.test(text) && CHECKED_BY_CODE.test(text)) return true;
   return LISTING_ACTION.test(text) || LISTING_TARGET.test(text);
 }
 

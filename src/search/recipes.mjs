@@ -1,3 +1,4 @@
+import { SCHEMA_CHECK_VERSION } from './schema.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -81,6 +82,7 @@ export class SiteRecipes {
     delete known.schema;
     known.schemaFailedAt = new Date(this.now()).toISOString();
     known.schemaFailure = reason;
+    known.schemaFailedVersion = SCHEMA_CHECK_VERSION;
     this.persist();
     return known;
   }
@@ -89,14 +91,15 @@ export class SiteRecipes {
     const host = hostOf(url);
     if (!host) return null;
     const known = this.sites[host] ?? { template: '', methods: [], count: 0, country: '', sample: [], searchPages: [], learnedAt: new Date(this.now()).toISOString(), verifiedAt: null, misses: 0 };
-    this.sites[host] = { ...known, schemaFailedAt: new Date(this.now()).toISOString(), schemaFailure: String(reason ?? '').slice(0, 160) };
+    this.sites[host] = { ...known, schemaFailedAt: new Date(this.now()).toISOString(), schemaFailure: String(reason ?? '').slice(0, 160), schemaFailedVersion: SCHEMA_CHECK_VERSION };
     this.persist();
     return this.sites[host];
   }
 
   schemaFailedRecently(url) {
-    const at = Date.parse(this.get(url)?.schemaFailedAt ?? '');
-    return Number.isFinite(at) && this.now() - at < RECHECK_MS;
+    const known = this.get(url);
+    const at = Date.parse(known?.schemaFailedAt ?? '');
+    return known?.schemaFailedVersion === SCHEMA_CHECK_VERSION && Number.isFinite(at) && this.now() - at < RECHECK_MS;
   }
 
   miss(url) {

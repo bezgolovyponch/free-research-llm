@@ -65,3 +65,16 @@ describe('learned schemas in the site recipe', () => {
     expect(recipes.schemaFailedRecently('https://auto.bazos.cz/')).toBe(false);
   });
 });
+
+describe('schema failures follow the checking rule version', () => {
+  it('does not block relearning when the failure was recorded under an older check', async () => {
+    const { SiteRecipes } = await import('../../src/search/recipes.mjs');
+    const recipes = new SiteRecipes({ now: () => Date.parse('2026-11-03T12:00:00Z') });
+    recipes.schemaFailed('https://auto.bazos.cz/', 'found 40, the generic reader found 66');
+    expect(recipes.schemaFailedRecently('https://auto.bazos.cz/')).toBe(true);
+    recipes.sites['auto.bazos.cz'].schemaFailedVersion = 1;
+    expect(recipes.schemaFailedRecently('https://auto.bazos.cz/')).toBe(false);
+    delete recipes.sites['auto.bazos.cz'].schemaFailedVersion;
+    expect(recipes.schemaFailedRecently('https://auto.bazos.cz/')).toBe(false);
+  });
+});
