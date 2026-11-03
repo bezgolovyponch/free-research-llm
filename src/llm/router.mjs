@@ -28,6 +28,7 @@ const OVERLOADED = /overloaded|high (?:traffic|demand)|currently experiencing|ov
 export const OVERLOAD_REST_MS = 10 * 60 * 1000;
 export const MAX_SWITCHES_PER_CALL = 3;
 export const FAILURE_STREAK_BENCH = 12;
+export const DEAD_AFTER_CALLS = 20;
 export const STREAK_BENCH_MS = 30 * 60 * 1000;
 export const STREAK_BENCH_MAX_MS = 6 * 60 * 60 * 1000;
 
@@ -110,7 +111,7 @@ export class ModelRouter {
     const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
-    const ranked = this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose);
+    const ranked = this.demoteDead(this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose));
     const usable = [...ranked, ...this.lastResortLocals(tier, purpose, tokens, time)];
     if (!avoid) return usable;
     const author = this.providers.find((p) => p.id === avoid);
@@ -170,6 +171,15 @@ export class ModelRouter {
     return [...timed.filter(([, ms]) => !slow(ms)), ...timed.filter(([, ms]) => slow(ms))].map(([p]) => p);
   }
 
+  demoteDead(providers) {
+    const recent = (id) => this.ledger.filter((r) => r.provider === id && r.purpose !== 'router').slice(-DEAD_AFTER_CALLS);
+    const dead = (p) => {
+      const rows = recent(p.id);
+      return rows.length >= DEAD_AFTER_CALLS && rows.every((r) => r.ok === false);
+    };
+    return [...providers.filter((p) => !dead(p)), ...providers.filter(dead)];
+  }
+
   recordOutcome({ provider, purpose, passed }) {
     const purposeClass = PURPOSE_CLASS[purpose] ?? purpose;
     this.outcomes?.record({ provider, purposeClass, passed: Boolean(passed) });
@@ -205,7 +215,15 @@ export class ModelRouter {
 
   restoreCooldowns(rows) {
     const latest = new Map();
-    for (const row of rows) if (row?.provider) latest.set(row.provider, row);
+    const byProvider = new Map();
+    for (const row of rows) {
+      if (!row?.provider) continue;
+      latest.set(row.provider, row);
+      if (row.provider === 'router') continue;
+      const list = byProvider.get(row.provider) ?? [];
+      list.push(row);
+      byProvider.set(row.provider, list);
+    }
     const restored = [];
     for (const [id, row] of latest) {
       if (row.ok || !this.providers.some((p) => p.id === id)) continue;
@@ -218,6 +236,27 @@ export class ModelRouter {
       if (!badKey && !daily) continue;
       this.coolDown({ id }, { status, message: String(row.error ?? '') });
       restored.push(id);
+    }
+    const now = this.now();
+    for (const [id, list] of byProvider) {
+      if (!this.providers.some((p) => p.id === id)) continue;
+      const calls = list.filter((row) => row.purpose !== 'router');
+      const benchRows = list.filter((row) => row.purpose === 'router');
+      const recent = calls.filter((row) => {
+        const at = Date.parse(row.ts);
+        return !Number.isNaN(at) && now - at <= STREAK_BENCH_MAX_MS;
+      });
+      let streak = 0;
+      while (streak < recent.length && recent[recent.length - 1 - streak].ok === false) streak++;
+      if (streak < FAILURE_STREAK_BENCH) continue;
+      const at = Date.parse(recent[recent.length - 1].ts);
+      const benches = benchRows.filter((row) => /failed calls in a row; rests/.test(String(row.error ?? '')) && now - Date.parse(row.ts) <= STREAK_BENCH_MAX_MS && Date.parse(row.ts) < at).length;
+      const rest = Math.min(STREAK_BENCH_MS * 2 ** benches, STREAK_BENCH_MAX_MS);
+      const until = at + rest;
+      if (until <= now) continue;
+      this.cooldownUntil.set(id, Math.max(this.cooldownUntil.get(id) ?? 0, until));
+      this.cooldownReason.set(id, `${streak} failed calls in a row before the restart; rests ${Math.round(rest / 60000)} min`);
+      if (!restored.includes(id)) restored.push(id);
     }
     return restored;
   }

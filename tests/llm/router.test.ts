@@ -155,6 +155,50 @@ describe('ModelRouter.restoreCooldowns', () => {
   });
 });
 
+describe('ModelRouter.restoreCooldowns failure streak', () => {
+  it('benches a provider whose last 12 rows before the restart all failed, and leaves one with a recent success alone', () => {
+    const now = Date.parse('2026-11-03T13:21:00Z');
+    const p = (id: string) => ({ id, ready: true, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('sambanova'), p('groq')], now: () => now });
+    const failures = (id: string, n: number, end: number) => Array.from({ length: n }, (_, i) => ({ ts: new Date(end - (n - 1 - i) * 60000).toISOString(), provider: id, ok: false, error: `${id} HTTP 429: model is currently experiencing high traffic` }));
+    const rows = [
+      ...failures('sambanova', 12, now - 60000),
+      ...failures('groq', 4, now - 120000),
+      { ts: new Date(now - 30000).toISOString(), provider: 'groq', ok: true, error: undefined },
+    ];
+    expect(router.restoreCooldowns(rows)).toEqual(['sambanova']);
+    expect(router.cooldownUntil.get('sambanova')).toBe(now - 60000 + 30 * 60 * 1000);
+    expect(router.cooldownReason.get('sambanova')).toBe('12 failed calls in a row before the restart; rests 30 min');
+    expect(router.cooldownUntil.has('groq')).toBe(false);
+  });
+
+  it('doubles the restored rest for each earlier streak bench of that provider', () => {
+    const now = Date.parse('2026-11-03T13:21:00Z');
+    const router = new ModelRouter({ providers: [{ id: 'sambanova', ready: true, describe: () => ({}), chat: async () => ({}) }], now: () => now });
+    const rows = [
+      { ts: new Date(now - 3 * 3600 * 1000).toISOString(), provider: 'sambanova', ok: false, purpose: 'router', ms: 0, error: '12 failed calls in a row; rests 30 min' },
+      ...Array.from({ length: 12 }, (_, i) => ({ ts: new Date(now - 60000 - (11 - i) * 60000).toISOString(), provider: 'sambanova', ok: false, error: 'sambanova HTTP 429: model is currently experiencing high traffic' })),
+    ];
+    expect(router.restoreCooldowns(rows)).toEqual(['sambanova']);
+    expect(router.cooldownReason.get('sambanova')).toBe('12 failed calls in a row before the restart; rests 60 min');
+    expect(router.cooldownUntil.get('sambanova')).toBe(now - 60000 + 60 * 60 * 1000);
+  });
+});
+
+describe('ModelRouter dead providers', () => {
+  it('orders a provider with 20 failures and no success in its recent records after a healthy one, even when the route order lists it first', () => {
+    const samba = provider('sambanova', []);
+    const groq = provider('groq', []);
+    const router = new ModelRouter({ providers: [samba, groq], routeOrder: { fast: ['sambanova', 'groq'] } });
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['sambanova', 'groq']);
+    for (let i = 0; i < 20; i++) router.record({ provider: 'sambanova', tier: 'fast', ok: false, ms: 100, error: 'sambanova HTTP 429: model is currently experiencing high traffic' });
+    expect(router.demoteDead([samba, groq]).map((p: { id: string }) => p.id)).toEqual(['groq', 'sambanova']);
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['groq', 'sambanova']);
+    router.record({ provider: 'sambanova', tier: 'fast', ok: true, ms: 100 });
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['sambanova', 'groq']);
+  });
+});
+
 describe('ModelRouter.coolDown', () => {
   it('treats a 402 that states a short retry as a short throttle, not a daily bench', () => {
     const now = Date.parse('2026-10-23T10:00:00Z');
@@ -425,7 +469,7 @@ describe('ModelRouter provider failure streak bench', () => {
     now = router.cooldownUntil.get('sambanova') + 1;
     for (let i = 0; i < 12; i++) {
       if (i) now += 60001;
-      await fail();
+      router.countFailure(samba);
     }
     expect(router.streakBenches.get('sambanova')).toBe(2);
     expect(router.cooldownUntil.get('sambanova')).toBe(now + 60 * 60 * 1000);
