@@ -42,6 +42,20 @@ function passingProject(extra: Record<string, unknown> = {}) {
   };
 }
 
+const car = (url: string, extra: Record<string, unknown> = {}) => ({ url, countryCode: 'PT', value: 10000, ...extra });
+
+function listProject(keptCount: number) {
+  return {
+    id: 'cars',
+    question: 'Which cars should I buy?',
+    candidates: {
+      kept: [car('https://example.test/car-a'), car('https://example.test/car-b'), car('https://example.test/car-c')],
+      keptCount,
+      builtAt: '2026-10-30T06:00:00Z',
+    },
+  };
+}
+
 const finding = (audit: { findings: { id: string }[] }, id: string) => audit.findings.find((f) => f.id === id);
 const withCandidates = (project: ReturnType<typeof passingProject>, patch: Record<string, unknown>) => ({ ...project, candidates: { ...project.candidates, ...patch } });
 
@@ -59,6 +73,16 @@ describe('concept audit', () => {
     const audit = conceptAudit(withCandidates(passingProject(), { keptCount: 3 }), { now: NOW });
     expect(finding(audit, 'C1')).toMatchObject({ severity: 'error', ok: false });
     expect(audit.errors).toBe(1);
+  });
+
+  it('C1: counts list rows without a plan toward the kept count', () => {
+    const audit = conceptAudit(listProject(3), { now: NOW });
+    expect(finding(audit, 'C1')).toMatchObject({ severity: 'error', ok: true, label: 'Only rows that pass every check count', detail: '3 kept row(s) pass every check.' });
+  });
+
+  it('C1: fails when a list research keeps more rows than it counts', () => {
+    const audit = conceptAudit(listProject(5), { now: NOW });
+    expect(finding(audit, 'C1')).toMatchObject({ severity: 'error', ok: false, label: 'Only rows that pass every check count', detail: 'The table shows 5 kept, but 3 row(s) pass every check.' });
   });
 
   it('C2: fails when a fit has a check that is not met', () => {
