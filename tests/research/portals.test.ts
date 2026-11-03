@@ -33,6 +33,36 @@ describe('seed portals', () => {
     ]));
   });
 
+  it('matches car seeds through kind words and filters only the portal whose currency is the brief unit', () => {
+    const carKind = { label: 'used car', terms: ['car', 'auto', 'samochod'] };
+    const seeds = seedPortals({ kind: carKind, regions: ['DE', 'PL', 'CZ'], valueRange: [2000, 4000], unit: 'EUR' });
+    expect(seeds).toHaveLength(3);
+    expect(new Set(seeds.map((s) => s.country))).toEqual(new Set(['DE', 'PL', 'CZ']));
+    expect(new Set(seeds.map((s) => s.url))).toEqual(new Set([
+      'https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000&atype=C',
+      'https://auto.bazos.cz/',
+      'https://www.otomoto.pl/osobowe',
+    ]));
+    expect(seeds.every((s) => s.seed === true)).toBe(true);
+    expect(seeds.some((s) => /pozemk|terreno|pisos/.test(s.url))).toBe(false);
+  });
+
+  it('keeps Czech plot seeds for a plot brief and offers no car seed', () => {
+    const seeds = seedPortals({ kind: { label: 'plot of land', terms: ['land', 'pozemek'] }, regions: ['CZ'] });
+    expect(new Set(seeds.map((s) => s.url))).toEqual(new Set([
+      'https://www.sreality.cz/hledani/prodej/pozemky',
+      'https://www.bezrealitky.cz/vypis/nabidka-prodej/pozemek',
+    ]));
+    expect(seeds.every((s) => s.country === 'CZ')).toBe(true);
+    expect(seeds.some((s) => /bazos|autoscout|otomoto/.test(s.url))).toBe(false);
+  });
+
+  it('reaches pisos seeds through a term even when the label words do not match', () => {
+    const seeds = seedPortals({ kind: { label: 'parcel', terms: ['terreno'] }, regions: ['ES'] });
+    expect(seeds).toHaveLength(8);
+    expect(seeds.every((s) => s.country === 'ES' && s.url.includes('pisos.com'))).toBe(true);
+  });
+
   it('interleaves pages by country so no named country waits behind another', () => {
     const pages = [{ c: 'PT', n: 1 }, { c: 'PT', n: 2 }, { c: 'PT', n: 3 }, { c: 'ES', n: 1 }, { c: 'TR', n: 1 }, { c: 'TR', n: 2 }];
     expect(roundRobin(pages, (p) => p.c).map((p) => `${p.c}${p.n}`)).toEqual(['PT1', 'ES1', 'TR1', 'PT2', 'TR2', 'PT3']);
