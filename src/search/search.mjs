@@ -364,7 +364,7 @@ export class SearchService {
     if (schema) {
       const items = applySchema(body, base, schema);
       if (items.length >= MIN_SCHEMA_ITEMS) Object.assign(found, { items, methods: ['schema'] });
-      else this.recipes.dropSchema(base);
+      else if (found.items.length >= MIN_SCHEMA_ITEMS) this.recipes.dropSchema(base);
     }
     return {
       text: (html ? htmlToText(body) : body.trim()).slice(0, READ_TEXT_LIMIT),

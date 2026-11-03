@@ -131,7 +131,7 @@ export function marketSample(rows, models = []) {
 }
 
 export function factsFor(group, facts, groupFacts = {}) {
-  const known = groupFacts?.[group]?.facts ?? [];
+  const known = (groupFacts?.[group]?.facts ?? []).filter((f) => (f.aspect ?? 'reliability') === 'reliability');
   return known.filter((f) => !f.engine || (facts.engine && plain(facts.engine).startsWith(plain(f.engine).split(' ')[0]) && (!plain(f.engine).split(' ')[1] || plain(facts.engine).includes(plain(f.engine).split(' ')[1]))));
 }
 
@@ -173,9 +173,45 @@ export function valueListing(row, sample, { models = [], groupFacts = {}, condit
   return { ...out, marketValue, underpriced, comparables: nearest.length, valueConfidence: confidence, valueNotes: notes, ...(underpriced >= UNDERPRICED_FROM && !flags.length && confidence !== 'low' ? { highlight: `underpriced: worth about ${marketValue.toLocaleString('en')} ${row.unit ?? ''}`.trim() } : {}) };
 }
 
-export function valueTable(kept, marketRows, { models = [], groupFacts = {}, condition = [] } = {}) {
+export const LIQUID_FROM = 20;
+export const RARE_UNDER = 6;
+export const MIN_STEP_SAMPLE = 10;
+
+export function stepEffects(sample, marketRows, words = []) {
+  const textByUrl = new Map((marketRows ?? []).map((r) => [r.url, textOf(r).all]));
+  return (words ?? []).map((w) => plain(w).trim()).filter((w) => w.length >= 3).map((word) => {
+    const withIt = [];
+    const without = [];
+    for (const [, list] of sample) {
+      const dated = list.filter((r) => r.facts.year !== null);
+      for (const r of dated) {
+        const peers = dated.filter((o) => o !== r && Math.abs(o.facts.year - r.facts.year) <= 1);
+        if (peers.length < MIN_COMPARABLES) continue;
+        const peerMedian = median(peers.map((o) => o.value * Math.exp((list.slopes?.year ?? 0) * (r.facts.year - o.facts.year))));
+        (String(textByUrl.get(r.url) ?? '').includes(word) ? withIt : without).push(r.value / peerMedian);
+      }
+    }
+    const measurable = withIt.length >= MIN_STEP_SAMPLE && without.length >= MIN_STEP_SAMPLE;
+    return { word, with: withIt.length, without: without.length, uplift: measurable ? Math.round((median(withIt) / median(without) - 1) * 1000) / 1000 : null };
+  });
+}
+
+export function resaleOf(row, depth, effects = [], groupFacts = {}) {
+  const { all } = textOf(row);
+  const steps = effects.filter((e) => !all.includes(e.word)).map((e) => ({ step: e.word, uplift: e.uplift, measuredOn: e.uplift === null ? `not measurable on this market (${e.with} with, ${e.without} without; ${MIN_STEP_SAMPLE} each needed)` : `${e.with} with, ${e.without} without` }));
+  const gain = steps.reduce((n, s) => n + (s.uplift && s.uplift > 0 ? s.uplift : 0), 0);
+  const repair = (groupFacts?.[row.group]?.facts ?? []).filter((f) => ['cheap', 'expensive'].includes(f.verdict) && (!f.engine || !row.engine || plain(row.engine).startsWith(plain(f.engine).split(' ')[0])));
+  const tags = [...(depth >= LIQUID_FROM ? [`easy to resell: ${depth} comparable listings on the market`] : []), ...(depth > 0 && depth < RARE_UNDER ? [`rare: only ${depth} comparable listings — may sell slowly`] : []), ...repair.slice(0, 2).map((f) => `${f.verdict} to repair${f.engine ? ` (${f.engine})` : ''}: ${f.note} — ${f.source}`)];
+  if (!Number.isFinite(row.marketValue)) return { marketDepth: depth, resaleTags: tags, valueSteps: steps };
+  const resaleValue = Math.round(row.marketValue * (1 + gain));
+  const resaleGain = resaleValue - row.value;
+  return { marketDepth: depth, resaleTags: tags, valueSteps: steps, resaleValue, resaleGain, resaleScore: Math.round(resaleGain * (depth / (depth + 10))) };
+}
+
+export function valueTable(kept, marketRows, { models = [], groupFacts = {}, condition = [], upgrades = [] } = {}) {
   const sample = marketSample(marketRows, models);
-  const valued = (kept ?? []).map((row) => valueListing(row, sample, { models, groupFacts, condition }));
+  const effects = stepEffects(sample, marketRows, upgrades);
+  const valued = (kept ?? []).map((row) => valueListing(row, sample, { models, groupFacts, condition })).map((row) => ({ ...row, ...resaleOf(row, (sample.get(row.group) ?? []).length, effects, groupFacts) }));
   const rank = (r) => (r.condition ? 3 : !Number.isFinite(r.underpriced) ? 2 : r.valueConfidence === 'low' ? 1 : 0);
   return valued.sort((a, b) => rank(a) - rank(b) || (b.underpriced ?? -Infinity) - (a.underpriced ?? -Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
 }

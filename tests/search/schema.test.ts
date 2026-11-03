@@ -52,7 +52,7 @@ describe('learned site schema on a real bazos page', () => {
 });
 
 describe('page reading with a stored schema', () => {
-  it('uses the site schema first and drops it when it stops finding listings', async () => {
+  it('uses the site schema first and keeps it on a page without listings', async () => {
     const { SearchService } = await import('../../src/search/search.mjs');
     const dropped: string[] = [];
     const recipes = { get: () => null, schemaFor: () => bazos, dropSchema: (url: string) => dropped.push(url) };
@@ -61,7 +61,7 @@ describe('page reading with a stored schema', () => {
     expect(page.methods).toEqual(['schema']);
     expect(page.listings[0].place).toBe('Vsetín 756 23');
     search.parsePage('<html><body>no listings</body></html>', { html: true, base, status: 200 });
-    expect(dropped).toEqual([base]);
+    expect(dropped).toEqual([]);
   });
 });
 
@@ -70,5 +70,19 @@ describe('schema check against the priced generic listings', () => {
     const items = applySchema(html, base, bazos);
     const generic = [...items.map(({ place, attrs, ...rest }) => ({ ...rest, place: '' })), ...items.map((i) => ({ title: i.title, url: `${i.url}?top`, value: null, unit: '', place: '' }))];
     expect(verifySchema(items, generic)).toMatchObject({ ok: true });
+  });
+});
+
+describe('a schema survives pages without listings', () => {
+  it('keeps the schema on an empty or last results page, and drops it only when the page has listings it misses', async () => {
+    const { SearchService } = await import('../../src/search/search.mjs');
+    const dropped: string[] = [];
+    const recipes = { get: () => null, schemaFor: () => bazos, dropSchema: (url: string) => dropped.push(url) };
+    const search = new SearchService({ backends: [], recipes } as never);
+    search.parsePage('<html><body><p>Žádné inzeráty</p></body></html>', { html: true, base, status: 200 });
+    expect(dropped).toEqual([]);
+    const cardsWithoutSchemaShape = Array.from({ length: 5 }, (_, i) => `<div class="card"><a href="/inzerat/22595${i}000/car-${i}.php">Car ${i}</a> <b>${30000 + i} Kč</b></div>`).join('');
+    search.parsePage(`<html><body>${cardsWithoutSchemaShape}</body></html>`, { html: true, base, status: 200 });
+    expect(dropped).toEqual([base]);
   });
 });
