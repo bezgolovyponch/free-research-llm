@@ -16,6 +16,30 @@ describe('value facts calibrated on real ad texts', () => {
     expect(applied).toEqual({ for: ['servisni kniha'], against: ['koroze'], calibratedOn: 5 });
   });
 
+  it('finds phrases in real Czech ads whatever shape the proposals return them in', () => {
+    const ads = [
+      'Škoda Fabia 1.4 16V, r. v. 2007, najeto 168 000 km. Servisní kniha, nové rozvody, 1. majitel, bez koroze.',
+      'Prodám Škodu Fabii 1.2 HTP, r.v. 2008. Servisní kniha doložena, 1. majitel, koroze na prazích.',
+      'Škoda Fabia Combi 1.6, 2009, 132 000 km, nové rozvody ve 120 tkm, servisní kniha.',
+      'Škoda Fabia 1.2, 2008. Koroze na prazích, jinak bez koroze, 1. majitel.',
+      'Škoda Fabia 1.4, 2007, servisní kniha, nové rozvody, bez koroze.',
+    ];
+    const merged = mergeValueFacts([
+      { data: { for: ['„Servisní kniha“', '1. majitel.', 'Nové rozvody', 'bez koroze'], against: ['koroze na prazích'] } },
+      { data: { analysis: { phrases: { for: ['servisni kniha,', '1. majitel', { phrase: 'nové rozvody' }], against: [{ phrase: 'Koroze na prazích' }] } } } },
+      { data: { result: { for: [{ phrase: 'Servisní kniha' }, 'nové rozvody', '1. majitel'], against: ['koroze na prazích.'] } } },
+    ]);
+    expect(merged.for.sort()).toEqual(['1. majitel', 'nove rozvody', 'servisni kniha']);
+    expect(merged.against).toEqual(['koroze na prazich']);
+    expect(applyValueFacts(merged, ads)).toEqual({ for: ['1. majitel', 'nove rozvody', 'servisni kniha'], against: ['koroze na prazich'], calibratedOn: 5 });
+  });
+
+  it('compares quoted, capitalised or punctuated phrases after plain() on both sides', () => {
+    const ads = ['Servisní kniha, 1. majitel.', 'servisni kniha doložena, 1. majitel, nové rozvody', 'nové rozvody', 'koroze na prazích', 'mírná koroze na prazích'];
+    const applied = applyValueFacts({ for: ['"Servisní kniha"', 'Nové rozvody!', '"1. majitel"'], against: ['Koroze na prazích.'] }, ads);
+    expect(applied).toEqual({ for: ['servisni kniha', 'nove rozvody', '1. majitel'], against: ['koroze na prazich'], calibratedOn: 5 });
+  });
+
   it('asks for phrases copied from the ads, for and against value', () => {
     const [system, user] = valueFactsPrompt({ question: 'Which used cars are worth buying?', texts: ['prodám fabii, servisní kniha'] });
     expect(system.content).toContain('"for"');

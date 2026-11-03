@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { listingKey } from '../search/listings.mjs';
 import { plain } from './itemgate.mjs';
 import { factEffects, rankCases, valueCase } from './valuecase.mjs';
@@ -233,7 +234,7 @@ const pct = (slope) => Math.round((Math.exp(slope) - 1) * 1000) / 10;
 
 function adjustmentNote(slopes, facts) {
   const age = slopes.year !== null ? `adjusted to ${facts.year} by ${pct(slopes.year)}% per year of age` : `not adjusted for age: ${slopes.datedPoints} dated listings, ${MIN_SLOPE_POINTS} needed to measure it, so comparables are limited to ±1 year`;
-  const wear = slopes.km === null ? 'not adjusted for mileage (not measurable on this market)' : facts.km === null ? 'not adjusted for mileage (this listing does not state it)' : `adjusted for mileage by ${pct(slopes.km * Math.log(1.1))}% per 10% more km`;
+  const wear = slopes.km === null ? 'not adjusted for use (not measurable on this market)' : facts.km === null ? 'not adjusted for use (this listing does not state it)' : `adjusted for use by ${pct(slopes.km * Math.log(1.1))}% per 10% more km`;
   return `${age}; ${wear}; slopes measured within each model on ${slopes.datedPoints} dated listings (Theil–Sen)`;
 }
 
@@ -247,15 +248,7 @@ function estimateFor(facts, key, group, sample, k = COMPARABLES) {
   return { window, peers: peers.length, eligible: peers, nearest, values, estimate: median(values), slopes };
 }
 
-export const VALUATION_CONCEPTS = [
-  {
-    id: 'used-vehicle',
-    kindWords: ['car', 'cars', 'auto', 'automobile', 'vehicle', 'hatchback', 'sedan', 'estate', 'kombi', 'osobni', 'vuz'],
-    purpose: 'compare a used vehicle with comparable listings: age and mileage drive the price, and the ad states the facts that set it apart',
-    validatedOn: 'research 0c750f, 2026-11-04: 215 dated listings, age and mileage effects measured with the expected sign, interval calibrated on 126 listings',
-    sources: 'Ohta & Griliches 1976; Engers, Hartmann & Stern 2009; Lessmann & Voß 2017; Barber et al. 2021; Blundell et al. 2026',
-  },
-];
+export const VALUATION_CONCEPTS = JSON.parse(readFileSync(new URL('./valueconcepts.json', import.meta.url), 'utf8'));
 
 const kindWordsOf = (kind) => new Set(plain(`${kind?.label ?? ''} ${(kind?.terms ?? []).join(' ')}`).split(/[^a-z0-9]+/).filter(Boolean));
 

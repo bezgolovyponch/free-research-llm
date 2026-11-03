@@ -1,0 +1,9 @@
+[
+  {
+    "id": "used-vehicle",
+    "kindWords": ["car", "cars", "auto", "automobile", "vehicle", "hatchback", "sedan", "estate", "kombi", "osobni", "vuz"],
+    "purpose": "compare a used vehicle with comparable listings: age and mileage drive the price, and the ad states the facts that set it apart",
+    "validatedOn": "research 0c750f, 2026-11-04: 215 dated listings, age and mileage effects measured with the expected sign, interval calibrated on 126 listings",
+    "sources": "Ohta & Griliches 1976; Engers, Hartmann & Stern 2009; Lessmann & Voß 2017; Barber et al. 2021; Blundell et al. 2026"
+  }
+]

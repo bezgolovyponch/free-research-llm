@@ -158,7 +158,16 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 
 Not yet used and the next step: equipment, trim, transmission, body, accident and service history from the ad text, and the listing's time on market (ProbSAINT); they would narrow the interval.
 
-## 7c-model. Where a used car's value comes from and how it changes (sources checked 2026-11-04)
+## 7c-method. Composing an item's value (any kind)
+
+1. State the concept and purpose, and validate them on the research's own data before computing anything.
+2. List the drivers of value from published research and trustworthy statistics, with sources.
+3. Read each item's facts from its own page.
+4. Measure each driver's effect on the market (comparables of the same group, enough with and without).
+5. Accept owner and expert claims only when at least two independent sites agree, with quotes.
+6. Give a calibrated interval (jackknife on the method's own errors) and flag only outside it, saying these are asking prices.
+
+## 7c-example. Example of value composition: used cars (sources checked 2026-11-04)
 
 | Driver | How it moves the value | Trustworthy source | How the engine uses it |
 |---|---|---|---|

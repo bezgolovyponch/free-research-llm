@@ -17,12 +17,42 @@ export function valueFactsPrompt({ question = '', texts = [] }) {
   ];
 }
 
+const EDGE = /[\s"'`„“”‚‘’«»()\[\]{}<>,.;:!?–—-]/;
+
+export function cleanPhrase(value) {
+  const text = plain(typeof value === 'string' ? value : value?.phrase ?? value?.text ?? '');
+  let start = 0;
+  let end = text.length;
+  while (start < end && EDGE.test(text[start])) start++;
+  while (end > start && EDGE.test(text[end - 1])) end--;
+  return text.slice(start, end);
+}
+
+const phraseList = (list) => (Array.isArray(list) ? list.map(cleanPhrase) : list && typeof list === 'object' ? Object.values(list).map(cleanPhrase) : []).filter((x) => x.length >= 4);
+
+function sidesOf(data, depth = 0) {
+  const out = { for: [], against: [] };
+  if (!data || typeof data !== 'object' || depth > 3) return out;
+  if (data.for !== undefined || data.against !== undefined) {
+    out.for = phraseList(data.for);
+    out.against = phraseList(data.against);
+    return out;
+  }
+  for (const value of Object.values(data)) {
+    const inner = sidesOf(value, depth + 1);
+    out.for.push(...inner.for);
+    out.against.push(...inner.against);
+  }
+  return out;
+}
+
 export function mergeValueFacts(replies) {
   const datas = (replies ?? []).map((r) => (r?.data && typeof r.data === 'object' ? r.data : null)).filter(Boolean);
   const need = Math.max(1, Math.ceil(datas.length / 2));
+  const sides = datas.map((d) => sidesOf(d));
   const voted = (side) => {
     const votes = new Map();
-    for (const d of datas) for (const w of new Set((Array.isArray(d[side]) ? d[side] : []).map((x) => plain(String(x)).trim()).filter((x) => x.length >= 4))) votes.set(w, (votes.get(w) ?? 0) + 1);
+    for (const d of sides) for (const w of new Set(d[side])) votes.set(w, (votes.get(w) ?? 0) + 1);
     return [...votes].filter(([, n]) => n >= need).map(([w]) => w);
   };
   return { for: voted('for'), against: voted('against'), samples: datas.length };
@@ -30,9 +60,9 @@ export function mergeValueFacts(replies) {
 
 export function applyValueFacts(merged, texts) {
   const ads = (texts ?? []).map((t) => plain(String(t ?? '')));
-  const seen = (phrase) => ads.filter((t) => t.includes(phrase)).length >= VALUE_FACT_MIN_ADS;
-  const forList = (merged?.for ?? []).filter(seen);
-  const against = (merged?.against ?? []).filter((p) => seen(p) && !forList.includes(p));
+  const seen = (phrase) => phrase.length >= 4 && ads.filter((t) => t.includes(phrase)).length >= VALUE_FACT_MIN_ADS;
+  const forList = [...new Set(phraseList(merged?.for))].filter(seen);
+  const against = [...new Set(phraseList(merged?.against))].filter((p) => seen(p) && !forList.includes(p));
   return { for: forList, against, calibratedOn: ads.length };
 }
 
