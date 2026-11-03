@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MIN_SLOPE_POINTS, adText, conditionOf, listingFacts, marketSample, pooledSlopes, theilSen, valueListing, valueTable } from '../../src/research/valuation.mjs';
+import { MIN_CALIBRATION, MIN_SLOPE_POINTS, adText, calibrate, conditionOf, listingFacts, marketSample, pooledSlopes, theilSen, valueListing, valueTable } from '../../src/research/valuation.mjs';
 import { verifiedGroupFacts } from '../../src/research/engine.mjs';
 
 describe('facts a listing states', () => {
@@ -37,19 +37,34 @@ describe('market value from comparable listings', () => {
     expect(thin.km).toBeNull();
   });
 
-  it('values a listing from other listings of nearby years as a rounded range and flags it only below three of four comparables', () => {
+  it('values a listing from other listings of nearby years and flags it only below an interval calibrated on the method\'s own errors (jackknife)', () => {
     const sample = marketSample(market, ['dacia sandero']);
-    const row = valueListing(ad('Dacia Sandero 2009 165000 km', 25000, 9), sample, { models: ['dacia sandero'] });
+    const calibration = calibrate(sample);
+    expect(calibration.n).toBeGreaterThanOrEqual(MIN_CALIBRATION);
+    const row = valueListing(ad('Dacia Sandero 2009 165000 km', 25000, 9), sample, { models: ['dacia sandero'], calibration });
     expect(row.marketValue! % 1000).toBe(0);
     expect(row.marketRange![0]).toBeLessThanOrEqual(row.marketValue!);
     expect(row.marketRange![1]).toBeGreaterThanOrEqual(row.marketValue!);
     expect(Math.abs(row.marketValue! - priced(2009, 165000))).toBeLessThan(5000);
     expect(row.valueConfidence).toBe('high');
-    expect(row.highlight).toMatch(/^asks less than 3 of 4 comparable listings/);
-    expect(row.valueNotes[0]).toMatch(/^asking prices of 7 other dacia sandero listings from 20(07|08)–20(10|11)/);
-    expect(row.valueNotes[1]).toMatch(/per year of age/);
-    const fair = valueListing(ad('Dacia Sandero 2009 165000 km', priced(2009, 165000), 8), sample, { models: ['dacia sandero'] });
+    expect(row.highlight).toMatch(/^asks below the 80% interval of comparable asking prices/);
+    expect(row.valueNotes.join(' ')).toContain('Annals of Statistics 49(1), 2021');
+    expect(row.valueNotes.join(' ')).toContain('lemons penalty');
+    const fair = valueListing(ad('Dacia Sandero 2009 165000 km', priced(2009, 165000), 8), sample, { models: ['dacia sandero'], calibration });
     expect(fair.highlight).toBeUndefined();
+  });
+
+  it('flags nothing when the market\'s own errors are as wide as the gap, or when too few listings calibrate the interval', () => {
+    const noisy = market.map((r, i) => ({ ...r, value: Math.round(r.value * (i % 2 ? 1.8 : 0.55)) }));
+    const sample = marketSample(noisy, ['dacia sandero']);
+    const row = valueListing(ad('Dacia Sandero 2009 165000 km', Math.round(priced(2009, 165000) * 0.6), 9), sample, { models: ['dacia sandero'], calibration: calibrate(sample) });
+    expect(row.highlight).toBeUndefined();
+    const thin = marketSample(market.slice(0, 20), ['dacia sandero']);
+    const few = calibrate(thin);
+    expect(few.low).toBeNull();
+    const unflagged = valueListing(ad('Dacia Sandero 2009 165000 km', 5000, 9), thin, { models: ['dacia sandero'], calibration: few });
+    expect(unflagged.highlight).toBeUndefined();
+    expect(unflagged.marketRange).toBeUndefined();
   });
 
   it('never counts a listing as its own comparable, even when the market holds copies of it', () => {
@@ -57,7 +72,7 @@ describe('market value from comparable listings', () => {
     const clean = valueListing(row, marketSample(market, ['dacia sandero']), { models: ['dacia sandero'] });
     const copies = valueListing(row, marketSample([...market, row, row, { ...row, url: `${row.url}?ref=list` }], ['dacia sandero']), { models: ['dacia sandero'] });
     expect(copies.marketValue).toBe(clean.marketValue);
-    expect(copies.marketRange).toEqual(clean.marketRange);
+    expect(copies.underpriced).toEqual(clean.underpriced);
   });
 
   it('gives no value without the listing year or without five dated comparables of nearby years', () => {
@@ -91,7 +106,7 @@ describe('market value from comparable listings', () => {
     const table = valueTable(rows, market, { models: ['dacia sandero'], condition: ['na dojezdeni'] });
     expect(table.map((r) => r.value)).toEqual([30000, 15000]);
     expect(table[1].highlight).toBeUndefined();
-    expect(table[1].valueNotes).toContain('condition stated in the listing: na dojezdeni — the price reflects it, so it is not shown as underpriced');
+    expect(table[1].valueNotes).toContain('condition stated in the listing: na dojezdeni — the price reflects it, so it is not flagged');
   });
 
   it('shows quoted owner and expert facts with their source but never changes the value with them', () => {

@@ -5,8 +5,6 @@ export const COMPARABLES = 7;
 export const MIN_COMPARABLES = 5;
 export const YEAR_WINDOW = 2;
 export const MIN_SLOPE_POINTS = 30;
-export const LOW_QUANTILE = 0.25;
-export const HIGH_QUANTILE = 0.75;
 export const VALUE_ROUNDING = 1000;
 const MAD_CUT = 2.5;
 const MAD_CONSISTENCY = 1.4826;
@@ -114,13 +112,6 @@ function median(values) {
   const sorted = [...values].sort((x, y) => x - y);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-export function quantile(values, q) {
-  const sorted = [...values].sort((x, y) => x - y);
-  const at = (sorted.length - 1) * q;
-  const low = Math.floor(at);
-  return sorted[low] + (sorted[Math.min(low + 1, sorted.length - 1)] - sorted[low]) * (at - low);
 }
 
 const MAX_PAIRS = 20000;
@@ -242,7 +233,40 @@ function adjustmentNote(slopes, facts) {
   return `${age}; ${wear}; slopes measured within each model on ${slopes.datedPoints} dated listings (Theil–Sen)`;
 }
 
-export function valueListing(row, sample, { models = [], groupFacts = {}, condition = [], k = COMPARABLES, pageFacts = null } = {}) {
+function estimateFor(facts, key, group, sample, k = COMPARABLES) {
+  const slopes = sample.slopes ?? { year: null, km: null, datedPoints: 0, kmPoints: 0 };
+  const window = slopes.year === null ? 1 : YEAR_WINDOW;
+  const peers = (sample.get(group) ?? []).filter((p) => p.key !== key && !p.flagged && p.facts.year !== null && Math.abs(p.facts.year - facts.year) <= window && !(facts.fuel && p.facts.fuel && p.facts.fuel !== facts.fuel));
+  if (peers.length < MIN_COMPARABLES) return { window, peers: peers.length };
+  const nearest = peers.map((p) => ({ ...p, d: distance(facts, p.facts) })).sort((a, b) => a.d - b.d).slice(0, k);
+  const values = nearest.map((p) => adjusted(p, facts, slopes));
+  return { window, peers: peers.length, nearest, values, estimate: median(values), slopes };
+}
+
+export const MISCOVERAGE = 0.2;
+export const MIN_CALIBRATION = 30;
+export const JACKKNIFE_SOURCE = 'jackknife prediction interval: Barber, Candès, Ramdas, Tibshirani, Annals of Statistics 49(1), 2021';
+export const LEMONS_NOTE = 'asking prices, not sale prices; a low asking price can reflect hidden quality the ad does not state (lemons penalty about 12% of the price: Blundell et al., Quantitative Economics 17(1), 2026); inspect before buying';
+
+export function calibrate(sample) {
+  const residuals = [];
+  for (const [group, list] of sample) {
+    for (const r of list) {
+      if (r.flagged || r.facts.year === null) continue;
+      const fit = estimateFor(r.facts, r.key, group, sample);
+      if (fit.estimate) residuals.push(Math.log(r.value / fit.estimate));
+    }
+  }
+  const n = residuals.length;
+  if (n < MIN_CALIBRATION) return { n, low: null, high: null };
+  const sorted = residuals.sort((a, b) => a - b);
+  const lowRank = Math.floor((MISCOVERAGE / 2) * (n + 1));
+  const highRank = Math.ceil((1 - MISCOVERAGE / 2) * (n + 1));
+  if (lowRank < 1 || highRank > n) return { n, low: null, high: null };
+  return { n, low: sorted[lowRank - 1], high: sorted[highRank - 1] };
+}
+
+export function valueListing(row, sample, { models = [], groupFacts = {}, condition = [], k = COMPARABLES, pageFacts = null, calibration = null } = {}) {
   const facts = factsOf(row, pageFacts);
   const group = groupOf(row, models);
   const key = keyOf(row);
@@ -250,26 +274,25 @@ export function valueListing(row, sample, { models = [], groupFacts = {}, condit
   const out = { ...row, ...facts, group, ...(flags.length ? { condition: flags } : {}) };
   if (!group || !Number.isFinite(row.value) || row.value <= 0) return out;
   if (facts.year === null) return { ...out, valueNotes: ['no value: the listing does not state its year, and age drives the price'] };
-  const slopes = sample.slopes ?? { year: null, km: null, datedPoints: 0, kmPoints: 0 };
-  const window = slopes.year === null ? 1 : YEAR_WINDOW;
-  const peers = (sample.get(group) ?? []).filter((p) => p.key !== key && !p.flagged && p.facts.year !== null && Math.abs(p.facts.year - facts.year) <= window && !(facts.fuel && p.facts.fuel && p.facts.fuel !== facts.fuel));
-  if (peers.length < MIN_COMPARABLES) return { ...out, valueNotes: [`no value: ${peers.length} other ${group} listing(s) state a year within ±${window} of ${facts.year}; ${MIN_COMPARABLES} are needed`] };
-  const nearest = peers.map((p) => ({ ...p, d: distance(facts, p.facts) })).sort((a, b) => a.d - b.d).slice(0, k);
-  const values = nearest.map((p) => adjusted(p, facts, slopes));
-  const estimate = median(values);
-  const low = quantile(values, LOW_QUANTILE);
-  const high = quantile(values, HIGH_QUANTILE);
+  const fit = estimateFor(facts, key, group, sample, k);
+  if (!fit.estimate) return { ...out, valueNotes: [`no value: ${fit.peers} other ${group} listing(s) state a year within ±${fit.window} of ${facts.year}; ${MIN_COMPARABLES} are needed`] };
+  const { nearest, estimate, slopes } = fit;
   const years = nearest.map((p) => p.facts.year);
   const unit = row.unit ?? '';
+  const calibrated = calibration && calibration.low !== null && calibration.high !== null;
+  const low = calibrated ? estimate * Math.exp(calibration.low) : null;
+  const high = calibrated ? estimate * Math.exp(calibration.high) : null;
   const notes = [`asking prices of ${nearest.length} other ${group} listings from ${Math.min(...years)}–${Math.max(...years)}: ${rounded(Math.min(...nearest.map((p) => p.value))).toLocaleString('en')}–${rounded(Math.max(...nearest.map((p) => p.value))).toLocaleString('en')} ${unit}`.trim(), adjustmentNote(slopes, facts)];
-  if (flags.length) notes.push(`condition stated in the listing: ${flags.join(', ')} — the price reflects it, so it is not shown as underpriced`);
+  notes.push(calibrated ? `${Math.round((1 - MISCOVERAGE) * 100)}% interval from this method's own errors on ${calibration.n} listings of this market, each valued without itself (${JACKKNIFE_SOURCE})` : `no calibrated interval: only ${calibration?.n ?? 0} listings could be valued without themselves, ${MIN_CALIBRATION} are needed; nothing is flagged`);
+  notes.push(LEMONS_NOTE);
+  if (flags.length) notes.push(`condition stated in the listing: ${flags.join(', ')} — the price reflects it, so it is not flagged`);
   for (const f of factsFor(group, facts, groupFacts).slice(0, 3)) notes.push(`${f.verdict}${f.engine ? ` (${f.engine})` : ''}: ${f.note} — "${f.quote}" (${f.source}); a quoted fact, not used in the value`);
   const kmCompared = facts.km !== null && nearest.filter((p) => p.facts.km !== null).length >= MIN_COMPARABLES;
-  const confidence = nearest.length >= COMPARABLES && kmCompared && slopes.year !== null ? 'high' : 'medium';
+  const confidence = calibrated && nearest.length >= COMPARABLES && kmCompared && slopes.year !== null ? 'high' : 'medium';
   const marketValue = rounded(estimate);
-  const marketRange = [rounded(low), rounded(high)];
-  const below = row.value < low && kmCompared && !flags.length;
-  return { ...out, marketValue, marketRange, underpriced: Math.round((estimate / row.value) * 100) / 100, comparables: nearest.length, valueConfidence: confidence, valueNotes: notes, ...(below ? { highlight: `asks less than 3 of 4 comparable listings: ${row.value.toLocaleString('en')} ${unit} against ${marketRange.map((v) => v.toLocaleString('en')).join('–')} ${unit} (asking prices, adjusted)`.replace(/\s+/g, ' ').trim() } : {}) };
+  const marketRange = calibrated ? [rounded(low), rounded(high)] : null;
+  const below = calibrated && row.value < low && !flags.length;
+  return { ...out, marketValue, ...(marketRange ? { marketRange } : {}), underpriced: Math.round((estimate / row.value) * 100) / 100, comparables: nearest.length, valueConfidence: confidence, valueNotes: notes, ...(below ? { highlight: `asks below the ${Math.round((1 - MISCOVERAGE) * 100)}% interval of comparable asking prices: ${row.value.toLocaleString('en')} ${unit} against ${marketRange.map((v) => v.toLocaleString('en')).join('–')} ${unit}; check for hidden faults`.replace(/\s+/g, ' ').trim() } : {}) };
 }
 
 export const LIQUID_FROM = 20;
@@ -311,7 +334,8 @@ export function valueTable(kept, marketRows, { models = [], groupFacts = {}, con
   const facts = pageFacts instanceof Map ? pageFacts : new Map(Object.entries(pageFacts ?? {}));
   const sample = marketSample(marketRows, models, { pageFacts: facts, condition });
   const effects = stepEffects(sample, marketRows, upgrades);
-  const valued = (kept ?? []).map((row) => valueListing(row, sample, { models, groupFacts, condition, pageFacts: facts })).map((row) => ({ ...row, ...resaleOf(row, (sample.get(row.group) ?? []).length, effects, groupFacts) }));
+  const calibration = calibrate(sample);
+  const valued = (kept ?? []).map((row) => valueListing(row, sample, { models, groupFacts, condition, pageFacts: facts, calibration })).map((row) => ({ ...row, ...resaleOf(row, (sample.get(row.group) ?? []).length, effects, groupFacts) }));
   const rank = (r) => (r.condition ? 3 : !Number.isFinite(r.underpriced) ? 2 : r.valueConfidence === 'low' ? 1 : 0);
   return valued.sort((a, b) => rank(a) - rank(b) || (b.underpriced ?? -Infinity) - (a.underpriced ?? -Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
 }

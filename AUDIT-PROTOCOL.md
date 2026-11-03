@@ -76,6 +76,7 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | A19 | Identification pieces were dropped for an item no portal lists, and supplier pages abroad were dropped for not naming the shop's country (wholesale suppliers b2f5b7, 2026-11-03: 3 weak pieces left, nothing to find the suppliers) | `listedKind`, `brief.located`; PROTOCOLS 4m |
 | A20 | "20 direct links" gave no item count, so the decision model was built after the tree | `itemCountFromWords` allows two describing words |
 | A21 | Car values were artefacts (verified 2026-11-04 on 0c750f): each listing was in its own comparables and every comparable counted twice (market rows had no URL); 90% of listings had no year because only titles were read; slopes came from 2–9 points (Ibiza +73%/year); a Fabia I was valued from a 2013 Fabia II; a +10/−15% assumption changed values; values were one listing's asking price shown as "worth". Rebuilt from titles only, 0 of 235 could be valued | `readListingFacts`, `adText`; `marketSample` dedupe by `listingKey`; `pooledSlopes` (≥ 30 dated); ±2-year comparables, ≥ 5; P25–P75 range; flag below P25 only; calibration check: 25 / 45 / 30 of 100 below / inside / above |
+| A22 | A "bargain" flag from the comparables' own spread (P25), with no coverage guarantee; the published method (jackknife on the method's own errors) gives an 80% interval of 0.47–1.51 × the estimate on 0c750f and flags none (2026-11-04) | `calibrate`; PROTOCOLS 7c-sources |
 
 ### B · Evidence and gates
 | # | Failure | How it is caught |
