@@ -282,3 +282,14 @@ describe('C18 for kinds not sold on listing portals', () => {
     expect(c18({ ...base, brief: { located: false } })).toBeUndefined();
   });
 });
+
+describe('C20 listing rules on a kind no portal lists', () => {
+  it('fails when such a research still has a candidate table or rejects items as not a listing page', () => {
+    const base = { id: 'x', phase: 'researching', acceptance: { itemCount: 20 }, brief: { located: false } };
+    const c20 = (p: Record<string, unknown>) => conceptAudit(p).findings.find((f: { id: string }) => f.id === 'C20');
+    expect(c20({ ...base, candidates: { kept: [], keptCount: 0 } })?.ok).toBe(false);
+    expect(c20({ ...base, nodes: [{ id: 'D1', finding: { rejected: [{ reasons: ['not a single listing page'] }] } }] })?.ok).toBe(false);
+    expect(c20({ ...base, nodes: [] })?.ok).toBe(true);
+    expect(c20({ ...base, brief: { located: true } })).toBeUndefined();
+  });
+});
