@@ -48,7 +48,7 @@ export function withoutOwningRows(project) {
 const FACT_FIELDS = [
   ['underpriced', (r) => (Number.isFinite(r.underpriced) ? r.underpriced : '')],
   ['market value', (r) => r.marketValue],
-  ['comparables range', (r) => (r.marketRange ? r.marketRange.join('–') : '')],
+  ['80% interval', (r) => (r.marketRange ? r.marketRange.join('–') : '')],
   ['value confidence', (r) => r.valueConfidence],
   ['highlight', (r) => r.highlight],
   ['condition', (r) => (r.condition ?? []).join(', ')],
