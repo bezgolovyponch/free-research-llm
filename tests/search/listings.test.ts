@@ -3,6 +3,11 @@ import { coordsOf, extractListings, pagePlace, fromCards, fromEmbeddedJson, from
 
 const BASE = 'https://portal.example/land-for-sale';
 const CZ_BASE = 'https://www.sreality.cz/hledani/prodej/pozemky';
+const DE_BASE = 'https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000';
+
+function embedded(records: unknown[]) {
+  return `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { listings: records } } })}</script>`;
+}
 
 function card(id: number, title: string, price: string, area = '') {
   return `<div class="card"><a href="/listing/plot-${id}-u${id}000000"><img src="/i/${id}.jpg"></a><a href="/listing/plot-${id}-u${id}000000">${title}</a><p>${price}</p>${area ? `<span>${area}</span>` : ''}<a href="/agent/7">Agent</a></div>`;
@@ -127,6 +132,35 @@ describe('listing extraction', () => {
       lon: 13.867084,
     });
     expect(items[0].lat).toBeCloseTo(50.372607, 5);
+  });
+
+  it('reads autoscout24 listing prices from priceRaw and infers the currency from priceFormatted', () => {
+    const listing = (id: string, slug: string, priceRaw: number, priceFormatted: string) => ({
+      url: `/angebote/${slug}-${id}`,
+      id,
+      price: { priceFormatted, priceEvaluation: 1, priceRaw, isConditionalPrice: false },
+      tracking: { price: String(priceRaw) },
+      vehicle: { make: 'Peugeot', model: '208' },
+    });
+    const records = [
+      listing('d0b6741d-3dd5-47ce-804b-718ffdbb7507', 'peugeot-208-tuev-7-27-2-zonen-leder-tempo-pdc-diesel-silber-cat_ma55gr201150ge1074va3624mt3255tr480648', 2999, '€ 2.999'),
+      listing('5f1c2a9e-1b0d-4a3c-9e2f-7d6b8c0a1e23', 'seat-leon-1-5-tsi-xcellence-led-shz-kamera-tempomat-silber-cat_ma55gr201150ge1074va3624mt3255tr480649', 3499, '€ 3.499'),
+      listing('8a7b6c5d-4e3f-2a1b-9c8d-7e6f5a4b3c2d', 'ford-focus-1-0-ecoboost-st-line-navi-pdc-blau-cat_ma55gr201150ge1074va3624mt3255tr480650', 3899, '€ 3.899'),
+    ];
+    const items = fromEmbeddedJson(embedded(records), DE_BASE);
+    expect(items.map((i) => i.value)).toEqual([2999, 3499, 3899]);
+    expect(items.map((i) => i.unit)).toEqual(['EUR', 'EUR', 'EUR']);
+    expect(items.map((i) => i.url)).toEqual(records.map((r) => `https://www.autoscout24.de${r.url}`));
+    expect(items.every((i) => new URL(i.url).hostname === 'www.autoscout24.de')).toBe(true);
+  });
+
+  it('reads a złoty price from priceFormatted when the record states no currency field', () => {
+    const records = [1, 2, 3].map((n) => ({
+      url: `/angebote/skoda-octavia-1-5-tsi-${n}-0b6741d-3dd5-47ce-804b-718ffdbb750${n}`,
+      price: { priceFormatted: 'zł 12 500', priceRaw: 12500, isConditionalPrice: false },
+    }));
+    const items = fromEmbeddedJson(embedded(records), 'https://www.autoscout24.pl/lst?pricefrom=10000&priceto=20000');
+    expect(items.map((i) => [i.value, i.unit])).toEqual([[12500, 'PLN'], [12500, 'PLN'], [12500, 'PLN']]);
   });
 
   it('keeps the listing anchor titles when the page title is script code', () => {

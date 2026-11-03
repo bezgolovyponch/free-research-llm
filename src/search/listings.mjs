@@ -40,13 +40,35 @@ function numberOf(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+const CURRENCY_TEXT_KEYS = ['priceFormatted', 'formatted', 'display'];
+const CURRENCY_HINTS = [[/€|\bEUR\b/i, 'EUR'], [/zł|\bPLN\b/i, 'PLN'], [/Kč|\bCZK\b/i, 'CZK'], [/£|\bGBP\b/i, 'GBP'], [/\bFt\b|\bHUF\b/i, 'HUF']];
+
+function currencyIn(text) {
+  if (typeof text !== 'string') return '';
+  for (const [hint, code] of CURRENCY_HINTS) if (hint.test(text)) return code;
+  return '';
+}
+
+function currencyOf(record) {
+  for (const key of CURRENCY_TEXT_KEYS) {
+    const found = currencyIn(record[key]);
+    if (found) return found;
+  }
+  for (const [key, text] of Object.entries(record)) {
+    if (!key.endsWith('Formatted')) continue;
+    const found = currencyIn(text);
+    if (found) return found;
+  }
+  return '';
+}
+
 function priceOf(value, depth = 0) {
   if (value === null || value === undefined || depth > 3) return null;
   if (Array.isArray(value)) return value.map((v) => priceOf(v, depth + 1)).find(Boolean) ?? null;
   if (typeof value === 'object') {
-    const amount = numberOf(value.value ?? value.amount ?? value.price ?? value.lowPrice ?? value.total ?? null);
+    const amount = numberOf(value.value ?? value.amount ?? value.price ?? value.lowPrice ?? value.total ?? value.priceRaw ?? value.raw ?? null);
     const currency = clean(value.currency ?? value.currencyCode ?? value.priceCurrency ?? '', 8).toUpperCase();
-    if (amount !== null && amount > 0) return { value: amount, unit: currency };
+    if (amount !== null && amount > 0) return { value: amount, unit: currency || currencyOf(value) };
     for (const [key, inner] of Object.entries(value)) if (PRICE_KEY.test(key) || key === 'priceSpecification') {
       const found = priceOf(inner, depth + 1);
       if (found) return found;
