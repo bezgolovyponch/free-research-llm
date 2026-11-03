@@ -14,7 +14,7 @@ import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
-import { buildBrief, describeBrief, onConcept } from './brief.mjs';
+import { buildBrief, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
@@ -273,13 +273,33 @@ export class ResearchEngine {
     const model = project.decisionModel ?? null;
     const kind = template.itemKind ?? (model?.kind?.terms?.length ? { label: model.kind.label, terms: model.kind.terms } : null);
     const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: { ...template, itemKind: kind } });
+    if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
     project.brief = { ...brief, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
+  async ensureArea(project) {
+    if (!this.sites?.areaCountries) return project.area ?? null;
+    const want = radiusIn(`${project.question ?? ''} ${project.acceptance?.expected ?? ''}`);
+    if (!want) return project.area ?? null;
+    const held = project.area;
+    if (held && held.km === want.km && String(held.place ?? '').toLowerCase() === want.place.toLowerCase()) return held;
+    try {
+      const area = await this.sites.areaCountries(want.place, want.km);
+      if (!area) return project.area ?? null;
+      project.area = area;
+      this.emit(project, 'decision', `area: within ${want.km} km of ${want.place} -> ${area.countries.join(', ')}`);
+      return area;
+    } catch (error) {
+      this.emit(project, 'warn', `area not measured: ${String(error?.message ?? error).slice(0, 160)}`);
+      return project.area ?? null;
+    }
+  }
+
   async ensureDecisionModel(project) {
+    await this.ensureArea(project);
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
     try {
       const model = await this.modeler.build(project);

@@ -79,6 +79,19 @@ export function nearestKm(lat, lon, points) {
   return best === Infinity ? null : round(best);
 }
 
+export function destinationPoint(lat, lon, bearing, km) {
+  const rad = Math.PI / 180;
+  const degrees = 180 / Math.PI;
+  const angle = bearing * rad;
+  const arc = km / 6371;
+  const phi = lat * rad;
+  const lambda = lon * rad;
+  const toPhi = Math.asin(Math.sin(phi) * Math.cos(arc) + Math.cos(phi) * Math.sin(arc) * Math.cos(angle));
+  const toLambda = lambda + Math.atan2(Math.sin(angle) * Math.sin(arc) * Math.cos(phi), Math.cos(arc) - Math.sin(phi) * Math.sin(toPhi));
+  const toLon = (((toLambda * degrees + 540) % 360) + 360) % 360 - 180;
+  return { lat: toPhi * degrees, lon: toLon };
+}
+
 export function siteKey(lat, lon) {
   return `${(Math.round(lat * 50) / 50).toFixed(2)},${(Math.round(lon * 50) / 50).toFixed(2)}`;
 }
@@ -352,6 +365,44 @@ export class SiteAssessor {
     this.store.places[key] = { at: this.now(), point };
     this.persist();
     return point;
+  }
+
+  async reverseCountry(lat, lon) {
+    const key = `rev|${lat.toFixed(2)}|${lon.toFixed(2)}`;
+    const known = this.store.places[key];
+    if (this.fresh(known)) return known.point;
+    const wait = this.lastGeocode + GEOCODE_GAP_MS - this.now();
+    if (wait > 0) await this.sleep(wait);
+    this.lastGeocode = this.now();
+    const found = await this.fetchJson(`${NOMINATIM_URL.replace(/\/search$/, '')}/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`);
+    const code = String(found?.address?.country_code ?? '').toUpperCase();
+    const point = code || null;
+    this.store.places[key] = { at: this.now(), point };
+    this.persist();
+    return point;
+  }
+
+  async areaCountries(place, km) {
+    const point = await this.geocode(place);
+    if (!point) return null;
+    const codes = new Set();
+    const sample = async (lat, lon) => {
+      try {
+        const code = await this.reverseCountry(lat, lon);
+        if (code) codes.add(code);
+      } catch {
+        return;
+      }
+    };
+    await sample(point.lat, point.lon);
+    for (let i = 0; i < 16; i++) {
+      const bearing = i * 22.5;
+      for (const distance of [km, km / 2]) {
+        const at = destinationPoint(point.lat, point.lon, bearing, distance);
+        await sample(at.lat, at.lon);
+      }
+    }
+    return { point, km, place, countries: [...codes].sort() };
   }
 
   async locate(row, readPage) {

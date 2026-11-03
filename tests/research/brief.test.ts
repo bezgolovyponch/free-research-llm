@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, regionsIn, sourceCountry } from '../../src/research/brief.mjs';
+import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, radiusIn, regionsIn, sourceCountry } from '../../src/research/brief.mjs';
 
 const kind = { label: 'plot of land', terms: ['land', 'terreno'] };
 const plots = buildBrief({
@@ -81,6 +81,21 @@ describe('concept brief', () => {
     expect(isNewsPage('https://portal.example/anuncio/terreno-ID1abcd')).toBe(false);
     expect(mentionsCoast({ url: 'https://famalo.example/zemljiste-100-m-od-mora-14501', title: 'Zemljište' })).toBe(true);
     expect(mentionsCoast({ url: 'https://imo.example/terreno-coimbra-ID1abcd', title: 'Terreno Urbano Coimbra' })).toBe(false);
+  });
+});
+
+describe('a distance around a place', () => {
+  it('reads the radius and the place from "within", "<n> km of/from/around" and "up to"', () => {
+    expect(radiusIn('I want a hatchback to purchase within 300km from prague, hatchback under 15000 EUR')).toEqual({ km: 300, place: 'prague' });
+    expect(radiusIn('land 300 km from Prague')).toEqual({ km: 300, place: 'Prague' });
+    expect(radiusIn('a plot 50km around Brno, not far from the motorway')).toEqual({ km: 50, place: 'Brno' });
+    expect(radiusIn('up to 75 km of Vienna and its villages')).toEqual({ km: 75, place: 'Vienna' });
+  });
+
+  it('has no radius when the place is not a place or no distance is given', () => {
+    expect(radiusIn('plots at most 10 km from the sea')).toBeNull();
+    expect(radiusIn('find land in Portugal')).toBeNull();
+    expect(radiusIn('within 10 km')).toBeNull();
   });
 });
 

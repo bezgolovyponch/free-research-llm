@@ -357,6 +357,34 @@ describe('ResearchEngine', () => {
     expect(rewards).toEqual([[[project.id], project.acceptanceResult.score]]);
   });
 
+  it('turns the place and radius a question names into the countries the brief uses as regions', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
+    const asked: Array<[string, number]> = [];
+    engine.sites = { areaCountries: async (place: string, km: number) => { asked.push([place, km]); return { point: { lat: 50.07, lon: 14.44 }, km, place, countries: ['AT', 'CZ', 'DE', 'PL'] }; } } as never;
+    const project = await engine.createProject({ question: 'Find a hatchback to purchase within 300km from prague, hatchback under 15000 EUR', templateId: 'generic', expected: '3 hatchbacks within 300km from prague' });
+    await engine.ensureDecisionModel(project);
+    expect(asked).toEqual([['prague', 300]]);
+    expect(project.area).toMatchObject({ km: 300, place: 'prague', countries: ['AT', 'CZ', 'DE', 'PL'] });
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message === 'area: within 300 km of prague -> AT, CZ, DE, PL')).toBe(true);
+    const brief = engine.briefOf(project);
+    expect(brief.regions).toEqual(['AT', 'CZ', 'DE', 'PL']);
+    expect(brief.text).toContain('Where: Austria, Czechia, Germany, Poland');
+    await engine.ensureDecisionModel(project);
+    expect(asked).toHaveLength(1);
+  });
+
+  it('warns and leaves the area unset when the places in the radius cannot be geocoded', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
+    engine.sites = { areaCountries: async () => { throw new Error('HTTP 503 from nominatim.openstreetmap.org'); } } as never;
+    const project = await engine.createProject({ question: 'Find a hatchback to purchase within 300km from prague', templateId: 'generic' });
+    await engine.ensureDecisionModel(project);
+    expect(project.area).toBeUndefined();
+    expect(engine.briefOf(project).regions).toEqual([]);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'warn' && l.message === 'area not measured: HTTP 503 from nominatim.openstreetmap.org')).toBe(true);
+  });
+
   it('builds the decision model right after decompose learns the expected item count, so the brief lists pages instead of a memo', async () => {
     const proposal = { concept: 'used cars within budget', kind: { label: 'used car', terms: ['car', 'used car'] }, criteria: [{ clause: 'under 50000 EUR', measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000 EUR' }] };
     const builds: Array<{ itemCount: number | null }> = [];
