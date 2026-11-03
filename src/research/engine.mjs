@@ -3,7 +3,7 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, normalizeAcceptance } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, itemCountFromWords, normalizeAcceptance } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -222,6 +222,10 @@ export class ResearchEngine {
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
     await this.store.save(project);
     const template = templateById(project.templateId);
+    if (!project.acceptance?.locked && !project.acceptance?.itemCount) {
+      const asked = itemCountFromWords(project.acceptance?.expected, project.question);
+      if (typeof asked === 'number') project.acceptance = { ...project.acceptance, itemCount: asked };
+    }
     await this.ensureDecisionModel(project);
     const ask = async (feedback) => {
       const reply = await this.router.complete({
