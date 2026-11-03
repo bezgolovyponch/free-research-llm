@@ -357,6 +357,49 @@ describe('ResearchEngine', () => {
     expect(rewards).toEqual([[[project.id], project.acceptanceResult.score]]);
   });
 
+  it('calibrates the item kind on the swept titles when few titles use its words, once, and passes the sub-type to the brief', async () => {
+    const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
+    const router = { complete: async (req: { purpose: string; tier: string; messages: Array<{ role: string; content: string }> }) => {
+      calls.push(req);
+      return { provider: 'p', data: { not: ['kola', 'svetlo', 'pneumatiky', 'naraznik'], subtype: { label: 'hatchback', models: ['fabia', 'corsa', 'polo'] } } };
+    } };
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) } as never);
+    const listing = (n: number, title: string) => ({ title, url: `https://auto.bazos.cz/inzerat/auto-${n}-ID1${String(10000 + n)}`, value: 50000 + n, unit: 'CZK' });
+    const project: Record<string, any> = {
+      id: 'calibration-1',
+      question: 'Find used hatchback cars within 300 km of Prague, 65000 CZK max',
+      guidance: '',
+      templateId: 'generic',
+      acceptance: { itemCount: 2, valueRange: [0, 65000], unit: 'CZK' },
+      nodes: [],
+      log: [],
+      decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts'], verified: { titles: 10, matched: 1, share: 0.1 } }, criteria: [], noLimit: [], missing: [] },
+      sweep: { pages: [{ id: 'P1', url: 'https://auto.bazos.cz/skoda/', listings: [
+        listing(1, 'Alu kola 215x65R16'),
+        listing(2, 'ALU KOLA 15" Škoda'),
+        listing(3, 'Levé zadní světlo Honda Accord 7g'),
+        listing(4, 'Zadní světlo Škoda Fabia'),
+        listing(5, 'Použité pneumatiky 205/55 R16'),
+        listing(6, 'Letní pneumatiky Michelin'),
+        listing(7, 'Matky hliníkové lehké'),
+        listing(8, 'ŠKODA FABIA II COMFORT 2008'),
+        listing(9, 'Opel Corsa 1.2'),
+        listing(10, 'Škoda Octavia 1.9 TDI'),
+      ] }] },
+    };
+    await engine.collectCandidates(project as never, { sweep: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ purpose: 'decision-model', tier: 'deep' });
+    expect(JSON.stringify(calls[0].messages)).toContain('Alu kola 215x65R16');
+    expect(project.decisionModel.kind.not).toEqual(['parts', 'kola', 'svetlo', 'pneumatiky']);
+    expect(project.decisionModel.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa'], source: 'model proposal, matched to listing titles by code' });
+    expect(project.decisionModel.calibrated).toBeTruthy();
+    expect(project.brief.subtype).toEqual(project.decisionModel.subtype);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && /^kind calibrated on 10 titles: not parts, kola, svetlo, pneumatiky; hatchback: 2 models$/.test(l.message))).toBe(true);
+    await engine.collectCandidates(project as never, { sweep: true });
+    expect(calls).toHaveLength(1);
+  });
+
   it('turns the place and radius a question names into the countries the brief uses as regions', async () => {
     const router = new ModelRouter({ providers: [new ScriptedProvider()] });
     const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });

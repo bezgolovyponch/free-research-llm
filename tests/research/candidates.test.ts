@@ -93,6 +93,21 @@ describe('candidate table', () => {
     expect(plain.screened).toEqual({ 'not a used car': 1 });
   });
 
+  it('sends a row whose title and url show no model of the asked sub-type to "to check", and keeps a row that does', () => {
+    const carBrief = buildBrief({ question: 'Used hatchbacks within 300 km of Prague, 65000 CZK max', acceptance: { expected: '2 used cars', itemCount: 2, valueRange: [0, 65000], unit: 'CZK' }, template: { itemKind: { label: 'used car', terms: ['skoda'] } } });
+    const subtype = { label: 'hatchback', models: ['fabia', 'corsa'], source: 'model proposal, matched to listing titles by code' };
+    const nodes = [{ id: 'D1', sources: [{ id: 'S1', url: 'https://auto.bazos.cz/skoda/', listings: [
+      { title: 'ŠKODA FABIA II COMFORT 2008', url: 'https://auto.bazos.cz/inzerat/skoda-fabia-ii-2008-ID1aaaa', value: 55000, unit: 'CZK' },
+      { title: 'Škoda Octavia 1.9 TDI', url: 'https://auto.bazos.cz/inzerat/skoda-octavia-1-9-ID1bbbb', value: 60000, unit: 'CZK' },
+    ] }] }];
+    const out = buildCandidates(nodes, { ...carBrief, subtype }, {});
+    expect(out.kept.map((r: { title: string }) => r.title)).toEqual(['ŠKODA FABIA II COMFORT 2008']);
+    expect(out.toCheck.map((r: { title: string; toCheck: string }) => [r.title, r.toCheck])).toEqual([['Škoda Octavia 1.9 TDI', 'not shown to be a hatchback']]);
+    const without = buildCandidates(nodes, carBrief, {});
+    expect(without.keptCount).toBe(2);
+    expect(without.toCheckCount).toBe(0);
+  });
+
   it('counts a row toward the result only when it still fits every check and the verifier confirmed it', () => {
     const confirmed = { verdict: 'confirmed', failed: [], at: '2026-10-26T18:00:00Z' };
     const stale = {

@@ -1,6 +1,6 @@
 import { currencyOf } from './acceptance.mjs';
 import { countryByCode, isNewsPage, itemCountry, mentionsCoast } from './brief.mjs';
-import { screenItem } from './itemgate.mjs';
+import { plain, screenItem } from './itemgate.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { explorePoints } from './site.mjs';
 import { pricePerM2Medians } from './strategy.mjs';
@@ -11,6 +11,11 @@ export const MAX_SCREENED_EXAMPLES = 30;
 export const MAX_OUTSIDE = 150;
 const OUTSIDE_REASON = /^in .*, outside the asked regions$/;
 export const MIN_PLAUSIBLE_SHARE = 0.01;
+
+const hasWord = (text, word) => {
+  const term = plain(word).trim();
+  return Boolean(term) && new RegExp(`(?:^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(text);
+};
 
 function rowsFrom(nodes) {
   const rows = [];
@@ -51,6 +56,11 @@ export function screenCandidate(row, brief, options = {}) {
   if (read !== null && value === null) missing.push(`price read as ${row.value} ${row.unit}, too low to be the asking price`);
   else if (value === null) missing.push('price not shown');
   if (brief?.regions?.length && !country.code) missing.push('country not shown');
+  const subtype = brief?.subtype;
+  if (subtype?.models?.length) {
+    const offer = plain(`${row.title ?? ''} ${row.url ?? ''}`);
+    if (!subtype.models.some((model) => hasWord(offer, model))) missing.push(`not shown to be a ${subtype.label}`);
+  }
   return { reasons, missing, country, value };
 }
 

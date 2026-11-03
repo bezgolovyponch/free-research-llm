@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyModel, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
+import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyCalibration, applyModel, calibrationPrompt, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
 import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
 
 const question = 'Find plots for a glamping site under 30000 EUR, at most 15 km from the sea, hottest month under 29 °C, with a strong price trend';
@@ -191,6 +191,54 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
   it('keeps no model when fewer than two proposals came back', async () => {
     const router = { complete: async () => { throw new Error('down'); } };
     expect(await new DecisionModeler({ router }).build({ id: 'x', question })).toBeNull();
+  });
+});
+
+describe('item kind calibrated on real listing titles', () => {
+  const titles = [
+    'Alu kola 215x65R16',
+    'ALU KOLA 15" Škoda',
+    'Levé zadní světlo Honda Accord 7g',
+    'Zadní světlo Škoda Fabia',
+    'Použité pneumatiky 205/55 R16',
+    'Letní pneumatiky Michelin',
+    'Matky hliníkové lehké',
+    'Karburátor škoda',
+    'ŠKODA FABIA II COMFORT 2008',
+    'VW FOX 1,2 2009 BENZÍN',
+    'Peugeot 208',
+    'Opel Corsa',
+    'Mazda 6',
+    'Škoda Octavia',
+  ];
+  const kind = { label: 'used car', terms: ['hatchback'], not: ['parts'] };
+  const proposal = { data: { not: ['kola', 'svetlo', 'pneumatiky', 'naraznik'], subtype: { label: 'hatchback', models: ['fabia', 'corsa', '208', 'polo'] } } };
+
+  it('asks for the words that mark things which are not the item and for the models of the asked sub-type', () => {
+    const messages = calibrationPrompt({ kind, question: 'Find used hatchbacks near Prague', titles });
+    const system = messages[0].content;
+    const user = messages[1].content;
+    expect(system).toContain('"not"');
+    expect(system).toContain('"subtype"');
+    expect(system).toContain('"models"');
+    expect(system).toContain('Copy words exactly as they appear in the titles');
+    expect(user).toContain('Levé zadní světlo Honda Accord 7g');
+    expect(user).toContain('ŠKODA FABIA II COMFORT 2008');
+  });
+
+  it('keeps a not word only when 2 or more titles use it, and a model only when 1 or more titles show it', () => {
+    const out = applyCalibration(kind, proposal, titles);
+    expect(out.kind).toEqual({ label: 'used car', terms: ['hatchback'], not: ['parts', 'kola', 'svetlo', 'pneumatiky'] });
+    expect(out.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa', '208'], source: 'model proposal, matched to listing titles by code' });
+  });
+
+  it('drops every proposal no title confirms and returns no sub-type without a confirmed model', () => {
+    const out = applyCalibration(kind, { not: ['naraznik'], subtype: { label: 'hatchback', models: ['polo'] } }, titles);
+    expect(out.kind.not).toEqual(['parts']);
+    expect(out.subtype).toBeNull();
+    const none = applyCalibration(kind, null, titles);
+    expect(none.kind.not).toEqual(['parts']);
+    expect(none.subtype).toBeNull();
   });
 });
 
