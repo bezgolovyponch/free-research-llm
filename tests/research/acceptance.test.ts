@@ -140,3 +140,13 @@ describe('prices in more currencies and scales', () => {
     expect(parseAmounts('Tlaxcala 5 and title 7')).toEqual([]);
   });
 });
+
+describe('item count with describing words', () => {
+  it('reads a count when up to two words describe the noun, and the noun can be a company kind', () => {
+    expect(itemCountFromWords('20 direct links to the providers with proposal and proof')).toBe(20);
+    expect(itemCountFromWords('12 verified wholesale suppliers')).toBe(12);
+    expect(itemCountFromWords('a list of 8 clothing companies')).toBe(8);
+    expect(itemCountFromWords('5 year old cars under 3000 EUR')).toBeNull();
+    expect(itemCountFromWords('cars within 300 km of Prague')).toBeNull();
+  });
+});

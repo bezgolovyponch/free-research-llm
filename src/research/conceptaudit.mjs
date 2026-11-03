@@ -154,7 +154,7 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
     add('C17', 'A list research knows what item it lists', 'warn', Boolean(label), label ? `Item kind: ${label}.` : 'no item kind: the research prompts ask for a decision memo instead of listing pages');
   }
 
-  if (Number(p.acceptance?.itemCount) > 0 && Array.isArray(p.nodes)) {
+  if (Number(p.acceptance?.itemCount) > 0 && Array.isArray(p.nodes) && p.brief?.located !== false) {
     const leaves = p.nodes.filter((n) => !p.nodes.some((m) => m.parentId === n.id));
     const ids = leaves.filter((n) => listingWork(n.question)).map((n) => n.id);
     add('C18', 'A list research leaves per-listing work to code', 'warn', !ids.length, ids.length ? `${ids.length} piece(s) do per-listing work code should do: ${ids.slice(0, 6).join(', ')}` : 'No piece does per-listing work.');

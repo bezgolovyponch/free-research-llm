@@ -73,6 +73,8 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | A16 | Table columns labelled € for CZK values | columns carry no currency; each value shows its unit |
 | A17 | Communities and expert sources never searched; knowledge pieces asked in generic English (12 of 14 weak) | `planKnowledgeQueries` |
 | A18 | "Underpriced" claimed on thin facts: ad dates read as model years, comparables of other years unadjusted, parts priced like cars (witness 2026-11-03: a 2006 car 'worth' 55,000 CZK) | `listingFacts` date rules; Theil–Sen adjustment; no value without year or mileage; highlight only at medium or high confidence |
+| A19 | Identification pieces were dropped for an item no portal lists, and supplier pages abroad were dropped for not naming the shop's country (wholesale suppliers b2f5b7, 2026-11-03: 3 weak pieces left, nothing to find the suppliers) | `listedKind`, `brief.located`; PROTOCOLS 4m |
+| A20 | "20 direct links" gave no item count, so the decision model was built after the tree | `itemCountFromWords` allows two describing words |
 
 ### B · Evidence and gates
 | # | Failure | How it is caught |

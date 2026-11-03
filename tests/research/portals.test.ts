@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { roundRobin, SEED_PORTALS, seedPortals } from '../../src/research/portals.mjs';
+import { listedKind, roundRobin, SEED_PORTALS, seedPortals } from '../../src/research/portals.mjs';
 
 const kind = { label: 'plot of land', terms: ['terreno'] };
 
@@ -105,5 +105,14 @@ describe('seed portals', () => {
   it('interleaves pages by country so no named country waits behind another', () => {
     const pages = [{ c: 'PT', n: 1 }, { c: 'PT', n: 2 }, { c: 'PT', n: 3 }, { c: 'ES', n: 1 }, { c: 'TR', n: 1 }, { c: 'TR', n: 2 }];
     expect(roundRobin(pages, (p) => p.c).map((p) => `${p.c}${p.n}`)).toEqual(['PT1', 'ES1', 'TR1', 'PT2', 'TR2', 'PT3']);
+  });
+});
+
+describe('listedKind', () => {
+  it('knows a kind sold on listing portals from the seed portals, in any country', () => {
+    expect(listedKind({ label: 'used car', terms: ['car', 'hatchback'] })).toBe(true);
+    expect(listedKind({ label: 'plot of land', terms: ['plot'] })).toBe(true);
+    expect(listedKind({ label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing', 'used clothing wholesale'] })).toBe(false);
+    expect(listedKind(null)).toBe(false);
   });
 });
