@@ -792,6 +792,45 @@ describe('ResearchEngine', () => {
     expect(synthesized).toBe(false);
   });
 
+  it('stops a piece in flight when cancelled, leaving that piece pending', async () => {
+    const scripted = new ScriptedProvider();
+    const calls: string[] = [];
+    let projectId = '';
+    let piece = '';
+    let cancelled = false;
+    let engine: ResearchEngine;
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        const nodeId = /SUB-QUESTION (\S+):/.exec(prompt)?.[1] ?? '';
+        if (prompt.includes(TASK_MARKERS.research)) {
+          calls.push(`research:${nodeId}`);
+          if (!cancelled) {
+            cancelled = true;
+            piece = nodeId;
+            engine.cancel(projectId);
+          }
+        } else if (prompt.includes(TASK_MARKERS.critique)) {
+          calls.push(`critique:${nodeId}`);
+        }
+        return scripted.chat(args as never);
+      },
+    };
+    const made = engineWith(provider, fakeSearch, 1);
+    engine = made.engine;
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    projectId = project.id;
+    const stopped = await engine.run(project.id);
+    expect(stopped.phase).toBe('cancelled');
+    expect(piece).not.toBe('');
+    expect(calls).toEqual([`research:${piece}`]);
+    expect(stopped.nodes.find((n: { id: string }) => n.id === piece)?.status).toBe('pending');
+    expect(stopped.report).toBeNull();
+  });
+
   it('regrades finished pieces whose answers say the evidence does not settle them, and rewrites the memo from the current pieces on request', async () => {
     const { engine } = engineWith(new ScriptedProvider());
     const project = await engine.createProject({ question: 'Should I import e-bikes from Germany to Czechia?' });

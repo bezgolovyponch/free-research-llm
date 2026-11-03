@@ -45,6 +45,7 @@ export const CALIBRATION_TITLES = 60;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
+export class ResearchCancelled extends Error {}
 
 function calibrationTitles(pages, max = CALIBRATION_TITLES) {
   const lists = (pages ?? []).map((page) => (page.listings ?? []).map((listing) => String(listing.title ?? '')).filter(Boolean));
@@ -546,6 +547,7 @@ export class ResearchEngine {
   }
 
   async searchGaps(project, node) {
+    this.throwIfCancelled(project);
     if (!this.search?.enabled || !node.finding) return;
     const queries = followUpQueries(node, node.finding, [...node.searchQueries, ...(node.followUpQueries ?? [])]);
     if (!queries.length) return;
@@ -563,6 +565,7 @@ export class ResearchEngine {
   }
 
   async correctiveSearch(project, node) {
+    this.throwIfCancelled(project);
     if (!this.search?.enabled) return;
     const queries = [...new Set([node.question, `${node.title} ${node.metric ?? ''}`.trim()].filter(Boolean))].filter((q) => !(node.searchQueries ?? []).includes(q));
     if (!queries.length) return;
@@ -579,7 +582,8 @@ export class ResearchEngine {
     return node.dependsOn.map((id) => byId.get(id)).filter((n) => n?.finding).map((n) => ({ id: n.id, status: n.status, answer: n.finding.answer, keyNumbers: keyNumbers(n.finding) }));
   }
 
-  async critique(node, finding, sources, avoid) {
+  async critique(project, node, finding, sources, avoid) {
+    this.throwIfCancelled(project);
     try {
       const reply = await this.router.complete({ purpose: 'critique', tier: 'fast', avoid, messages: critiquePrompt({ node, finding, sources }) });
       const critique = normalizeCritique(reply.data);
@@ -600,18 +604,20 @@ export class ResearchEngine {
     }
   }
 
-  async voteOnQuote(claim, quote, author, context = '') {
+  async voteOnQuote(project, claim, quote, author, context = '') {
     const shown = context || quote;
+    this.throwIfCancelled(project);
     const first = await this.supportVote('support', 'deep', author, claim.text, shown);
+    this.throwIfCancelled(project);
     const second = await this.supportVote('support-second', 'fast', first?.provider ?? author, claim.text, shown);
     return supportRecord({ votes: [first, second].filter(Boolean), term: termCheck(claim.text, shown) });
   }
 
-  async checkClaimSupport(node, claim, author) {
-    let record = await this.voteOnQuote(claim, claim.quote, author, contextOf(claim.quote, node.sources ?? [], claim.sourceIds ?? []));
+  async checkClaimSupport(project, node, claim, author) {
+    let record = await this.voteOnQuote(project, claim, claim.quote, author, contextOf(claim.quote, node.sources ?? [], claim.sourceIds ?? []));
     const found = toConfirm(record) ? resolveFromSources(claim, node.sources ?? []) : null;
     if (found) {
-      const retry = await this.voteOnQuote(claim, found.quote, author);
+      const retry = await this.voteOnQuote(project, claim, found.quote, author);
       if (retry.verdict === 'supported') {
         Object.assign(claim, { quote: found.quote, sourceIds: [found.sourceId] });
         record = { ...retry, resolvedFrom: found.sourceId };
@@ -621,11 +627,16 @@ export class ResearchEngine {
   }
 
   async checkSupport(project, node, finding, author) {
+    this.throwIfCancelled(project);
     const claims = claimsToCheck(finding, node);
-    for (let i = 0; i < claims.length; i += SUPPORT_PARALLEL) await Promise.all(claims.slice(i, i + SUPPORT_PARALLEL).map((claim) => this.checkClaimSupport(node, claim, author)));
+    for (let i = 0; i < claims.length; i += SUPPORT_PARALLEL) await Promise.all(claims.slice(i, i + SUPPORT_PARALLEL).map((claim) => this.checkClaimSupport(project, node, claim, author)));
     const open = claims.filter((c) => toConfirm(c.support)).length;
     if (claims.length) this.emit(project, 'node', `${node.id}: meaning checked for ${claims.length} claim(s), ${open} to confirm`, { nodeId: node.id });
     return { checked: claims.length, open };
+  }
+
+  throwIfCancelled(project) {
+    if (this.cancelled.has(project.id)) throw new ResearchCancelled();
   }
 
   async researchLeaf(project, node, hint) {
@@ -652,6 +663,7 @@ export class ResearchEngine {
       const tier = attempt === 1 ? 'fast' : 'deep';
       if (attempt > 1) await this.searchGaps(project, node);
       const { shown } = this.rankSources(project, node);
+      this.throwIfCancelled(project);
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
@@ -660,7 +672,7 @@ export class ResearchEngine {
       const finding = await this.withHarvest(project, node, await this.screenFinding(project, normalizeFinding(reply.data)));
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
       const retryAnyway = needsEscalation(mechanical) && attempt < MAX_ATTEMPTS;
-      const critique = retryAnyway ? null : await this.critique(node, finding, shown, reply.provider);
+      const critique = retryAnyway ? null : await this.critique(project, node, finding, shown, reply.provider);
       if (!retryAnyway) await this.checkSupport(project, node, finding, reply.provider);
       const verification = retryAnyway ? mechanical : verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
@@ -932,10 +944,13 @@ export class ResearchEngine {
               node.sources = compactSources(node.sources).sources;
             } else await this.rollup(project, node);
           } catch (error) {
-            node.status = 'failed';
-            node.error = error.message;
-            this.emit(project, 'error', `${node.id}: ${error.message}`, { nodeId: node.id });
-            if (/no model provider|cooling down/.test(error.message)) throw error;
+            if (error instanceof ResearchCancelled) node.status = 'pending';
+            else {
+              node.status = 'failed';
+              node.error = error.message;
+              this.emit(project, 'error', `${node.id}: ${error.message}`, { nodeId: node.id });
+              if (/no model provider|cooling down/.test(error.message)) throw error;
+            }
           }
           await this.store.save(project);
         },
