@@ -28,11 +28,25 @@ describe('termCheck', () => {
 
 describe('affectsResult', () => {
   it('counts claims with numbers, values, calculation inputs and deciding pieces', () => {
-    expect(affectsResult({ text: 'Pitches cost €20 a night' })).toBe(true);
+    expect(affectsResult({ text: 'Pitches cost €20 a night' }, { answer: 'Pitches cost €20 a night.' })).toBe(true);
     expect(affectsResult({ text: 'Rent is cheap', value: 12 })).toBe(true);
     expect(affectsResult({ text: 'Camping needs municipal approval' }, {}, { method: 'analysis' })).toBe(false);
     expect(affectsResult({ text: 'Camping needs municipal approval' }, {}, { method: 'analysis', decides: true })).toBe(true);
     expect(affectsResult({ text: 'Camping needs municipal approval' }, {}, { method: 'calculation' })).toBe(true);
+  });
+
+  it('ignores digits that do not reach the result', () => {
+    const claim = { text: 'The carlist.com hatchback page is geo-targeted to a US ZIP code (29415), i.e. it is not a Czech marketplace.' };
+    expect(affectsResult(claim, { answer: 'Sauto.cz and Bazos.cz list hatchbacks near Prague.' })).toBe(false);
+    expect(affectsResult({ text: 'The page has ZIP 29415' })).toBe(false);
+  });
+
+  it('counts a claim whose number appears in the answer', () => {
+    expect(affectsResult({ text: 'Median price is 61,500 CZK' }, { answer: 'The median asking price is 61,500 CZK' })).toBe(true);
+  });
+
+  it('counts a numeric claim value', () => {
+    expect(affectsResult({ text: 'The route has stops', value: 3 }, { answer: 'There are three stops.' })).toBe(true);
   });
 
   it('skips assumptions', () => {
@@ -97,7 +111,7 @@ describe('claimsToCheck', () => {
       { text: 'Camping needs approval', attributed: true },
       ...Array.from({ length: 8 }, (_, i) => ({ text: `Fee ${i + 1} €`, attributed: true })),
     ];
-    const picked = claimsToCheck({ claims }, { method: 'analysis' });
+    const picked = claimsToCheck({ answer: 'Fees are 1, 2, 3, 4, 5, 6, 7 and 8 euros.', claims }, { method: 'analysis' });
     expect(picked).toHaveLength(MAX_SUPPORT_CLAIMS);
     expect(picked[0].text).toBe('Fee 1 €');
   });
@@ -110,7 +124,7 @@ describe('roll-up pieces', () => {
     expect(quotesOtherPieces(rollup)).toBe(true);
     expect(isStale(claim, { claims: [claim] }, rollup)).toBe(false);
     expect(claimsToCheck({ claims: [claim] }, rollup)).toEqual([]);
-    expect(isStale(claim, { claims: [claim] }, { id: 'D2', sources: [{ id: 'S1', kind: 'web' }] })).toBe(true);
+    expect(isStale(claim, { answer: 'margin 300', claims: [claim] }, { id: 'D2', sources: [{ id: 'S1', kind: 'web' }] })).toBe(true);
   });
 });
 
@@ -134,8 +148,8 @@ describe('supportAudit', () => {
   it('queues disagreements first and counts claims checked under older logic', () => {
     const support = (verdict) => ({ version: SUPPORT_LOGIC_VERSION, verdict, votes: [], missing: [], cause: `• ${verdict}` });
     const nodes = [
-      { id: 'D1', finding: { claims: [{ text: 'Fee €1', attributed: true, support: support('unchecked') }, { text: 'Fee €2', attributed: true, support: support('unsupported') }] } },
-      { id: 'D2', finding: { claims: [{ text: 'Fee €3', attributed: true, support: support('disagree') }, { text: 'Fee €4', attributed: true, support: support('supported') }, { text: 'Fee €5', attributed: true }, { text: 'Fee €6', attributed: true, support: { ...support('supported'), version: 1 } }] } },
+      { id: 'D1', decides: true, finding: { claims: [{ text: 'Fee €1', attributed: true, support: support('unchecked') }, { text: 'Fee €2', attributed: true, support: support('unsupported') }] } },
+      { id: 'D2', decides: true, finding: { claims: [{ text: 'Fee €3', attributed: true, support: support('disagree') }, { text: 'Fee €4', attributed: true, support: support('supported') }, { text: 'Fee €5', attributed: true }, { text: 'Fee €6', attributed: true, support: { ...support('supported'), version: 1 } }] } },
       { id: 'D3', finding: null },
     ];
     const audit = supportAudit(nodes);
@@ -167,6 +181,6 @@ describe('live-data fixes', () => {
 
   it('counts only claims inside the per-piece cap as stale', () => {
     const claims = Array.from({ length: 9 }, (_, i) => ({ text: `Fee ${i + 1} €`, attributed: true }));
-    expect(supportAudit([{ id: 'D1', finding: { claims } }]).stale).toBe(MAX_SUPPORT_CLAIMS);
+    expect(supportAudit([{ id: 'D1', decides: true, finding: { claims } }]).stale).toBe(MAX_SUPPORT_CLAIMS);
   });
 });
