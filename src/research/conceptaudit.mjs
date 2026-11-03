@@ -1,3 +1,4 @@
+import { countsTowardResult } from './candidates.mjs';
 import { supportAudit } from './support.mjs';
 import { TEMPLATES } from './templates.mjs';
 import { listingWork } from './treeaudit.mjs';
@@ -40,10 +41,17 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
 
   if (c && kept && typeof c.keptCount === 'number') {
     const outside = Boolean(c.verification);
-    const counted = outside ? fits.filter((r) => r?.verified?.verdict === 'confirmed').length : fits.length;
+    const planned = kept.some((r) => r?.plan);
+    const counted = kept.filter((r) => countsTowardResult(r, c)).length;
     const ok = c.keptCount === counted;
-    const what = outside ? 'fit every check and are confirmed' : 'fit every check';
-    add('C1', 'Only plots that fit every check and are confirmed count', 'error', ok, ok ? `${counted} kept plot(s) ${what}.` : `The table shows ${c.keptCount} kept, but ${counted} plot(s) ${what}.`);
+    if (!planned) {
+      const label = 'Only rows that pass every check count';
+      const what = 'pass every check';
+      add('C1', label, 'error', ok, ok ? `${counted} kept row(s) ${what}.` : `The table shows ${c.keptCount} kept, but ${counted} row(s) ${what}.`);
+    } else {
+      const what = outside ? 'fit every check and are confirmed' : 'fit every check';
+      add('C1', 'Only plots that fit every check and are confirmed count', 'error', ok, ok ? `${counted} kept plot(s) ${what}.` : `The table shows ${c.keptCount} kept, but ${counted} plot(s) ${what}.`);
+    }
   }
 
   if (c && kept) {
