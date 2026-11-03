@@ -63,6 +63,8 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | A6 | Checks the user never asked for (sea check on an inland Czech question, #64, #68) | `askedCriteria` tests; verifier `obligationsOf` tests |
 | A7 | An asked country never reaches the table (Vietnam: no readable land portal) | C13 and the lease alert says so |
 | A8 | Fits hidden by a stale cached record (cached site without climate index, 2026-10-27) | witness on a copy before deploy (S7) |
+| A9 | A list research outside the plot flow delivered nothing and the audit said nothing (cars, 2026-11-03: 0 of 10 links) | C15, C17 |
+| A10 | A research kept a removed template (car-arbitrage, removed 2026-10-20) | C16 |
 
 ### B · Evidence and gates
 | # | Failure | How it is caught |
