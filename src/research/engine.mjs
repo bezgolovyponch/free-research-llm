@@ -227,7 +227,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({
         purpose: 'decompose',
         tier: 'deep',
-        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback }), project.guidance),
+        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback, listsItems: Boolean(project.acceptance?.itemCount) }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
       repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
@@ -557,6 +557,8 @@ export class ResearchEngine {
     }
     this.emit(project, 'node', `${node.id}: ${node.sources.length} source(s) from ${new Set(node.sources.filter((x) => x.url).map((x) => hostOf(x.url))).size} site(s), analysing`, { nodeId: node.id });
     let failures = [];
+    const brief = project.brief ?? this.briefOf(project);
+    const alreadyListed = project.candidates?.kept?.length || project.candidates?.toCheck?.length ? `\nListings already found and read by code (do not search for listings again; use these when the piece is about them):\n${shortlistText(project.candidates, 15)}` : '';
     const retrieval = this.rankSources(project, node);
     if (retrieval.verdict === 'incorrect' || retrieval.verdict === 'none') await this.correctiveSearch(project, node);
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -566,7 +568,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
-        messages: withGuidance(researchPrompt({ question: project.question, node, sources: shown, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected, brief: (project.brief ?? this.briefOf(project)).text }), project.guidance),
+        messages: withGuidance(researchPrompt({ question: project.question, node, sources: shown, upstream: this.upstreamFor(project, node), previousFailures: failures, hint, expected: project.acceptance?.expected, brief: brief.text + alreadyListed }), project.guidance),
       });
       const finding = await this.withHarvest(project, node, await this.screenFinding(project, normalizeFinding(reply.data)));
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
@@ -806,6 +808,20 @@ export class ResearchEngine {
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       this.regrade(project);
       this.monitorPass(project);
+      const stopped = async () => {
+        project.phase = 'cancelled';
+        release();
+        this.emit(project, 'phase', 'stopped by user');
+        if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
+        return await this.store.save(project);
+      };
+      const listingsFirst = Boolean(project.acceptance?.itemCount && this.search?.readPage && !this.demo);
+      if (listingsFirst) {
+        this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
+        await this.collectCandidates(project, { sweep: true });
+        await this.store.save(project);
+        if (this.cancelled.has(id)) return await stopped();
+      }
       this.emit(project, 'phase', 'researching sub-questions in dependency order');
       await this.store.save(project);
       const byId = new Map(project.nodes.map((n) => [n.id, n]));
@@ -834,15 +850,9 @@ export class ResearchEngine {
           await this.store.save(project);
         },
       });
-      if (this.cancelled.has(id)) {
-        project.phase = 'cancelled';
-        release();
-        this.emit(project, 'phase', 'stopped by user');
-        if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
-        return await this.store.save(project);
-      }
+      if (this.cancelled.has(id)) return await stopped();
       try {
-        await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
+        await this.collectCandidates(project, { sweep: listingsFirst ? false : sweep ?? !this.quiet.has(id) });
       } catch (error) {
         this.emit(project, 'warn', `candidate table not built: ${error.message}`);
       }
