@@ -106,3 +106,20 @@ describe('router ranking', () => {
     expect([familyOf('openai/gpt-oss-120b'), familyOf('gpt-oss-120b'), familyOf('gemini-3.8-flash'), familyOf('DeepSeek-V3.2'), familyOf('x', 'p')]).toEqual(['gpt-oss', 'gpt-oss', 'gemini', 'deepseek', 'p']);
   });
 });
+
+describe('providers that never answered', () => {
+  it('ranks a provider whose calls all failed after ones that answered and never reserves it, whatever its prior', () => {
+    const ps = [
+      { id: 'puter', label: 'Puter', state: 'ready', deep: 'gpt-5.4-nano', fast: 'gemini-3.5-flash-lite', coolingDownMs: 0 },
+      { id: 'fcc', label: 'fcc', state: 'ready', deep: 'claude-opus-5-5', fast: 'claude-haiku-4-5', coolingDownMs: 0 },
+      { id: 'pollinations', label: 'Pollinations', state: 'ready', deep: 'openai-fast', fast: 'openai-fast', coolingDownMs: 0 },
+    ];
+    const stats = providerStats([...calls('puter', 'deep', 1, 500, false, 'puter HTTP 402: A subscription is required'), ...calls('fcc', 'deep', 6, 9000), ...calls('pollinations', 'deep', 6, 40000)], { now });
+    const plan = purposePlan({ providers: ps, stats, enabled: ps.map((p) => p.id) });
+    expect(plan.reserved).not.toBe('puter');
+    expect(plan.orders.top.at(-1)).toBe('puter');
+    expect(plan.orders.research.at(-1)).toBe('puter');
+    const rows = rankRole({ role: 'deep', strategy: 'balanced', providers: ps, stats });
+    expect(rows.at(-1).id).toBe('puter');
+  });
+});

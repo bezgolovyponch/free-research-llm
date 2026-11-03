@@ -320,3 +320,12 @@ describe('AnthropicMessagesProvider (fcc proxy)', () => {
   });
 });
 
+describe('call timeout of a proxy provider', () => {
+  it('gives fcc its own longer call timeout, because it queues behind remote models with its own retries', () => {
+    const fccPreset = PROVIDER_PRESETS.find((p) => p.id === 'fcc')!;
+    const fcc = new AnthropicMessagesProvider({ preset: fccPreset, fetchImpl: fakeFetch([]) });
+    expect(fcc.timeoutFor(6000, 800)).toBe(240000);
+    const groq = new OpenAICompatibleProvider({ preset: PROVIDER_PRESETS.find((p) => p.id === 'groq')!, apiKey: 'k', fetchImpl: fakeFetch([]) });
+    expect(groq.timeoutFor(6000, 800)).toBeUndefined();
+  });
+});

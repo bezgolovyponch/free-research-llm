@@ -188,6 +188,7 @@ export const PROVIDER_PRESETS = [
     prefer: { fast: ['claude-haiku-4-5', 'claude-haiku'], deep: ['claude-opus-5-5', 'claude-opus'] },
     fallbackModels: { fast: 'claude-haiku-4-5-20251001', deep: 'claude-opus-5-5' },
     maxOutputTokens: 16000,
+    callTimeoutMs: 240000,
     thinking: false,
   },
 ];

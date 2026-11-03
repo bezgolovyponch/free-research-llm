@@ -233,7 +233,7 @@ export class OpenAICompatibleProvider {
 
   timeoutFor(promptTokens, outTokens) {
     const seconds = this.estimateSeconds(promptTokens, outTokens);
-    if (seconds === null) return undefined;
+    if (seconds === null) return this.preset.callTimeoutMs;
     return Math.min(LOCAL_TIMEOUT_MAX_MS, Math.max(LOCAL_TIMEOUT_MIN_MS, Math.round(seconds * 1500 + 10000)));
   }
 
