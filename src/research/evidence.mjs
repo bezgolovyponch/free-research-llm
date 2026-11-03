@@ -66,6 +66,16 @@ export function evidenceQuery(node, brief = null) {
   return [node.title, node.question, node.metric, ...(brief?.kind?.terms ?? []).slice(0, 4)].filter(Boolean).join(' ');
 }
 
+const TOPIC_STOP = new Set('with from that this which what have does there their about into each most more than when where list lists site sites'.split(' '));
+
+export function topicCoverage(source, query) {
+  const wanted = new Set(tokens(query).filter((t) => t.length >= 4 && !TOPIC_STOP.has(t)));
+  const present = new Set(tokens(`${source?.title ?? ''} ${source?.snippet ?? ''} ${source?.text ?? ''}`));
+  let found = 0;
+  for (const term of wanted) if (present.has(term)) found++;
+  return found;
+}
+
 export function retrievalVerdict(ranked) {
   const web = ranked.filter((s) => s.kind !== 'data' && s.url);
   const useful = web.filter((s) => s.relevance > 0);

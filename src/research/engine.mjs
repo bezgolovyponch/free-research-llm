@@ -21,7 +21,7 @@ import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strateg
 import { applyModel, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
-import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence } from './evidence.mjs';
+import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
@@ -296,7 +296,11 @@ export class ResearchEngine {
     const kept = sources.filter((s) => onConcept(s, brief));
     const dropped = sources.length - kept.length;
     if (dropped) this.emit(project, 'node', `${node.id}: ${dropped} source(s) dropped before any model call — outside the asked regions (${sources.filter((s) => !kept.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
-    return kept;
+    const query = evidenceQuery(node, brief);
+    const topical = kept.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || topicCoverage(s, query) >= 2);
+    const offTopic = kept.length - topical.length;
+    if (offTopic) this.emit(project, 'node', `${node.id}: ${offTopic} source(s) dropped before any model call — off topic (${kept.filter((s) => !topical.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
+    return topical;
   }
 
   async collectCandidates(project, { sweep = false } = {}) {

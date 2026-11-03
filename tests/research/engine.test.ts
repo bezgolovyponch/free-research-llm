@@ -16,7 +16,7 @@ const fakeSearch = {
   async search(queries: string[]) {
     return [
       { kind: 'web', title: 'One', url: 'https://one.example/a', domain: 'one.example', snippet: 's', text: `about ${queries[0]}` },
-      { kind: 'web', title: 'Two', url: 'https://two.example/b', domain: 'two.example', snippet: 's', text: 'more evidence from a second independent source on the same question' },
+      { kind: 'web', title: 'Two', url: 'https://two.example/b', domain: 'two.example', snippet: 's', text: `more evidence from a second independent source about ${queries[0]}` },
     ];
   },
   describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
@@ -105,7 +105,7 @@ describe('ResearchEngine', () => {
       ...fakeSearch,
       async search(queries: string[], options: { exclude?: string[] } = {}) {
         calls.push({ queries, exclude: options.exclude ?? [] });
-        return calls.length === 1 || !options.exclude ? fakeSearch.search(queries) : [{ kind: 'web', title: 'Gap', url: 'https://gap.example/p', domain: 'gap.example', snippet: 's', text: 'RAV4 median 21,500 EUR' }];
+        return calls.length === 1 || !options.exclude ? fakeSearch.search(queries) : [{ kind: 'web', title: 'Gap', url: 'https://gap.example/p', domain: 'gap.example', snippet: 's', text: 'RAV4 median 21,500 EUR demand baseline figure' }];
       },
     };
     const { engine } = engineWith(provider, recordingSearch, 1);
@@ -392,7 +392,7 @@ describe('ResearchEngine', () => {
     expect(project.brief.text).not.toContain('Deliver: a decision memo');
   });
 
-  it('searches again before any model call when no retrieved page matches the piece, and shows the model the best passages', async () => {
+  it('drops off-topic pages before any model call, searches again when nothing matches, and shows the model the retrieved page', async () => {
     const queries: string[][] = [];
     const prompts: string[] = [];
     const offTopic = {
@@ -414,7 +414,9 @@ describe('ResearchEngine', () => {
     expect(queries[1]).toContain(leaf.question);
     expect(leaf.sources.map((s: { url: string }) => s.url)).toContain('https://answer.example/c');
     const research = prompts.find((p) => p.includes(TASK_MARKERS.research))!;
-    expect(research.indexOf('https://answer.example/c')).toBeLessThan(research.indexOf('https://bikes.example/a'));
+    expect(research).toContain('https://answer.example/c');
+    expect(research).not.toContain('https://bikes.example/a');
+    expect(built.log.some((l: { message: string }) => /source\(s\) dropped before any model call — off topic \(bikes\.example, shop\.example\)/.test(l.message))).toBe(true);
   });
 
   it('runs the corrective search when no pages were retrieved at all, before any model call', async () => {
@@ -892,5 +894,18 @@ describe('meaning check of claims', () => {
     const saved = await engine.load(project.id);
     expect(saved.nodes[0].finding.claims[0].support.verdict).toBe('supported');
     expect(saved.supportAudit).toMatchObject({ checked: 1, supported: 1, stale: 0 });
+  });
+
+  it('drops pages that share fewer than two topic terms with the node before any model call', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'What Czech car sites list used hatchbacks near Prague?' });
+    const node = { id: 'D1', title: 'What Czech car sites list hatchbacks?', question: 'used car hatchback', metric: 'count' };
+    const sources = [
+      { kind: 'web', title: 'UNESCO World Heritage Centre', url: 'https://whc.unesco.org/en/list/', domain: 'whc.unesco.org', snippet: 'World Heritage List', text: 'World Heritage sites in the Czech Republic: Prague historic centre, Cesky Krumlov and the Holašovice village.' },
+      { kind: 'web', title: 'Ojeté vozy', url: 'https://www.sauto.cz/ojete', domain: 'sauto.cz', snippet: 'Inzerce', text: 'Ojeté hatchbacky Škoda Fabia, used car hatchback listings Czech' },
+    ];
+    const kept = engine.onConceptOnly(project, node, sources);
+    expect(kept.map((s: { url: string }) => s.url)).toEqual(['https://www.sauto.cz/ojete']);
+    expect(project.log.some((l: { message: string }) => l.message === 'D1: 1 source(s) dropped before any model call — off topic (whc.unesco.org)')).toBe(true);
   });
 });
