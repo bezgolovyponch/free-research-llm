@@ -4,7 +4,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, itemCountFromWords, normalizeAcceptance } from './acceptance.mjs';
-import { critiquePrompt, decomposePrompt, expandPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
+import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding, withMeaning } from './verify.mjs';
@@ -14,7 +14,7 @@ import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
-import { buildBrief, describeBrief, onConcept, radiusIn } from './brief.mjs';
+import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
@@ -43,7 +43,7 @@ export const TEAM_TTL_MS = 24 * 3600 * 1000;
 export const SUPPORT_PARALLEL = 3;
 export const CALIBRATION_TITLES = 60;
 export const CALIBRATION_SAMPLES = 3;
-
+export const QUERY_PLAN_GROUPS = 6;
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
 export class ResearchCancelled extends Error {}
@@ -68,6 +68,50 @@ function calibrationTitles(pages, max = CALIBRATION_TITLES) {
 
 function strings(value, max = 8) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => String(v).trim()).filter(Boolean).slice(0, max);
+}
+
+function queryLanguages(regions = []) {
+  const names = [...new Set((regions ?? []).map((code) => countryByCode(String(code ?? '').toUpperCase())?.name).filter(Boolean))];
+  return [...names.map((name) => `the main language of ${name}`), 'English'];
+}
+
+function mentionsModel(title, name) {
+  const text = plain(title);
+  const key = plain(name);
+  if (!text || !key) return false;
+  if (text.includes(key)) return true;
+  const words = key.split(/[^a-z0-9]+/).filter((word) => word.length >= 3);
+  if (!words.length) return false;
+  if (words.length === 1) return text.includes(words[0]);
+  return words.every((word) => text.includes(word));
+}
+
+function mentionedModels(models = [], rows = []) {
+  const titles = rows.map((row) => plain(row?.title ?? '')).filter(Boolean);
+  const counts = new Map();
+  for (const model of models ?? []) {
+    const name = String(model ?? '').trim();
+    const key = plain(name);
+    if (!key || counts.has(key)) continue;
+    counts.set(key, { name, count: titles.filter((title) => mentionsModel(title, name)).length });
+  }
+  return [...counts.values()].filter((row) => row.count > 0).sort((a, b) => b.count - a.count).map((row) => row.name);
+}
+
+function namesGroup(query, groups) {
+  const text = plain(query);
+  return groups.some((group) => {
+    const name = plain(group);
+    if (!name) return false;
+    if (text.includes(name)) return true;
+    return name.split(/[^a-z0-9]+/).filter((word) => word.length >= 4).some((word) => text.includes(word));
+  });
+}
+
+function contentWordHits(query, question) {
+  const text = plain(query);
+  const words = [...new Set(plain(question).split(/[^a-z0-9]+/).filter((word) => word.length >= 4))];
+  return words.filter((word) => text.includes(word)).length;
 }
 
 export function normalizeFinding(raw) {
@@ -459,6 +503,51 @@ export class ResearchEngine {
     const c = project.candidates;
     this.emit(project, 'candidates', `candidate table: ${c.found} found, ${c.keptCount} kept, ${c.toCheckCount} to check, ${c.screenedCount} screened out${Object.keys(c.screened).length ? ` (${Object.entries(c.screened).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}`);
     return c;
+  }
+
+  async planKnowledgeQueries(project) {
+    if (!this.router || !project?.acceptance?.itemCount || project.queryPlanAt) return null;
+    const kept = project.candidates?.kept ?? [];
+    const models = project.decisionModel?.subtype?.models ?? [];
+    if (!kept.length || !models.length) return null;
+    const groups = mentionedModels(models, kept).slice(0, QUERY_PLAN_GROUPS);
+    if (!groups.length) return null;
+    const nodes = project.nodes ?? [];
+    const pieces = nodes.filter((node) => node.status === 'pending' && isLeaf(nodes, node));
+    if (!pieces.length) return null;
+    try {
+      const brief = project.brief ?? this.briefOf(project);
+      const reply = await this.router.complete({
+        purpose: 'decompose',
+        tier: 'deep',
+        messages: queryPlanPrompt({
+          question: project.question,
+          pieces: pieces.map((node) => ({ id: node.id, question: node.question })),
+          groups,
+          languages: queryLanguages(brief.regions),
+        }),
+      });
+      const queries = reply?.data?.queries;
+      if (!queries || typeof queries !== 'object') throw new Error('the reply named no queries');
+      const plan = new Map();
+      for (const node of pieces) {
+        const offered = (Array.isArray(queries[node.id]) ? queries[node.id] : []).map((query) => String(query ?? '').trim()).filter(Boolean);
+        const useful = [...new Set(offered)].filter((query) => namesGroup(query, groups) || contentWordHits(query, node.question) >= 2);
+        if (!useful.length) continue;
+        const existing = Array.isArray(node.searchQueries) ? node.searchQueries : [];
+        plan.set(node.id, [...useful, ...existing].slice(0, 4));
+      }
+      for (const [id, list] of plan) {
+        const node = nodes.find((n) => n.id === id);
+        if (node) node.searchQueries = list;
+      }
+      project.queryPlanAt = new Date().toISOString();
+      this.emit(project, 'tree', `knowledge queries planned for ${plan.size} pieces around: ${groups.join(', ')}`);
+      return plan.size;
+    } catch (error) {
+      this.emit(project, 'warn', `knowledge queries not planned: ${String(error?.message ?? error).slice(0, 160)}`);
+      return null;
+    }
   }
 
   startSiteWarm(id, raw, brief) {
@@ -924,6 +1013,7 @@ export class ResearchEngine {
       if (listingsFirst) {
         this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
         await this.collectCandidates(project, { sweep: true });
+        await this.planKnowledgeQueries(project);
         await this.store.save(project);
         const stoppedAfterListings = await this.stopIfCancelled(project, id, release);
         if (stoppedAfterListings) return stoppedAfterListings;

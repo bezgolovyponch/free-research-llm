@@ -1193,3 +1193,25 @@ describe('needsSiteFit', () => {
     expect(needsSiteFit({ id: 'glamping' }, null)).toBe(true);
   });
 });
+
+describe('knowledge queries about the item groups found', () => {
+  it('plans local-language community queries around the models in the table, keeps only relevant ones, once', async () => {
+    const calls: unknown[] = [];
+    const reply = { data: { queries: { 'D3.1': ['Škoda Fabia 1.4 MPI zkušenosti majitelů fórum', 'best laptops 2026', 'Fabia II 1.2 HTP reliability TÜV report'] } } };
+    const router = { complete: async (args: unknown) => { calls.push(args); return reply; } };
+    const engine = new ResearchEngine({ router, search: null, store: { cache: new Map(), save: async (p: unknown) => p } } as never);
+    const project = {
+      id: 'p', question: 'used hatchback cars near Prague', log: [], brief: { regions: ['CZ'] }, acceptance: { itemCount: 20 },
+      decisionModel: { subtype: { models: ['skoda fabia', 'kia rio'] } },
+      candidates: { kept: [{ title: 'Škoda Fabia 1.4 MPI 50kw' }, { title: 'ŠKODA FABIA II COMFORT 2008' }, { title: 'Kia Rio 1.4' }] },
+      nodes: [{ id: 'D3', parentId: null, status: 'pending', question: 'reliability' }, { id: 'D3.1', parentId: 'D3', status: 'pending', question: 'What are known failure modes for candidate engines?', searchQueries: ['engine failure modes'] }],
+    };
+    expect(await (engine as unknown as { planKnowledgeQueries: (p: unknown) => Promise<number | null> }).planKnowledgeQueries(project)).toBe(1);
+    const leaf = project.nodes[1];
+    expect(leaf.searchQueries[0]).toBe('Škoda Fabia 1.4 MPI zkušenosti majitelů fórum');
+    expect(leaf.searchQueries).not.toContain('best laptops 2026');
+    expect(JSON.stringify(calls[0])).toContain('the main language of Czechia');
+    await (engine as unknown as { planKnowledgeQueries: (p: unknown) => Promise<number | null> }).planKnowledgeQueries(project);
+    expect(calls).toHaveLength(1);
+  });
+});
