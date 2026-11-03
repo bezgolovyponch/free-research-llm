@@ -98,6 +98,16 @@ describe('portal sweep', () => {
     expect(read).toEqual(['https://seed.example/pt/1', 'https://seed.example/es/1', 'https://seed.example/pt/2']);
   });
 
+  it('hands the item gate converter to the seed portals, and null when the options carry none', async () => {
+    const calls: unknown[][] = [];
+    const seeds = (...args: unknown[]) => { calls.push(args); return []; };
+    const search = { readPage: async () => ({ status: 200, locale: 'pt', text: '', listings: [], next: '', links: [] }) };
+    const convert = (value: number) => value;
+    await new CandidateSweeper({ search, seeds }).sweep({ nodes: [] }, brief, { convert });
+    await new CandidateSweeper({ search, seeds }).sweep({ nodes: [] }, brief, {});
+    expect(calls).toEqual([[brief, convert], [brief, null]]);
+  });
+
   it('pages through every seed portal even when other pages already met the count, keeping one page for each start still to come', async () => {
     const one = buildBrief({ question: 'Plots near the sea, 20000EUR max', acceptance: { expected: '1 plot in Portugal or Spain', itemCount: 1, valueRange: [0, 20000], unit: 'EUR' }, template: { itemKind: kind } });
     const read: string[] = [];

@@ -47,6 +47,32 @@ describe('seed portals', () => {
     expect(seeds.some((s) => /pozemk|terreno|pisos/.test(s.url))).toBe(false);
   });
 
+  it('converts the asked range into each seed portal own currency before building its URL', () => {
+    const carKind = { label: 'used car', terms: ['car', 'auto', 'samochod'] };
+    const convert = (v: number, from: string, to: string) => (from === 'EUR' && to === 'CZK' ? v * 25 : from === 'EUR' && to === 'PLN' ? v * 4.3 : null);
+    const seeds = seedPortals({ kind: carKind, regions: ['DE', 'PL', 'CZ'], valueRange: [2000, 4000], unit: 'EUR' }, convert);
+    const urlOf = (country: string) => seeds.find((s) => s.country === country)?.url ?? '';
+    expect(urlOf('CZ')).toBe('https://auto.bazos.cz/?hledat=&cenaod=50000&cenado=100000');
+    expect(urlOf('DE')).toBe('https://www.autoscout24.de/lst?pricefrom=2000&priceto=4000&atype=C');
+    const otomoto = new URL(urlOf('PL'));
+    expect(otomoto.searchParams.get('search[filter_float_price:from]')).toBe('8600');
+    expect(otomoto.searchParams.get('search[filter_float_price:to]')).toBe('17200');
+  });
+
+  it('keeps a seed portal URL unfiltered when no converter is given or the seed currency already matches', () => {
+    const carKind = { label: 'used car', terms: ['car', 'auto', 'samochod'] };
+    const carBrief = { kind: carKind, regions: ['DE', 'PL', 'CZ'], valueRange: [2000, 4000], unit: 'EUR' };
+    const plain = seedPortals(carBrief);
+    expect(plain.find((s) => s.country === 'CZ')?.url).toBe('https://auto.bazos.cz/');
+    expect(plain.find((s) => s.country === 'PL')?.url).toBe('https://www.otomoto.pl/osobowe');
+    const convert = () => 1;
+    const czSeeds = seedPortals({ kind, regions: ['CZ'], coastal: false, valueRange: [0, 5000000], unit: 'CZK' }, convert);
+    expect(new Set(czSeeds.map((s) => s.url))).toEqual(new Set([
+      'https://www.sreality.cz/hledani/prodej/pozemky?cena-do=5000000',
+      'https://www.bezrealitky.cz/vypis/nabidka-prodej/pozemek?priceTo=5000000',
+    ]));
+  });
+
   it('keeps Czech plot seeds for a plot brief and offers no car seed', () => {
     const seeds = seedPortals({ kind: { label: 'plot of land', terms: ['land', 'pozemek'] }, regions: ['CZ'] });
     expect(new Set(seeds.map((s) => s.url))).toEqual(new Set([
