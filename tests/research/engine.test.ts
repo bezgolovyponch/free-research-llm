@@ -850,7 +850,7 @@ describe('meaning check of claims', () => {
 
   it('asks the most capable model, then a fast model of another provider, and records both votes', async () => {
     const { engine, calls } = votingEngine({ 'support|old': 'yes', 'support-second|old': 'no' });
-    const finding = { claims: [claimOf(), { text: 'No number here', attributed: true }] };
+    const finding = { answer: 'The permit costs €950.', claims: [claimOf(), { text: 'No number here', attributed: true }] };
     const result = await engine.checkSupport({ id: 'p', nodes: [] }, nodeOf(), finding, 'cerebras');
     expect(result).toEqual({ checked: 1, open: 1 });
     expect(calls.slice(0, 2)).toEqual([
@@ -867,7 +867,7 @@ describe('meaning check of claims', () => {
   it('resolves a claim to confirm from another fetched sentence before flagging it', async () => {
     const { engine, calls } = votingEngine({ 'support|old': 'no', 'support-second|old': 'no' });
     const node = nodeOf([{ id: 'S1', text: `${quote}.` }, { id: 'S2', text: 'The building permit for a small camp costs €950 in most districts.' }]);
-    const finding = { claims: [claimOf()] };
+    const finding = { answer: 'The permit costs €950.', claims: [claimOf()] };
     await engine.checkSupport({ id: 'p', nodes: [] }, node, finding, 'cerebras');
     expect(calls.map((c) => c.quote)).toEqual([`${quote}.`, `${quote}.`, 'The building permit for a small camp costs €950 in most districts.', 'The building permit for a small camp costs €950 in most districts.']);
     expect(finding.claims[0]).toMatchObject({ quote: 'The building permit for a small camp costs €950 in most districts.', sourceIds: ['S2'], support: { verdict: 'supported', resolvedFrom: 'S2' } });
@@ -876,7 +876,7 @@ describe('meaning check of claims', () => {
   it('leaves a claim unchecked when no model answers', async () => {
     const { engine, router } = engineWith(new ScriptedProvider());
     router.complete = (async () => { throw new Error('every provider failed'); }) as typeof router.complete;
-    const finding = { claims: [claimOf()] };
+    const finding = { answer: 'The permit costs €950.', claims: [claimOf()] };
     await engine.checkSupport({ id: 'p', nodes: [] }, nodeOf(), finding, 'cerebras');
     expect(finding.claims[0].support).toMatchObject({ verdict: 'unchecked', votes: [] });
   });
