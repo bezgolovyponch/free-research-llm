@@ -140,6 +140,23 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 | Pieces that asked for specific listings and answered "none found" were graded verified | A piece that asks for listings must deliver at least one listing with a link to be supported or verified; existing ones are re-graded | `src/research/deliverable.mjs`, `checkDelivers`, `effectiveGrade` |
 | Criteria were answered as regional averages, so no plot was ever checked against them | List-type expected results get a funnel tree (PRISMA: identify → screen → include): candidates per region or source, then screening rules per item; the memo screens every delivered item and reports identified / screened out / included | `decomposePrompt` rule 2a, `synthesizePrompt` |
 
+## 4m. Universal list research (2026-11-03, supersedes the funnel tree of 4i rule 2a)
+
+Audit of the car researches (0c750f, b4f648): 62 pages read, none on a marketplace, 0 listings from the tree; the only listings came from the portal sweep, which ran last. The funnel of 4i had put PRISMA's identify and screen stages into tree pieces answered by models from web search; those stages are mechanical and belong to code. The same order is used for every kind of item, the way a careful buyer or a systematic review works (PRISMA 2020, Page et al., *BMJ* 2021;372:n71: eligibility criteria are set before records are identified, every record is screened against them, the counts are reported):
+
+| Stage | Who does it | Rule | Code |
+|---|---|---|---|
+| 1. Eligibility | the user's words, then the decision model | The item count is read from the user's words before the tree; the decision model (kind, criteria with the user's quote) is built before any search | `itemCountFromWords`, `ensureDecisionModel` |
+| 2. Where to look | code | Named countries; a place with a radius becomes the countries measured on a ring of geocoded points around it | `radiusIn`, `areaCountries` |
+| 3. Identify | code | Seed portals matched by the kind's words, portal pages from search, recipes; read before any piece is researched | `CandidateSweeper`, `seedPortals` |
+| 4. Read each record | code | Each listing keeps the facts it states itself (structured page data), for any kind of item | `attributesOf` |
+| 5. Screen | code | Every record against every criterion; a listing from a seed category page is of that kind | `screenCandidate`, `kindPage` |
+| 6. What records cannot show | models, tree pieces | Only knowledge a listing cannot state (reliability, typical faults, rules, norms), phrased about the kinds in the table, with the table in the prompt | `decomposePrompt` `listsItems`, shortlist in `researchLeaf` |
+| 7. Spend only on relevant pages | code | A page must contain 2+ of the piece's content words before any model reads it (CRAG's "incorrect" retrieval is discarded, Yan et al. 2024); meaning votes only for claims whose numbers feed the answer | `topicCoverage`, `affectsResult` |
+| 8. Rank and report | code | Pareto layers over measured values (NSGA-II), identified / screened / included counts | `proposal.mjs` |
+
+Test of the rule: a list research whose tree contains a piece that searches for, prices, filters, locates or verifies individual listings is a defect.
+
 ## 4j. Staying up (incident 2026-10-23 23:05)
 
 | What happened | Rule now | Code |
