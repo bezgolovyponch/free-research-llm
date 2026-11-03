@@ -42,8 +42,11 @@ export function isKind(item, kind) {
 export function screenItem(item, { valueRange = null, unit = '', convert = (v) => v, kind = null, kindKnown = false } = {}) {
   const reasons = [];
   if (!looksLikeListing(item.url) || SEARCH_TITLE.test(item.title ?? '')) reasons.push('not a single listing page');
-  if (!kindKnown && !isKind(item, kind)) reasons.push(`not a ${kind.label}`);
   const offer = `${item.title ?? ''} ${decodedUrl(item.url)}`;
+  if (kind) {
+    const excluded = (kind.not ?? []).some((term) => hasTerm(plain(offer), term));
+    if (!kindKnown ? !isKind(item, kind) : excluded) reasons.push(`not a ${kind.label}`);
+  }
   if (kind && RENTAL.test(offer)) reasons.push('offered for rent, not for sale');
   if (kind && SWAP.test(offer)) reasons.push('offered as a swap, not for sale');
   if (kind && WANTED.test(offer)) reasons.push('a wanted ad, not an offer');
