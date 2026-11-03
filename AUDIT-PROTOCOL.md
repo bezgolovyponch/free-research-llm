@@ -68,6 +68,10 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | A11 | A list research did its identify and screen stages as tree pieces over web search (car research 0c750f, 2026-11-03: 62 pages, none on a marketplace, 0 listings) | PROTOCOLS 4m: listings first by code, tree only for what listings cannot show |
 | A12 | "Within 300 km of Prague" gave no countries, so no portal was read | `radiusIn`, `areaCountries` |
 | A13 | Plot measurements (sea, climate, cadastre) ran on a car list and hung the run for 20+ min | `needsSiteFit`: only when a strategy or a site criterion asks |
+| A14 | Parts, wheels and lights counted as cars; the kind's exclusion words were English only (0c750f, 2026-11-03: 538 kept) | `calibrateKind` (3-sample majority on real titles), `implausiblyLow` |
+| A15 | The memo said 15 results while the table held 70 and the acceptance check passed | `shortlistText` final counts, verdict starts with `tableVerdict` |
+| A16 | Table columns labelled € for CZK values | columns carry no currency; each value shows its unit |
+| A17 | Communities and expert sources never searched; knowledge pieces asked in generic English (12 of 14 weak) | `planKnowledgeQueries` |
 
 ### B · Evidence and gates
 | # | Failure | How it is caught |
