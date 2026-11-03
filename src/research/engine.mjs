@@ -22,6 +22,7 @@ import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strateg
 import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
+import { applySchema, schemaPrompt, schemaSample, verifySchema } from '../search/schema.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { plain, screenItems } from './itemgate.mjs';
@@ -484,6 +485,31 @@ export class ResearchEngine {
     return false;
   }
 
+  async learnSiteSchema(project, { url, generic }) {
+    const recipes = this.search?.recipes;
+    if (!recipes?.saveSchema || recipes.schemaFailedRecently(url)) return null;
+    const host = hostOf(url);
+    try {
+      const html = await this.search.fetchHtml(url);
+      if (!html) throw new Error('the page could not be fetched again');
+      const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: schemaPrompt({ host, kind: project.brief?.kind?.label ?? '', sample: schemaSample(html, url) }) });
+      const schema = reply?.data;
+      const verdict = verifySchema(applySchema(html, url, schema), generic);
+      if (!verdict.ok) {
+        recipes.schemaFailed(url, verdict.reason);
+        this.emit(project, 'candidates', `listing schema for ${host} not kept: ${verdict.reason}`);
+        return null;
+      }
+      recipes.saveSchema(url, schema);
+      this.emit(project, 'candidates', `learned a listing schema for ${host}: ${verdict.items.length} listings, ${verdict.priced} priced, ${verdict.placed} with a place, ${schema.fields.length} fields`);
+      return verdict;
+    } catch (error) {
+      recipes.schemaFailed(url, error.message);
+      this.emit(project, 'warn', `listing schema for ${host} not learned: ${String(error.message).slice(0, 160)}`);
+      return null;
+    }
+  }
+
   async collectCandidates(project, { sweep = false } = {}) {
     if (sweep || !this.quiet.has(project.id)) await this.ensureDecisionModel(project);
     let brief = this.briefOf(project);
@@ -500,7 +526,7 @@ export class ResearchEngine {
       this.emit(project, 'candidates', `strategy "${strategy.label}": ${confirmed} of ${quoted.length} sources re-read online with their quotes found (${project.strategyCheck.at})`);
     }
     if (sweep && this.search?.readPage) {
-      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null, arms: this.arms });
+      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null, arms: this.arms, learnSchema: this.router && !this.demo && this.search.fetchHtml ? (args) => this.learnSiteSchema(project, args) : null });
       const result = await sweeper.sweep(project, brief, options);
       if (result) {
         const fresh = new Set(result.pages.map((page) => page.url));

@@ -63,9 +63,20 @@ export function portalPages(nodes, brief, extra = []) {
   return [...pages.values()].sort((a, b) => b.listings - a.listings);
 }
 
+export const SCHEMA_GAP_SHARE = 0.8;
+
+export function needsSchema(page) {
+  const rows = page?.listings ?? [];
+  if (rows.length < 3 || !(page.methods ?? []).length || !(page.methods ?? []).every((m) => m === 'cards')) return false;
+  const missing = (test) => rows.filter(test).length / rows.length >= SCHEMA_GAP_SHARE;
+  return missing((r) => !String(r.place ?? '').trim()) || missing((r) => r.value === null || r.value === undefined);
+}
+
 export class CandidateSweeper {
-  constructor({ search, recipes = null, budget = PAGE_BUDGET, perSite = PAGES_PER_SITE, seeds = seedPortals, arms = null, rng = Math.random }) {
+  constructor({ search, recipes = null, budget = PAGE_BUDGET, perSite = PAGES_PER_SITE, seeds = seedPortals, arms = null, rng = Math.random, learnSchema = null }) {
     this.search = search;
+    this.learnSchema = learnSchema;
+    this.schemaTried = new Set();
     this.arms = arms;
     this.rng = rng;
     this.seeds = seeds;
@@ -91,7 +102,13 @@ export class CandidateSweeper {
       if (!url || read.has(url) || left <= 0) return null;
       read.add(url);
       left--;
-      const page = await this.search.readPage(url);
+      let page = await this.search.readPage(url);
+      const host = hostOf(url);
+      if (this.learnSchema && !this.schemaTried.has(host) && needsSchema(page) && !this.recipes?.schemaFor?.(url)) {
+        this.schemaTried.add(host);
+        const learned = await this.learnSchema({ url, generic: page.listings ?? [] }).catch(() => null);
+        if (learned?.items?.length) page = { ...page, listings: learned.items, methods: ['schema'] };
+      }
       const fresh = (page.listings ?? []).filter((l) => !keys.has(listingKey(l.url)));
       fresh.forEach((l) => keys.add(listingKey(l.url)));
       const record = { id: `P${pages.length + 1}`, kind: 'web', url, from, country, kindPage: seed, title: `${hostOf(url)} listings`, domain: hostOf(url), locale: page.locale ?? '', text: String(page.text ?? '').slice(0, STORED_PAGE_TEXT), links: [], listings: fresh, status: page.status ?? 0 };
