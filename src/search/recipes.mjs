@@ -55,9 +55,48 @@ export class SiteRecipes {
       learnedAt: relearned || !known ? new Date(this.now()).toISOString() : known.learnedAt,
       verifiedAt: relearned ? null : known?.verifiedAt ?? null,
       misses: 0,
+      ...(known?.schema ? { schema: known.schema, schemaCheckedAt: known.schemaCheckedAt } : {}),
+      ...(known?.schemaFailedAt ? { schemaFailedAt: known.schemaFailedAt, schemaFailure: known.schemaFailure } : {}),
     };
     this.persist();
     return this.sites[host];
+  }
+
+  schemaFor(url) {
+    return this.get(url)?.schema ?? null;
+  }
+
+  saveSchema(url, schema) {
+    const host = hostOf(url);
+    if (!host) return null;
+    const known = this.sites[host] ?? { template: '', methods: [], count: 0, country: '', sample: [], searchPages: [], learnedAt: new Date(this.now()).toISOString(), verifiedAt: null, misses: 0 };
+    this.sites[host] = { ...known, schema, schemaCheckedAt: new Date(this.now()).toISOString(), schemaFailedAt: null, schemaFailure: null };
+    this.persist();
+    return this.sites[host];
+  }
+
+  dropSchema(url, reason = 'it no longer finds listings') {
+    const known = this.get(url);
+    if (!known?.schema) return null;
+    delete known.schema;
+    known.schemaFailedAt = new Date(this.now()).toISOString();
+    known.schemaFailure = reason;
+    this.persist();
+    return known;
+  }
+
+  schemaFailed(url, reason) {
+    const host = hostOf(url);
+    if (!host) return null;
+    const known = this.sites[host] ?? { template: '', methods: [], count: 0, country: '', sample: [], searchPages: [], learnedAt: new Date(this.now()).toISOString(), verifiedAt: null, misses: 0 };
+    this.sites[host] = { ...known, schemaFailedAt: new Date(this.now()).toISOString(), schemaFailure: String(reason ?? '').slice(0, 160) };
+    this.persist();
+    return this.sites[host];
+  }
+
+  schemaFailedRecently(url) {
+    const at = Date.parse(this.get(url)?.schemaFailedAt ?? '');
+    return Number.isFinite(at) && this.now() - at < RECHECK_MS;
   }
 
   miss(url) {
