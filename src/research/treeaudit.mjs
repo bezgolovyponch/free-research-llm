@@ -61,6 +61,35 @@ export function alike(a, b, threshold = SIMILAR) {
 
 const textOf = (n) => `${String(n.title ?? '').replace(ID_PREFIX, '')} ${n.question ?? ''}`;
 
+const LISTING_ACTION = /\b(?:list|find|identify|search|scrape|collect|calculate|compute|convert|verify|check|confirm|assess)\b/i;
+const LISTING_TARGET = /\b(?:listings?|urls?|links?|ads?|items?|each|every|priced|distances?|body\s*types?)\b/i;
+const NOT_LISTING_KNOWLEDGE = /\b(?:reliab|fault|defect|problem|issue|cost|norm|rule|law|legal|tax|insurance|trend|depreciat|review|reput|communit|forum|empirical|statistic|typical)\w*|\bmarket(?!place)\w*/i;
+
+export function listingWork(question) {
+  const text = String(question ?? '');
+  if (!text.trim() || NOT_LISTING_KNOWLEDGE.test(text)) return false;
+  return LISTING_ACTION.test(text) || LISTING_TARGET.test(text);
+}
+
+export function dropListingWork(nodes) {
+  const hadChildren = new Set(nodes.filter((n) => nodes.some((m) => m.parentId === n.id)).map((n) => n.id));
+  const removed = new Set();
+  for (const n of nodes) {
+    if (n.id === ROOT_ID || hadChildren.has(n.id)) continue;
+    if (listingWork(textOf(n))) removed.add(n.id);
+  }
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const n of nodes) {
+      if (n.id === ROOT_ID || removed.has(n.id) || !hadChildren.has(n.id)) continue;
+      if (nodes.some((m) => m.parentId === n.id && !removed.has(m.id))) continue;
+      removed.add(n.id);
+      changed = true;
+    }
+  }
+  return { nodes: nodes.filter((n) => !removed.has(n.id)), dropped: nodes.filter((n) => removed.has(n.id)).map((n) => n.id) };
+}
+
 export function cleanTitle(title) {
   return String(title ?? '').replace(ID_PREFIX, '').trim();
 }

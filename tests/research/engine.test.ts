@@ -357,6 +357,49 @@ describe('ResearchEngine', () => {
     expect(rewards).toEqual([[[project.id], project.acceptanceResult.score]]);
   });
 
+  it('calibrates the item kind on the swept titles when few titles use its words, once with three independent proposals kept by majority, and passes the sub-type to the brief', async () => {
+    const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
+    const router = { complete: async (req: { purpose: string; tier: string; messages: Array<{ role: string; content: string }> }) => {
+      calls.push(req);
+      return { provider: 'p', data: { not: ['kola', 'svetlo', 'pneumatiky', 'naraznik'], subtype: { label: 'hatchback', models: ['fabia', 'corsa', 'polo'] } } };
+    } };
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) } as never);
+    const listing = (n: number, title: string) => ({ title, url: `https://auto.bazos.cz/inzerat/auto-${n}-ID1${String(10000 + n)}`, value: 50000 + n, unit: 'CZK' });
+    const project: Record<string, any> = {
+      id: 'calibration-1',
+      question: 'Find used hatchback cars within 300 km of Prague, 65000 CZK max',
+      guidance: '',
+      templateId: 'generic',
+      acceptance: { itemCount: 2, valueRange: [0, 65000], unit: 'CZK' },
+      nodes: [],
+      log: [],
+      decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts'], verified: { titles: 10, matched: 1, share: 0.1 } }, criteria: [], noLimit: [], missing: [] },
+      sweep: { pages: [{ id: 'P1', url: 'https://auto.bazos.cz/skoda/', listings: [
+        listing(1, 'Alu kola 215x65R16'),
+        listing(2, 'ALU KOLA 15" Škoda'),
+        listing(3, 'Levé zadní světlo Honda Accord 7g'),
+        listing(4, 'Zadní světlo Škoda Fabia'),
+        listing(5, 'Použité pneumatiky 205/55 R16'),
+        listing(6, 'Letní pneumatiky Michelin'),
+        listing(7, 'Matky hliníkové lehké'),
+        listing(8, 'ŠKODA FABIA II COMFORT 2008'),
+        listing(9, 'Opel Corsa 1.2'),
+        listing(10, 'Škoda Octavia 1.9 TDI'),
+      ] }] },
+    };
+    await engine.collectCandidates(project as never, { sweep: true });
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toMatchObject({ purpose: 'decision-model', tier: 'deep' });
+    expect(JSON.stringify(calls[0].messages)).toContain('Alu kola 215x65R16');
+    expect(project.decisionModel.kind.not).toEqual(['parts', 'kola', 'svetlo', 'pneumatiky']);
+    expect(project.decisionModel.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa'], variants: [], source: 'model proposal, matched to listing titles by code' });
+    expect(project.decisionModel.calibrated).toBeTruthy();
+    expect(project.brief.subtype).toEqual(project.decisionModel.subtype);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && /^kind calibrated on 10 titles: not parts, kola, svetlo, pneumatiky; hatchback: 2 models$/.test(l.message))).toBe(true);
+    await engine.collectCandidates(project as never, { sweep: true });
+    expect(calls).toHaveLength(3);
+  });
+
   it('turns the place and radius a question names into the countries the brief uses as regions', async () => {
     const router = new ModelRouter({ providers: [new ScriptedProvider()] });
     const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
@@ -418,6 +461,44 @@ describe('ResearchEngine', () => {
     expect(project.brief.kind).toEqual({ label: 'used car', terms: ['car', 'used car'] });
     expect(project.brief.text).toContain('listing pages');
     expect(project.brief.text).not.toContain('Deliver: a decision memo');
+  });
+
+  it('drops tree pieces that do per-listing work when the project lists items, since code does that work on the candidate table', async () => {
+    const question = 'Find hatchback car listings within 300km from Prague up to 65000 CZK';
+    const piece = (id: string, parentId: string, question: string) => ({ id, parentId, title: question, question, method: 'lookup', searchQueries: [] });
+    const tree = {
+      decision: 'Choose hatchback listings within 300km of Prague up to 65000 CZK',
+      successCriteria: 'live hatchback listings within 300km of Prague up to 65000 CZK',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: 10, valueRange: [0, 65000], unit: 'CZK' },
+      nodes: [
+        piece('D1', 'Q', 'Which specific hatchback listings exist on major Austria and Czechia and Germany and Poland and Slovakia marketplaces?'),
+        piece('D1.1', 'D1', 'List hatchbacks <= 65,000 CZK on auto.cz, bazos.cz, inradius.cz within 300km.'),
+        piece('D1.2', 'D1', 'List hatchbacks <= 65,000 CZK equivalent on mobile.de, autoscout24.de within 300km.'),
+        piece('D1.3', 'D1', 'List hatchbacks <= 65,000 CZK equivalent on at, pl, sk sites within 300km.'),
+        piece('D2', 'Q', 'Do candidates meet the 300km radius and hatchback body type criteria?'),
+        piece('D2.1', 'D2', 'Calculate road distance from Prague to each listing location.'),
+        piece('D2.2', 'D2', 'Verify each listing is explicitly classified as a hatchback.'),
+        piece('D3', 'Q', 'Are all candidates priced at or below 65,000 CZK equivalent?'),
+        piece('D3.1', 'D3', 'Verify CZK listings are <= 65,000 CZK.'),
+        piece('D3.2', 'D3', 'Convert EUR/PLN/CHF prices to CZK and check <= 65,000 CZK.'),
+        piece('D4', 'Q', 'Which candidates offer the highest price-to-value ratio based on specs?'),
+        piece('D4.1', 'D4', 'Compare engine types and mileage against market norms for the price.'),
+        piece('D4.2', 'D4', 'Check empirical reliability data for specific models in the candidate pool.'),
+        piece('D5', 'Q', 'Are the listings live, accurate, and from reputable sellers?'),
+        piece('D5.1', 'D5', 'Verify that all candidate URLs are live and not 404 errors.'),
+        piece('D5.2', 'D5', 'Assess seller reputation based on reviews or dealer status.'),
+      ],
+    };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
+    const project = await engine.createProject({ question, templateId: 'generic', expected: '10 live hatchback listings within 300km of Prague up to 65000 CZK' });
+    await engine.decompose(project);
+    expect(project.acceptance.itemCount).toBe(10);
+    expect(project.nodes.map((n: { id: string }) => n.id)).toEqual(['D4', 'D4.1', 'D4.2', 'D5', 'D5.2']);
+    expect(project.nodes.every((n: { question: string }) => !/\b(?:List|Verify|Convert|Calculate)\b/.test(n.question))).toBe(true);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'tree' && l.message === 'pieces covered by code on the candidate table, not researched: D1, D1.1, D1.2, D1.3, D2, D2.1, D2.2, D3, D3.1, D3.2, D5.1')).toBe(true);
   });
 
   it('reads the item count from the user words, so the decision model is built before the tree is decomposed', async () => {
@@ -709,6 +790,45 @@ describe('ResearchEngine', () => {
     const stopped = await engine.run(project.id);
     expect(stopped.phase).toBe('cancelled');
     expect(synthesized).toBe(false);
+  });
+
+  it('stops a piece in flight when cancelled, leaving that piece pending', async () => {
+    const scripted = new ScriptedProvider();
+    const calls: string[] = [];
+    let projectId = '';
+    let piece = '';
+    let cancelled = false;
+    let engine: ResearchEngine;
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        const nodeId = /SUB-QUESTION (\S+):/.exec(prompt)?.[1] ?? '';
+        if (prompt.includes(TASK_MARKERS.research)) {
+          calls.push(`research:${nodeId}`);
+          if (!cancelled) {
+            cancelled = true;
+            piece = nodeId;
+            engine.cancel(projectId);
+          }
+        } else if (prompt.includes(TASK_MARKERS.critique)) {
+          calls.push(`critique:${nodeId}`);
+        }
+        return scripted.chat(args as never);
+      },
+    };
+    const made = engineWith(provider, fakeSearch, 1);
+    engine = made.engine;
+    const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+    projectId = project.id;
+    const stopped = await engine.run(project.id);
+    expect(stopped.phase).toBe('cancelled');
+    expect(piece).not.toBe('');
+    expect(calls).toEqual([`research:${piece}`]);
+    expect(stopped.nodes.find((n: { id: string }) => n.id === piece)?.status).toBe('pending');
+    expect(stopped.report).toBeNull();
   });
 
   it('regrades finished pieces whose answers say the evidence does not settle them, and rewrites the memo from the current pieces on request', async () => {

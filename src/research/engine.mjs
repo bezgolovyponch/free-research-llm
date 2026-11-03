@@ -18,14 +18,14 @@ import { buildBrief, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
-import { applyModel, modelText, verifyKind, withModelRules } from './decision.mjs';
+import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
-import { screenItems } from './itemgate.mjs';
+import { plain, screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
-import { BLOCKING, auditFeedback, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
+import { BLOCKING, auditFeedback, auditTree, cleanTitle, dropListingWork, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { captureBaseline, championChallenger, lineageFor, recordChampionGap, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
@@ -41,9 +41,30 @@ const ATTACHMENT_TYPES = /\.(csv|tsv|txt|md|json|html?)$/i;
 const SWEEP_PAGES_KEPT = 120;
 export const TEAM_TTL_MS = 24 * 3600 * 1000;
 export const SUPPORT_PARALLEL = 3;
+export const CALIBRATION_TITLES = 60;
+export const CALIBRATION_SAMPLES = 3;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
+export class ResearchCancelled extends Error {}
+
+function calibrationTitles(pages, max = CALIBRATION_TITLES) {
+  const lists = (pages ?? []).map((page) => (page.listings ?? []).map((listing) => String(listing.title ?? '')).filter(Boolean));
+  const seen = new Set();
+  const titles = [];
+  const longest = Math.max(0, ...lists.map((list) => list.length));
+  for (let i = 0; i < longest && titles.length < max; i++) {
+    for (const list of lists) {
+      const title = list[i];
+      const key = plain(title);
+      if (!title || seen.has(key)) continue;
+      seen.add(key);
+      titles.push(title);
+      if (titles.length >= max) break;
+    }
+  }
+  return titles;
+}
 
 function strings(value, max = 8) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => String(v).trim()).filter(Boolean).slice(0, max);
@@ -256,6 +277,11 @@ export class ResearchEngine {
     const proposed = project.acceptance?.locked ? { spec: project.acceptance, dropped: [] } : groundAcceptance(normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected), { expected: project.acceptance?.expected, question: project.question, constraints: project.constraints });
     const acceptance = proposed.spec;
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
+    if (acceptance?.itemCount) {
+      const pruned = dropListingWork(tree.nodes);
+      tree.nodes = pruned.nodes;
+      if (pruned.dropped.length) this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${pruned.dropped.join(', ')}`);
+    }
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
     if (acceptance?.itemCount) {
       await this.ensureDecisionModel(project);
@@ -292,7 +318,7 @@ export class ResearchEngine {
     if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
-    project.brief = { ...brief, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    project.brief = { ...brief, subtype: model?.subtype ?? null, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -339,9 +365,33 @@ export class ResearchEngine {
     return topical;
   }
 
+  async calibrateKind(project) {
+    const kind = project.decisionModel?.kind;
+    if (this.router && !this.demo && kind?.verified && kind.verified.share < 0.5 && !project.decisionModel.calibrated && project.sweep?.pages?.length) {
+      const titles = calibrationTitles(project.sweep.pages);
+      if (titles.length) {
+        try {
+          const messages = calibrationPrompt({ kind, question: project.question, titles });
+          const replies = await Promise.all(Array.from({ length: CALIBRATION_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
+          const merged = mergeCalibrations(replies);
+          if (merged.samples < 2) throw new Error(`only ${merged.samples} of ${CALIBRATION_SAMPLES} calibration proposals answered`);
+          const applied = applyCalibration(kind, merged, titles);
+          project.decisionModel.kind = applied.kind;
+          project.decisionModel.subtype = applied.subtype;
+          project.decisionModel.calibrated = new Date().toISOString();
+          this.emit(project, 'decision', `kind calibrated on ${titles.length} titles: not ${(applied.kind.not ?? []).join(', ') || 'none'}; ${applied.subtype?.label ?? ''}: ${applied.subtype?.models?.length ?? 0} models`);
+        } catch (error) {
+          this.emit(project, 'warn', `item kind not calibrated: ${String(error?.message ?? error).slice(0, 160)}`);
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
   async collectCandidates(project, { sweep = false } = {}) {
     if (sweep || !this.quiet.has(project.id)) await this.ensureDecisionModel(project);
-    const brief = this.briefOf(project);
+    let brief = this.briefOf(project);
     if (!brief.kind) {
       project.candidates = null;
       return null;
@@ -370,8 +420,10 @@ export class ResearchEngine {
         const best = (result.arms ?? []).filter((a) => a.listings > 0).slice(0, 3);
         if (result.arms?.length) this.emit(project, 'candidates', `portal order by Thompson sampling on measured yield: ${result.arms.length} portal(s) read, ${result.arms.filter((a) => a.useful).length} gave new listings within the limits${best.length ? ` (best: ${best.map((a) => `${hostOf(a.url)} ${a.listings}`).join(', ')})` : ''}`);
         this.emit(project, 'candidates', `portal sweep: ${result.pagesRead} listing page(s) read by code (budget ${result.budget}), ${result.pages.reduce((n, p) => n + p.listings.length, 0)} new listing(s)`);
+        if (await this.calibrateKind(project)) brief = this.briefOf(project);
       }
     }
+    if (await this.calibrateKind(project)) brief = this.briefOf(project);
     let table = buildCandidates([...project.nodes, { id: 'sweep', sources: project.sweep?.pages ?? [] }], brief, options);
     if (this.sites && !this.demo && needsSiteFit(strategy, project.decisionModel)) {
       const looping = this.quiet.has(project.id);
@@ -499,6 +551,7 @@ export class ResearchEngine {
   }
 
   async searchGaps(project, node) {
+    this.throwIfCancelled(project);
     if (!this.search?.enabled || !node.finding) return;
     const queries = followUpQueries(node, node.finding, [...node.searchQueries, ...(node.followUpQueries ?? [])]);
     if (!queries.length) return;
@@ -516,6 +569,7 @@ export class ResearchEngine {
   }
 
   async correctiveSearch(project, node) {
+    this.throwIfCancelled(project);
     if (!this.search?.enabled) return;
     const queries = [...new Set([node.question, `${node.title} ${node.metric ?? ''}`.trim()].filter(Boolean))].filter((q) => !(node.searchQueries ?? []).includes(q));
     if (!queries.length) return;
@@ -532,7 +586,8 @@ export class ResearchEngine {
     return node.dependsOn.map((id) => byId.get(id)).filter((n) => n?.finding).map((n) => ({ id: n.id, status: n.status, answer: n.finding.answer, keyNumbers: keyNumbers(n.finding) }));
   }
 
-  async critique(node, finding, sources, avoid) {
+  async critique(project, node, finding, sources, avoid) {
+    this.throwIfCancelled(project);
     try {
       const reply = await this.router.complete({ purpose: 'critique', tier: 'fast', avoid, messages: critiquePrompt({ node, finding, sources }) });
       const critique = normalizeCritique(reply.data);
@@ -553,18 +608,20 @@ export class ResearchEngine {
     }
   }
 
-  async voteOnQuote(claim, quote, author, context = '') {
+  async voteOnQuote(project, claim, quote, author, context = '') {
     const shown = context || quote;
+    this.throwIfCancelled(project);
     const first = await this.supportVote('support', 'deep', author, claim.text, shown);
+    this.throwIfCancelled(project);
     const second = await this.supportVote('support-second', 'fast', first?.provider ?? author, claim.text, shown);
     return supportRecord({ votes: [first, second].filter(Boolean), term: termCheck(claim.text, shown) });
   }
 
-  async checkClaimSupport(node, claim, author) {
-    let record = await this.voteOnQuote(claim, claim.quote, author, contextOf(claim.quote, node.sources ?? [], claim.sourceIds ?? []));
+  async checkClaimSupport(project, node, claim, author) {
+    let record = await this.voteOnQuote(project, claim, claim.quote, author, contextOf(claim.quote, node.sources ?? [], claim.sourceIds ?? []));
     const found = toConfirm(record) ? resolveFromSources(claim, node.sources ?? []) : null;
     if (found) {
-      const retry = await this.voteOnQuote(claim, found.quote, author);
+      const retry = await this.voteOnQuote(project, claim, found.quote, author);
       if (retry.verdict === 'supported') {
         Object.assign(claim, { quote: found.quote, sourceIds: [found.sourceId] });
         record = { ...retry, resolvedFrom: found.sourceId };
@@ -574,11 +631,16 @@ export class ResearchEngine {
   }
 
   async checkSupport(project, node, finding, author) {
+    this.throwIfCancelled(project);
     const claims = claimsToCheck(finding, node);
-    for (let i = 0; i < claims.length; i += SUPPORT_PARALLEL) await Promise.all(claims.slice(i, i + SUPPORT_PARALLEL).map((claim) => this.checkClaimSupport(node, claim, author)));
+    for (let i = 0; i < claims.length; i += SUPPORT_PARALLEL) await Promise.all(claims.slice(i, i + SUPPORT_PARALLEL).map((claim) => this.checkClaimSupport(project, node, claim, author)));
     const open = claims.filter((c) => toConfirm(c.support)).length;
     if (claims.length) this.emit(project, 'node', `${node.id}: meaning checked for ${claims.length} claim(s), ${open} to confirm`, { nodeId: node.id });
     return { checked: claims.length, open };
+  }
+
+  throwIfCancelled(project) {
+    if (this.cancelled.has(project.id)) throw new ResearchCancelled();
   }
 
   async researchLeaf(project, node, hint) {
@@ -605,6 +667,7 @@ export class ResearchEngine {
       const tier = attempt === 1 ? 'fast' : 'deep';
       if (attempt > 1) await this.searchGaps(project, node);
       const { shown } = this.rankSources(project, node);
+      this.throwIfCancelled(project);
       const reply = await this.router.complete({
         purpose: 'research',
         tier,
@@ -613,7 +676,7 @@ export class ResearchEngine {
       const finding = await this.withHarvest(project, node, await this.screenFinding(project, normalizeFinding(reply.data)));
       const mechanical = verifyFinding({ finding, sources: node.sources, node });
       const retryAnyway = needsEscalation(mechanical) && attempt < MAX_ATTEMPTS;
-      const critique = retryAnyway ? null : await this.critique(node, finding, shown, reply.provider);
+      const critique = retryAnyway ? null : await this.critique(project, node, finding, shown, reply.provider);
       if (!retryAnyway) await this.checkSupport(project, node, finding, reply.provider);
       const verification = retryAnyway ? mechanical : verifyFinding({ finding, sources: node.sources, critique, node });
       Object.assign(node, { finding, critique, verification, attempts: attempt, model: `${reply.provider}/${reply.model}`, status: verification.grade });
@@ -885,10 +948,13 @@ export class ResearchEngine {
               node.sources = compactSources(node.sources).sources;
             } else await this.rollup(project, node);
           } catch (error) {
-            node.status = 'failed';
-            node.error = error.message;
-            this.emit(project, 'error', `${node.id}: ${error.message}`, { nodeId: node.id });
-            if (/no model provider|cooling down/.test(error.message)) throw error;
+            if (error instanceof ResearchCancelled) node.status = 'pending';
+            else {
+              node.status = 'failed';
+              node.error = error.message;
+              this.emit(project, 'error', `${node.id}: ${error.message}`, { nodeId: node.id });
+              if (/no model provider|cooling down/.test(error.message)) throw error;
+            }
           }
           await this.store.save(project);
         },
