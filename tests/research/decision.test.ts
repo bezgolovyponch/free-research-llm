@@ -228,7 +228,7 @@ describe('item kind calibrated on real listing titles', () => {
 
   it('keeps a not word only when 2 or more titles use it, and a model only when 1 or more titles show it', () => {
     const out = applyCalibration(kind, proposal, titles);
-    expect(out.kind).toEqual({ label: 'used car', terms: ['hatchback'], not: ['parts', 'kola', 'svetlo', 'pneumatiky'], condition: [] });
+    expect(out.kind).toEqual({ label: 'used car', terms: ['hatchback'], not: ['parts', 'kola', 'svetlo', 'pneumatiky'], condition: [], upgrades: [] });
     expect(out.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa', '208'], variants: [], source: 'model proposal, matched to listing titles by code' });
   });
 

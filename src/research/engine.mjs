@@ -82,7 +82,7 @@ function groupQueryPrompt({ group, engines, languages, kind }) {
   return [
     { role: 'system', content: 'You write web search queries. Answer with JSON only: {"queries": ["..."]}.' },
     { role: 'user', content: `Item: ${kind || 'item'} "${group}"${engines.length ? `, engines or variants seen in listings: ${engines.join(', ')}` : ''}.
-Write 4 queries that find owner experiences and expert or statistical evidence about which engines or variants of "${group}" are reliable, durable or problematic and what typically fails (owner forums and clubs, defect or breakdown statistics such as the TÜV report or ADAC breakdown statistics where they exist). Write them in: ${languages.join(', ')}. Every query names "${group}".` },
+Write 4 queries that find owner experiences and expert or statistical evidence about which engines or variants of "${group}" are reliable, durable or problematic, what typically fails, and how costly repairs and parts are (owner forums and clubs, defect or breakdown statistics such as the TÜV report or ADAC breakdown statistics where they exist). Write them in: ${languages.join(', ')}. Every query names "${group}".` },
   ];
 }
 
@@ -91,7 +91,7 @@ function groupFactsPrompt({ group, engines, sources }) {
   return [
     { role: 'system', content: 'You extract facts only from the given pages. Answer with JSON only.' },
     { role: 'user', content: `Item: "${group}"${engines.length ? `; engines or variants in the listings: ${engines.join(', ')}` : ''}.
-From the pages below, list facts about the reliability or durability of specific engines or variants of "${group}". Return {"facts": [{"engine": "the engine or variant as named, or \"\" for the whole model", "verdict": "reliable" | "problematic" | "neutral", "note": "what owners or experts report, at most 15 words", "quote": "the exact sentence from the page, copied character for character", "sourceId": "G1"}]}. Only facts the page states; no facts from memory; at most 8.
+From the pages below, list facts about the reliability or durability of specific engines or variants, and about repair costs and parts availability, of "${group}". Return {"facts": [{"engine": "the engine or variant as named, or \"\" for the whole model", "aspect": "reliability" | "repair" | "parts", "verdict": "reliable" | "problematic" | "neutral" | "cheap" | "expensive", "note": "what owners or experts report, at most 15 words", "quote": "the exact sentence from the page, copied character for character", "sourceId": "G1"}]}. Only facts the page states; no facts from memory; at most 8.
 
 ${pages}` },
   ];
@@ -99,10 +99,10 @@ ${pages}` },
 
 export function verifiedGroupFacts(facts, sources) {
   const squash = (t) => plain(t).replace(/\s+/g, ' ').trim();
-  return (Array.isArray(facts) ? facts : []).filter((f) => f && ['reliable', 'problematic', 'neutral'].includes(f.verdict) && String(f.quote ?? '').trim().length >= 20).map((f) => {
+  return (Array.isArray(facts) ? facts : []).filter((f) => f && ['reliable', 'problematic', 'neutral', 'cheap', 'expensive'].includes(f.verdict) && String(f.quote ?? '').trim().length >= 20).map((f) => {
     const source = sources.find((s) => s.id === f.sourceId);
     const found = source && squash(source.text).includes(squash(f.quote));
-    return found ? { engine: String(f.engine ?? '').slice(0, 30), verdict: f.verdict, note: String(f.note ?? '').slice(0, 140), quote: String(f.quote).slice(0, 300), source: source.url } : null;
+    return found ? { aspect: ['repair', 'parts'].includes(f.aspect) ? f.aspect : 'reliability', engine: String(f.engine ?? '').slice(0, 30), verdict: f.verdict, note: String(f.note ?? '').slice(0, 140), quote: String(f.quote).slice(0, 300), source: source.url } : null;
   }).filter(Boolean).slice(0, 8);
 }
 

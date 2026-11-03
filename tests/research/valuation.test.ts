@@ -74,6 +74,36 @@ describe('owner and expert facts are kept only with a quote found on the page', 
       { engine: '1.2 HTP', verdict: 'problematic', note: 'timing chain wear', quote: 'Motor 1.2 HTP má problémy s rozvodovým řetězem už kolem 100 tisíc km.', sourceId: 'G1' },
       { engine: '1.9 TDI', verdict: 'reliable', note: 'durable', quote: 'The 1.9 TDI lasts forever according to everyone.', sourceId: 'G1' },
     ], sources);
-    expect(facts).toEqual([{ engine: '1.2 HTP', verdict: 'problematic', note: 'timing chain wear', quote: 'Motor 1.2 HTP má problémy s rozvodovým řetězem už kolem 100 tisíc km.', source: 'https://forum.example/fabia' }]);
+    expect(facts).toEqual([{ aspect: 'reliability', engine: '1.2 HTP', verdict: 'problematic', note: 'timing chain wear', quote: 'Motor 1.2 HTP má problémy s rozvodovým řetězem už kolem 100 tisíc km.', source: 'https://forum.example/fabia' }]);
+  });
+});
+
+describe('resale potential', () => {
+  const ad = (title: string, value: number, i: number) => ({ title, value, unit: 'CZK', url: `https://auto.bazos.cz/inzerat/3359${i}0000/x.php` });
+  it('tags liquidity and rarity from market depth and lists unmeasurable steps honestly', async () => {
+    const { resaleOf, LIQUID_FROM, RARE_UNDER } = await import('../../src/research/valuation.mjs');
+    const row = { title: 'Dacia Sandero 2009 165000 km', value: 25000, unit: 'CZK', url: 'u', group: 'dacia sandero', marketValue: 45000 };
+    const deep = resaleOf(row, LIQUID_FROM + 14, [{ word: 'nova stk', with: 6, without: 47, uplift: null }]);
+    expect(deep.resaleTags[0]).toBe('easy to resell: 34 comparable listings on the market');
+    expect(deep.valueSteps).toEqual([{ step: 'nova stk', uplift: null, measuredOn: 'not measurable on this market (6 with, 47 without; 10 each needed)' }]);
+    expect(deep.resaleValue).toBe(45000);
+    expect(deep.resaleScore).toBe(Math.round(20000 * (34 / 44)));
+    expect(resaleOf(row, RARE_UNDER - 1, []).resaleTags[0]).toMatch(/^rare: only 5 comparable listings/);
+  });
+
+  it('adds a measured step uplift to the resale value and skips steps the listing already states', async () => {
+    const { resaleOf } = await import('../../src/research/valuation.mjs');
+    const row = { title: 'Dacia Sandero 2009 klima', value: 25000, unit: 'CZK', url: 'u', group: 'dacia sandero', marketValue: 40000 };
+    const out = resaleOf(row, 30, [{ word: 'nova stk', with: 12, without: 40, uplift: 0.08 }, { word: 'klima', with: 18, without: 35, uplift: 0.05 }]);
+    expect(out.valueSteps.map((s: { step: string }) => s.step)).toEqual(['nova stk']);
+    expect(out.resaleValue).toBe(43200);
+    expect(out.resaleGain).toBe(18200);
+  });
+
+  it('shows repair-cost facts as tags but never adjusts the value with them', async () => {
+    const { resaleOf, factsFor } = await import('../../src/research/valuation.mjs');
+    const groupFacts = { 'dacia sandero': { facts: [{ aspect: 'repair', engine: '1.4', verdict: 'cheap', note: 'cheap common parts', quote: 'q', source: 'https://forum.example/s' }] } };
+    expect(factsFor('dacia sandero', { engine: '1.4 mpi' }, groupFacts)).toEqual([]);
+    expect(resaleOf({ title: 'Dacia Sandero 1.4', value: 1, url: 'u', group: 'dacia sandero', engine: '1.4 mpi' }, 10, [], groupFacts).resaleTags).toEqual(['cheap to repair (1.4): cheap common parts — https://forum.example/s']);
   });
 });
