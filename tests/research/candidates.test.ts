@@ -136,3 +136,14 @@ describe('candidate table', () => {
   });
 });
 
+
+describe('robust low-price rule for any kind of item', () => {
+  it('moves a price far below what most listings of the kind cost to the check list (a part, a deposit or an instalment)', async () => {
+    const { implausiblyLow, MIN_PRICE_SAMPLE } = await import('../../src/research/candidates.mjs');
+    const cars = Array.from({ length: MIN_PRICE_SAMPLE }, (_, i) => ({ title: `Škoda Fabia ${i}`, value: 30000 + i * 1000 }));
+    const wheels = { title: 'Zimní kola Kia Rio', value: 1500 };
+    const low = implausiblyLow([...cars, wheels]);
+    expect(low.map((r: { title: string }) => r.title)).toEqual(['Zimní kola Kia Rio']);
+    expect(implausiblyLow(cars.slice(0, 5).concat(wheels))).toEqual([]);
+  });
+});

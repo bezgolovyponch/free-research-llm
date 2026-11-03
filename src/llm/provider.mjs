@@ -311,15 +311,24 @@ export class AnthropicMessagesProvider extends OpenAICompatibleProvider {
     const model = this.selected[tier] ?? this.selected.fast;
     const system = [...messages.filter((m) => m.role === 'system').map((m) => String(m.content ?? '')), ...(json ? ['Answer with JSON only.'] : [])].filter(Boolean).join('\n\n');
     const turns = messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
-    await this.throttle();
-    const body = await this.request('/messages', {
-      method: 'POST',
-      body: JSON.stringify({ model, max_tokens: Math.min(maxTokens, this.preset.maxOutputTokens ?? maxTokens), temperature, system, messages: turns }),
-      ...(timeoutMs ? { timeoutMs } : {}),
-    });
-    const content = (body.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('');
-    const truncated = body.stop_reason === 'max_tokens';
-    if (!content) throw new ProviderError(`${this.id} returned an empty reply`, { status: 502, provider: this.id });
+    const cap = this.preset.maxOutputTokens ?? maxTokens;
+    let budget = Math.min(maxTokens, cap);
+    let body;
+    let content = '';
+    let truncated = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.throttle();
+      body = await this.request('/messages', {
+        method: 'POST',
+        body: JSON.stringify({ model, max_tokens: budget, temperature, system, messages: turns, ...(this.preset.thinking === false ? { thinking: { type: 'disabled' } } : {}) }),
+        ...(timeoutMs ? { timeoutMs } : {}),
+      });
+      content = (body.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('');
+      truncated = body.stop_reason === 'max_tokens';
+      if (!truncated || budget >= cap) break;
+      budget = Math.min(budget * 2, cap);
+    }
+    if (!content.trim()) throw new ProviderError(`${this.id} returned an empty reply${truncated ? ' (token limit reached)' : ''}`, { status: 502, provider: this.id });
     return {
       content,
       model,

@@ -60,6 +60,7 @@ export function screenCandidate(row, brief, options = {}) {
   if (subtype?.models?.length) {
     const offer = plain(`${row.title ?? ''} ${row.url ?? ''}`);
     if (!subtype.models.some((model) => hasWord(offer, model))) missing.push(`not shown to be a ${subtype.label}`);
+    else if ((subtype.variants ?? []).some((word) => hasWord(offer, word))) missing.push(`a body variant that is not a ${subtype.label}`);
   }
   return { reasons, missing, country, value };
 }
@@ -85,6 +86,22 @@ function publicRow(row, verdict, unit) {
     via: row.via ?? [],
     ...(verdict.missing.length ? { toCheck: verdict.missing.join('; ') } : {}),
   };
+}
+
+export const MIN_PRICE_SAMPLE = 20;
+const MAD_SCALE = 1.4826;
+const LOW_PRICE_MADS = 2.5;
+
+export function implausiblyLow(rows) {
+  const priced = rows.filter((r) => Number.isFinite(r.value) && r.value > 0);
+  if (priced.length < MIN_PRICE_SAMPLE) return [];
+  const logs = priced.map((r) => Math.log(r.value)).sort((a, b) => a - b);
+  const middle = (list) => list[Math.floor(list.length / 2)];
+  const median = middle(logs);
+  const mad = middle(logs.map((v) => Math.abs(v - median)).sort((a, b) => a - b));
+  if (!(mad > 0)) return [];
+  const cut = Math.round(Math.exp(median - LOW_PRICE_MADS * MAD_SCALE * mad));
+  return priced.filter((r) => r.value < cut).map((r) => Object.assign(r, { lowCut: cut }));
 }
 
 export function buildCandidates(nodes, brief, options = {}) {
@@ -118,6 +135,11 @@ export function buildCandidates(nodes, brief, options = {}) {
       continue;
     }
     (verdict.missing.length ? toCheck : kept).push(publicRow(row, verdict, unit));
+  }
+  for (const row of implausiblyLow(kept)) {
+    kept.splice(kept.indexOf(row), 1);
+    const { lowCut, ...rest } = row;
+    toCheck.push({ ...rest, toCheck: [rest.toCheck, `price far below what most listings of this kind cost (under ${lowCut} ${unit}): likely a part, a deposit or an instalment`].filter(Boolean).join('; ') });
   }
   kept.sort((a, b) => Number(b.coast) - Number(a.coast) || (a.value ?? Infinity) - (b.value ?? Infinity));
   return {

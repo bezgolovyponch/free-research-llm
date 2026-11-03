@@ -357,7 +357,7 @@ describe('ResearchEngine', () => {
     expect(rewards).toEqual([[[project.id], project.acceptanceResult.score]]);
   });
 
-  it('calibrates the item kind on the swept titles when few titles use its words, once, and passes the sub-type to the brief', async () => {
+  it('calibrates the item kind on the swept titles when few titles use its words, once with three independent proposals kept by majority, and passes the sub-type to the brief', async () => {
     const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
     const router = { complete: async (req: { purpose: string; tier: string; messages: Array<{ role: string; content: string }> }) => {
       calls.push(req);
@@ -388,16 +388,16 @@ describe('ResearchEngine', () => {
       ] }] },
     };
     await engine.collectCandidates(project as never, { sweep: true });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(3);
     expect(calls[0]).toMatchObject({ purpose: 'decision-model', tier: 'deep' });
     expect(JSON.stringify(calls[0].messages)).toContain('Alu kola 215x65R16');
     expect(project.decisionModel.kind.not).toEqual(['parts', 'kola', 'svetlo', 'pneumatiky']);
-    expect(project.decisionModel.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa'], source: 'model proposal, matched to listing titles by code' });
+    expect(project.decisionModel.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa'], variants: [], source: 'model proposal, matched to listing titles by code' });
     expect(project.decisionModel.calibrated).toBeTruthy();
     expect(project.brief.subtype).toEqual(project.decisionModel.subtype);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && /^kind calibrated on 10 titles: not parts, kola, svetlo, pneumatiky; hatchback: 2 models$/.test(l.message))).toBe(true);
     await engine.collectCandidates(project as never, { sweep: true });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(3);
   });
 
   it('turns the place and radius a question names into the countries the brief uses as regions', async () => {

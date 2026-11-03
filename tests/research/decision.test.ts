@@ -229,7 +229,7 @@ describe('item kind calibrated on real listing titles', () => {
   it('keeps a not word only when 2 or more titles use it, and a model only when 1 or more titles show it', () => {
     const out = applyCalibration(kind, proposal, titles);
     expect(out.kind).toEqual({ label: 'used car', terms: ['hatchback'], not: ['parts', 'kola', 'svetlo', 'pneumatiky'] });
-    expect(out.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa', '208'], source: 'model proposal, matched to listing titles by code' });
+    expect(out.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa', '208'], variants: [], source: 'model proposal, matched to listing titles by code' });
   });
 
   it('drops every proposal no title confirms and returns no sub-type without a confirmed model', () => {
@@ -249,5 +249,25 @@ describe('decision model version', () => {
     const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 } } };
     expect(modeler.fresh(project)).toBe(false);
     expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, version: DECISION_MODEL_VERSION } })).toBe(true);
+  });
+});
+
+describe('mergeCalibrations', () => {
+  it('keeps a word or model only when a majority of the calibration proposals name it', async () => {
+    const { mergeCalibrations } = await import('../../src/research/decision.mjs');
+    const reply = (models: string[], not: string[]) => ({ data: { not, subtype: { label: 'hatchback', models, variants: [] } } });
+    const merged = mergeCalibrations([reply(['Skoda Fabia', 'Peugeot 3008'], ['kola']), reply(['Škoda Fabia', 'Ford Fiesta'], ['kola', 'pneu']), reply(['Ford Fiesta'], ['pneu']), null]);
+    expect(merged.samples).toBe(3);
+    expect(merged.data.subtype.models.sort()).toEqual(['ford fiesta', 'skoda fabia']);
+    expect(merged.data.not.sort()).toEqual(['kola', 'pneu']);
+  });
+});
+
+describe('calibration model names', () => {
+  it('matches a model by make and model when the proposal copied a generation suffix from one title', async () => {
+    const { applyCalibration } = await import('../../src/research/decision.mjs');
+    const titles = ['ŠKODA FABIA II COMFORT 2008', 'Škoda Fabia 1.4 MPI 50kw nová STK', 'Škoda Fabia 2, LPG'];
+    const out = applyCalibration({ label: 'used car', terms: [] }, { data: { not: [], subtype: { label: 'hatchback', models: ['Skoda Fabia II'], variants: [] } } }, titles);
+    expect(out.subtype?.models).toEqual(['skoda fabia ii', 'skoda fabia']);
   });
 });

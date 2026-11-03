@@ -176,26 +176,44 @@ const wordList = (text) => plain(text).split(/[^a-z0-9]+/).filter(Boolean);
 const wordHit = (text, word) => {
   const term = plain(word).trim();
   if (!term) return false;
+  if (/\s/.test(term)) return new RegExp(`(?:^|[^a-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(plain(text));
   return wordList(text).some((w) => w === term || (term.length >= 4 && w.startsWith(term)));
 };
+
+export const MIN_EXCLUSION_LETTERS = 4;
 
 export function calibrationPrompt({ kind, question = '', titles = [] }) {
   const listed = (titles ?? []).map((title) => `- ${title}`).join('\n');
   return [
-    { role: 'system', content: `You calibrate the item kind of a listing search against real listing titles. The item is "${kind?.label ?? ''}"${kind?.terms?.length ? ` and the proposed title words for it are: ${kind.terms.join(', ')}` : ''}. Answer with JSON only: {"not": ["..."], "subtype": {"label": "...", "models": ["..."]}}. "not" lists words that appear in the given titles and mark things that are not the item itself: parts, wheels, tyres, lights, accessories, services, wanted ads. "subtype" names the sub-type the question asks for in "label", and "models" lists the model or make+model names that appear in the given titles and are of that sub-type. Copy words exactly as they appear in the titles. Return "" for the label and [] for the models when the question asks for no sub-type or no title shows one.` },
+    { role: 'system', content: `You calibrate the item kind of a listing search against real listing titles. The item is "${kind?.label ?? ''}"${kind?.terms?.length ? ` and the proposed title words for it are: ${kind.terms.join(', ')}` : ''}. Answer with JSON only: {"not": ["..."], "subtype": {"label": "...", "models": ["..."], "variants": ["..."]}}. "variants" lists title words that mark a body variant of those models that is not the asked sub-type (for example estate, sedan, cabriolet or van words as written in the titles). "not" lists every single title word (one word each, as written in the titles, in their language) that marks a listing of something that is not the item itself: parts, wheels, tyres, lights, bumpers, doors, engines sold alone, accessories, services, wanted ads; list all such words you see, typically 10 to 30. "subtype" names the sub-type the question asks for in "label", and "models" lists every model or make+model name that appears in the given titles and is built as that sub-type (list all of them, not examples). Copy words exactly as they appear in the titles. Return "" for the label and [] for the models when the question asks for no sub-type or no title shows one.` },
     { role: 'user', content: `Question: ${question}\n\nListing titles:\n${listed}` },
   ];
+}
+
+export function mergeCalibrations(replies) {
+  const datas = (replies ?? []).map((r) => (r?.data && typeof r.data === 'object' ? r.data : null)).filter(Boolean);
+  const need = Math.max(1, Math.ceil(datas.length / 2));
+  const voted = (pick) => {
+    const votes = new Map();
+    for (const d of datas) for (const w of new Set((pick(d) ?? []).map((x) => plain(String(x)).trim()).filter(Boolean))) votes.set(w, (votes.get(w) ?? 0) + 1);
+    return [...votes].filter(([, n]) => n >= need).map(([w]) => w);
+  };
+  const labels = datas.map((d) => String(d.subtype?.label ?? '').trim()).filter(Boolean);
+  const label = labels.sort((a, b) => labels.filter((x) => x === b).length - labels.filter((x) => x === a).length)[0] ?? '';
+  return { data: { not: voted((d) => d.not), subtype: { label, models: voted((d) => d.subtype?.models), variants: voted((d) => d.subtype?.variants) } }, samples: datas.length };
 }
 
 export function applyCalibration(kind, reply, titles) {
   const data = reply?.data && typeof reply.data === 'object' ? reply.data : reply ?? {};
   const texts = (titles ?? []).map((title) => String(title ?? ''));
-  const not = [...new Set((Array.isArray(data.not) ? data.not : []).map((word) => plain(String(word)).trim()).filter((word) => word && texts.filter((text) => wordHit(text, word)).length >= 2))];
+  const not = [...new Set((Array.isArray(data.not) ? data.not : []).map((word) => plain(String(word)).trim()).filter((word) => word.length >= MIN_EXCLUSION_LETTERS && texts.filter((text) => wordHit(text, word)).length >= 2))];
+  const variants = [...new Set((Array.isArray(data.subtype?.variants) ? data.subtype.variants : []).map((word) => plain(String(word)).trim()).filter((word) => word.length >= 2 && texts.some((text) => wordHit(text, word))))];
   const label = String(data.subtype?.label ?? '').trim();
-  const models = [...new Set((Array.isArray(data.subtype?.models) ? data.subtype.models : []).map((model) => plain(String(model)).trim()).filter((model) => model && texts.some((text) => wordHit(text, model))))];
+  const forms = (model) => { const parts = plain(String(model)).trim().split(/\s+/).filter(Boolean); return parts.length > 2 ? [parts.join(' '), parts.slice(0, 2).join(' ')] : [parts.join(' ')]; };
+  const models = [...new Set((Array.isArray(data.subtype?.models) ? data.subtype.models : []).flatMap(forms).filter((model) => model && texts.some((text) => wordHit(text, model))))];
   return {
     kind: { ...kind, not: [...new Set([...(kind?.not ?? []), ...not])] },
-    subtype: models.length ? { label, models, source: 'model proposal, matched to listing titles by code' } : null,
+    subtype: models.length ? { label, models, variants, source: 'model proposal, matched to listing titles by code' } : null,
   };
 }
 

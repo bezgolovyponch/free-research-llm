@@ -18,7 +18,7 @@ import { buildBrief, describeBrief, onConcept, radiusIn } from './brief.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
-import { applyCalibration, applyModel, calibrationPrompt, modelText, verifyKind, withModelRules } from './decision.mjs';
+import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage } from './evidence.mjs';
@@ -42,6 +42,7 @@ const SWEEP_PAGES_KEPT = 120;
 export const TEAM_TTL_MS = 24 * 3600 * 1000;
 export const SUPPORT_PARALLEL = 3;
 export const CALIBRATION_TITLES = 60;
+export const CALIBRATION_SAMPLES = 3;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -370,8 +371,11 @@ export class ResearchEngine {
       const titles = calibrationTitles(project.sweep.pages);
       if (titles.length) {
         try {
-          const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: calibrationPrompt({ kind, question: project.question, titles }) });
-          const applied = applyCalibration(kind, reply, titles);
+          const messages = calibrationPrompt({ kind, question: project.question, titles });
+          const replies = await Promise.all(Array.from({ length: CALIBRATION_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
+          const merged = mergeCalibrations(replies);
+          if (merged.samples < 2) throw new Error(`only ${merged.samples} of ${CALIBRATION_SAMPLES} calibration proposals answered`);
+          const applied = applyCalibration(kind, merged, titles);
           project.decisionModel.kind = applied.kind;
           project.decisionModel.subtype = applied.subtype;
           project.decisionModel.calibrated = new Date().toISOString();
