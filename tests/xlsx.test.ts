@@ -1,4 +1,5 @@
 import { unzipSync } from 'fflate';
+import { crc32, inflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { MAX_CELL_CHARS, columnName, isLink, sheetName, sheetXml, workbook, xmlText, zip } from '../src/xlsx.mjs';
 
@@ -39,11 +40,17 @@ describe('xlsx writer: a workbook Excel and Google Sheets open, with no dependen
     expect(xml.match(/>(x+)</)![1].length).toBe(MAX_CELL_CHARS);
   });
 
-  it('packs a valid zip: every entry inflates to its content', () => {
+  it('packs a valid zip: every entry inflates to its content and matches its CRC, checked by Node zlib', () => {
     const buffer = zip([['a.txt', 'hello'], ['b/c.xml', '<x/>']]);
     const files = unzip(buffer);
     expect(files).toEqual({ 'a.txt': 'hello', 'b/c.xml': '<x/>' });
     expect(buffer.readUInt32LE(0)).toBe(0x04034b50);
+    expect(buffer.readUInt32LE(14)).toBe(crc32(Buffer.from('hello')));
+    const nameLength = buffer.readUInt16LE(26);
+    const extraLength = buffer.readUInt16LE(28);
+    const start = 30 + nameLength + extraLength;
+    const packed = buffer.subarray(start, start + buffer.readUInt32LE(18));
+    expect((buffer.readUInt16LE(8) === 8 ? inflateRawSync(packed) : packed).toString()).toBe('hello');
   });
 
   it('holds the parts a spreadsheet needs: content types, workbook, styles and one sheet per table', () => {
