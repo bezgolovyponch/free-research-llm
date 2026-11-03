@@ -118,6 +118,52 @@ describe('decision model per request: criteria kept by agreement, limits only fr
   });
 });
 
+describe('stage 0: the purpose, its value and the needs it implies are chosen by code', () => {
+  const ask = 'Find used hatchback cars within 300km from prague up to 65000CZK with highest price/value';
+  const specific = {
+    concept: 'used hatchbacks near Prague',
+    purpose: 'A buyer wants a used hatchback near Prague under 65,000 CZK so that they buy the best value car',
+    value: 'a shortlist of 20 hatchbacks within 300 km of Prague, each at or below 65,000 CZK and below the median price of its model and year',
+    needs: [
+      { need: 'live hatchback listings within 300 km of Prague', kind: 'listings', sources: ['sauto.cz', 'mobile.de'] },
+      { need: 'reliability of common hatchback models', kind: 'knowledge', sources: ['adac.de', 'car buying guides'] },
+      { need: 'price below the median for its model and year', kind: 'computed', sources: ['listings table'] },
+    ],
+    kind: { label: 'used hatchback', terms: ['hatchback'] },
+    criteria: [],
+  };
+  const generic = { purpose: 'User wants information about cars', value: '', needs: [{ need: 'cars', kind: 'prices', sources: [] }] };
+  const other = { purpose: 'Someone wants a cheap car so that they save money', value: 'the cheapest car', needs: [] };
+
+  it('picks the purpose and value that share the most words with the question', () => {
+    const model = aggregate([normalizeSample(generic), normalizeSample(specific), normalizeSample(other)], { question: ask });
+    expect(model.purpose).toBe(specific.purpose);
+    expect(model.value).toBe(specific.value);
+    expect(model.needs).toEqual(specific.needs);
+    expect(model.purposeGrounded).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps no purpose when it is not grounded in the question or has no value', () => {
+    const vague = aggregate([normalizeSample(generic), normalizeSample(generic)], { question: ask });
+    expect(vague.purpose).toBeNull();
+    expect(vague.purposeGrounded).toBeLessThan(2);
+    const noValue = { ...specific, value: '' };
+    expect(aggregate([normalizeSample(noValue), normalizeSample(noValue)], { question: ask }).purpose).toBeNull();
+    const noSoThat = { ...specific, purpose: 'A buyer wants a used hatchback near Prague under 65,000 CZK' };
+    expect(aggregate([normalizeSample(noSoThat), normalizeSample(noSoThat)], { question: ask }).purpose).toBeNull();
+  });
+
+  it('keeps only needs with a known kind and puts Why, Value and Needs first in the brief', () => {
+    const model = aggregate([normalizeSample(specific), normalizeSample(specific)], { question: ask });
+    expect(model.needs.map((n: { kind: string }) => n.kind)).toEqual(['listings', 'knowledge', 'computed']);
+    const text = modelText(model);
+    expect(text.startsWith(`Why: ${specific.purpose}`)).toBe(true);
+    expect(text).toContain(`Value: ${specific.value}`);
+    expect(text).toContain('Needs: live hatchback listings within 300 km of Prague (listings: sauto.cz, mobile.de);');
+    expect(modelText(aggregate([normalizeSample(generic)], { question: ask }))).toContain('Why: not stated clearly — pieces must not be researched until it is');
+  });
+});
+
 describe('DecisionModeler: several independent model calls, code decides', () => {
   const reply = (criteria: object[]) => ({ provider: 'p', data: { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria } });
 
@@ -145,5 +191,15 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
   it('keeps no model when fewer than two proposals came back', async () => {
     const router = { complete: async () => { throw new Error('down'); } };
     expect(await new DecisionModeler({ router }).build({ id: 'x', question })).toBeNull();
+  });
+});
+
+describe('decision model version', () => {
+  it('treats a model built under an older logic version as stale so it is rebuilt', async () => {
+    const { DecisionModeler, DECISION_MODEL_VERSION } = await import('../../src/research/decision.mjs');
+    const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
+    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 } } };
+    expect(modeler.fresh(project)).toBe(false);
+    expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, version: DECISION_MODEL_VERSION } })).toBe(true);
   });
 });

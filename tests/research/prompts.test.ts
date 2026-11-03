@@ -32,6 +32,12 @@ describe('list-first decomposition', () => {
     const prompt = decomposePrompt({ question: 'Should I import e-bikes from Germany to Czechia?', template, constraints: {}, expected: '' })[1].content;
     expect(prompt).not.toContain('Do not create pieces that search for, price, filter');
   });
+
+  it('sends pieces only to knowledge needs when the brief lists needs', () => {
+    const prompt = decomposePrompt({ question: 'Find 20 hatchbacks within 300 km of Prague', template, constraints: {}, expected: 'at least 20 cars', brief: 'Why: A buyer wants a used hatchback so that they buy the best value car\nValue: a shortlist of 20 hatchbacks\nNeeds: reliability (knowledge: adac.de); price (computed: listings table)' })[1].content;
+    expect(prompt).toContain('Create pieces only for needs of kind knowledge; listings and computed needs are done by code.');
+    expect(decomposePrompt({ question: 'Find 20 hatchbacks', template, constraints: {}, expected: '' })[1].content).not.toContain('Create pieces only for needs of kind knowledge');
+  });
 });
 
 describe('concept brief in prompts', () => {

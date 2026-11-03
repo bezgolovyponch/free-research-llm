@@ -261,6 +261,11 @@ export class ResearchEngine {
       await this.ensureDecisionModel(project);
       this.briefOf(project);
     }
+    const model = project.decisionModel;
+    if (model) {
+      this.emit(project, 'decision', `purpose: ${model.purpose || 'not stated clearly — pieces must not be researched until it is'}`);
+      if (model.value) this.emit(project, 'decision', `value: ${model.value}`);
+    }
     this.emit(project, 'tree', `issue tree ready: ${tree.nodes.length} nodes (${reply.provider}/${reply.model})`);
     await this.store.save(project);
   }

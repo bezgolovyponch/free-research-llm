@@ -453,6 +453,38 @@ describe('ResearchEngine', () => {
     expect(engine.modeler.fresh(project)).toBe(true);
   });
 
+  it('reports the purpose and value stage 0 chose right after the decision model', async () => {
+    const purpose = 'A buyer wants a used car under 50000 EUR so that they shortlist the best value listings';
+    const value = 'a shortlist of used car listings under 50000 EUR below the median price of their model and year';
+    const proposal = { concept: 'used cars within budget', purpose, value, needs: [{ need: 'live used car listings', kind: 'listings', sources: ['sauto.cz'] }], kind: { label: 'used car', terms: ['car', 'used car'] }, criteria: [{ clause: 'under 50000 EUR', measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000 EUR' }] };
+    const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
+      p.decisionModel = { ...aggregate([normalizeSample(proposal), normalizeSample(proposal)], { question: String(p.question) }), caseIds: [] };
+      return p.decisionModel;
+    } };
+    const tree = {
+      decision: 'Choose used car listings under 50000 EUR',
+      successCriteria: 'live listing pages under 50000 EUR',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: null, urlsLive: true, valueRange: [0, 50000], unit: 'EUR', mustMention: [] },
+      nodes: [
+        { id: 'D1', parentId: null, title: 'Candidate listings', question: 'Which used car listings are for sale under 50000 EUR?', method: 'lookup', searchQueries: ['used cars for sale'] },
+        { id: 'D1.1', parentId: 'D1', title: 'Dealer stock', question: 'Which dealer listings show a used car under 50000 EUR?', method: 'lookup', searchQueries: ['used car dealer stock'] },
+        { id: 'D1.2', parentId: 'D1', title: 'Private ads', question: 'Which private ads show a used car under 50000 EUR?', method: 'lookup', searchQueries: ['used car private ads'] },
+        { id: 'D2', parentId: null, title: 'Price check', question: 'What do comparable used cars cost near 50000 EUR?', method: 'comparison', searchQueries: ['used car price comparison'] },
+        { id: 'D2.1', parentId: 'D2', title: 'Asking prices', question: 'What asking prices do comparable used cars show?', method: 'lookup', searchQueries: ['used car asking prices'] },
+        { id: 'D2.2', parentId: 'D2', title: 'Running costs', question: 'What running costs change which used car is worth shortlisting?', method: 'lookup', searchQueries: ['used car running costs'] },
+      ],
+    };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Which used car listings under 50000 EUR are worth shortlisting right now?', templateId: 'generic', expected: '10 links to real listings of used cars priced up to 50000 EUR' });
+    await engine.decompose(project);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message.startsWith('purpose:'))).toBe(true);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message === `purpose: ${purpose}`)).toBe(true);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message === `value: ${value}`)).toBe(true);
+  });
+
   it('drops off-topic pages before any model call, searches again when nothing matches, and shows the model the retrieved page', async () => {
     const queries: string[][] = [];
     const prompts: string[] = [];
