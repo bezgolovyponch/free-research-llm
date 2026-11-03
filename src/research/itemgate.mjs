@@ -16,8 +16,10 @@ function priceOf(value) {
   }
 }
 
+const UNICODE_DASHES = /[\u2010-\u2015\u2212]/g;
+
 export function plain(text) {
-  return String(text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  return String(text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(UNICODE_DASHES, '-').replace(/\u00a0/g, ' ').toLowerCase();
 }
 
 function decodedUrl(url) {
@@ -39,9 +41,9 @@ export function isKind(item, kind) {
   return kind.terms.some((term) => hasTerm(text, term)) && !(kind.not ?? []).some((term) => hasTerm(text, term));
 }
 
-export function screenItem(item, { valueRange = null, unit = '', convert = (v) => v, kind = null, kindKnown = false } = {}) {
+export function screenItem(item, { valueRange = null, unit = '', convert = (v) => v, kind = null, kindKnown = false, located = true } = {}) {
   const reasons = [];
-  if (!looksLikeListing(item.url) || SEARCH_TITLE.test(item.title ?? '')) reasons.push('not a single listing page');
+  if ((located && !looksLikeListing(item.url)) || SEARCH_TITLE.test(item.title ?? '')) reasons.push(located ? 'not a single listing page' : 'a search results page, not the item');
   const offer = `${item.title ?? ''} ${decodedUrl(item.url)}`;
   if (kind) {
     const excluded = (kind.not ?? []).some((term) => hasTerm(plain(offer), term));

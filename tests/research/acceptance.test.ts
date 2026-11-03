@@ -150,3 +150,27 @@ describe('item count with describing words', () => {
     expect(itemCountFromWords('cars within 300 km of Prague')).toBeNull();
   });
 });
+
+describe('acceptance for items no listing portal sells', () => {
+  it('counts a provider home page that opens, and keeps the listing-page rule for listed kinds', async () => {
+    const readPage = async () => ({ status: 200, text: 'Branded second-hand clothing wholesale. '.repeat(20) });
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true }, '1 direct link to a provider');
+    const items = [{ title: 'Vintage wholesale', url: 'https://vintage-wholesale.example.de/' }];
+    const unlisted = await checker.evaluate(spec, items, { located: false });
+    expect(unlisted.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 1 });
+    expect(unlisted.checks.find((c: { id: string }) => c.id === 'count').detail).toContain('a page that opens and describes the asked kind');
+    const listed = await checker.evaluate(spec, items);
+    expect(listed.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 0 });
+  });
+});
+
+describe('kindOnPage', () => {
+  it('finds the asked kind on a page by word stems, and not on a brand site or a press release', async () => {
+    const { kindOnPage } = await import('../../src/research/acceptance.mjs');
+    const kind = { terms: ['wholesale second\u2011hand clothing', 'used clothing wholesale'] };
+    expect(kindOnPage('China Wholesale Second Hand Supplier Bale Used Clothes', kind)).toBe(true);
+    expect(kindOnPage('The North Face jackets, shop the new collection', kind)).toBe(false);
+    expect(kindOnPage('eBay launches pre-loved fashion on Love Island', kind)).toBe(false);
+  });
+});

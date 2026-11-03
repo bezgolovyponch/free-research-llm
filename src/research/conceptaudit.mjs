@@ -168,6 +168,11 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
     add('C18', 'A list research leaves per-listing work to code', 'warn', !ids.length, ids.length ? `${ids.length} piece(s) do per-listing work code should do: ${ids.slice(0, 6).join(', ')}` : 'No piece does per-listing work.');
   }
 
+  if (p.brief?.located === false && Number(p.acceptance?.itemCount) > 0) {
+    const listingShaped = Boolean(c) || (p.nodes ?? []).some((n) => (n.finding?.rejected ?? []).some((r) => (r.reasons ?? []).includes('not a single listing page')));
+    add('C20', 'A kind no portal lists is not judged by listing rules', 'error', !listingShaped, listingShaped ? 'a candidate table or a "single listing page" rejection on a kind no listing portal sells: the result side still uses listing rules' : 'Results are the items the pieces find, each checked as a page that opens.');
+  }
+
   if (typeof c?.keptCount === 'number' && typeof p.report?.verdict === 'string') {
     const asked = Number(p.acceptance?.itemCount) || 0;
     const wrong = c.keptCount >= asked ? statedResultCounts(p.report.verdict).find((n) => n < c.keptCount) : undefined;
