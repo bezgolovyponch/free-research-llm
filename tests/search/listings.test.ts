@@ -48,9 +48,9 @@ describe('listing extraction', () => {
     ] };
     const html = `<script type="application/ld+json">${JSON.stringify(ld)}</script>`;
     expect(fromJsonLd(html, BASE)).toEqual([
-      { title: 'Plot by the bay', url: 'https://portal.example/listing/bay-ID1abcd', value: 14000, unit: 'EUR', area: null, place: '' },
-      { title: 'Hill plot', url: 'https://portal.example/listing/hill-ID1efgh', value: 9500, unit: 'EUR', area: null, place: '' },
-      { title: 'Field', url: 'https://portal.example/listing/field-u5555555', value: null, unit: '', area: 4000, place: '' },
+      { title: 'Plot by the bay', url: 'https://portal.example/listing/bay-ID1abcd', value: 14000, unit: 'EUR', area: null, place: '', attrs: { '@type': 'Offer', name: 'Plot by the bay', price: 14000, priceCurrency: 'EUR' } },
+      { title: 'Hill plot', url: 'https://portal.example/listing/hill-ID1efgh', value: 9500, unit: 'EUR', area: null, place: '', attrs: { '@type': 'Offer', name: 'Hill plot', price: '9.500', 'price#n': 9500, priceCurrency: 'EUR' } },
+      { title: 'Field', url: 'https://portal.example/listing/field-u5555555', value: null, unit: '', area: 4000, place: '', attrs: { '@type': 'SingleFamilyResidence', name: 'Field', 'floorSize.value': 4000 } },
     ]);
   });
 
@@ -74,7 +74,7 @@ describe('listing extraction', () => {
     const next = { props: { pageProps: { data: { searchAds: { items: records, pagination: { currentPage: 1, totalPages: 9 } } } } } };
     const anchors = [1, 2, 3].map((n) => `<a href="/pt/anuncio/terreno-${n}-ID1x${n}yz">Terreno ${n}</a>`).join('');
     const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(next)}</script>${anchors}`;
-    expect(fromEmbeddedJson(html, 'https://imo.example/pt/resultados')).toEqual([1, 2, 3].map((n) => ({ title: `Terreno ${n}`, url: `https://imo.example/pt/anuncio/terreno-${n}-ID1x${n}yz`, value: n * 5000, unit: 'EUR', area: n * 1000, place: `Faro, Loulé ${n}` })));
+    expect(fromEmbeddedJson(html, 'https://imo.example/pt/resultados')).toEqual([1, 2, 3].map((n) => ({ title: `Terreno ${n}`, url: `https://imo.example/pt/anuncio/terreno-${n}-ID1x${n}yz`, value: n * 5000, unit: 'EUR', area: n * 1000, place: `Faro, Loulé ${n}`, attrs: { title: `Terreno ${n}`, 'totalPrice.value': n * 5000, 'totalPrice.currency': 'EUR', areaInSquareMeters: n * 1000 } })));
     expect(pagedNext(html, 'https://imo.example/pt/resultados')).toBe('https://imo.example/pt/resultados?page=2');
     expect(pagedNext(html.replace('"currentPage":1', '"currentPage":9'), 'https://imo.example/pt/resultados')).toBe('');
   });
@@ -152,6 +152,60 @@ describe('listing extraction', () => {
     expect(items.map((i) => i.unit)).toEqual(['EUR', 'EUR', 'EUR']);
     expect(items.map((i) => i.url)).toEqual(records.map((r) => `https://www.autoscout24.de${r.url}`));
     expect(items.every((i) => new URL(i.url).hostname === 'www.autoscout24.de')).toBe(true);
+  });
+
+  it('keeps the facts each autoscout24 listing states as generic dotted attributes, with parsed numbers', () => {
+    const records = [1, 2, 3].map((n) => ({
+      id: `d0b6741d-3dd5-47ce-804b-718ffdbb75${n}0`,
+      crossReferenceId: `cat_ma55gr201150ge1074va3624mt3255tr48064${n}`,
+      adTier: 1,
+      url: `/angebote/peugeot-208-${n}-d0b6741d-3dd5-47ce-804b-718ffdbb75${n}0`,
+      vehicle: { make: 'Peugeot', model: '208', fuel: 'Diesel', transmission: 'Schaltgetriebe', mileageInKm: '212.000 km', engineDisplacementInCCM: '1.560 cm³', motorTypeName: '115 e-HDI' },
+      location: { countryCode: 'DE', zip: 85276, city: 'Pfaffenhofen an der Ilm' },
+      seller: { type: 'Dealer', dealer: { id: 991, name: 'Autohaus Ilm' } },
+      ratings: { total: 4.6, count: 128 },
+      superDeal: { score: 0.9 },
+      price: { priceRaw: 2999, priceFormatted: '€ 2.999', isVatLabelLegallyRequired: true },
+      availableNow: true,
+    }));
+    const [first] = fromEmbeddedJson(embedded(records), DE_BASE);
+    expect(first.attrs['vehicle.make']).toBe('Peugeot');
+    expect(first.attrs['vehicle.mileageInKm']).toBe('212.000 km');
+    expect(first.attrs['vehicle.mileageInKm#n']).toBe(212000);
+    expect(first.attrs['vehicle.engineDisplacementInCCM#n']).toBe(1560);
+    expect(first.attrs['location.city']).toBe('Pfaffenhofen an der Ilm');
+    expect(first.attrs['seller.type']).toBe('Dealer');
+    expect(first.attrs.availableNow).toBe(true);
+    const keys = Object.keys(first.attrs);
+    expect(keys).not.toContain('id');
+    expect(keys).not.toContain('crossReferenceId');
+    expect(keys).not.toContain('adTier');
+    expect(keys.some((k) => k.startsWith('ratings') || k.startsWith('seller.dealer') || k.startsWith('price.isVat'))).toBe(false);
+  });
+
+  it('keeps the facts a schema.org Vehicle states, parsed numbers included', () => {
+    const ld = {
+      '@type': 'Vehicle',
+      name: 'Peugeot 208 1.6 e-HDI',
+      url: 'https://portal.example/listing/peugeot-208-ID1abcd',
+      bodyType: 'Hatchback',
+      fuelType: 'Diesel',
+      productionDate: '2015-04-01',
+      mileageFromOdometer: { '@type': 'QuantitativeValue', value: 120000, unitCode: 'KMT' },
+      vehicleEngine: { '@type': 'EngineSpecification', enginePower: { '@type': 'QuantitativeValue', value: 85, unitCode: 'KWT' } },
+    };
+    const [item] = fromJsonLd(`<script type="application/ld+json">${JSON.stringify(ld)}</script>`, BASE);
+    expect(item.attrs.bodyType).toBe('Hatchback');
+    expect(item.attrs['mileageFromOdometer.value']).toBe(120000);
+    expect(item.attrs['vehicleEngine.enginePower.value']).toBe(85);
+    expect(item.attrs.fuelType).toBe('Diesel');
+  });
+
+  it('gives a record without scalar facts no attributes key', () => {
+    const bare = { url: 'https://portal.example/listing/bare-1-100000', images: ['https://portal.example/i/1.jpg'], tags: ['x'] };
+    const items = fromJsonLd(`<script type="application/ld+json">${JSON.stringify(bare)}</script>`, BASE);
+    expect(items).toHaveLength(1);
+    expect('attrs' in items[0]).toBe(false);
   });
 
   it('reads a złoty price from priceFormatted when the record states no currency field', () => {
