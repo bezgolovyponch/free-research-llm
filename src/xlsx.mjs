@@ -1,4 +1,4 @@
-import { crc32, deflateRawSync } from 'node:zlib';
+import { zipSync, strToU8 } from 'fflate';
 
 export const MAX_CELL_CHARS = 32767;
 export const MAX_SHEET_NAME = 31;
@@ -98,59 +98,12 @@ export function workbookFiles(sheets) {
   return files;
 }
 
-function dosTime(date) {
-  const time = (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | Math.floor(date.getUTCSeconds() / 2);
-  const day = ((date.getUTCFullYear() - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate();
-  return { time, day };
-}
-
 export function zip(files, date = new Date()) {
-  const { time, day } = dosTime(date);
-  const locals = [];
-  const central = [];
-  let offset = 0;
+  const entries = {};
   for (const [name, content] of files) {
-    const nameBuf = Buffer.from(name, 'utf8');
-    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
-    const packed = deflateRawSync(data);
-    const crc = crc32(data);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0x0800, 6);
-    local.writeUInt16LE(8, 8);
-    local.writeUInt16LE(time, 10);
-    local.writeUInt16LE(day, 12);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(packed.length, 18);
-    local.writeUInt32LE(data.length, 22);
-    local.writeUInt16LE(nameBuf.length, 26);
-    local.writeUInt16LE(0, 28);
-    locals.push(local, nameBuf, packed);
-    const entry = Buffer.alloc(46);
-    entry.writeUInt32LE(0x02014b50, 0);
-    entry.writeUInt16LE(20, 4);
-    entry.writeUInt16LE(20, 6);
-    entry.writeUInt16LE(0x0800, 8);
-    entry.writeUInt16LE(8, 10);
-    entry.writeUInt16LE(time, 12);
-    entry.writeUInt16LE(day, 14);
-    entry.writeUInt32LE(crc, 16);
-    entry.writeUInt32LE(packed.length, 20);
-    entry.writeUInt32LE(data.length, 24);
-    entry.writeUInt16LE(nameBuf.length, 28);
-    entry.writeUInt32LE(offset, 42);
-    central.push(entry, nameBuf);
-    offset += local.length + nameBuf.length + packed.length;
+    entries[name] = Buffer.isBuffer(content) ? new Uint8Array(content) : strToU8(content);
   }
-  const centralBuf = Buffer.concat(central);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(files.length, 8);
-  end.writeUInt16LE(files.length, 10);
-  end.writeUInt32LE(centralBuf.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, centralBuf, end]);
+  return Buffer.from(zipSync(entries, { level: 6, mtime: date }));
 }
 
 export function workbook(sheets, date = new Date()) {

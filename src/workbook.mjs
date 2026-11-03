@@ -45,12 +45,41 @@ export function withoutOwningRows(project) {
   })];
 }
 
+const FACT_FIELDS = [
+  ['group', (r) => r.group],
+  ['year', (r) => r.year],
+  ['mileage km', (r) => r.km],
+  ['power kW', (r) => r.kw],
+  ['value vs peers', (r) => r.valueIndex],
+  ['peers', (r) => r.peers],
+  ['peer median', (r) => r.peerMedian],
+  ['distance km', (r) => r.distanceKm],
+];
+
+const KEEP_ALWAYS = ['title', 'url', 'price', 'currency'];
+
+function isBlank(value) {
+  return value === null || value === undefined || value === '' || (typeof value === 'number' && !Number.isFinite(value));
+}
+
+function attrColumns(rows) {
+  const keys = [];
+  for (const r of rows) for (const key of Object.keys(r.attrs ?? {})) if (!keys.includes(key)) keys.push(key);
+  const plain = keys.filter((key) => !/#n$/.test(key));
+  return keys.filter((key) => {
+    if (/#n$/.test(key) && plain.includes(key.replace(/#n$/, ''))) return false;
+    const have = rows.filter((r) => !isBlank(r.attrs?.[key])).length;
+    return rows.length > 0 && have * 5 >= rows.length;
+  });
+}
+
 export function plotRows(project) {
   const c = project.candidates ?? {};
   const listed = [...(c.kept ?? []).map((r) => ['your countries', r]), ...(c.toCheck ?? []).map((r) => ['to check (price or country not shown)', r]), ...(c.outside ?? []).map((r) => ['outside your countries', r])];
   const rows = listed.map(([, r]) => r);
   const ids = checkIds(rows);
-  const header = ['list', 'counted in the result', 'tier', 'external check', 'external check notes', 'title', 'url', 'price', 'currency', `price in ${project.acceptance?.unit || 'EUR'}`, 'entry cost EUR', 'area', 'area unit', 'area m²', 'area in title m²', 'area matches title', 'glamping units', 'place', 'country', 'sea km', 'beach km', 'named lake km', 'workable months', 'comfortable months', 'hottest month avg high °C', 'things to explore within 15 km', 'lodging within 15 km', 'campsites within 15 km', 'zoning', 'checks met %', ...checkLabels(rows, ids), 'verdict', 'why', 'trade-offs', 'risks', 'legal path', 'found on', 'read by', 'latitude', 'longitude'];
+  const unit = project.acceptance?.unit || 'EUR';
+  const rawHeader = ['list', 'counted in the result', 'tier', 'external check', 'external check notes', 'title', 'url', 'price', 'currency', `price in ${unit}`, 'entry cost EUR', 'area', 'area unit', 'area m²', 'area in title m²', 'area matches title', 'glamping units', 'place', 'country', 'sea km', 'beach km', 'named lake km', 'workable months', 'comfortable months', 'hottest month avg high °C', 'things to explore within 15 km', 'lodging within 15 km', 'campsites within 15 km', 'zoning', 'checks met %', ...checkLabels(rows, ids), 'verdict', 'why', 'trade-offs', 'risks', 'legal path', 'found on', 'read by', 'latitude', 'longitude'];
   const body = listed.map(([list, r]) => {
     const plan = r.plan ?? {};
     const site = r.site ?? null;
@@ -102,7 +131,23 @@ export function plotRows(project) {
       num(r.lon),
     ];
   });
-  return [header, ...body];
+  const names = rawHeader.map((name) => (name === 'entry cost EUR' ? `entry cost ${unit}` : name));
+  const kept = names.map((name, index) => ({ name, index })).filter(({ name, index }) => KEEP_ALWAYS.includes(name) || body.some((row) => !isBlank(row[index])));
+  const facts = FACT_FIELDS.filter(([, get]) => rows.some((r) => !isBlank(get(r))));
+  const attrs = attrColumns(rows);
+  const prefix = ['list', 'counted in the result', 'title', 'url', 'price', 'currency', `price in ${unit}`];
+  const columns = [];
+  for (const name of prefix) {
+    const col = kept.find((k) => k.name === name);
+    if (col) columns.push({ name, value: (row) => row[col.index] });
+  }
+  for (const [name, get] of facts) columns.push({ name, value: (_row, src) => get(src) });
+  for (const key of attrs) columns.push({ name: `fact: ${key}`, value: (_row, src) => src.attrs?.[key] ?? '' });
+  for (const col of kept) {
+    if (columns.some((c) => c.name === col.name)) continue;
+    columns.push({ name: col.name, value: (row) => row[col.index] });
+  }
+  return [columns.map((c) => c.name), ...body.map((row, i) => columns.map((c) => c.value(row, rows[i])))];
 }
 
 export function checkRows(project) {

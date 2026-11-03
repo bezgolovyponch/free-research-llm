@@ -184,6 +184,10 @@ describe('HTTP server', () => {
     expect(xlsx.headers.get('content-type')).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     expect(xlsx.headers.get('content-disposition')).toBe(`attachment; filename="${created.id}-results.xlsx"`);
     expect(Buffer.from(await xlsx.arrayBuffer()).subarray(0, 2).toString()).toBe('PK');
+    const zip = await fetch(`${base}/api/projects/${created.id}/results.zip`);
+    expect(zip.headers.get('content-type')).toBe('application/zip');
+    expect(zip.headers.get('content-disposition')).toBe(`attachment; filename="${created.id}-results.zip"`);
+    expect(Buffer.from(await zip.arrayBuffer()).subarray(0, 2).toString()).toBe('PK');
     expect(done.results.model).toMatchObject({ kind: 'decision', probability: expect.any(Number), changedSince: [] });
     expect(typeof done.report.model).toBe('string');
     expect(Array.isArray(done.results.treeAudit)).toBe(true);
