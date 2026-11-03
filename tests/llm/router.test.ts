@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
-import { DEAD_WINDOW_MS, ModelRouter, NoModelAvailableError, OVERLOAD_REST_MS, estimateTokens, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { DEAD_WINDOW_MS, ModelRouter, NoModelAvailableError, OVERLOAD_REST_MS, PAYMENT_REST_MS, estimateTokens, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -70,6 +70,22 @@ describe('ModelRouter', () => {
     expect(st.daily.coolingReason).toContain('daily quota');
     expect(st.ok.coolingReason).toBeNull();
     expect(nextUtcMidnight(now)).toBe(Date.parse('2026-10-21T00:01:00Z'));
+  });
+
+  it('benches a provider that needs a paid plan for 24 h, not only until the next midnight', async () => {
+    const now = Date.parse('2026-11-03T10:00:00Z');
+    const cerebras = provider('cerebras', [new ProviderError('cerebras HTTP 402: Payment required', { status: 402 })]);
+    const puter = provider('puter', [new ProviderError('puter HTTP 429: A subscription is required', { status: 429 })]);
+    const ok = provider('ok', ['{}']);
+    const router = new ModelRouter({ providers: [cerebras, puter, ok], now: () => now });
+    await router.complete({ messages: [] });
+    const st = Object.fromEntries(router.status().map((p: { id: string; coolingDownMs: number; coolingReason: string }) => [p.id, p]));
+    expect(PAYMENT_REST_MS).toBe(24 * 3600 * 1000);
+    expect(st.cerebras.coolingDownMs).toBe(PAYMENT_REST_MS);
+    expect(st.cerebras.coolingReason).toBe('needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key');
+    expect(st.puter.coolingDownMs).toBe(PAYMENT_REST_MS);
+    expect(st.puter.coolingReason).toContain('rests 24 h');
+    expect(st.ok.coolingReason).toBeNull();
   });
 
   it('routes each kind of call by its own order, skips providers a prompt is too big for, and avoids the author\'s model family for reviews', async () => {
@@ -152,6 +168,25 @@ describe('ModelRouter.restoreCooldowns', () => {
     expect(router.cooldownReason.get('sambanova')).toMatch(/daily quota or credit/);
     expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
     expect(router.cooldownUntil.has('groq')).toBe(false);
+  });
+});
+
+describe('ModelRouter.restoreCooldowns paid plan', () => {
+  it('keeps a provider that needs a paid plan benched for the rest of the 24 h after a restart', () => {
+    const now = Date.parse('2026-11-03T10:00:00Z');
+    const p = (id: string) => ({ id, ready: true, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('cerebras'), p('puter'), p('old')], now: () => now });
+    const restored = router.restoreCooldowns([
+      { ts: '2026-11-03T09:00:00Z', provider: 'cerebras', ok: false, error: 'cerebras HTTP 402: Payment required' },
+      { ts: '2026-11-03T08:00:00Z', provider: 'puter', ok: false, error: 'puter HTTP 429: A subscription is required' },
+      { ts: '2026-11-01T09:00:00Z', provider: 'old', ok: false, error: 'old HTTP 402: Payment required' },
+    ]);
+    expect(restored.sort()).toEqual(['cerebras', 'puter']);
+    expect(router.cooldownUntil.get('cerebras')).toBe(now + PAYMENT_REST_MS);
+    expect(router.cooldownReason.get('cerebras')).toContain('needs a paid plan');
+    expect(router.cooldownUntil.get('puter')).toBe(now + PAYMENT_REST_MS);
+    expect(router.cooldownReason.get('puter')).toContain('rests 24 h');
+    expect(router.cooldownUntil.has('old')).toBe(false);
   });
 });
 
@@ -552,6 +587,23 @@ describe('ModelRouter last-resort local models', () => {
     const reply = await router.complete({ messages: [] });
     expect(reply).toMatchObject({ provider: 'llamacpp-lan', data: { answer: 'from the PC' } });
     expect(router.available({ tier: 'vision' }).map((p: { id: string }) => p.id)).toEqual([]);
+  });
+});
+
+describe('ModelRouter paced providers', () => {
+  it('keeps a provider that would have to queue behind the free ones', () => {
+    const queued = { ...provider('pollinations', ['{}']), queueMs: () => 30000 };
+    const free = provider('groq', ['{}']);
+    const router = new ModelRouter({ providers: [queued, free] });
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['groq', 'pollinations']);
+  });
+
+  it('records the service time without the queue wait the provider sat through', async () => {
+    let now = 1000;
+    const paced = { id: 'pollinations', ready: true, describe: () => ({ id: 'pollinations' }), selected: { fast: 'm' }, chat: async () => { now += 40000; return { content: '{"ok":true}', model: 'm', waitMs: 30000 }; } };
+    const router = new ModelRouter({ providers: [paced], now: () => now });
+    await router.complete({ messages: [] });
+    expect(router.ledger[0]).toMatchObject({ provider: 'pollinations', ok: true, ms: 10000, waitMs: 30000 });
   });
 });
 

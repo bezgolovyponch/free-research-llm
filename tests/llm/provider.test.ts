@@ -167,6 +167,38 @@ describe('provider limits', () => {
     }
   });
 
+  it('reports how long the call had to wait in the queue and how much queue is left', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000);
+      const pollinations = PROVIDER_PRESETS.find((p) => p.id === 'pollinations')!;
+      const fetchImpl = fakeFetch([
+        [/\/models$/, () => jsonResponse({ data: [{ id: 'openai-fast' }] })],
+        [/\/chat\/completions$/, () => jsonResponse({ choices: [{ message: { content: '{"ok":true}' } }] })],
+      ]);
+      const p = await new OpenAICompatibleProvider({ preset: { ...pollinations, minIntervalMs: 45000 }, fetchImpl }).discover();
+      const first = await p.chat({ messages: [] });
+      expect(first.waitMs).toBe(0);
+      expect(p.queueMs()).toBe(45000);
+      const second = p.chat({ messages: [] });
+      await vi.advanceTimersByTimeAsync(45000);
+      expect((await second).waitMs).toBe(45000);
+      expect(p.queueMs()).toBe(45000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('has no queue to wait for when the provider is not paced', async () => {
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'llama-3.1-8b-instant' }] })],
+      [/\/chat\/completions$/, () => jsonResponse({ choices: [{ message: { content: '{"ok":true}' } }] })],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: groq, apiKey: 'k', fetchImpl }).discover();
+    expect(p.queueMs()).toBe(0);
+    expect(await p.chat({ messages: [] })).toMatchObject({ waitMs: 0 });
+  });
+
   it('retries with a doubled token budget when the reply was cut off', async () => {
     const budgets: number[] = [];
     const fetchImpl = fakeFetch([
@@ -270,6 +302,7 @@ describe('AnthropicMessagesProvider (fcc proxy)', () => {
       provider: 'fcc',
       usage: { prompt_tokens: 47, completion_tokens: 41, total_tokens: 88 },
       truncated: false,
+      waitMs: 0,
     });
     const sent = fetchImpl.calls.at(-1)!;
     expect(sent.url).toBe('http://127.0.0.1:8082/v1/messages');

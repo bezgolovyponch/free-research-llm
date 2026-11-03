@@ -107,6 +107,8 @@ Every row happened in this app (date, PR) or is the same failure in another plac
 | D9 | A provider stayed "dead" for hours after it recovered: fcc's last 20 calls timed out (14:14–18:01Z), so it ranked last and never got the call that would clear it (2026-11-03) | `DEAD_WINDOW_MS`: failures older than 30 min no longer demote |
 | D10 | A provider that never answered was ranked first and reserved for the top calls on its prior alone (Puter, 2026-11-03: "subscription required") | `neverAnswered` in `ranking.mjs` |
 | D11 | A proxy provider timed out at the tier timeout (45/90 s) while it queued behind remote models | preset `callTimeoutMs` (fcc 240 s) |
+| D12 | Calls queued minutes behind a paced provider (Pollinations, one reply per 45 s per IP) while others were free, and the queue wait was recorded as reply time (median 38–57 s, 2026-11-03) | `queueMs`, `QUEUE_DEMOTE_MS`; ledger `ms` excludes `waitMs` |
+| D13 | A provider without a free tier (Cerebras 402 "Payment required" since 2026-07-21, Puter "subscription required") rested only until midnight and failed first again every day | `PAYMENT_REST_MS` 24 h, restored after a restart; speed ranks by time per useful answer (`msPerAnswer`) |
 
 ### E · Change process
 | # | Failure | How it is caught |

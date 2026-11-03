@@ -29,6 +29,13 @@ describe('router ranking', () => {
     expect(s.pollinations.medianMs.deep).toBe(25000);
   });
 
+  it('counts the time lost on failed calls too, so speed means time per useful answer', () => {
+    const s = providerStats([...calls('pollinations', 'fast', 10, 40000), ...calls('pollinations', 'fast', 10, 40000, false, 'pollinations HTTP 500: boom')], { now });
+    expect(s.pollinations).toMatchObject({ calls: 20, ok: 10, failed: 10, spentMs: 800000, msPerAnswer: 80000 });
+    const none = providerStats([...calls('pollinations', 'fast', 3, 40000, false, 'pollinations HTTP 500: boom')], { now });
+    expect(none.pollinations.msPerAnswer).toBeNull();
+  });
+
   it('balanced: a capable provider that keeps failing moves down, and every place has a reason', () => {
     const rows = rankRole({ role: 'deep', strategy: 'balanced', providers, stats: providerStats(ledger, { now }) });
     expect(rows.map((r: { id: string }) => r.id)).toEqual(['cerebras', 'pollinations', 'gemini', 'mistral']);
@@ -104,6 +111,24 @@ describe('router ranking', () => {
     expect(tight.byPurpose.synthesize[0]).toBe('gemini');
     expect(PURPOSE_CLASS.rollup).toBe('volume');
     expect([familyOf('openai/gpt-oss-120b'), familyOf('gpt-oss-120b'), familyOf('gemini-3.8-flash'), familyOf('DeepSeek-V3.2'), familyOf('x', 'p')]).toEqual(['gpt-oss', 'gpt-oss', 'gemini', 'deepseek', 'p']);
+  });
+
+  it('volume order follows time per useful answer, so a slow provider with many failures drops below a fast reliable one', () => {
+    const ps = [
+      { id: 'cerebras', label: 'Cerebras', state: 'ready', deep: 'gpt-oss-120b', fast: 'gpt-oss-120b', coolingDownMs: 0 },
+      { id: 'pollinations', label: 'Pollinations', state: 'ready', deep: 'openai-fast', fast: 'openai-fast', coolingDownMs: 0 },
+      { id: 'groq', label: 'Groq', state: 'ready', deep: 'openai/gpt-oss-120b', fast: 'openai/gpt-oss-20b', coolingDownMs: 0 },
+    ];
+    const stats = providerStats([
+      ...calls('cerebras', 'fast', 10, 45000),
+      ...calls('cerebras', 'fast', 8, 45000, false, 'cerebras HTTP 500: boom'),
+      ...calls('pollinations', 'fast', 10, 1000),
+      ...calls('groq', 'fast', 10, 600),
+    ], { now });
+    const plan = purposePlan({ providers: ps, stats, enabled: ps.map((p) => p.id) });
+    expect(plan.orders.volume.indexOf('pollinations')).toBeLessThan(plan.orders.volume.indexOf('cerebras'));
+    expect(plan.orders.volume.at(-1)).toBe('groq');
+    expect(plan.reserved).toBe('groq');
   });
 });
 
