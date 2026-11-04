@@ -5,18 +5,21 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../../src/llm/router.mjs';
 import { ResearchEngine } from '../../../src/research/engine.mjs';
-import { ProjectImprover, acceptsTrial } from '../../../src/research/improve.mjs';
+import { NOISE_MIN_SAMPLES, ProjectImprover, acceptsTrial } from '../../../src/research/improve.mjs';
 import { ProjectStore } from '../../../src/store.mjs';
 
 type Node = { id: string; status: string };
+const measuredNoise = () => Array.from({ length: NOISE_MIN_SAMPLES }, () => 0);
 
 describe('acceptsTrial', () => {
-  it('needs a gain above 0.01 to keep a removal and above 0.001 for any other change', () => {
-    expect(acceptsTrial(0.5, 0.505)).toBe(true);
-    expect(acceptsTrial(0.5, 0.505, ['D4'])).toBe(false);
-    expect(acceptsTrial(0.5, 0.51, ['D4'])).toBe(false);
-    expect(acceptsTrial(0.5, 0.511, ['D4'])).toBe(true);
-    expect(acceptsTrial(0.5, 0.5)).toBe(false);
+  const measured = Array.from({ length: NOISE_MIN_SAMPLES }, () => 0);
+  it('needs a gain above 0.01 to keep a removal and above 0.001 for any other change, once the noise is measured', () => {
+    expect(acceptsTrial(0.5, 0.505, [], measured)).toBe(true);
+    expect(acceptsTrial(0.5, 0.505, ['D4'], measured)).toBe(false);
+    expect(acceptsTrial(0.5, 0.51, ['D4'], measured)).toBe(false);
+    expect(acceptsTrial(0.5, 0.511, ['D4'], measured)).toBe(true);
+    expect(acceptsTrial(0.5, 0.5, [], measured)).toBe(false);
+    expect(acceptsTrial(0.5, 0.505, [], measured.slice(1))).toBe(false);
   });
 });
 
@@ -27,6 +30,7 @@ async function removalLoop(verifyAfter: (nodes: Node[]) => void) {
   const created = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
   const done = await engine.run(created.id);
   for (const n of done.nodes as Node[]) if (n.id.startsWith('D1')) n.status = 'weak';
+  done.improve = { trials: [], remeasureNoise: measuredNoise() };
   await engine.store.save(done);
   const originalRun = engine.run.bind(engine);
   engine.run = async (id: string) => {

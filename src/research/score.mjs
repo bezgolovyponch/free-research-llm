@@ -12,9 +12,8 @@ export function scoreProject(project, pieces = []) {
   for (const n of nodes) counts[n.status in counts ? n.status : 'pending']++;
   const base = gradeAverage(nodes, pieces);
   const verdict = String(project?.report?.verdict ?? '');
-  const decisive = !project?.report || /INSUFFICIENT DATA/i.test(verdict) ? 0 : /^PROVISIONAL/i.test(verdict) ? 0.05 : 0.1;
   const issues = nodes
     .filter((n) => !['verified', 'supported'].includes(n.status))
     .map((n) => ({ nodeId: n.id, title: n.title, question: n.question, grade: n.status, failures: n.verification?.failures ?? (n.error ? [n.error] : []), sources: (n.sources ?? []).length }));
-  return { score: Math.round((base * 0.9 + decisive) * 1000) / 1000, counts, total: nodes.length, verdict, issues };
+  return { score: Math.round(base * 0.9 * 1000) / 1000, counts, total: nodes.length, verdict, issues };
 }

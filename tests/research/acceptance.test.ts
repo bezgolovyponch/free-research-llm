@@ -73,7 +73,16 @@ describe('valid items only', () => {
     const result = await checker.evaluate({ itemCount: 4, urlsLive: false, valueRange: [0, 20000], unit: 'EUR', mustMention: [] }, Object.keys(pages).map((url, i) => ({ url, value: [18000, 400000, 15000][i], unit: 'EUR' })));
     const count = result.checks.find((c: { id: string }) => c.id === 'count');
     expect(count).toMatchObject({ label: 'At least 4 valid items', value: 0.25 });
-    expect(count.detail).toMatch(/^1 of 3 delivered pass every check/);
+    expect(count.detail).toMatch(/^1 of 3 delivered pass every check; first 3 inspected/);
+  });
+
+  it('says how many of the delivered items it inspected when the list is longer than the check needs', async () => {
+    const urls = Array.from({ length: 10 }, (_, i) => `https://a.example/anuncio/plot-ID1iZBr${i}`);
+    const checker = new AcceptanceChecker({ readPage: async () => ({ status: 200, text: 'Rustic plot for sale 18 000 EUR near the coast '.repeat(20) }) });
+    const result = await checker.evaluate({ itemCount: 1, urlsLive: false, valueRange: null, mustMention: [] }, urls.map((url) => ({ url, value: 18000, unit: 'EUR' })));
+    const count = result.checks.find((c: { id: string }) => c.id === 'count');
+    expect(count.value).toBe(1);
+    expect(count.detail).toMatch(/^2 of 10 delivered pass every check; first 2 inspected/);
   });
 });
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { gradeAverage, scoreProject } from '../../src/research/score.mjs';
 
 describe('scoreProject', () => {
-  it('weights grades, rewards a decisive memo and lists the failing nodes', () => {
+  it('weights grades only, never rewards a verdict, and lists the failing nodes', () => {
     const project = {
       nodes: [
         { id: 'D1', status: 'verified', sources: [] },
@@ -11,9 +11,12 @@ describe('scoreProject', () => {
       report: { verdict: 'GO-IF spread > €7,500' },
     };
     const s = scoreProject(project);
-    expect(s.score).toBe(0.663);
+    expect(s.score).toBe(0.563);
+    expect(s.verdict).toBe('GO-IF spread > €7,500');
     expect(s.issues).toEqual([{ nodeId: 'D2', title: undefined, question: 'VAT?', grade: 'weak', failures: ['no number'], sources: 1 }]);
-    expect(scoreProject({ ...project, report: { verdict: 'INSUFFICIENT DATA — prices' } }).score).toBeCloseTo(0.5625, 3);
+    expect(scoreProject({ ...project, report: { verdict: 'PROVISIONAL — prices' } }).score).toBe(0.563);
+    expect(scoreProject({ ...project, report: { verdict: 'INSUFFICIENT DATA — prices' } }).score).toBe(0.563);
+    expect(scoreProject({ ...project, report: null }).score).toBe(0.563);
   });
 });
 
