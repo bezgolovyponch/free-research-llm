@@ -1,0 +1,93 @@
+[
+  {
+    "id": "F1",
+    "title": "concept change applied to one stage only",
+    "touches": [
+      "src/research/**",
+      "src/llm/**",
+      "scripts/concept-trace.mjs",
+      "scripts/quality.mjs",
+      "tests/research/**"
+    ],
+    "signal": "a concept flag is handled in one stage only; a research reaches the acceptance stage with 0 kept rows",
+    "cause": "the flag was added where the bug was seen, not traced through brief to search, screen, table, acceptance and audit",
+    "prevention": "stage-trace gate: scripts/concept-trace.mjs walks brief to search, screen, table, acceptance and audit and fails when a declared stage has no handler or no test"
+  },
+  {
+    "id": "F2",
+    "title": "invented criteria the user never asked for",
+    "touches": [
+      "src/research/**",
+      "scripts/concept-audit.mjs",
+      "scripts/quality.mjs",
+      "tests/research/**"
+    ],
+    "signal": "an enforced criterion whose source phrase is not in the request; rejection reasons naming a rule the user never stated",
+    "cause": "acceptance criteria were written at implementation time instead of derived from askedCriteria",
+    "prevention": "traceability gate: every enforced criterion carries the request phrase it comes from, and the enforced set is diffed against askedCriteria"
+  },
+  {
+    "id": "F3",
+    "title": "oversized worker task, no early artifact",
+    "touches": [
+      "scripts/launch-worker.mjs",
+      "scripts/quality.mjs",
+      "src/**",
+      "tests/**"
+    ],
+    "signal": "no file written within 20 min; a src change with no matching tests/<path>.test.ts",
+    "cause": "the worker spec was a whole feature, so the worker planned and wrote late and a timeout left nothing salvageable",
+    "prevention": "launcher contract and watchdog: the launcher refuses a spec that does not name the src files and the matching test file, and the worker writes code and its test first"
+  },
+  {
+    "id": "F4",
+    "title": "acting on the wrong research",
+    "touches": [
+      "src/frl.mjs",
+      "scripts/quality.mjs",
+      "tests/frl.test.ts"
+    ],
+    "signal": "two researches with the same question; a created research the user did not ask for",
+    "cause": "the research was identified by similarity instead of by creation time and id",
+    "prevention": "resolve-by-id rule: any command taking a research id lists researches by creation time, takes the newest one the user created and prints its id and question before the run"
+  },
+  {
+    "id": "F5",
+    "title": "two gates collide on e2e port 4610",
+    "touches": [
+      "scripts/quality.mjs",
+      "scripts/quality-lock.mjs",
+      "playwright.config.mjs",
+      "playwright.config.ts",
+      "e2e/**",
+      ".githooks/**",
+      "src/instancelock.mjs"
+    ],
+    "signal": "EADDRINUSE or port-in-use in the e2e output; a gate run that fails only while another gate is running",
+    "cause": "the e2e port was fixed and unowned, so the commit hook gate and the harness gate could run it at the same time",
+    "prevention": "exclusive lock file in os.tmpdir() (frl-quality.lock holding the pid): the second gate waits for the lock instead of failing on the port, and a stale lock is removed"
+  },
+  {
+    "id": "F6",
+    "title": "provider saturation by background loops",
+    "touches": [
+      "src/llm/**",
+      "verifier/**",
+      "tests/llm/**"
+    ],
+    "signal": "no new rows in the model-call ledger for N minutes while the run is in progress; provider failure rate above its bench threshold",
+    "cause": "background loops and the foreground witness draw from the same free provider quota with no concurrency budget",
+    "prevention": "per-provider concurrency semaphore with a reserved foreground slot: the witness runner acquires the reservation or waits with a printed reason"
+  },
+  {
+    "id": "F7",
+    "title": "worker launch fails on missing worktree link",
+    "touches": [
+      "scripts/launch-worker.mjs",
+      "tests/launcher.test.ts"
+    ],
+    "signal": "the launcher error itself; the worktree path missing from the launcher preflight output",
+    "cause": "the launcher checked the model and the spec but not the working copy it was going to run in",
+    "prevention": "launcher preflight: verify the worktree path exists, is a registered git worktree of this repo and has a clean node_modules link, and refuse to start with the missing path named"
+  }
+]

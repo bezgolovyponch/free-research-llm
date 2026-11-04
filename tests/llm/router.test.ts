@@ -730,6 +730,46 @@ describe('ModelRouter capacity inside one provider', () => {
   });
 });
 
+describe('ModelRouter paid providers', () => {
+  it('keeps a paid provider behind the free ones even when the route order puts it first', () => {
+    const fcc = provider('fcc', []);
+    const custom = provider('custom', []);
+    const gemini = provider('gemini', []);
+    const router = new ModelRouter({ providers: [fcc, custom, gemini], routeOrder: { fast: ['fcc', 'custom', 'gemini'] }, env: {} });
+    expect(router.available().map((p) => p.id)).toEqual(['gemini', 'fcc', 'custom']);
+  });
+
+  it('rests a paid provider when its tokens today reach the daily cap, and lets it back after the UTC day turns', () => {
+    let time = Date.parse('2026-11-04T10:00:00Z');
+    const fcc = provider('fcc', []);
+    const gemini = provider('gemini', []);
+    const router = new ModelRouter({ providers: [fcc, gemini], routeOrder: { fast: ['gemini', 'fcc'] }, now: () => time, env: { FRL_PAID_PROVIDERS: 'fcc', FRL_PAID_DAILY_TOKENS: '1000' } });
+    router.record({ provider: 'fcc', ts: '2026-11-03T09:00:00.000Z', tier: 'fast', ok: true, ms: 10, tokens: 999999 });
+    router.record({ provider: 'fcc', tier: 'fast', ok: true, ms: 100, tokens: 600 });
+    expect(router.available().map((p) => p.id)).toEqual(['gemini', 'fcc']);
+    router.record({ provider: 'fcc', tier: 'fast', ok: true, ms: 100, tokens: 400 });
+    expect(router.available().map((p) => p.id)).toEqual(['gemini']);
+    const capped = router.status().find((p: { id: string }) => p.id === 'fcc');
+    expect(capped.coolingReason).toBe('paid daily cap reached (1000 tokens)');
+    expect(capped.coolingDownMs).toBeGreaterThan(0);
+    time = Date.parse('2026-11-05T00:02:00Z');
+    expect(router.available().map((p) => p.id)).toEqual(['gemini', 'fcc']);
+  });
+
+  it('serves a paid provider under the cap when every free provider rests', async () => {
+    const time = Date.parse('2026-11-04T10:00:00Z');
+    const fcc = provider('fcc', ['{"ok":true}']);
+    const gemini = provider('gemini', []);
+    const router = new ModelRouter({ providers: [fcc, gemini], routeOrder: { fast: ['gemini', 'fcc'] }, now: () => time, env: { FRL_PAID_PROVIDERS: 'fcc', FRL_PAID_DAILY_TOKENS: '1000' } });
+    router.record({ provider: 'fcc', tier: 'fast', ok: true, ms: 100, tokens: 500 });
+    router.coolDown({ id: 'gemini', preset: {} }, new ProviderError('gemini HTTP 429: slow down', { status: 429, retryAfterMs: 1000 }));
+    expect(router.available().map((p) => p.id)).toEqual(['fcc']);
+    const reply = await router.complete({ messages: [], purpose: 'chat' });
+    expect(reply.provider).toBe('fcc');
+    expect(fcc.calls).toEqual(['fast']);
+  });
+});
+
 describe('ModelRouter dead providers recover', () => {
   it('stops treating a provider as dead once its last failure is older than the dead window, so it gets calls again', () => {
     let time = Date.parse('2026-11-03T14:00:00Z');

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SECRET_PATTERNS } from '../src/secrets.mjs';
+import { acquireQualityLock, releaseQualityLock, LOCK_WAIT_MS } from './quality-lock.mjs';
 
 import { parse as parseYaml } from 'yaml';
 
@@ -114,10 +115,18 @@ const gates = {
       const ci = Boolean(process.env.CI);
       return { passed: !ci, detail: ci ? 'Playwright is not installed and CI is set: the gate cannot run e2e, so it fails instead of skipping' : 'skipped: Playwright not installed (npm install, npx playwright install chromium webkit)' };
     }
-    const result = run('npx', ['playwright', 'test', '--reporter=line']);
-    const summary = `${result.stdout}${result.stderr}`.match(/(\d+ passed[^\n]*|\d+ failed[^\n]*)/g);
-    const failing = result.status === 0 ? [] : failingLines(`${result.stdout}${result.stderr}`, /^\s*(?:✘|\d+\)\s|Error:|Test timeout)/);
-    return { passed: result.status === 0, detail: `${summary ? summary.join(', ') : `${result.stdout}${result.stderr}`.slice(-300)}${failing.length ? `\n      ${failing.join('\n      ')}` : ''}` };
+    const lock = acquireQualityLock();
+    if (!lock.acquired) {
+      return { passed: false, detail: `another quality gate holds ${lock.file} (pid ${lock.holder}); waited ${Math.round(LOCK_WAIT_MS / 60000)} min for it` };
+    }
+    try {
+      const result = run('npx', ['playwright', 'test', '--reporter=line']);
+      const summary = `${result.stdout}${result.stderr}`.match(/(\d+ passed[^\n]*|\d+ failed[^\n]*)/g);
+      const failing = result.status === 0 ? [] : failingLines(`${result.stdout}${result.stderr}`, /^\s*(?:✘|\d+\)\s|Error:|Test timeout)/);
+      return { passed: result.status === 0, detail: `${summary ? summary.join(', ') : `${result.stdout}${result.stderr}`.slice(-300)}${failing.length ? `\n      ${failing.join('\n      ')}` : ''}` };
+    } finally {
+      releaseQualityLock({ file: lock.file });
+    }
   },
 
   flakes() {

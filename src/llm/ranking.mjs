@@ -1,3 +1,7 @@
+import { paidProviderIds } from './presets.mjs';
+
+export const PAID_REASON = 'paid: used only when every free provider is resting';
+
 export const STRATEGIES = {
   max: { label: 'Maximum capability', what: 'Each kind of call gets the strongest model that can take it: memo, tree and code go to the most capable; research to capable models with volume, escalating to the strongest when checks fail (FrugalGPT cascade); reviews and roll-ups to fast models of a different family than the one that wrote the answer. The strongest model\'s quota is kept for the important calls, spent keys wait for their daily reset, and prompts too big for a provider skip it.' },
   balanced: { label: 'Balanced', what: 'Reliable and capable first, speed breaks ties. Deep work weighs capability, fast work weighs speed.' },
@@ -83,6 +87,7 @@ function qualityText(row) {
 
 function reasonFor(row, role, strategy, rank) {
   if (!row.ready) return row.notReady;
+  if (row.paid) return PAID_REASON;
   const parts = [];
   if (row.cooling) parts.push(row.coolingReason ? `benched ${row.cooling > 3600 ? `${Math.round(row.cooling / 3600)} h` : `${row.cooling} s`}: ${row.coolingReason}` : `cooling ${row.cooling} s, skipped until then`);
   if (strategy === 'custom') parts.push(`your position ${rank + 1}`);
@@ -94,14 +99,15 @@ function reasonFor(row, role, strategy, rank) {
   return parts.join(' · ');
 }
 
-export function rankRole({ role, strategy, providers, stats, customOrder = [], now = Date.now(), outcomes = null, purposeClass = null, rng = Math.random }) {
+export function rankRole({ role, strategy, providers, stats, customOrder = [], now = Date.now(), outcomes = null, purposeClass = null, rng = Math.random, paid = null, env = process.env }) {
   const cls = purposeClass ?? (role === 'deep' ? 'research' : 'volume');
+  const paidIds = new Set(paid ?? paidProviderIds(env));
   const rows = providers.map((p) => {
     const s = stats[p.id] ?? { calls: 0, ok: 0, failed: 0, rateLimited: 0, reliability: 0.5, spentMs: 0, msPerAnswer: null, medianMs: {} };
     const [capability, capabilityBasis] = capabilityOf(p);
     const posterior = outcomes ? outcomes.posterior(p.id, cls, capability) : { mean: capability / 5, observed: 0, pass: 0, fail: 0 };
     const draw = outcomes ? outcomes.sample(p.id, cls, capability, rng) : capability / 5;
-    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, quality: posterior.mean, qualityObserved: posterior.observed, passed: posterior.pass, draw, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, msPerAnswer: s.msPerAnswer ?? null, medianMs: s.medianMs[role] ?? null };
+    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, quality: posterior.mean, qualityObserved: posterior.observed, passed: posterior.pass, draw, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, msPerAnswer: s.msPerAnswer ?? null, medianMs: s.medianMs[role] ?? null, paid: paidIds.has(p.id) || p.paid === true || p.preset?.paid === true };
   });
   const speedMs = (r) => r.msPerAnswer ?? r.medianMs;
   const timed = rows.map(speedMs).filter((ms) => ms);
@@ -123,15 +129,15 @@ export function rankRole({ role, strategy, providers, stats, customOrder = [], n
     smartest: (a, b) => b.quality - a.quality || b.reliability - a.reliability,
     balanced: (a, b) => weak(a) - weak(b) || b.score - a.score,
   }[strategy] ?? ((a, b) => b.score - a.score);
-  const ordered = [...rows].sort((a, b) => Number(b.ready) - Number(a.ready) || compare(a, b) || a.id.localeCompare(b.id));
+  const ordered = [...rows].sort((a, b) => Number(b.ready) - Number(a.ready) || Number(a.paid) - Number(b.paid) || compare(a, b) || a.id.localeCompare(b.id));
   return ordered.map((r, rank) => ({ ...r, rank: r.ready ? rank + 1 : null, why: reasonFor(r, role, strategy, rank), score: Math.round(r.score * 100) / 100, reliability: Math.round(r.reliability * 100) / 100 }));
 }
 
-export function routeFor({ strategy, providers, ledger, enabled, customOrder, now = Date.now(), outcomes = null, rng = Math.random }) {
+export function routeFor({ strategy, providers, ledger, enabled, customOrder, now = Date.now(), outcomes = null, rng = Math.random, paid = null, env = process.env }) {
   const used = providers.filter((p) => enabled.includes(p.id));
   const stats = providerStats(ledger, { now });
-  const deep = rankRole({ role: 'deep', strategy, providers: used, stats, customOrder, now, outcomes, rng });
-  const fast = rankRole({ role: 'fast', strategy, providers: used, stats, customOrder, now, outcomes, rng });
+  const deep = rankRole({ role: 'deep', strategy, providers: used, stats, customOrder, now, outcomes, rng, paid, env });
+  const fast = rankRole({ role: 'fast', strategy, providers: used, stats, customOrder, now, outcomes, rng, paid, env });
   return { deep, fast, order: { deep: deep.map((r) => r.id), fast: fast.map((r) => r.id) }, stats };
 }
 
@@ -216,18 +222,18 @@ export const NEVER_ANSWERED_AFTER = 1;
 const neverAnswered = (r) => r.calls >= NEVER_ANSWERED_AFTER && r.ok === 0;
 
 function orderBy(rows, compare) {
-  return [...rows].sort((a, b) => Number(b.ready) - Number(a.ready) || compare(a, b) || a.id.localeCompare(b.id)).map((r) => r.id);
+  return [...rows].sort((a, b) => Number(b.ready) - Number(a.ready) || Number(a.paid) - Number(b.paid) || compare(a, b) || a.id.localeCompare(b.id)).map((r) => r.id);
 }
 
-export function purposePlan({ providers, stats, usage = {}, enabled, outcomes = null, rng = Math.random }) {
+export function purposePlan({ providers, stats, usage = {}, enabled, outcomes = null, rng = Math.random, paid = null, env = process.env }) {
   const used = providers.filter((p) => enabled.includes(p.id));
-  const rank = (role, purposeClass) => rankRole({ role, strategy: 'balanced', providers: used, stats, outcomes, purposeClass, rng });
+  const rank = (role, purposeClass) => rankRole({ role, strategy: 'balanced', providers: used, stats, outcomes, purposeClass, rng, paid, env });
   const topRows = rank('deep', 'top');
   const deep = rank('deep', 'research');
   const fast = rank('fast', 'volume');
   const weak = (r) => (r.capability <= 1 && !(r.qualityObserved >= 5 && r.quality >= 0.5) ? 2 : 0) + (r.reliability < 0.5 && r.calls >= 4 ? 1 : 0) + (neverAnswered(r) ? 1 : 0);
   const spent = (r) => ((usage[r.id]?.today?.used ?? 0) >= 0.9 ? 1 : 0);
-  const reserved = topRows.filter((r) => r.ready && !neverAnswered(r)).sort((a, b) => b.quality - a.quality || b.reliability - a.reliability)[0]?.id;
+  const reserved = topRows.filter((r) => r.ready && !r.paid && !neverAnswered(r)).sort((a, b) => b.quality - a.quality || b.reliability - a.reliability)[0]?.id;
   const reservedTight = reserved && (usage[reserved]?.today?.used ?? 0) >= RESERVE_UNTIL;
   const top = orderBy(topRows, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || b.draw - a.draw || b.reliability - a.reliability);
   const research = orderBy(deep, (a, b) => weak(a) - weak(b) || spent(a) - spent(b) || Number(a.id === reserved && reservedTight) - Number(b.id === reserved && reservedTight) || b.score - a.score);

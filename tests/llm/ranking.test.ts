@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY, PURPOSE_CLASS, STRATEGIES, capabilityOf, familyOf, purposePlan, localCapability, providerStats, rankRole, routeFor, usageInfo } from '../../src/llm/ranking.mjs';
+import { CAPABILITY, PAID_REASON, PURPOSE_CLASS, STRATEGIES, capabilityOf, familyOf, purposePlan, localCapability, providerStats, rankRole, routeFor, usageInfo } from '../../src/llm/ranking.mjs';
+import { paidDailyTokens, paidProviderIds } from '../../src/llm/presets.mjs';
 
 const now = Date.parse('2026-10-19T12:00:00Z');
 const ts = (min: number) => new Date(now - min * 60000).toISOString();
@@ -142,9 +143,63 @@ describe('providers that never answered', () => {
     const stats = providerStats([...calls('puter', 'deep', 1, 500, false, 'puter HTTP 402: A subscription is required'), ...calls('fcc', 'deep', 6, 9000), ...calls('pollinations', 'deep', 6, 40000)], { now });
     const plan = purposePlan({ providers: ps, stats, enabled: ps.map((p) => p.id) });
     expect(plan.reserved).not.toBe('puter');
-    expect(plan.orders.top.at(-1)).toBe('puter');
-    expect(plan.orders.research.at(-1)).toBe('puter');
+    expect(plan.orders.top.at(-1)).toBe('fcc');
+    expect(plan.orders.top.indexOf('puter')).toBeLessThan(plan.orders.top.indexOf('fcc'));
+    expect(plan.orders.research.at(-1)).toBe('fcc');
+    expect(plan.orders.research.indexOf('puter')).toBeLessThan(plan.orders.research.indexOf('fcc'));
     const rows = rankRole({ role: 'deep', strategy: 'balanced', providers: ps, stats });
-    expect(rows.at(-1).id).toBe('puter');
+    expect(rows.at(-1).id).toBe('fcc');
+    expect(rows.at(-2).id).toBe('puter');
+  });
+});
+
+describe('paid providers', () => {
+  it('takes the paid list from the settings, with the presets that say so, and the daily cap', () => {
+    expect(paidProviderIds({})).toEqual(expect.arrayContaining(['fcc', 'custom']));
+    expect(paidProviderIds({ FRL_PAID_PROVIDERS: 'alpha, beta' })).toEqual(expect.arrayContaining(['alpha', 'beta', 'fcc']));
+    expect(paidDailyTokens({})).toBe(1000000);
+    expect(paidDailyTokens({ FRL_PAID_DAILY_TOKENS: '500' })).toBe(500);
+  });
+
+  it('puts a paid provider behind every ready free one, whatever its score, and says why', () => {
+    const ps = [
+      { id: 'fcc', label: 'fcc', state: 'ready', deep: 'claude-opus-5-5', fast: 'claude-haiku-4-5', coolingDownMs: 0 },
+      { id: 'pollinations', label: 'Pollinations', state: 'ready', deep: 'openai-fast', fast: 'openai-fast', coolingDownMs: 0 },
+      { id: 'mistral', label: 'Mistral', state: 'missing', detail: 'set MISTRAL_API_KEY', coolingDownMs: 0 },
+    ];
+    const stats = providerStats([...calls('pollinations', 'deep', 6, 40000)], { now });
+    const rows = rankRole({ role: 'deep', strategy: 'balanced', providers: ps, stats });
+    expect(rows.map((r: { id: string }) => r.id)).toEqual(['pollinations', 'fcc', 'mistral']);
+    expect(rows[1].why).toBe(PAID_REASON);
+    expect(rows[1].why).toBe('paid: used only when every free provider is resting');
+    expect(rows[1].rank).toBe(2);
+    expect(rows[2].why).toBe('set MISTRAL_API_KEY');
+  });
+
+  it('marks the providers named in the settings as paid, even with a better prior', () => {
+    const ps = [
+      { id: 'custom', label: 'Custom', state: 'ready', deep: 'my-model', fast: 'my-model', coolingDownMs: 0 },
+      { id: 'pollinations', label: 'Pollinations', state: 'ready', deep: 'openai-fast', fast: 'openai-fast', coolingDownMs: 0 },
+    ];
+    const stats = providerStats([...calls('pollinations', 'deep', 6, 40000)], { now });
+    const rows = rankRole({ role: 'deep', strategy: 'balanced', providers: ps, stats, env: { FRL_PAID_PROVIDERS: 'custom' } });
+    expect(rows.map((r: { id: string }) => r.id)).toEqual(['pollinations', 'custom']);
+    expect(rows[1].why).toBe(PAID_REASON);
+  });
+
+  it('keeps the paid provider last in every purpose plan and never reserves it', () => {
+    const ps = [
+      { id: 'fcc', label: 'fcc', state: 'ready', deep: 'claude-opus-5-5', fast: 'claude-haiku-4-5', coolingDownMs: 0 },
+      { id: 'gemini', label: 'Gemini', state: 'ready', deep: 'gemini-3.8-flash', fast: 'gemini-3.5-flash-lite', coolingDownMs: 0 },
+      { id: 'pollinations', label: 'Pollinations', state: 'ready', deep: 'openai-fast', fast: 'openai-fast', coolingDownMs: 0 },
+    ];
+    const stats = providerStats([...calls('gemini', 'deep', 10, 2000), ...calls('pollinations', 'fast', 10, 25000)], { now });
+    const plan = purposePlan({ providers: ps, stats, enabled: ps.map((p) => p.id) });
+    expect(plan.reserved).toBe('gemini');
+    expect(plan.orders.top.at(-1)).toBe('fcc');
+    expect(plan.orders.research.at(-1)).toBe('fcc');
+    expect(plan.orders.volume.at(-1)).toBe('fcc');
+    expect(plan.byPurpose.synthesize.at(-1)).toBe('fcc');
+    expect(plan.byPurpose.critique.at(-1)).toBe('fcc');
   });
 });
