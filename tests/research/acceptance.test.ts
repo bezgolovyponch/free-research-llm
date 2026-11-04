@@ -262,6 +262,31 @@ describe('purpose checks from the user\'s words', () => {
     expect(result!.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 0.05 });
   });
 
+  it('matches the user\'s misspelt brand name to the page spelling within Levenshtein distance 2', async () => {
+    const pages: Record<string, { text: string; status: number }> = {
+      'https://moncler-wholesale.example/en/lots': { text: 'Wholesale Moncler down jackets, second hand clothing bales, used clothing wholesale. '.repeat(6), status: 200 },
+      'https://barbour-wholesale.example/en/lots': { text: 'Barbour wax jackets wholesale lots, used clothing wholesale bales. '.repeat(6), status: 200 },
+      'https://north-face.example/en/lots': { text: 'The North Face jackets wholesale, used clothing bales. '.repeat(6), status: 200 },
+      'https://mixed-bales.example/en/lots': { text: 'Mixed second hand clothing bales, used clothing wholesale, 45 kg lots. '.repeat(6), status: 200 },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const items = Object.keys(pages).map((url) => ({ title: 'clothing lot', url, value: null, unit: 'n/a' }));
+    const result = await checker.evaluate(normalizeAcceptance({ itemCount: 4 }, '4 lots'), items, { located: false, purpose: purposeChecks(WHOLESALE) });
+    expect(result!.items.map((i: { purpose: { passed: boolean }[] }) => i.purpose[0].passed)).toEqual([true, true, true, false]);
+    expect(result!.checks.find((c: { id: string }) => c.id === 'purpose-names-1')).toMatchObject({ value: 0.75, passed: false, label: 'Page mentions one of: "Ralph Lauren", "Monclair", "North face", "Barbour" (your words)' });
+  });
+
+  it('does not stretch the misspelling rule to short names or to distant words', async () => {
+    const pages: Record<string, { text: string; status: number }> = {
+      'https://a.example/lots': { text: 'Monte carlo wholesale bales, second hand clothing wholesale. '.repeat(6), status: 200 },
+      'https://b.example/lots': { text: 'Ralphie coats wholesale bales, second hand clothing wholesale. '.repeat(6), status: 200 },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const items = Object.keys(pages).map((url) => ({ title: 'clothing lot', url, value: null, unit: 'n/a' }));
+    const result = await checker.evaluate(normalizeAcceptance({ itemCount: 2 }, '2 lots'), items, { located: false, purpose: purposeChecks(WHOLESALE) });
+    expect(result!.items.map((i: { purpose: { passed: boolean }[] }) => i.purpose[0].passed)).toEqual([false, false]);
+  });
+
   it('still reports nothing to check when neither the spec nor the words ask for anything', async () => {
     const checker = new AcceptanceChecker({ readPage: async () => ({ text: '', status: 404 }) });
     expect(await checker.evaluate(normalizeAcceptance({}, 'a memo'), [])).toBeNull();

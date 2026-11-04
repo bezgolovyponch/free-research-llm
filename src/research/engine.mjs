@@ -581,7 +581,8 @@ export class ResearchEngine {
     }
   }
 
-  async collectCandidates(project, { sweep = false } = {}) {
+  async collectCandidates(project, { sweep = false, reuse = false } = {}) {
+    if (reuse) return project.candidates ?? null;
     if (sweep || !this.quiet.has(project.id)) await this.ensureDecisionModel(project);
     let brief = this.briefOf(project);
     if (!brief.kind) {
@@ -1011,7 +1012,7 @@ export class ResearchEngine {
     this.emit(project, 'node', `${node.id}: ${grade} (rolled up)`, { nodeId: node.id });
   }
 
-  async synthesize(project) {
+  async synthesize(project, pages = null) {
     project.phase = 'synthesizing';
     this.emit(project, 'phase', 'writing the decision memo');
     await this.store.save(project);
@@ -1048,7 +1049,7 @@ export class ResearchEngine {
       const passed = project.report.claimCheck.contradicted.length === 0;
       this.router.recordOutcome?.({ provider: reply.provider, purpose: 'synthesize', passed });
     }
-    await this.checkAcceptance(project);
+    await this.checkAcceptance(project, pages);
     this.emit(project, 'report', `decision memo ready: ${project.report.verdict}`);
   }
 
@@ -1180,7 +1181,7 @@ export class ResearchEngine {
     return changed;
   }
 
-  async regroundAndRescore(id, { sweep = false } = {}) {
+  async regroundAndRescore(id, { sweep = false, pages = null } = {}) {
     const project = await this.load(id);
     const compacted = compactProject(project);
     const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
@@ -1192,19 +1193,40 @@ export class ResearchEngine {
     const regraded = this.regrade(project);
     if (fixes.some((f) => ['merged-duplicate', 'grouped-candidates'].includes(f.code)) || regraded.length) {
       await this.store.save(project);
-      return this.run(id);
+      return this.run(id, { pages });
     }
-    if (project.report) await this.checkAcceptance(project);
+    if (project.report) await this.checkAcceptance(project, pages);
     return this.store.save(project);
   }
 
-  async checkAcceptance(project) {
+  async remeasure(id, { pages = null } = {}) {
+    const project = await this.load(id);
+    if (project.report) await this.checkAcceptance(project, pages);
+    return this.store.save(project);
+  }
+
+  cachedPageReader(pages) {
+    if (!this.search?.readPage) return null;
+    if (!pages) return (url) => this.search.readPage(url);
+    return (url) => {
+      if (!pages.has(url)) pages.set(url, (async () => {
+        try {
+          return await this.search.readPage(url);
+        } catch {
+          return { text: '', status: 0 };
+        }
+      })());
+      return pages.get(url);
+    };
+  }
+
+  async checkAcceptance(project, pages = null) {
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
     const deliverables = project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))];
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
-    const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });
+    const checker = new AcceptanceChecker({ readPage: this.cachedPageReader(pages), convert });
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: (project.brief ?? this.briefOf(project)).located !== false, kind: (project.brief ?? this.briefOf(project)).kind ?? null, purpose: purposeChecks(project) });
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
@@ -1227,7 +1249,7 @@ export class ResearchEngine {
     return await this.store.save(project);
   }
 
-  async run(id, { hints = {}, memo = true, sweep = null } = {}) {
+  async run(id, { hints = {}, memo = true, sweep = null, pieces = null, reuse = false, pages = null } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
     this.cancelled.delete(id);
@@ -1260,7 +1282,7 @@ export class ResearchEngine {
       this.regrade(project);
       this.monitorPass(project);
       const listingsFirst = Boolean(project.acceptance?.itemCount && this.search?.readPage && !this.demo);
-      if (listingsFirst) {
+      if (listingsFirst && !reuse) {
         this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
         await this.collectCandidates(project, { sweep: true });
         await this.planKnowledgeQueries(project);
@@ -1276,8 +1298,9 @@ export class ResearchEngine {
       await this.store.save(project);
       const byId = new Map(project.nodes.map((n) => [n.id, n]));
       const finished = (nodeId) => DONE.has(byId.get(nodeId)?.status) || byId.get(nodeId)?.status === 'failed';
+      const wanted = pieces ? new Set(pieces) : null;
       await runInLanes({
-        order: researchOrder(project.nodes),
+        order: researchOrder(project.nodes).filter((nodeId) => !wanted || wanted.has(nodeId)),
         isFinished: finished,
         prerequisites: (nodeId) => prerequisitesOf(project.nodes, byId.get(nodeId)),
         known: (nodeId) => byId.has(nodeId),
@@ -1306,14 +1329,14 @@ export class ResearchEngine {
       const stoppedAfterPieces = await this.stopIfCancelled(project, id, release);
       if (stoppedAfterPieces) return stoppedAfterPieces;
       try {
-        await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
+        if (!reuse) await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
       } catch (error) {
         this.emit(project, 'warn', `candidate table not built: ${error.message}`);
       }
       const stoppedBeforeMemo = await this.stopIfCancelled(project, id, release);
       if (stoppedBeforeMemo) return stoppedBeforeMemo;
-      if (memo || !project.report) await this.synthesize(project);
-      else await this.checkAcceptance(project);
+      if (memo || !project.report) await this.synthesize(project, pages);
+      else await this.checkAcceptance(project, pages);
       this.checkSpecs(project);
       project.phase = 'done';
       release();
@@ -1543,12 +1566,12 @@ export class ResearchEngine {
     return this.store.save(project);
   }
 
-  async resynthesize(id) {
+  async resynthesize(id, { pages = null } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
     try {
       const project = await this.load(id);
-      await this.synthesize(project);
+      await this.synthesize(project, pages);
       this.checkSpecs(project);
       project.phase = project.nodes.every((n) => DONE.has(n.status)) ? 'done' : project.phase;
       this.emit(project, 'phase', 'memo rewritten from the current pieces');

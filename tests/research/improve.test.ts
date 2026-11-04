@@ -537,17 +537,22 @@ describe('a loop that cannot get stuck', () => {
     expect(restingPieces([1, 2, 3].map((i) => ({ nodeId: 'D3', outcome: 'provider-outage', at: at(i) })), t0 + 10 * 60000).size).toBe(0);
   });
 
-  it('re-measures by researching the changed pieces again and refuses to keep anything before the noise is measured', async () => {
+  it('researches the changed pieces once and re-measures from the cached pages, refusing to keep anything before the noise is measured', async () => {
     const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [] } };
     let saved = structuredClone(project);
     const scores = [0.5, 0.29];
-    const runs: string[][] = [];
+    const runs: Array<{ pieces?: string[]; reuse?: boolean; pages?: Map<string, unknown>; memo?: boolean }> = [];
     const engine = {
       load: async () => structuredClone(saved),
       store: { save: async (p: typeof project) => { saved = structuredClone(p); } },
       emit: () => {},
       resetWithAncestors: (p: typeof project, id: string) => { p.nodes.find((n) => n.id === id)!.status = 'pending'; },
-      run: async () => { runs.push(saved.nodes.filter((n) => n.status === 'pending').map((n) => n.id)); return { ...structuredClone(saved), phase: 'done' }; },
+      run: async (_id: string, options: { pieces?: string[]; reuse?: boolean; pages?: Map<string, unknown> }) => {
+        runs.push(options);
+        saved.nodes.find((n) => n.id === 'D3')!.sources = [{ url: 'https://permit.example/praha' }];
+        return { ...structuredClone(saved), phase: 'done' };
+      },
+      remeasure: async () => structuredClone(saved),
       resynthesize: async () => {},
     };
     const state = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() }, measure: () => ({ score: scores.shift() }) };
@@ -556,8 +561,11 @@ describe('a loop that cannot get stuck', () => {
     trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
     const base = { at: at(0), nodeId: 'D3', before: 0.3 };
     expect(await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toEqual({ kept: false });
-    expect(runs).toEqual([['D3'], ['D3']]);
-    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'reverted-noise', score: 0.29, detail: expect.stringMatching(/^measured 0\.5, re-measured 0\.29 after researching the same pieces again; noise not yet measured/) });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ memo: false, reuse: true, pieces: ['D3'] });
+    expect(runs[0].pages).toBeInstanceOf(Map);
+    expect(state.pages).toBe(runs[0].pages);
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'reverted-noise', score: 0.29, detail: expect.stringMatching(/^measured 0\.5, re-measured 0\.29 from the cached pages; noise not yet measured/) });
     expect(saved.improve.remeasureNoise).toEqual([-0.21]);
     expect(saved.nodes.find((n) => n.id === 'D3')!.question).toBe('permits?');
   });
@@ -566,12 +574,18 @@ describe('a loop that cannot get stuck', () => {
     const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [], remeasureNoise: [0, 0, 0, 0, 0] } };
     let saved = structuredClone(project);
     const scores = [0.4, 0.395];
+    const runs: string[] = [];
     const engine = {
       load: async () => structuredClone(saved),
       store: { save: async (p: typeof project) => { saved = structuredClone(p); } },
       emit: () => {},
       resetWithAncestors: (p: typeof project, id: string) => { p.nodes.find((n) => n.id === id)!.status = 'pending'; },
-      run: async () => ({ ...structuredClone(saved), phase: 'done' }),
+      run: async () => {
+        runs.push('run');
+        saved.nodes.find((n) => n.id === 'D3')!.sources = [{ url: 'https://permits.example/brno' }];
+        return { ...structuredClone(saved), phase: 'done' };
+      },
+      remeasure: async () => structuredClone(saved),
       resynthesize: async () => {},
     };
     const state = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() }, measure: () => ({ score: scores.shift() }) };
@@ -580,9 +594,31 @@ describe('a loop that cannot get stuck', () => {
     trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
     const base = { at: at(0), nodeId: 'D3', before: 0.3 };
     expect(await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toMatchObject({ kept: true, score: { score: 0.395 } });
+    expect(runs).toEqual(['run']);
     expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'kept', score: 0.395, remeasured: 0.395 });
     expect(state.best.score).toBe(0.395);
     expect(saved.improve.remeasureNoise).toEqual([0, 0, 0, 0, 0, -0.005]);
+  });
+
+  it('refuses to keep a change that cites no source URL the tree did not already have', async () => {
+    const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [], remeasureNoise: [0, 0, 0, 0, 0] } };
+    let saved = structuredClone(project);
+    const engine = {
+      load: async () => structuredClone(saved),
+      store: { save: async (p: typeof project) => { saved = structuredClone(p); } },
+      emit: () => {},
+      resetWithAncestors: (p: typeof project, id: string) => { p.nodes.find((n) => n.id === id)!.status = 'pending'; },
+      run: async () => ({ ...structuredClone(saved), phase: 'done' }),
+      resynthesize: async () => {},
+    };
+    const state = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() }, measure: () => ({ score: 0.9 }) };
+    const improver = new ProjectImprover({ engine: engine as never });
+    const trialProject = structuredClone(project);
+    trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
+    const base = { at: at(0), nodeId: 'D3', before: 0.3 };
+    expect(await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toEqual({ kept: false });
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'no-new-evidence', detail: 'the trial cites no source URL the tree did not already have; a kept change has to bring new evidence' });
+    expect(saved.improve.best).toBeUndefined();
   });
 
   it('keeps nothing until the noise is measured, then demands a gain above both the noise floor and the largest noise sample', () => {
@@ -661,5 +697,60 @@ describe('a loop that cannot get stuck', () => {
     const stall2 = stallCheck(project2, t0 + 130 * 60000);
     expect(stall2.stalled).toBe(true);
     expect(stall2.trialsSinceKept).toBe(20);
+  });
+});
+
+describe('a trial that researches only what it changed', () => {
+  it('reuses the stored table and researches only the given pieces, without touching the portals', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-reuse-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), lanes: 1 });
+    const created = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    const done = await engine.run(created.id);
+    const leaf = done.nodes.find((n: { id: string }) => n.id !== 'Q' && !done.nodes.some((c: { parentId: string }) => c.parentId === n.id));
+    const collected: string[] = [];
+    const collect = engine.collectCandidates.bind(engine);
+    engine.collectCandidates = async (p: never, options: { reuse?: boolean } = {}) => { collected.push(options.reuse ? 'reuse' : 'fresh'); return collect(p, options); };
+    const researched: string[] = [];
+    const research = engine.researchLeaf.bind(engine);
+    engine.researchLeaf = async (p: never, node: { id: string }) => { researched.push(node.id); return research(p, node); };
+    const stored = await engine.load(created.id);
+    engine.resetWithAncestors(stored, leaf.id);
+    await engine.store.save(stored);
+    const pages = new Map();
+    const reused = await engine.run(created.id, { memo: false, reuse: true, pieces: [leaf.id], pages });
+    expect(collected).toEqual([]);
+    expect(researched).toEqual([leaf.id]);
+    expect(reused.candidates).toBeNull();
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+
+  it('reads each acceptance page once per loop and reuses the cached text on the re-measure', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-pages-'));
+    const reads: string[] = [];
+    const one = 'https://auto.example/inzerat/225881782/citroen-c3.php';
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      search: async () => [],
+      readPage: async (url: string) => { reads.push(url); return { status: 200, text: `Citroen C3 1.4i hatchback 54 kW 150 000 km cena 15 000 Kč ${url} `.repeat(6) }; },
+      describe: () => ({}),
+    };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }) });
+    const project = {
+      id: 'p',
+      question: 'Find accurate hatchback car listings at least 1 car',
+      acceptance: { expected: 'one hatchback listing', itemCount: 1, urlsLive: true, valueRange: null, unit: 'CZK', mustMention: [] },
+      candidates: null,
+      report: { deliverables: [] },
+      nodes: [{ id: 'D1', parentId: 'Q', status: 'verified', dependsOn: [], specs: [], sources: [], finding: { items: [{ url: one, value: 15000, unit: 'CZK' }] } }],
+    };
+    const pages = new Map();
+    await engine.checkAcceptance(project as never, pages);
+    const first = { score: project.acceptanceResult.score, checks: project.acceptanceResult.checks };
+    await engine.checkAcceptance(project as never, pages);
+    expect(reads).toEqual([one]);
+    expect({ score: project.acceptanceResult.score, checks: project.acceptanceResult.checks }).toEqual(first);
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 });

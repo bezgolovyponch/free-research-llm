@@ -139,7 +139,7 @@ export function acceptsTrial(before, after, removed = [], samples = []) {
   return trialVerdict(before, after, removed, samples).ok;
 }
 
-const FUTILE = new Set(['repeat', 'reverted-noise', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'reverted-structure']);
+const FUTILE = new Set(['repeat', 'reverted-noise', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'no-new-evidence', 'reverted-structure']);
 export const REST_AFTER_FUTILE = 3;
 export const ROOT_EVERY = 3;
 
@@ -203,6 +203,20 @@ export function repeatOf(trials = [], { nodeId, change, removedPieceId }) {
 
 function itemKeys(node) {
   return new Set((node?.finding?.items ?? []).map((i) => `${i.url}|${i.value ?? ''}`));
+}
+
+export function citedUrls(project) {
+  const urls = new Set();
+  for (const node of project?.nodes ?? []) {
+    for (const source of node.sources ?? []) if (source.url) urls.add(source.url);
+    for (const item of node.finding?.items ?? []) if (item.url) urls.add(item.url);
+  }
+  return urls;
+}
+
+export function newEvidence(before, after) {
+  const known = citedUrls(before);
+  return [...citedUrls(after)].filter((url) => !known.has(url));
 }
 
 export function structuralIssues(project) {
@@ -473,10 +487,11 @@ export class ProjectImprover {
     const scope = state.scope ?? [];
     const exclude = state.exclude ?? [];
     state.pieces = new Set();
+    state.pages = new Map();
     state.lock = new Mutex();
     state.measure = (p) => (scope.length ? scopeScore(p, scope, [...state.pieces], exclude) : projectScore(p, [...state.pieces]));
     await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, scope, exclude, error: null });
-    project = await this.whenModelsAnswer(id, state, () => (project.phase !== 'done' ? this.engine.run(id, { sweep: true }) : this.engine.regroundAndRescore(id, { sweep: true })));
+    project = await this.whenModelsAnswer(id, state, () => (project.phase !== 'done' ? this.engine.run(id, { sweep: true, pages: state.pages }) : this.engine.regroundAndRescore(id, { sweep: true, pages: state.pages })));
     if (!project) return this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
     state.pieces = new Set(scoredPieces(project, scope, exclude));
     state.best = state.measure(project);
@@ -667,12 +682,15 @@ export class ProjectImprover {
       return { kept: false };
     }
     state.before = before;
+    const pages = state.pages ?? (state.pages = new Map());
     try {
+      const beforePending = new Set(before.nodes.filter((n) => n.status === 'pending' || n.status === 'failed').map((n) => n.id));
       const merged = mergeTrial(current, snapshot, project, touched);
       for (const t of touched) if (merged.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(merged, t);
       if (researched) merged.nodes[merged.nodes.findIndex((n) => n.id === nodeId)] = structuredClone(project.nodes.find((n) => n.id === nodeId));
+      const pieces = [...new Set([...touched, ...merged.nodes.filter((n) => n.status === 'pending' && !beforePending.has(n.id)).map((n) => n.id)])];
       await this.engine.store.save({ ...merged, chats: current.chats, log: current.log, improve: current.improve });
-      const after = await this.engine.run(id, { memo: false });
+      const after = await this.engine.run(id, { memo: false, pieces, reuse: true, pages });
       if (this.stopped(state) || after.phase === 'cancelled') return await reject('reverted-stopped');
       const outage = after.nodes.find((n) => n.status === 'failed' && QUOTA_ERROR.test(n.error ?? ''));
       if (outage) {
@@ -683,24 +701,23 @@ export class ProjectImprover {
       const broken = regressions(before, after);
       if (broken.length) return await reject('reverted-regression', `breaks passing check(s): ${broken.join(', ')}`);
       if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`);
+      if (!removed.length && !newEvidence(before, after).length) return await reject('no-new-evidence', 'the trial cites no source URL the tree did not already have; a kept change has to bring new evidence');
       const measure = state.measure ?? projectScore;
       const score = measure(after);
       const minGain = removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN;
       if (score.score - best.score > minGain) {
-        const fresh = await this.engine.load(id);
-        for (const t of touched) if (fresh.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(fresh, t);
-        await this.engine.store.save(fresh);
-        const again = measure(await this.engine.run(id, { memo: false }));
+        const remeasured = this.engine.remeasure ? await this.engine.remeasure(id, { pages }) : after;
+        const again = measure(remeasured);
         if (this.stopped(state)) return await reject('reverted-stopped');
         const remeasureNoise = [...(current.improve?.remeasureNoise ?? []), round(again.score - score.score)].slice(-NOISE_SAMPLES);
         await this.record(id, { remeasureNoise });
         const verdict = trialVerdict(best.score, Math.min(score.score, again.score), removed, remeasureNoise);
-        if (!verdict.ok) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} after researching the same pieces again; ${verdict.reason}`, Math.min(score.score, again.score));
+        if (!verdict.ok) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} from the cached pages; ${verdict.reason}`, Math.min(score.score, again.score));
         const kept = again;
         for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
         state.best = kept;
         await this.record(id, { best: kept.score }, { ...base, before: best.score, change, outcome: 'kept', score: kept.score, remeasured: again.score });
-        await this.engine.resynthesize(id);
+        await this.engine.resynthesize(id, { pages });
         return { kept: true, score: kept };
       }
       return await reject('reverted-whole', '', score.score);
