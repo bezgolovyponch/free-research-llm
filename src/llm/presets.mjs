@@ -180,6 +180,7 @@ export const PROVIDER_PRESETS = [
     id: 'fcc',
     label: 'fcc proxy on this Mac (free-claude-code; routes to the models set in fcc)',
     api: 'anthropic',
+    paid: true,
     baseURL: 'http://127.0.0.1:8082/v1',
     baseEnv: 'FCC_BASE_URL',
     keyEnv: null,
@@ -192,6 +193,20 @@ export const PROVIDER_PRESETS = [
     thinking: false,
   },
 ];
+
+export const PAID_PROVIDERS_DEFAULT = 'fcc,custom';
+export const PAID_DAILY_TOKENS_DEFAULT = 1000000;
+
+export function paidProviderIds(env = process.env) {
+  const listed = String(env.FRL_PAID_PROVIDERS ?? PAID_PROVIDERS_DEFAULT).split(',').map((s) => s.trim()).filter(Boolean);
+  const fromPresets = PROVIDER_PRESETS.filter((p) => p.paid).map((p) => p.id);
+  return [...new Set([...listed, ...fromPresets])];
+}
+
+export function paidDailyTokens(env = process.env) {
+  const value = Number(env.FRL_PAID_DAILY_TOKENS);
+  return Number.isFinite(value) && value > 0 ? value : PAID_DAILY_TOKENS_DEFAULT;
+}
 
 export const ROUTE_ORDER = {
   deep: ['gemini', 'mistral', 'cerebras', 'groq', 'nvidia', 'sambanova', 'openrouter', 'cloudflare', 'cohere', 'puter', 'fcc', 'custom', 'llamacpp-lan', 'llamacpp', 'pollinations', 'ollama'],
