@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { NOISE_MIN_SAMPLES, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, noiseFloor, resultsRubric, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, loopCanImprove, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage, trialVerdict } from '../../src/research/improve.mjs';
+import { NOISE_MIN_SAMPLES, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, noiseFloor, purposeScore, resultsRubric, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, loopCanImprove, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage, trialVerdict } from '../../src/research/improve.mjs';
 import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -71,6 +71,34 @@ describe('loopCanImprove', () => {
     expect(loopCanImprove({ ...empty, acceptanceResult: null }).ok).toBe(true);
     expect(loopCanImprove(met).ok).toBe(true);
     expect(loopCanImprove(tree()).ok).toBe(true);
+  });
+});
+
+describe('purpose per delivered row', () => {
+  const delivered = (passed: boolean[]) => ({ url: 'https://auto.bazos.cz/inzerat/225881782/citroen-c3.php', purpose: [{ id: 'purpose-kind', passed: passed[0] }, ...(passed.length > 1 ? [{ id: 'purpose-names-1', passed: passed[1] }] : [])] });
+
+  it('scores the share of delivered rows that pass every purpose check', () => {
+    expect(purposeScore({ acceptanceResult: { items: [delivered([true]), delivered([true]), delivered([false])] } })).toBe(0.667);
+    expect(purposeScore({ acceptanceResult: { items: [delivered([true, false]), delivered([true, true])] } })).toBe(0.5);
+    expect(purposeScore({ acceptanceResult: { items: [{ url: 'https://www.tradeindia.com/products/bale-of-mustang-used-cloth-korean-second-hand-c8797405.html' }] } })).toBeNull();
+    expect(purposeScore({ acceptanceResult: { items: [] } })).toBeNull();
+    expect(purposeScore({})).toBeNull();
+  });
+
+  it('blends the purpose share into the project score and still reports it', () => {
+    const project = { ...tree(), acceptanceResult: { score: 1, items: [delivered([true]), delivered([false])] } };
+    const scored = projectScore(project);
+    expect(scored).toMatchObject({ acceptance: 1, purpose: 0.5, results: null });
+    const base = projectScore({ ...project, acceptanceResult: null }).score;
+    expect(scored.score).toBeCloseTo(0.6 * ((1 + 0.5) / 2) + 0.4 * base, 3);
+  });
+
+  it('refuses a loop when every delivered row meets the purpose, and allows it while the share is below 1', () => {
+    const rows = (n: number, passing: number) => Array.from({ length: n }, (_, i) => delivered([i < passing]));
+    const met = { ...tree(), acceptance: { itemCount: 20 }, acceptanceResult: { score: 1, items: rows(20, 20) }, candidates: { kept: [] } };
+    expect(loopCanImprove(met)).toEqual({ ok: false, reason: 'every delivered row already meets the purpose checks and nothing else measures the purpose' });
+    expect(loopCanImprove({ ...met, acceptanceResult: { score: 1, items: rows(20, 19) } }).ok).toBe(true);
+    expect(loopCanImprove({ ...met, acceptanceResult: { score: 0.725, items: rows(20, 20) } }).ok).toBe(true);
   });
 });
 

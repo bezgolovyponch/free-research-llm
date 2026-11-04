@@ -36,12 +36,20 @@ export function resultsRubric(project) {
   return round(shares.reduce((sum, v) => sum + v, 0) / target);
 }
 
+export function purposeScore(project) {
+  const rows = (project?.acceptanceResult?.items ?? []).filter((row) => Array.isArray(row.purpose) && row.purpose.length);
+  if (!rows.length) return null;
+  return round(rows.filter((row) => row.purpose.every((c) => c.passed)).length / rows.length);
+}
+
 export function projectScore(project, pieces = []) {
   const base = scoreProject(project, pieces);
   const acceptance = project?.acceptanceResult?.score ?? null;
   const results = resultsRubric(project);
-  const outcome = acceptance === null ? results : results === null ? acceptance : round((acceptance + results) / 2);
-  return { ...base, acceptance, results, score: outcome === null ? base.score : round(0.6 * outcome + 0.4 * base.score) };
+  const purpose = purposeScore(project);
+  const measured = [acceptance, results, purpose].filter((v) => v !== null);
+  const outcome = measured.length ? round(measured.reduce((sum, v) => sum + v, 0) / measured.length) : null;
+  return { ...base, acceptance, results, purpose, score: outcome === null ? base.score : round(0.6 * outcome + 0.4 * base.score) };
 }
 
 export const NOISE_SAMPLES = 30;
@@ -70,9 +78,10 @@ export function trialVerdict(before, after, removed = [], samples = []) {
 }
 
 export function loopCanImprove(project) {
-  const { acceptance, results } = projectScore(project);
-  if (acceptance !== null && acceptance >= 0.999 && results === null) {
-    return { ok: false, reason: 'the expected result is already met and nothing else measures the purpose; improve the purpose checks first' };
+  const { acceptance, results, purpose } = projectScore(project);
+  const purposeMet = purpose === null || purpose >= 0.999;
+  if (results === null && purposeMet && (acceptance === null ? purpose !== null : acceptance >= 0.999)) {
+    return { ok: false, reason: purpose === null ? 'the expected result is already met and nothing else measures the purpose; improve the purpose checks first' : 'every delivered row already meets the purpose checks and nothing else measures the purpose' };
   }
   return { ok: true, reason: '' };
 }
