@@ -1,6 +1,6 @@
 import { ROOT_ID } from './tree.mjs';
 import { asksForItems } from './deliverable.mjs';
-import { countryByCode, regionsIn } from './brief.mjs';
+import { countryByCode, countryPhrases, namedCountries, regionsIn } from './brief.mjs';
 import { criteriaOfText, strategyFor } from './strategy.mjs';
 
 export const CANDIDATES_TITLE = 'Candidate listings (identification)';
@@ -233,8 +233,33 @@ export function narrowRegions(nodes, regions = []) {
   return fixes;
 }
 
+export function unscopeRegions(nodes, allowed = []) {
+  const fixes = [];
+  for (const n of [...nodes]) {
+    if (n.id === ROOT_ID || n.parentId === null || n.parentId === undefined) continue;
+    const fields = [{ get: () => n.question, set: (text) => { n.question = text; } }];
+    for (const query of n.searchQueries ?? []) fields.push({ get: () => query, set: (text) => { n.searchQueries = n.searchQueries.map((q) => (q === query ? text : q)); } });
+    for (const field of fields) {
+      const text = String(field.get() ?? '');
+      if (!text) continue;
+      const removed = [];
+      let out = text;
+      for (const hit of countryPhrases(text)) {
+        if (allowed.includes(hit.code)) continue;
+        out = out.replace(new RegExp(`(?:\\b(?:in|from|at|near|within|across|inside)\\s+)?${escapeRe(hit.phrase)}(?![\\p{L}\\p{N}])`, 'giu'), '');
+        removed.push(hit);
+      }
+      out = out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:!?])/g, '$1').replace(/[,\s]+$/, '').trim();
+      if (!removed.length || !out) continue;
+      field.set(out);
+      for (const hit of removed) fixes.push({ code: 'scope', nodeId: n.id, detail: `scope: removed '${hit.phrase}' from ${n.id} — the user did not limit where the items come from` });
+    }
+  }
+  return fixes;
+}
+
 export function repairTree(nodes, question = '', model = {}) {
-  const fixes = [...narrowRegions(nodes, model.regions ?? [])];
+  const fixes = model.located === false ? unscopeRegions(nodes, model.asked ?? []) : [...narrowRegions(nodes, model.regions ?? [])];
   fixes.push(...mergeDuplicateDrivers(nodes, question));
   fixes.push(...groupCandidateDrivers(nodes));
   const { up } = ancestry(nodes);
@@ -265,7 +290,7 @@ export function repairTree(nodes, question = '', model = {}) {
 
 export function modelOf(project) {
   const strategy = project?.brief?.kind ? strategyFor(project.templateId) : null;
-  return { regions: project?.brief?.kind ? project.brief.regions ?? [] : [], strategy };
+  return { regions: project?.brief?.kind ? project.brief.regions ?? [] : [], strategy, located: project?.brief?.located !== false, asked: namedCountries(`${project?.question ?? ''} ${project?.guidance ?? ''}`) };
 }
 
 export function auditModel(nodes, { regions = [], strategy = null } = {}) {

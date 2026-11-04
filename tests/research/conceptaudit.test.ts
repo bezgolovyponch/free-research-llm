@@ -26,6 +26,7 @@ function passingProject(extra: Record<string, unknown> = {}) {
       strategy: { id: 's' },
     },
     brief: { regions: ['PT'], valueRange: [5000, 20000], unit: 'EUR' },
+    decisionModel: { purpose: 'A buyer wants a plot so that they can start a glamping site' },
     improve: { active: true, trials: [{ outcome: 'kept' }, { outcome: 'improved' }] },
     report: { claimCheck: { checked: 2, supported: 2, contradicted: [] } },
     strategyCheck: { at: '2026-10-31T00:00:00Z', 'src-1': { status: 'ok', confirmed: 2, quotes: 2 } },
@@ -63,7 +64,7 @@ describe('concept audit', () => {
   it('passes a project where every check holds', () => {
     const audit = conceptAudit(passingProject(), { now: NOW });
     expect(audit.at).toBe('2026-11-01T12:00:00.000Z');
-    expect(audit.findings).toHaveLength(14);
+    expect(audit.findings).toHaveLength(15);
     expect(audit.findings.every((f: { ok: boolean }) => f.ok)).toBe(true);
     expect(audit.errors).toBe(0);
     expect(audit.warnings).toBe(0);
@@ -238,7 +239,7 @@ describe('concept audit', () => {
   it('audits a list of projects with their identity', () => {
     const list = auditAll([passingProject(), { id: 'x', question: 'q'.repeat(120) }]);
     expect(list[0]).toMatchObject({ id: 'ok', question: 'Where should I buy a plot?' });
-    expect(list[0].findings).toHaveLength(14);
+    expect(list[0].findings).toHaveLength(15);
     expect(list[1].id).toBe('x');
     expect(list[1].question).toHaveLength(80);
   });
@@ -293,3 +294,28 @@ describe('C20 listing rules on a kind no portal lists', () => {
     expect(c20({ ...base, brief: { located: true } })).toBeUndefined();
   });
 });
+
+describe('C21 purpose and kind before the pieces are researched', () => {
+  const researched = [{ id: 'D1', parentId: null, status: 'verified', finding: { answer: 'found', claims: [] } }];
+
+  it('fails when a piece was researched while the purpose was not stated', () => {
+    const audit = conceptAudit({ id: 'x', question: 'Which suppliers?', nodes: researched, decisionModel: { purpose: '', kind: { label: 'supplier', terms: ['supplier'] } } });
+    expect(audit.findings.find((f: { id: string }) => f.id === 'C21')).toMatchObject({ severity: 'error', ok: false, detail: 'pieces were researched while the purpose was not stated' });
+  });
+
+  it('fails when a piece of a kind no portal lists was researched before the kind was confirmed on pages', () => {
+    const audit = conceptAudit({ id: 'x', question: 'Which suppliers?', nodes: researched, brief: { located: false }, decisionModel: { purpose: 'A buyer wants suppliers so that they can stock a shop', kind: { label: 'supplier', terms: ['supplier'] } } });
+    expect(audit.findings.find((f: { id: string }) => f.id === 'C21')).toMatchObject({ severity: 'error', ok: false, detail: 'pieces were researched before the item kind was confirmed on real pages' });
+  });
+
+  it('passes when the purpose is stated and the kind is confirmed on pages', () => {
+    const audit = conceptAudit({ id: 'x', question: 'Which suppliers?', nodes: researched, brief: { located: false }, decisionModel: { purpose: 'A buyer wants suppliers so that they can stock a shop', kind: { label: 'supplier', terms: ['supplier'], validated: { pages: 5, terms: ['supplier'], at: '2026-10-30T06:00:00Z' } } } });
+    expect(audit.findings.find((f: { id: string }) => f.id === 'C21')).toMatchObject({ severity: 'error', ok: true });
+  });
+
+  it('says nothing when no piece was researched', () => {
+    const audit = conceptAudit({ id: 'x', question: 'Which suppliers?', nodes: [{ id: 'D1', parentId: null, status: 'pending' }], decisionModel: { purpose: '' } });
+    expect(audit.findings.find((f: { id: string }) => f.id === 'C21')).toBeUndefined();
+  });
+});
+

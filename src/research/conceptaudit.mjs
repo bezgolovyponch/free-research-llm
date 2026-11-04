@@ -179,6 +179,14 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
     add('C19', 'The memo states the table count', 'warn', wrong === undefined, wrong === undefined ? `memo agrees with the table (${c.keptCount} kept).` : `memo states ${wrong} results, the table keeps ${c.keptCount}`);
   }
 
+  const researched = (p.nodes ?? []).filter((n) => n?.finding || ['verified', 'supported', 'weak', 'unsupported', 'failed'].includes(n?.status));
+  if (researched.length) {
+    const reasons = [];
+    if (!String(p.decisionModel?.purpose ?? '').trim()) reasons.push('pieces were researched while the purpose was not stated');
+    if (p.brief?.located === false && !p.decisionModel?.kind?.validated) reasons.push('pieces were researched before the item kind was confirmed on real pages');
+    add('C21', 'Pieces are researched only after the purpose and the kind are clear', 'error', !reasons.length, reasons.length ? reasons.join('; ') : `${researched.length} piece(s) researched with a stated purpose and a confirmed kind.`);
+  }
+
   return {
     at: new Date(now).toISOString(),
     findings,

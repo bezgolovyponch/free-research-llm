@@ -4,7 +4,7 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, itemCountFromWords, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -16,6 +16,7 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn } from './brief.mjs';
+import { CONCEPT_PAGES, CONCEPT_SAMPLES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
@@ -376,15 +377,16 @@ export class ResearchEngine {
         messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback, listsItems: Boolean(project.acceptance?.itemCount) }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
-      repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
-      return { reply, tree, issues: auditTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) })) };
+      const fixes = repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
+      return { reply, tree, issues: auditTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) })), fixes };
     };
-    let { reply, tree, issues } = await ask('');
+    let { reply, tree, issues, fixes } = await ask('');
     if (issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced')) {
       this.emit(project, 'tree', `tree checks failed (${issues.map((i) => i.code).join(', ')}); asking for a corrected tree`);
       const second = await ask(auditFeedback(issues)).catch(() => null);
-      if (second && second.tree.nodes.length >= 2 && second.issues.length < issues.length) ({ reply, tree, issues } = second);
+      if (second && second.tree.nodes.length >= 2 && second.issues.length < issues.length) ({ reply, tree, issues, fixes } = second);
     }
+    for (const fix of (fixes ?? []).filter((f) => f.code === 'scope')) this.emit(project, 'tree', fix.detail);
     if (tree.nodes.length < 2) throw new Error('the model returned an empty issue tree; try again or use a stronger model');
     const passed = !issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced');
     this.router.recordOutcome?.({ provider: reply.provider, purpose: 'decompose', passed });
@@ -432,7 +434,8 @@ export class ResearchEngine {
     if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
-    project.brief = { ...brief, located: !kind || Boolean(template.itemKind) || listedKind(kind), subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    const located = Boolean(template.itemKind) ? true : model?.kind?.validated ? false : (!kind || listedKind(kind));
+    project.brief = { ...brief, located, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -515,15 +518,114 @@ export class ResearchEngine {
     }
   }
 
+  async rebuildDecisionModel(project) {
+    if (!this.modeler || this.demo) return project.decisionModel ?? null;
+    try {
+      return await this.modeler.build(project, { force: true });
+    } catch (error) {
+      this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
+      return project.decisionModel ?? null;
+    }
+  }
+
+  async ensurePurpose(project) {
+    await this.ensureDecisionModel(project);
+    if (!project.decisionModel || this.demo) return true;
+    if (String(project.decisionModel.purpose ?? '').trim()) return true;
+    await this.rebuildDecisionModel(project);
+    if (String(project.decisionModel?.purpose ?? '').trim()) return true;
+    if (String(project.guidance ?? '').trim()) return true;
+    project.phase = 'needs-purpose';
+    this.emit(project, 'phase', 'research paused: the purpose is not clear — state why you ask and what result is worth having (Hints field)');
+    return false;
+  }
+
+  conceptLanguages(regions = []) {
+    const languages = ['English'];
+    for (const code of regions ?? []) {
+      const language = REGION_LANGUAGES[String(code ?? '').toUpperCase()];
+      if (language && !languages.includes(language)) languages.push(language);
+    }
+    return languages;
+  }
+
+  async conceptQueriesFor(project, brief, kind) {
+    const languages = this.conceptLanguages(brief.regions);
+    const fallback = conceptQueries(kind, brief, languages);
+    if (!this.router || this.demo) return fallback;
+    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: conceptQueryPrompt({ kind, question: project.question, languages }) }).catch(() => null);
+    const proposed = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 6).slice(0, 6);
+    return proposed.length >= 3 ? proposed : fallback;
+  }
+
+  async validateConcept(project) {
+    const brief = project.brief ?? this.briefOf(project);
+    if (brief.located !== false) return true;
+    const kind = project.decisionModel?.kind;
+    if (!kind) return true;
+    if (kind.validated?.terms?.length) return true;
+    if (!this.router || !this.search?.search || this.demo) return true;
+    const queries = await this.conceptQueriesFor(project, brief, kind);
+    const found = await this.search.search(queries, { maxSources: CONCEPT_PAGES }).catch(() => []);
+    const pages = conceptPages(found);
+    if (!pages.length) {
+      project.phase = 'needs-concept';
+      this.emit(project, 'phase', `research paused: no page about "${kind.label}" was found — say what the item is in the Hints field`);
+      return false;
+    }
+    const replies = await Promise.all(Array.from({ length: CONCEPT_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: conceptCardPrompt({ kind, question: project.question, pages }) }).catch(() => null)));
+    const merged = mergeConceptCards(replies);
+    const card = applyConceptCard(merged.data, pages);
+    if (!card.terms.length) {
+      project.phase = 'needs-concept';
+      this.emit(project, 'phase', `research paused: the ${pages.length} page(s) about "${kind.label}" do not call it the same thing — say what the item is in the Hints field`);
+      return false;
+    }
+    const grounded = (kind.terms ?? []).filter((term) => pages.filter((page) => mentionsPhrase(`${page.title} ${page.text}`, term)).length >= 2);
+    project.decisionModel.kind = {
+      ...kind,
+      terms: [...new Set([...card.terms, ...grounded])],
+      not: [...new Set([...(kind.not ?? []), ...card.not])],
+      hubs: [...new Set([...(kind.hubs ?? []), ...card.hubs])],
+      validated: { pages: pages.length, terms: card.terms, at: new Date().toISOString() },
+    };
+    this.emit(project, 'decision', `item kind "${kind.label}" confirmed on ${pages.length} page(s): ${card.terms.join(', ')}; not ${card.not.join(', ') || 'none'}${card.hubs.length ? `; sellers concentrated in ${card.hubs.join(', ')}` : ''}`);
+    this.briefOf(project);
+    return true;
+  }
+
+  gateOnKind(project, node, sources) {
+    const kind = project.decisionModel?.kind;
+    const terms = kind?.validated?.terms ?? [];
+    if (!terms.length) return sources;
+    const dropped = [];
+    const kept = sources.filter((source) => {
+      const text = `${source.title ?? ''} ${source.snippet ?? ''} ${source.text ?? ''}`;
+      const near = (kind.not ?? []).find((phrase) => mentionsPhrase(text, phrase));
+      if (near) {
+        dropped.push({ source, reason: `a near-miss kind (${near})` });
+        return false;
+      }
+      if (!kindOnPage(text, { terms })) {
+        dropped.push({ source, reason: `not the asked kind (${kind.label})` });
+        return false;
+      }
+      return true;
+    });
+    if (dropped.length) this.emit(project, 'node', `${node.id}: ${dropped.length} source(s) dropped before any model call — ${dropped.map((drop) => `${hostOf(drop.source.url)}: ${drop.reason}`).slice(0, 5).join(', ')}`, { nodeId: node.id });
+    return kept;
+  }
+
   onConceptOnly(project, node, sources) {
     const brief = project.brief ?? this.briefOf(project);
     const kept = sources.filter((s) => onConcept(s, brief));
     const dropped = sources.length - kept.length;
     if (dropped) this.emit(project, 'node', `${node.id}: ${dropped} source(s) dropped before any model call — outside the asked regions (${sources.filter((s) => !kept.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
+    const gated = brief.located === false ? this.gateOnKind(project, node, kept) : kept;
     const query = evidenceQuery(node, brief);
-    const topical = kept.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= 2);
-    const offTopic = kept.length - topical.length;
-    if (offTopic) this.emit(project, 'node', `${node.id}: ${offTopic} source(s) dropped before any model call — off topic (${kept.filter((s) => !topical.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
+    const topical = gated.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= 2);
+    const offTopic = gated.length - topical.length;
+    if (offTopic) this.emit(project, 'node', `${node.id}: ${offTopic} source(s) dropped before any model call — off topic (${gated.filter((s) => !topical.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
     return topical;
   }
 
@@ -1186,6 +1288,7 @@ export class ResearchEngine {
     const compacted = compactProject(project);
     const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
     if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
+    for (const fix of fixes.filter((f) => f.code === 'scope')) this.emit(project, 'tree', fix.detail);
     const regrounded = this.reground(project);
     await this.rescreenItems(project);
     await this.harvestAll(project);
@@ -1265,6 +1368,14 @@ export class ResearchEngine {
       if (!this.quiet.has(id)) this.rejoinTeam(id);
       if (!project.nodes.length) await this.decompose(project);
       this.reground(project);
+      if (!await this.ensurePurpose(project)) {
+        await this.store.save(project);
+        return project;
+      }
+      if (!await this.validateConcept(project)) {
+        await this.store.save(project);
+        return project;
+      }
       project.phase = 'researching';
       project.error = null;
       for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';
@@ -1272,6 +1383,7 @@ export class ResearchEngine {
       if (compacted) this.emit(project, 'tree', `stored page text and links capped for ${compacted} source(s) to keep memory small`);
       const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
+      for (const fix of fixes.filter((f) => f.code === 'scope')) this.emit(project, 'tree', fix.detail);
       if (project.acceptance?.itemCount && (project.brief ?? this.briefOf(project)).located) {
         const pruned = dropListingWork(project.nodes);
         if (pruned.dropped.length) {
