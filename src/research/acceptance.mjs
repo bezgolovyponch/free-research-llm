@@ -217,7 +217,7 @@ export class AcceptanceChecker {
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
     const checks = [];
     const valid = items.filter((i) => qualifies(i, spec)).length;
-    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, valid / spec.itemCount), detail: `${valid} of ${deliverables.length} delivered pass every check (${located ? 'a single listing page that opens' : 'a page that opens and describes the asked kind'}${spec.valueRange ? ', price in range' : ''})` });
+    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, valid / spec.itemCount), detail: `${valid} of ${deliverables.length} delivered pass every check; first ${items.length} inspected (${located ? 'a single listing page that opens' : 'a page that opens and describes the asked kind'}${spec.valueRange ? ', price in range' : ''})` });
     if (spec.urlsLive) checks.push({ id: 'live', label: 'Links open a real page', value: good((i) => i.live), detail: `${items.filter((i) => i.live).length} of ${items.length} checked links are live` });
     if (spec.valueRange) checks.push({ id: 'range', label: `Value within ${spec.valueRange.join('–')} ${spec.unit}`.trim(), value: good((i) => i.inRange), detail: `${items.filter((i) => i.inRange).length} of ${items.length} pages show a value in range` });
     if (spec.mustMention.length) checks.push({ id: 'mentions', label: `Pages mention: ${spec.mustMention.join(', ')}`, value: items.length ? items.reduce((s, i) => s + (i.mentions ?? 0), 0) / target : 0, detail: 'share of required terms found on the pages' });

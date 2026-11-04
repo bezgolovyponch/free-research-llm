@@ -47,12 +47,34 @@ export function projectScore(project, pieces = []) {
 export const NOISE_SAMPLES = 30;
 export const NOISE_MIN_SAMPLES = 5;
 export const NOISE_SIGMAS = 2;
+export const NOISE_UNMEASURED = 'noise not yet measured';
 
 export function noiseFloor(samples = []) {
   if (samples.length < NOISE_MIN_SAMPLES) return MIN_GAIN;
   const mean = samples.reduce((s, v) => s + v, 0) / samples.length;
   const sd = Math.sqrt(samples.reduce((s, v) => s + (v - mean) ** 2, 0) / (samples.length - 1));
   return Math.max(MIN_GAIN, round(NOISE_SIGMAS * sd));
+}
+
+function noiseBar(samples = []) {
+  return Math.max(noiseFloor(samples), ...samples.map((v) => Math.abs(v)));
+}
+
+export function trialVerdict(before, after, removed = [], samples = []) {
+  if (samples.length < NOISE_MIN_SAMPLES) return { ok: false, reason: NOISE_UNMEASURED };
+  const floor = noiseBar(samples);
+  const needed = Math.max(floor, removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
+  return after > before + needed
+    ? { ok: true, reason: `gain ${round(after - before)} clears the noise floor ${floor}` }
+    : { ok: false, reason: `gain ${round(after - before)} does not clear the noise floor ${floor}` };
+}
+
+export function loopCanImprove(project) {
+  const { acceptance, results } = projectScore(project);
+  if (acceptance !== null && acceptance >= 0.999 && results === null) {
+    return { ok: false, reason: 'the expected result is already met and nothing else measures the purpose; improve the purpose checks first' };
+  }
+  return { ok: true, reason: '' };
 }
 
 export function distinctResearches(list) {
@@ -104,8 +126,8 @@ export function allChecksPass(before, after) {
   return [...new Set([...keys(before), ...keys(after)])].every((k) => passing.has(k));
 }
 
-export function acceptsTrial(before, after, removed = [], floor = MIN_GAIN) {
-  return after > before + Math.max(floor, removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN);
+export function acceptsTrial(before, after, removed = [], samples = []) {
+  return trialVerdict(before, after, removed, samples).ok;
 }
 
 const FUTILE = new Set(['repeat', 'reverted-noise', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'reverted-structure']);
@@ -315,6 +337,15 @@ export class ProjectImprover {
 
   start(id, { hours = 1, nodes = [], exclude = [] } = {}) {
     if (this.active.has(id)) throw new Error('the self-improving loop is already running for this project');
+    const cached = this.engine.store?.cache?.get?.(id);
+    if (cached) {
+      const can = loopCanImprove(cached);
+      if (!can.ok) {
+        this.engine.emit(cached, 'improve-state', `loop not started: ${can.reason}`);
+        void this.engine.store.save(cached).catch(() => {});
+        return { ok: false, reason: can.reason };
+      }
+    }
     const h = Math.min(MAX_HOURS, Math.max(0.05, Number(hours) || 1));
     const scope = (Array.isArray(nodes) ? nodes : []).map(String).filter((n) => n && n !== ROOT_ID).slice(0, 60);
     const skipped = scope.length ? (Array.isArray(exclude) ? exclude : []).map(String).filter((n) => n && !scope.includes(n)).slice(0, 120) : [];
@@ -423,6 +454,12 @@ export class ProjectImprover {
 
   async loop(id, state) {
     let project = await this.engine.load(id);
+    const can = loopCanImprove(project);
+    if (!can.ok) {
+      this.engine.emit(project, 'improve-state', `loop not started: ${can.reason}`);
+      await this.engine.store.save(project);
+      return;
+    }
     this.engine.rejoinTeam(id, (clientId) => this.join(id, clientId));
     const scope = state.scope ?? [];
     const exclude = state.exclude ?? [];
@@ -639,8 +676,8 @@ export class ProjectImprover {
       if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`);
       const measure = state.measure ?? projectScore;
       const score = measure(after);
-      const floor = noiseFloor(current.improve?.remeasureNoise);
-      if (acceptsTrial(best.score, score.score, removed, floor)) {
+      const minGain = removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN;
+      if (score.score - best.score > minGain) {
         const fresh = await this.engine.load(id);
         for (const t of touched) if (fresh.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(fresh, t);
         await this.engine.store.save(fresh);
@@ -648,7 +685,8 @@ export class ProjectImprover {
         if (this.stopped(state)) return await reject('reverted-stopped');
         const remeasureNoise = [...(current.improve?.remeasureNoise ?? []), round(again.score - score.score)].slice(-NOISE_SAMPLES);
         await this.record(id, { remeasureNoise });
-        if (!acceptsTrial(best.score, Math.min(score.score, again.score), removed, floor)) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} after researching the same pieces again; the gain does not hold on both (noise floor ${floor})`, Math.min(score.score, again.score));
+        const verdict = trialVerdict(best.score, Math.min(score.score, again.score), removed, remeasureNoise);
+        if (!verdict.ok) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} after researching the same pieces again; ${verdict.reason}`, Math.min(score.score, again.score));
         const kept = again;
         for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
         state.best = kept;
