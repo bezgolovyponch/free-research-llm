@@ -33,8 +33,8 @@ async function removalLoop(verifyAfter: (nodes: Node[]) => void) {
   done.improve = { trials: [], remeasureNoise: measuredNoise() };
   await engine.store.save(done);
   const originalRun = engine.run.bind(engine);
-  engine.run = async (id: string) => {
-    const after = await originalRun(id);
+  engine.run = async (id: string, options: Record<string, unknown> = {}) => {
+    const after = await originalRun(id, options);
     if (!after.nodes.some((n: Node) => n.id === 'D4')) verifyAfter(after.nodes);
     await engine.store.save(after);
     return after;

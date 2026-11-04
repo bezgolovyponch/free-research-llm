@@ -196,6 +196,34 @@ function wordMatch(text, words) {
   });
 }
 
+const NAME_NEAR_MIN = 6;
+const NAME_NEAR_DISTANCE = 2;
+
+function editDistance(a, b) {
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) row[j] = Math.min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    previous = row;
+  }
+  return previous[b.length];
+}
+
+function nearName(page, name) {
+  const target = plain(name).replace(/[^a-z0-9]+/g, ' ').trim();
+  if (target.replace(/[^a-z0-9]/g, '').length < NAME_NEAR_MIN) return false;
+  const words = page.split(/[^a-z0-9]+/).filter(Boolean);
+  const span = target.split(' ').length;
+  for (let i = 0; i < words.length; i++) {
+    for (let n = 1; n <= span && i + n <= words.length; n++) {
+      const sequence = words.slice(i, i + n).join(' ');
+      if (Math.abs(sequence.length - target.length) > NAME_NEAR_DISTANCE) continue;
+      if (editDistance(sequence, target) <= NAME_NEAR_DISTANCE) return true;
+    }
+  }
+  return false;
+}
+
 function purposePass(criterion, pageText, item) {
   if (criterion.type === 'kind') {
     if (kindOnPage(pageText, { terms: criterion.terms })) return true;
@@ -204,7 +232,7 @@ function purposePass(criterion, pageText, item) {
     return wordMatch(item?.title ?? '', subtype.models) && !wordMatch(item?.title ?? '', subtype.variants) && !wordMatch(pageText, subtype.variants);
   }
   const page = plain(pageText);
-  return criterion.names.some((name) => page.includes(plain(name)));
+  return criterion.names.some((name) => page.includes(plain(name)) || nearName(page, name));
 }
 
 function deliveryRank(item) {
