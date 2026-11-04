@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, hasCriteria, headlinePrice, inRange, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, hasCriteria, headlinePrice, inRange, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -171,6 +171,100 @@ describe('acceptance for items no listing portal sells', () => {
     expect(unlisted.checks.find((c: { id: string }) => c.id === 'count').detail).toContain('a page that opens and describes the asked kind');
     const listed = await checker.evaluate(spec, items);
     expect(listed.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 0 });
+  });
+});
+
+const CAR = {
+  question: 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent',
+  acceptance: { expected: 'The list of 20 highest possible price/value ratio to buy, working links, no broken links, verified with the research logic, recently posted, 80 trade offs to confirm and review', itemCount: 20, urlsLive: true, valueRange: [0, 65000], unit: 'CZK', mustMention: [] },
+  decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories'] } },
+};
+
+const WHOLESALE = {
+  question: 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio , proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic',
+  acceptance: { expected: '20 direct links to the providers with proposal and proof that those particular companies do have highest proce/value ratio, quality, assortiment and appropriate setup for local Prague branded second hand shop retail', itemCount: 20, urlsLive: true, valueRange: null, unit: 'EUR', mustMention: [] },
+  decisionModel: { kind: { label: 'wholesale clothing provider', terms: ['wholesale second‑hand clothing', 'used clothing wholesale', 'second‑hand apparel wholesale'] } },
+};
+
+describe('purpose checks from the user\'s words', () => {
+  it('turns the sub-type the user named in the car research into a per-row check', () => {
+    const checks = purposeChecks(CAR);
+    expect(checks).toEqual([{ id: 'purpose-kind', type: 'kind', terms: ['hatchback'], label: 'Page shows the asked hatchback (your words)' }]);
+  });
+
+  it('turns the brand list of the wholesale research into one per-row check, not five', () => {
+    const checks = purposeChecks(WHOLESALE);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toMatchObject({ id: 'purpose-names-1', type: 'any', names: ['Ralph Lauren', 'Monclair', 'North face', 'Barbour'] });
+    expect(checks[0].label).toBe('Page mentions one of: "Ralph Lauren", "Monclair", "North face", "Barbour" (your words)');
+  });
+
+  it('invents nothing from descriptions, counts, distances or prices the question also states', () => {
+    expect(purposeChecks({ question: CAR.question })).toEqual([]);
+    expect(purposeChecks({ question: 'Find at least 20 cars within 300km from prague, price up to 65000CZK or equivalent' })).toEqual([]);
+    expect(purposeChecks({})).toEqual([]);
+  });
+
+  it('keeps a kind the user did not name out of the purpose checks', () => {
+    expect(purposeChecks({ question: CAR.question, decisionModel: { kind: { label: 'used car', terms: ['estate', 'suv'] } } })).toEqual([]);
+  });
+
+  it('counts a car row toward the result only when its own page shows a hatchback', async () => {
+    const pages: Record<string, { text: string; status: number }> = {
+      'https://auto.bazos.cz/inzerat/225881782/citroen-c3.php': { text: 'Citroen C3 1.4i hatchback, 54 kW, 180 000 km, benzín, STK 2026, cena 15 000 Kč. '.repeat(4), status: 200 },
+      'https://auto.bazos.cz/inzerat/225944880/peugeot-207.php': { text: 'Peugeot 207 SW kombi, 1.4 benzín, 65 kW, 210 000 km, cena 20 000 Kč. '.repeat(4), status: 200 },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const spec = normalizeAcceptance(CAR.acceptance);
+    const items = [{ title: 'Citroen c3 1.4i', url: Object.keys(pages)[0], value: 15000, unit: 'CZK' }, { title: 'Peugeot 207', url: Object.keys(pages)[1], value: 20000, unit: 'CZK' }];
+    const result = await checker.evaluate(spec, items, { located: true, kind: CAR.decisionModel.kind, purpose: purposeChecks(CAR) });
+    const purpose = result!.checks.find((c: { id: string }) => c.id === 'purpose-kind');
+    expect(purpose).toMatchObject({ label: 'Page shows the asked hatchback (your words)', value: 0.5, passed: false });
+    expect(purpose!.detail).toBe('1 of 2 delivered pages show it');
+    expect(result!.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 0.05 });
+    expect(result!.items.map((i: { purpose: { passed: boolean }[] }) => i.purpose[0].passed)).toEqual([true, false]);
+  });
+
+  it('counts a car row toward the result when its title names a model built as that sub-type', async () => {
+    const project = { ...CAR, decisionModel: { ...CAR.decisionModel, subtype: { label: 'hatchback', models: ['skoda fabia'], variants: ['combi'] } } };
+    const pages: Record<string, { text: string; status: number }> = {
+      'https://auto.bazos.cz/inzerat/225881782/skoda-fabia.php': { text: 'Škoda Fabia 1.2 HTP, 51 kW, 160 000 km, benzín, cena 25 000 Kč. '.repeat(4), status: 200 },
+      'https://auto.bazos.cz/inzerat/225944880/skoda-fabia-combi.php': { text: 'Škoda Fabia Combi 1.4, 55 kW, 210 000 km, cena 30 000 Kč. '.repeat(4), status: 200 },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const spec = normalizeAcceptance(CAR.acceptance);
+    const items = [{ title: 'Škoda Fabia 1.2 HTP', url: Object.keys(pages)[0], value: 25000, unit: 'CZK' }, { title: 'Škoda Fabia Combi', url: Object.keys(pages)[1], value: 30000, unit: 'CZK' }];
+    const result = await checker.evaluate(spec, items, { located: true, kind: project.decisionModel.kind, purpose: purposeChecks(project) });
+    const purpose = result!.checks.find((c: { id: string }) => c.id === 'purpose-kind');
+    expect(purpose).toMatchObject({ value: 0.5, passed: false });
+    expect(result!.items.map((i: { purpose: { passed: boolean }[] }) => i.purpose[0].passed)).toEqual([true, false]);
+  });
+
+  it('passes a car row whose page says hatchback, with no sub-type models known', async () => {
+    const pages = { 'https://auto.bazos.cz/inzerat/225881782/citroen-c3.php': { text: 'Citroen C3 1.4i hatchback, 54 kW, 180 000 km, cena 15 000 Kč. '.repeat(4), status: 200 } };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const result = await checker.evaluate(normalizeAcceptance(CAR.acceptance), [{ title: 'Citroen c3 1.4i', url: Object.keys(pages)[0], value: 15000, unit: 'CZK' }], { located: true, kind: CAR.decisionModel.kind, purpose: purposeChecks(CAR) });
+    expect(result!.checks.find((c: { id: string }) => c.id === 'purpose-kind')).toMatchObject({ value: 1, passed: true });
+  });
+
+  it('counts a wholesale row only when its own page names one of the asked brands', async () => {
+    const pages: Record<string, { text: string; status: number }> = {
+      'https://wuhanhaisen.en.made-in-china.com/product/BZdTfAtPJDGu/China-Wholesale-Thrift-Clothing-Bundle.html': { text: 'Wholesale second hand clothing bales, used clothing wholesale lots, Ralph Lauren and Barbour mix, 45 kg bales. '.repeat(4), status: 200 },
+      'https://www.tradeindia.com/products/bale-of-mustang-used-cloth-korean-second-hand-c8797405.html': { text: 'Wholesale second hand clothing bale, used clothing wholesale, mixed Korean used clothes, 45 kg bales, woolen and long sleeve. '.repeat(4), status: 200 },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const spec = normalizeAcceptance(WHOLESALE.acceptance);
+    const items = [{ title: 'Wholesale Thrift Clothing Bundle', url: Object.keys(pages)[0], value: 1.5, unit: 'USD/kg' }, { title: 'Bale Of Mustang Used Cloths', url: Object.keys(pages)[1], value: null, unit: 'n/a' }];
+    const result = await checker.evaluate(spec, items, { located: false, kind: WHOLESALE.decisionModel.kind, purpose: purposeChecks(WHOLESALE) });
+    const purpose = result!.checks.find((c: { id: string }) => c.id === 'purpose-names-1');
+    expect(purpose).toMatchObject({ value: 0.5, passed: false });
+    expect(purpose!.label).toBe('Page mentions one of: "Ralph Lauren", "Monclair", "North face", "Barbour" (your words)');
+    expect(result!.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 0.05 });
+  });
+
+  it('still reports nothing to check when neither the spec nor the words ask for anything', async () => {
+    const checker = new AcceptanceChecker({ readPage: async () => ({ text: '', status: 404 }) });
+    expect(await checker.evaluate(normalizeAcceptance({}, 'a memo'), [])).toBeNull();
   });
 });
 

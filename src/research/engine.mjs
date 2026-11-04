@@ -3,7 +3,7 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, itemCountFromWords, normalizeAcceptance } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, itemCountFromWords, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -1150,7 +1150,7 @@ export class ResearchEngine {
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });
-    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: (project.brief ?? this.briefOf(project)).located !== false, kind: (project.brief ?? this.briefOf(project)).kind ?? null });
+    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: (project.brief ?? this.briefOf(project)).located !== false, kind: (project.brief ?? this.briefOf(project)).kind ?? null, purpose: purposeChecks(project) });
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }

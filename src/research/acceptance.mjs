@@ -106,6 +106,107 @@ export function hasCriteria(spec) {
   return Boolean(spec && (spec.itemCount || spec.urlsLive || spec.valueRange || spec.mustMention?.length));
 }
 
+const NAME_STOP = new Set(['the', 'a', 'an', 'and', 'or', 'of', 'for', 'with', 'without', 'in', 'on', 'at', 'from', 'to', 'by', 'as', 'is', 'are', 'be', 'that', 'this', 'these', 'those', 'which', 'who', 'what', 'when', 'where', 'how', 'why', 'within', 'up', 'under', 'over', 'about', 'into', 'similar', 'like', 'such', 'certain', 'must', 'should', 'include', 'including', 'mention', 'containing', 'between', 'across', 'near', 'around', 'than', 'then', 'also', 'all', 'any', 'each', 'every', 'both', 'some', 'find', 'get', 'give', 'list', 'search', 'identify', 'select', 'show', 'compare']);
+const NAME_WORD = /^[\p{L}\p{N}'’.-]{2,}$/u;
+const NAME_MAX = 5;
+const NAME_WORDS_MAX = 3;
+
+function nameWord(token) {
+  const bare = String(token ?? '').replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  return NAME_WORD.test(bare) && !NAME_STOP.has(plain(bare)) ? bare : null;
+}
+
+function capitalised(word) {
+  return /^\p{Lu}/u.test(word);
+}
+
+function leadingName(tokens, atStart) {
+  if (atStart || !tokens.length) return '';
+  const first = nameWord(tokens[0]);
+  if (!first || !capitalised(first)) return '';
+  const out = [first];
+  for (let i = 1; i < tokens.length && out.length < NAME_WORDS_MAX; i++) {
+    const word = nameWord(tokens[i]);
+    if (!word) break;
+    out.push(word);
+  }
+  return out.join(' ');
+}
+
+function trailingName(tokens) {
+  if (!tokens.length) return '';
+  const last = nameWord(tokens.at(-1));
+  if (!last || !capitalised(last)) return '';
+  const out = [last];
+  for (let i = tokens.length - 2; i >= 0 && out.length < NAME_WORDS_MAX; i--) {
+    const word = nameWord(tokens[i]);
+    if (!word) break;
+    out.unshift(word);
+  }
+  return out.join(' ');
+}
+
+function wholeName(tokens) {
+  if (!tokens.length || tokens.length > NAME_WORDS_MAX) return '';
+  const out = tokens.map(nameWord);
+  return out.every(Boolean) && capitalised(out[0]) ? out.join(' ') : '';
+}
+
+function fragmentsOf(text) {
+  return String(text ?? '').split(',').map((part) => part.replace(/[.;!?]+$/, '').trim().split(/\s+/).filter(Boolean));
+}
+
+export function nameLists(text) {
+  const fragments = fragmentsOf(text).map((tokens, i) => ({ pure: wholeName(tokens), lead: leadingName(tokens, i === 0), trail: trailingName(tokens) }));
+  const lists = [];
+  for (let i = 0; i < fragments.length; i++) {
+    if (!fragments[i].pure) continue;
+    const names = [];
+    let next = i;
+    while (next < fragments.length && fragments[next].pure) names.push(fragments[next++].pure);
+    if (i > 0 && fragments[i - 1].trail) names.unshift(fragments[i - 1].trail);
+    if (next < fragments.length && fragments[next].lead) names.push(fragments[next].lead);
+    const unique = [...new Set(names)];
+    if (unique.length >= 2) lists.push(unique.slice(0, NAME_MAX));
+    i = next - 1;
+  }
+  return lists;
+}
+
+export function purposeChecks(project) {
+  const question = String(project?.question ?? '');
+  if (!question) return [];
+  const words = plain(question);
+  const checks = nameLists(question).map((names, i) => ({ id: `purpose-names-${i + 1}`, type: 'any', names, label: `Page mentions one of: ${names.map((n) => `"${n}"`).join(', ')} (your words)` }));
+  const kind = project?.decisionModel?.kind ?? project?.brief?.kind ?? null;
+  const subtype = project?.decisionModel?.subtype ?? project?.brief?.subtype ?? null;
+  const terms = (kind?.terms ?? []).filter((term) => {
+    const parts = plain(term).split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+    return parts.length >= 1 && parts.length <= 2 && parts.every((w) => words.includes(w));
+  });
+  if (terms.length) checks.push({ id: 'purpose-kind', type: 'kind', terms: [...new Set(terms)].slice(0, 3), ...(subtype?.models?.length ? { subtype: { models: subtype.models, variants: subtype.variants ?? [] } } : {}), label: `Page shows the asked ${[...new Set(terms)].join(' / ')} (your words)` });
+  return checks;
+}
+
+function wordMatch(text, words) {
+  const value = plain(text);
+  return (words ?? []).some((word) => {
+    const key = plain(word).trim();
+    return Boolean(key) && new RegExp(`(?:^|[^a-z0-9])${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(value);
+  });
+}
+
+function purposePass(criterion, pageText, item) {
+  if (criterion.type === 'kind') {
+    if (kindOnPage(pageText, { terms: criterion.terms })) return true;
+    const subtype = criterion.subtype;
+    if (!subtype?.models?.length) return false;
+    return wordMatch(item?.title ?? '', subtype.models) && !wordMatch(item?.title ?? '', subtype.variants) && !wordMatch(pageText, subtype.variants);
+  }
+  const page = plain(pageText);
+  return criterion.names.some((name) => page.includes(plain(name)));
+}
+
 function deliveryRank(item) {
   if (!item.harvested) return 0;
   return item.value !== null && item.value !== undefined ? 1 : 2;
@@ -173,7 +274,7 @@ export function kindOnPage(text, kind) {
 }
 
 export function qualifies(item, spec) {
-  return Boolean(item.live && item.listing && (!spec.valueRange || item.inRange));
+  return Boolean(item.live && item.listing && (!spec.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
 }
 
 export class AcceptanceChecker {
@@ -195,7 +296,7 @@ export class AcceptanceChecker {
     return results;
   }
 
-  async inspect(item, spec, { located = true, kind = null } = {}) {
+  async inspect(item, spec, { located = true, kind = null, purpose = [] } = {}) {
     const page = this.readPage ? await this.readPage(item.url) : { text: '', status: 0 };
     const pageText = String(page.text ?? '');
     const live = page.status >= 200 && page.status < 400 && pageText.length >= MIN_LIVE_TEXT && (!located || isDeepLink(item.url));
@@ -206,13 +307,14 @@ export class AcceptanceChecker {
       listing: located ? looksLikeListing(item.url) : !kind?.terms?.length || kindOnPage(pageText, kind),
       inRange: spec.valueRange ? live && inRange(amounts, spec, item.value, this.convert) : null,
       mentions: spec.mustMention.length ? spec.mustMention.filter((m) => pageText.toLowerCase().includes(m.toLowerCase())).length / spec.mustMention.length : null,
+      purpose: purpose.map((c) => ({ id: c.id, passed: purposePass(c, pageText, item) })),
     };
   }
 
-  async evaluate(spec, deliverables, { located = true, kind = null } = {}) {
-    if (!hasCriteria(spec)) return null;
+  async evaluate(spec, deliverables, { located = true, kind = null, purpose = [] } = {}) {
+    if (!hasCriteria(spec) && !purpose.length) return null;
     const wanted = spec.itemCount ?? MAX_ITEM_CHECKS;
-    const items = await this.inspectAll(deliverables.slice(0, Math.min(MAX_ITEM_CHECKS, Math.ceil(wanted * 1.5))), spec, { located, kind });
+    const items = await this.inspectAll(deliverables.slice(0, Math.min(MAX_ITEM_CHECKS, Math.ceil(wanted * 1.5))), spec, { located, kind, purpose });
     const target = spec.itemCount ?? Math.max(1, items.length);
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
     const checks = [];
@@ -221,6 +323,10 @@ export class AcceptanceChecker {
     if (spec.urlsLive) checks.push({ id: 'live', label: 'Links open a real page', value: good((i) => i.live), detail: `${items.filter((i) => i.live).length} of ${items.length} checked links are live` });
     if (spec.valueRange) checks.push({ id: 'range', label: `Value within ${spec.valueRange.join('–')} ${spec.unit}`.trim(), value: good((i) => i.inRange), detail: `${items.filter((i) => i.inRange).length} of ${items.length} pages show a value in range` });
     if (spec.mustMention.length) checks.push({ id: 'mentions', label: `Pages mention: ${spec.mustMention.join(', ')}`, value: items.length ? items.reduce((s, i) => s + (i.mentions ?? 0), 0) / target : 0, detail: 'share of required terms found on the pages' });
+    for (const criterion of purpose) {
+      const passed = items.filter((i) => (i.purpose ?? []).some((c) => c.id === criterion.id && c.passed)).length;
+      checks.push({ id: criterion.id, label: criterion.label, value: items.length ? passed / items.length : 0, detail: `${passed} of ${items.length} delivered pages show it` });
+    }
     const score = checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length;
     return { score: Math.round(score * 1000) / 1000, checks: checks.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })), items, checkedAt: new Date().toISOString() };
   }
