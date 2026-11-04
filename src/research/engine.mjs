@@ -588,6 +588,11 @@ export class ResearchEngine {
       project.candidates = null;
       return null;
     }
+    if (brief.located === false) {
+      if (project.candidates !== null) this.emit(project, 'candidates', `no candidate table: no listing portal sells "${brief.kind.label}", so the result is the items the pieces find, each checked as a page that opens`);
+      project.candidates = null;
+      return null;
+    }
     const options = await this.itemGateOptions(project);
     const strategy = strategyFor(project.templateId);
     if (strategy && this.search?.readPage && !this.demo && (sweep || !this.quiet.has(project.id))) {
@@ -1084,7 +1089,7 @@ export class ResearchEngine {
 
   async itemGateOptions(project) {
     const convert = this.rates ? await this.rates.converter().catch(() => undefined) : undefined;
-    return { valueRange: project.acceptance?.valueRange ?? null, unit: project.acceptance?.unit ?? '', kind: templateById(project.templateId)?.itemKind ?? null, pageFacts: project.listingFacts ?? null, valueFacts: project.valueFacts ?? null, ...(convert ? { convert } : {}) };
+    return { valueRange: project.acceptance?.valueRange ?? null, unit: project.acceptance?.unit ?? '', kind: templateById(project.templateId)?.itemKind ?? null, located: (project.brief ?? this.briefOf(project)).located !== false, pageFacts: project.listingFacts ?? null, valueFacts: project.valueFacts ?? null, ...(convert ? { convert } : {}) };
   }
 
   async calibrateValueFacts(project) {
@@ -1200,7 +1205,7 @@ export class ResearchEngine {
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage: this.search?.readPage ? (url) => this.search.readPage(url) : null, convert });
-    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables);
+    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: (project.brief ?? this.briefOf(project)).located !== false, kind: (project.brief ?? this.briefOf(project)).kind ?? null });
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }

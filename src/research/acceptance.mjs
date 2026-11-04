@@ -1,3 +1,4 @@
+import { plain } from './itemgate.mjs';
 const CURRENCIES = {
   EUR: ['€', 'eur', 'euro'],
   PLN: ['zł', 'zl', 'pln'],
@@ -160,6 +161,17 @@ export function looksLikeListing(url) {
   }
 }
 
+export const KIND_STEM = 5;
+
+export function kindOnPage(text, kind) {
+  const words = new Set(plain(text).split(/[^a-z0-9]+/).filter(Boolean));
+  const stems = new Set([...words].map((w) => w.slice(0, KIND_STEM)));
+  return (kind?.terms ?? []).some((term) => {
+    const parts = plain(term).split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+    return parts.length > 0 && parts.every((w) => (w.length <= KIND_STEM ? words.has(w) : stems.has(w.slice(0, KIND_STEM))));
+  });
+}
+
 export function qualifies(item, spec) {
   return Boolean(item.live && item.listing && (!spec.valueRange || item.inRange));
 }
@@ -170,42 +182,42 @@ export class AcceptanceChecker {
     this.convert = convert;
   }
 
-  async inspectAll(items, spec) {
+  async inspectAll(items, spec, options = {}) {
     const results = new Array(items.length);
     let next = 0;
     const worker = async () => {
       while (next < items.length) {
         const i = next++;
-        results[i] = await this.inspect(items[i], spec);
+        results[i] = await this.inspect(items[i], spec, options);
       }
     };
     await Promise.all(Array.from({ length: Math.min(PAGE_READS_AT_ONCE, items.length) }, worker));
     return results;
   }
 
-  async inspect(item, spec) {
+  async inspect(item, spec, { located = true, kind = null } = {}) {
     const page = this.readPage ? await this.readPage(item.url) : { text: '', status: 0 };
     const pageText = String(page.text ?? '');
-    const live = page.status >= 200 && page.status < 400 && pageText.length >= MIN_LIVE_TEXT && isDeepLink(item.url);
+    const live = page.status >= 200 && page.status < 400 && pageText.length >= MIN_LIVE_TEXT && (!located || isDeepLink(item.url));
     const amounts = parseAmounts(pageText);
     return {
       ...item,
       live,
-      listing: looksLikeListing(item.url),
+      listing: located ? looksLikeListing(item.url) : !kind?.terms?.length || kindOnPage(pageText, kind),
       inRange: spec.valueRange ? live && inRange(amounts, spec, item.value, this.convert) : null,
       mentions: spec.mustMention.length ? spec.mustMention.filter((m) => pageText.toLowerCase().includes(m.toLowerCase())).length / spec.mustMention.length : null,
     };
   }
 
-  async evaluate(spec, deliverables) {
+  async evaluate(spec, deliverables, { located = true, kind = null } = {}) {
     if (!hasCriteria(spec)) return null;
     const wanted = spec.itemCount ?? MAX_ITEM_CHECKS;
-    const items = await this.inspectAll(deliverables.slice(0, Math.min(MAX_ITEM_CHECKS, Math.ceil(wanted * 1.5))), spec);
+    const items = await this.inspectAll(deliverables.slice(0, Math.min(MAX_ITEM_CHECKS, Math.ceil(wanted * 1.5))), spec, { located, kind });
     const target = spec.itemCount ?? Math.max(1, items.length);
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
     const checks = [];
     const valid = items.filter((i) => qualifies(i, spec)).length;
-    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, valid / spec.itemCount), detail: `${valid} of ${deliverables.length} delivered pass every check (a single listing page that opens${spec.valueRange ? ', price in range' : ''})` });
+    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, valid / spec.itemCount), detail: `${valid} of ${deliverables.length} delivered pass every check (${located ? 'a single listing page that opens' : 'a page that opens and describes the asked kind'}${spec.valueRange ? ', price in range' : ''})` });
     if (spec.urlsLive) checks.push({ id: 'live', label: 'Links open a real page', value: good((i) => i.live), detail: `${items.filter((i) => i.live).length} of ${items.length} checked links are live` });
     if (spec.valueRange) checks.push({ id: 'range', label: `Value within ${spec.valueRange.join('–')} ${spec.unit}`.trim(), value: good((i) => i.inRange), detail: `${items.filter((i) => i.inRange).length} of ${items.length} pages show a value in range` });
     if (spec.mustMention.length) checks.push({ id: 'mentions', label: `Pages mention: ${spec.mustMention.join(', ')}`, value: items.length ? items.reduce((s, i) => s + (i.mentions ?? 0), 0) / target : 0, detail: 'share of required terms found on the pages' });

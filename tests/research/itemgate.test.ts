@@ -103,3 +103,18 @@ describe('item gate: Czech/Slovak/Polish land terms', () => {
     expect(screenItem({ title: 'Prodej bytu 2+kk', url: 'https://www.bezrealitky.cz/nemovitosti-byty-domy/prodej-byty-12345' }, glampingOptions).ok).toBe(false);
   });
 });
+
+describe('items of a kind no listing portal sells', () => {
+  it('reads Unicode hyphens as plain hyphens, so a model-written term like second‑hand matches', async () => {
+    const { plain, isKind } = await import('../../src/research/itemgate.mjs');
+    expect(plain('second\u2011hand')).toBe('second-hand');
+    expect(isKind({ title: 'Wholesale second-hand clothing bales', url: 'https://bales.example.de/' }, { terms: ['wholesale second\u2011hand clothing'] })).toBe(true);
+  });
+
+  it('does not require a single listing page for a provider, only for kinds sold on listing portals', async () => {
+    const { screenItem } = await import('../../src/research/itemgate.mjs');
+    const provider = { title: 'Vintage wholesale bales', url: 'https://vintage-wholesale.example.de/' };
+    expect(screenItem(provider, { located: true }).reasons).toContain('not a single listing page');
+    expect(screenItem(provider, { located: false }).reasons).not.toContain('not a single listing page');
+  });
+});

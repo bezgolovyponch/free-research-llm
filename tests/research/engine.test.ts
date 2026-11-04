@@ -528,6 +528,9 @@ describe('ResearchEngine', () => {
     await engine.decompose(project);
     expect(project.nodes.map((n: { id: string }) => n.id)).toEqual(['D1', 'D1.1', 'D1.2', 'D2', 'D2.1', 'D2.2']);
     expect(project.brief.located).toBe(false);
+    await engine.collectCandidates(project);
+    expect(project.candidates).toBeNull();
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('no candidate table: no listing portal sells "wholesale clothing provider"'))).toBe(true);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'tree' && l.message.startsWith('no listing portal is known for "wholesale clothing provider"'))).toBe(true);
   });
 
