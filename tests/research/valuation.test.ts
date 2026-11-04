@@ -127,7 +127,7 @@ describe('owner and expert facts are kept only with a quote found on the page', 
       { engine: '1.2 HTP', verdict: 'problematic', note: 'timing chain wear', quote: 'Motor 1.2 HTP má problémy s rozvodovým řetězem už kolem 100 tisíc km.', sourceId: 'G1' },
       { engine: '1.9 TDI', verdict: 'reliable', note: 'durable', quote: 'The 1.9 TDI lasts forever according to everyone.', sourceId: 'G1' },
     ], sources);
-    expect(facts).toEqual([{ aspect: 'reliability', engine: '1.2 HTP', verdict: 'problematic', note: 'timing chain wear', quote: 'Motor 1.2 HTP má problémy s rozvodovým řetězem už kolem 100 tisíc km.', source: 'https://forum.example/fabia' }]);
+    expect(facts).toEqual([{ aspect: 'reliability', engine: '1.2 HTP', verdict: 'problematic', note: 'timing chain wear', quote: 'Motor 1.2 HTP má problémy s rozvodovým řetězem už kolem 100 tisíc km.', host: 'forum.example', fixedBy: [], source: 'https://forum.example/fabia' }]);
   });
 });
 
@@ -160,3 +160,26 @@ describe('resale potential', () => {
     expect(resaleOf({ title: 'Dacia Sandero 1.4', value: 1, url: 'u', group: 'dacia sandero', engine: '1.4 mpi' }, 10, [], groupFacts).resaleTags).toEqual(['cheap to repair (1.4): cheap common parts — https://forum.example/s']);
   });
 });
+
+describe('car valuation only where its concept is validated', () => {
+  it('applies to used vehicles and only suggests itself for other kinds', async () => {
+    const { valuationConcept } = await import('../../src/research/valuation.mjs');
+    const { valuationNote } = await import('../../src/research/candidates.mjs');
+    expect(valuationConcept({ label: 'used car', terms: ['auto'] })?.id).toBe('used-vehicle');
+    expect(valuationConcept({ label: 'wholesale clothing provider', terms: ['used clothing wholesale'] })).toBeNull();
+    expect(valuationNote({ kind: { label: 'used car' }, subtype: { models: ['skoda fabia'] } })).toMatchObject({ concept: 'used-vehicle' });
+    expect(valuationNote({ kind: { label: 'used phone' }, subtype: { models: ['iphone 12'] } })?.suggestion).toMatch(/not validated for this kind, so no value is computed$/);
+    expect(valuationNote({ kind: { label: 'plot of land' } })).toBeNull();
+  });
+
+  it('never flags a listing whose mileage is not compared, such as an engine sold alone', () => {
+    const ad = (title: string, value: number, i: number) => ({ title, value, unit: 'CZK', url: `https://auto.bazos.cz/inzerat/4459${i}0000/x.php` });
+    const priced = (year: number, km: number) => Math.round(100000 * 1.1 ** (year - 2012) * (km / 100000) ** -0.3);
+    const market = Array.from({ length: 36 }, (_, i) => { const year = 2006 + (i % 7); const km = 90000 + ((i * 37) % 11) * 15000; return ad(`Dacia Sandero ${year} ${km} km`, priced(year, km) + ((i % 3) - 1) * 500, 100 + i); });
+    const sample = marketSample(market, ['dacia sandero']);
+    const row = valueListing(ad('Motor dacia sandero 2009', 9000, 7), sample, { models: ['dacia sandero'], calibration: calibrate(sample) });
+    expect(Number.isFinite(row.marketValue)).toBe(true);
+    expect(row.highlight).toBeUndefined();
+  });
+});
+

@@ -158,6 +158,32 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 
 Not yet used and the next step: equipment, trim, transmission, body, accident and service history from the ad text, and the listing's time on market (ProbSAINT); they would narrow the interval.
 
+## 7c-method. Composing an item's value (any kind)
+
+1. State the concept and purpose, and validate them on the research's own data before computing anything.
+2. List the drivers of value from published research and trustworthy statistics, with sources.
+3. Read each item's facts from its own page.
+4. Measure each driver's effect on the market (comparables of the same group, enough with and without).
+5. Accept owner and expert claims only when at least two independent sites agree, with quotes.
+6. Give a calibrated interval (jackknife on the method's own errors) and flag only outside it, saying these are asking prices.
+
+## 7c-example. Example of value composition: used cars (sources checked 2026-11-04)
+
+Owner and expert sources are searched worldwide (English, German, the make's home language, the asked country's language) and in the source register knowledgesources.json.
+
+| Driver | How it moves the value | Trustworthy source | How the engine uses it |
+|---|---|---|---|
+| Age | Roughly geometric decline (OECD average about 31% a year over a car's life); on 0c750f, 6.8% a year at fixed mileage for cars 10–20 years old | Storchmann, *Transportation* 31(4), 2004; measured per market | pooled Theil–Sen age effect (≥ 30 dated listings) |
+| Mileage | Explains much of the decline; for defects DEKRA rates mileage above age | Engers, Hartmann & Stern, *J. Applied Econometrics* 24(1), 2009; DEKRA Gebrauchtwagenreport (mileage bands) | measured mileage effect; low use for its age as a reason |
+| Mileage authenticity | In Czechia about a third of used cars had a rolled-back odometer, by about 100,000 km on average (2024) | Cebia (reported by novinky.cz, 2025) | documented mileage (inspection records, service book) counts only when its price effect is measured or owners and experts agree |
+| Accident history | Stated rarely in ads; actual prevalence much higher | Cebia SUMMARY 2Q/2025 | stated faults are cautions; a low price can mean hidden damage (lemons) |
+| Model and engine reliability | Defect and breakdown rates differ strongly by model, engine and age | TÜV Report (10.2 million inspections, 2025); ADAC Pannenstatistik 2025 (159 model series, breakdowns per 1,000 cars); DEKRA Gebrauchtwagenreport | reputation only when ≥ 2 independent sites agree with quotes; a known problem the ad says is fixed |
+| Equipment, trim, transmission, colour | Change resale by large margins | Autovista / Eurotax residual-value methodology | ad facts calibrated on real ads; counted only with a measured effect |
+| Origin | Czech market 2025 H1: 52.9% domestic, 19.1% from Germany; imports older (11.4 vs 8.3 years) | Cebia SUMMARY 2Q/2025 | not used yet; a candidate fact to measure |
+| Season | Czech used-car price index 2025 low in spring (April 886.9), high in autumn and winter | AURES Holdings index (via echo24.cz) | not used per car; a note on timing |
+| Time on market and verification | Average 67 days to sell; cars with a basic history check sold in 53 days | Cebia SUMMARY 2Q/2025; ProbSAINT 2024 (price depends on offer duration) | not used yet: needs the listing's age on the market |
+| Hidden quality | Sale prices reflect the average quality sold; lemons penalty about 12% of the price | Blundell et al., *Quantitative Economics* 17(1), 2026 | every flag says asking price, and a low price can reflect hidden faults |
+
 ## 4m. Universal list research (2026-11-03, supersedes the funnel tree of 4i rule 2a)
 
 Audit of the car researches (0c750f, b4f648): 62 pages read, none on a marketplace, 0 listings from the tree; the only listings came from the portal sweep, which ran last. The funnel of 4i had put PRISMA's identify and screen stages into tree pieces answered by models from web search; those stages are mechanical and belong to code. The same order is used for every kind of item, the way a careful buyer or a systematic review works (PRISMA 2020, Page et al., *BMJ* 2021;372:n71: eligibility criteria are set before records are identified, every record is screened against them, the counts are reported):

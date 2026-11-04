@@ -1,6 +1,6 @@
 import { currencyOf } from './acceptance.mjs';
 import { countryByCode, isNewsPage, itemCountry, mentionsCoast } from './brief.mjs';
-import { valueTable } from './valuation.mjs';
+import { valuationConcept, valueTable } from './valuation.mjs';
 import { plain, screenItem } from './itemgate.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { explorePoints } from './site.mjs';
@@ -211,6 +211,13 @@ export function implausiblyLow(rows) {
   return priced.filter((r) => r.value < cut).map((r) => Object.assign(r, { lowCut: cut }));
 }
 
+export function valuationNote(brief) {
+  if (!brief?.subtype?.models?.length) return null;
+  const concept = valuationConcept(brief.kind);
+  if (concept) return { concept: concept.id, purpose: concept.purpose, validatedOn: concept.validatedOn, sources: concept.sources };
+  return { concept: null, suggestion: `a value from comparable listings, like the one validated for used vehicles, may fit "${brief.kind?.label ?? 'this item'}"; its concept and purpose are not validated for this kind, so no value is computed` };
+}
+
 export function buildCandidates(nodes, brief, options = {}) {
   const unit = brief?.unit ?? '';
   let kept = [];
@@ -252,7 +259,7 @@ export function buildCandidates(nodes, brief, options = {}) {
     const compared = valueVsPeers(kept, brief.subtype.models);
     kept = compared.filter((row) => !row.peerNote);
     for (const row of compared.filter((r) => r.peerNote)) toCheck.push({ ...row, toCheck: [row.toCheck, `price ${row.valueIndex} of its ${row.peers} peers' median: ${row.peerNote}`].filter(Boolean).join('; ') });
-    kept = valueTable(kept, [...kept, ...toCheck.filter((r) => !SUSPECT_PRICE.test(r.toCheck ?? '')), ...market.filter((m) => m.title)], { models: brief.subtype.models, groupFacts: brief.groupFacts ?? {}, condition: brief.kind?.condition ?? [], upgrades: brief.kind?.upgrades ?? [], pageFacts: options.pageFacts ?? null });
+    if (valuationConcept(brief.kind)) kept = valueTable(kept, [...kept, ...toCheck.filter((r) => !SUSPECT_PRICE.test(r.toCheck ?? '')), ...market.filter((m) => m.title)], { models: brief.subtype.models, groupFacts: brief.groupFacts ?? {}, condition: brief.kind?.condition ?? [], upgrades: brief.kind?.upgrades ?? [], pageFacts: options.pageFacts ?? null, valueFacts: options.valueFacts ?? null });
   }
   if (kept.some((row) => Number.isFinite(row.underpriced))) kept.sort(() => 0);
   else if (kept.some((row) => row.valueIndex !== null && row.valueIndex !== undefined)) kept.sort((a, b) => (a.valueIndex ?? Infinity) - (b.valueIndex ?? Infinity) || (a.km ?? Infinity) - (b.km ?? Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
@@ -270,6 +277,7 @@ export function buildCandidates(nodes, brief, options = {}) {
     screened,
     screenedCount: found - kept.length - toCheck.length,
     examples,
+    valuation: valuationNote(brief),
     builtAt: new Date().toISOString(),
   };
 }

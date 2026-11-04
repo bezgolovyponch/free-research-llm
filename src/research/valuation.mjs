@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { listingKey } from '../search/listings.mjs';
 import { plain } from './itemgate.mjs';
+import { factEffects, rankCases, valueCase } from './valuecase.mjs';
 
 export const COMPARABLES = 7;
 export const MIN_COMPARABLES = 5;
@@ -166,7 +168,7 @@ export function factsOf(row, pageFacts = null) {
   const own = listingFacts(row);
   const page = pageFacts?.get?.(keyOf(row)) ?? null;
   if (!page) return own;
-  return Object.fromEntries(Object.entries(own).map(([k, v]) => [k, v ?? page[k] ?? null]));
+  return { ...Object.fromEntries(Object.entries(own).map(([k, v]) => [k, v ?? page[k] ?? null])), text: page.text ?? '' };
 }
 
 function robustCut(list) {
@@ -187,7 +189,8 @@ export function marketSample(rows, models = [], { pageFacts = null, condition = 
     seen.add(key);
     const group = groupOf(row, models);
     if (!group) continue;
-    byGroup.set(group, [...(byGroup.get(group) ?? []), { url: row.url, key, value: row.value, facts: factsOf(row, pageFacts), flagged: conditionOf(row, condition).length > 0 }]);
+    const { text, ...facts } = factsOf(row, pageFacts);
+    byGroup.set(group, [...(byGroup.get(group) ?? []), { url: row.url, key, group, value: row.value, facts, text: plain(`${row.title ?? ''} ${text ?? ''}`), flagged: conditionOf(row, condition).length > 0 }]);
   }
   for (const [group, list] of byGroup) byGroup.set(group, robustCut(list));
   byGroup.slopes = pooledSlopes(byGroup.values());
@@ -219,9 +222,11 @@ export function adText(text, title, value = null) {
   return price ? body.slice(0, anchor.length + price.index) : body;
 }
 
+export const AD_TEXT_KEPT = 1500;
+
 export const pageFactsFrom = (text, row) => {
   const own = adText(text, row?.title, row?.value);
-  return own ? listingFacts({ title: '', attrs: { description: own } }) : null;
+  return own ? { ...listingFacts({ title: '', attrs: { description: own } }), text: own.slice(0, AD_TEXT_KEPT) } : null;
 };
 
 const rounded = (v) => Math.round(v / VALUE_ROUNDING) * VALUE_ROUNDING;
@@ -229,7 +234,7 @@ const pct = (slope) => Math.round((Math.exp(slope) - 1) * 1000) / 10;
 
 function adjustmentNote(slopes, facts) {
   const age = slopes.year !== null ? `adjusted to ${facts.year} by ${pct(slopes.year)}% per year of age` : `not adjusted for age: ${slopes.datedPoints} dated listings, ${MIN_SLOPE_POINTS} needed to measure it, so comparables are limited to ±1 year`;
-  const wear = slopes.km === null ? 'not adjusted for mileage (not measurable on this market)' : facts.km === null ? 'not adjusted for mileage (this listing does not state it)' : `adjusted for mileage by ${pct(slopes.km * Math.log(1.1))}% per 10% more km`;
+  const wear = slopes.km === null ? 'not adjusted for use (not measurable on this market)' : facts.km === null ? 'not adjusted for use (this listing does not state it)' : `adjusted for use by ${pct(slopes.km * Math.log(1.1))}% per 10% more km`;
   return `${age}; ${wear}; slopes measured within each model on ${slopes.datedPoints} dated listings (Theil–Sen)`;
 }
 
@@ -237,10 +242,19 @@ function estimateFor(facts, key, group, sample, k = COMPARABLES) {
   const slopes = sample.slopes ?? { year: null, km: null, datedPoints: 0, kmPoints: 0 };
   const window = slopes.year === null ? 1 : YEAR_WINDOW;
   const peers = (sample.get(group) ?? []).filter((p) => p.key !== key && !p.flagged && p.facts.year !== null && Math.abs(p.facts.year - facts.year) <= window && !(facts.fuel && p.facts.fuel && p.facts.fuel !== facts.fuel));
-  if (peers.length < MIN_COMPARABLES) return { window, peers: peers.length };
+  if (peers.length < MIN_COMPARABLES) return { window, peers: peers.length, eligible: peers };
   const nearest = peers.map((p) => ({ ...p, d: distance(facts, p.facts) })).sort((a, b) => a.d - b.d).slice(0, k);
   const values = nearest.map((p) => adjusted(p, facts, slopes));
-  return { window, peers: peers.length, nearest, values, estimate: median(values), slopes };
+  return { window, peers: peers.length, eligible: peers, nearest, values, estimate: median(values), slopes };
+}
+
+export const VALUATION_CONCEPTS = JSON.parse(readFileSync(new URL('./valueconcepts.json', import.meta.url), 'utf8'));
+
+const kindWordsOf = (kind) => new Set(plain(`${kind?.label ?? ''} ${(kind?.terms ?? []).join(' ')}`).split(/[^a-z0-9]+/).filter(Boolean));
+
+export function valuationConcept(kind) {
+  const words = kindWordsOf(kind);
+  return VALUATION_CONCEPTS.find((c) => c.kindWords.some((w) => words.has(w))) ?? null;
 }
 
 export const MISCOVERAGE = 0.2;
@@ -266,8 +280,12 @@ export function calibrate(sample) {
   return { n, low: sorted[lowRank - 1], high: sorted[highRank - 1] };
 }
 
-export function valueListing(row, sample, { models = [], groupFacts = {}, condition = [], k = COMPARABLES, pageFacts = null, calibration = null } = {}) {
-  const facts = factsOf(row, pageFacts);
+function reputationOf(group, facts, groupFacts = {}) {
+  return (groupFacts?.[group]?.facts ?? []).filter((f) => !f.engine || !facts.engine || plain(facts.engine).startsWith(plain(f.engine).split(' ')[0]));
+}
+
+export function valueListing(row, sample, { models = [], groupFacts = {}, condition = [], k = COMPARABLES, pageFacts = null, calibration = null, phrases = null, effects = [] } = {}) {
+  const { text: adText, ...facts } = factsOf(row, pageFacts);
   const group = groupOf(row, models);
   const key = keyOf(row);
   const flags = conditionOf(row, condition);
@@ -291,8 +309,9 @@ export function valueListing(row, sample, { models = [], groupFacts = {}, condit
   const confidence = calibrated && nearest.length >= COMPARABLES && kmCompared && slopes.year !== null ? 'high' : 'medium';
   const marketValue = rounded(estimate);
   const marketRange = calibrated ? [rounded(low), rounded(high)] : null;
-  const below = calibrated && row.value < low && !flags.length;
-  return { ...out, marketValue, ...(marketRange ? { marketRange } : {}), underpriced: Math.round((estimate / row.value) * 100) / 100, comparables: nearest.length, valueConfidence: confidence, valueNotes: notes, ...(below ? { highlight: `asks below the ${Math.round((1 - MISCOVERAGE) * 100)}% interval of comparable asking prices: ${row.value.toLocaleString('en')} ${unit} against ${marketRange.map((v) => v.toLocaleString('en')).join('–')} ${unit}; check for hidden faults`.replace(/\s+/g, ' ').trim() } : {}) };
+  const below = calibrated && kmCompared && row.value < low && !flags.length;
+  const caseOf = phrases ? valueCase({ ...row, ...facts, adText, marketValue: rounded(estimate) }, fit.eligible, { phrases, effects, reputation: reputationOf(group, facts, groupFacts), kmSlope: slopes.km }) : null;
+  return { ...out, ...(caseOf ? { valueCase: caseOf } : {}), marketValue, ...(marketRange ? { marketRange } : {}), underpriced: Math.round((estimate / row.value) * 100) / 100, comparables: nearest.length, valueConfidence: confidence, valueNotes: notes, ...(below ? { highlight: `asks below the ${Math.round((1 - MISCOVERAGE) * 100)}% interval of comparable asking prices: ${row.value.toLocaleString('en')} ${unit} against ${marketRange.map((v) => v.toLocaleString('en')).join('–')} ${unit}; check for hidden faults`.replace(/\s+/g, ' ').trim() } : {}) };
 }
 
 export const LIQUID_FROM = 20;
@@ -330,12 +349,14 @@ export function resaleOf(row, depth, effects = [], groupFacts = {}) {
   return { marketDepth: depth, resaleTags: tags, valueSteps: steps, resaleValue, resaleGain, resaleScore: Math.round(resaleGain * (depth / (depth + 10))) };
 }
 
-export function valueTable(kept, marketRows, { models = [], groupFacts = {}, condition = [], upgrades = [], pageFacts = null } = {}) {
+export function valueTable(kept, marketRows, { models = [], groupFacts = {}, condition = [], upgrades = [], pageFacts = null, valueFacts = null } = {}) {
   const facts = pageFacts instanceof Map ? pageFacts : new Map(Object.entries(pageFacts ?? {}));
   const sample = marketSample(marketRows, models, { pageFacts: facts, condition });
   const effects = stepEffects(sample, marketRows, upgrades);
   const calibration = calibrate(sample);
-  const valued = (kept ?? []).map((row) => valueListing(row, sample, { models, groupFacts, condition, pageFacts: facts, calibration })).map((row) => ({ ...row, ...resaleOf(row, (sample.get(row.group) ?? []).length, effects, groupFacts) }));
-  const rank = (r) => (r.condition ? 3 : !Number.isFinite(r.underpriced) ? 2 : r.valueConfidence === 'low' ? 1 : 0);
-  return valued.sort((a, b) => rank(a) - rank(b) || (b.underpriced ?? -Infinity) - (a.underpriced ?? -Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
+  const phrases = valueFacts?.for?.length || valueFacts?.against?.length ? valueFacts : null;
+  const measured = phrases ? factEffects([...sample.values()].flat(), [...phrases.for, ...phrases.against], sample.slopes?.year ?? 0) : [];
+  const valued = rankCases((kept ?? []).map((row) => valueListing(row, sample, { models, groupFacts, condition, pageFacts: facts, calibration, phrases, effects: measured })).map((row) => ({ ...row, ...resaleOf(row, (sample.get(row.group) ?? []).length, effects, groupFacts) })));
+  const rank = (r) => (r.condition ? 3 : !Number.isFinite(r.underpriced) ? 2 : 0);
+  return valued.sort((a, b) => rank(a) - rank(b) || (a.caseLayer ?? Infinity) - (b.caseLayer ?? Infinity) || (b.underpriced ?? -Infinity) - (a.underpriced ?? -Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
 }

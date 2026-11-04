@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { withProposals } from './proposal.mjs';
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
@@ -18,6 +19,7 @@ import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn } from '.
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
+import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
@@ -79,22 +81,34 @@ function strings(value, max = 8) {
 }
 
 const GROUP_KNOWLEDGE_GROUPS = 6;
+const GROUP_QUERIES = 8;
+const GROUP_SOURCES = 12;
+const GROUP_PAGES_PER_CALL = 4;
 const GROUP_FACTS_TTL_MS = 30 * 24 * 3600 * 1000;
 
-function groupQueryPrompt({ group, engines, languages, kind }) {
+const KNOWLEDGE_SOURCES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8'));
+const MAKE_LANGUAGES = KNOWLEDGE_SOURCES.makeLanguages ?? {};
+const REGION_LANGUAGES = KNOWLEDGE_SOURCES.regionLanguages ?? {};
+
+export function knowledgeSourcesFor(concept) {
+  return (KNOWLEDGE_SOURCES.sources ?? []).filter((source) => source.concept === concept);
+}
+
+export function groupQueryPrompt({ group, engines, languages, kind, sources = [] }) {
+  const domains = [...new Set(sources.map((source) => source.site).filter(Boolean))];
   return [
     { role: 'system', content: 'You write web search queries. Answer with JSON only: {"queries": ["..."]}.' },
     { role: 'user', content: `Item: ${kind || 'item'} "${group}"${engines.length ? `, engines or variants seen in listings: ${engines.join(', ')}` : ''}.
-Write 4 queries that find owner experiences and expert or statistical evidence about which engines or variants of "${group}" are reliable, durable or problematic, what typically fails, and how costly repairs and parts are (owner forums and clubs, defect or breakdown statistics such as the TÜV report or ADAC breakdown statistics where they exist). Write them in: ${languages.join(', ')}. Every query names "${group}".` },
+Write ${GROUP_QUERIES} queries that find owner experiences and expert or statistical evidence about which engines or variants of "${group}" are reliable, durable or problematic, what typically fails and at what mileage, what a buyer should check, and how costly repairs and parts are. Spread them across these languages: ${languages.join(', ')}. Restrict at least ${Math.ceil(GROUP_QUERIES / 2)} of them with site: to one of these owner and expert sources: ${domains.map((domain) => `site:${domain}`).join(', ')}. Give at least one query per engine listed. Every query names "${group}".` },
   ];
 }
 
-function groupFactsPrompt({ group, engines, sources }) {
+function groupFactsPrompt({ group, engines, sources, languages = ['English'] }) {
   const pages = sources.map((s) => `[${s.id}] ${s.url}\n${String(s.text ?? '').slice(0, 3500)}`).join('\n\n');
   return [
     { role: 'system', content: 'You extract facts only from the given pages. Answer with JSON only.' },
     { role: 'user', content: `Item: "${group}"${engines.length ? `; engines or variants in the listings: ${engines.join(', ')}` : ''}.
-From the pages below, list facts about the reliability or durability of specific engines or variants, and about repair costs and parts availability, of "${group}". Return {"facts": [{"engine": "the engine or variant as named, or \"\" for the whole model", "aspect": "reliability" | "repair" | "parts", "verdict": "reliable" | "problematic" | "neutral" | "cheap" | "expensive", "note": "what owners or experts report, at most 15 words", "quote": "the exact sentence from the page, copied character for character", "sourceId": "G1"}]}. Only facts the page states; no facts from memory; at most 8.
+From the pages below, list facts about the reliability or durability of specific engines or variants, and about repair costs and parts availability, of "${group}". Return {"facts": [{"engine": "the engine or variant as named, or \"\" for the whole model", "aspect": "reliability" | "repair" | "parts", "verdict": "reliable" | "problematic" | "neutral" | "cheap" | "expensive", "note": "what owners or experts report, at most 15 words", "fixedBy": ["for a problem: short phrases a seller's ad would use to say it was fixed, in ${languages.join(' and ')}"], "quote": "the exact sentence from the page, copied character for character", "sourceId": "G1"}]}. Only facts the page states; no facts from memory; at most 10.
 
 ${pages}` },
   ];
@@ -105,13 +119,27 @@ export function verifiedGroupFacts(facts, sources) {
   return (Array.isArray(facts) ? facts : []).filter((f) => f && ['reliable', 'problematic', 'neutral', 'cheap', 'expensive'].includes(f.verdict) && String(f.quote ?? '').trim().length >= 20).map((f) => {
     const source = sources.find((s) => s.id === f.sourceId);
     const found = source && squash(source.text).includes(squash(f.quote));
-    return found ? { aspect: ['repair', 'parts'].includes(f.aspect) ? f.aspect : 'reliability', engine: String(f.engine ?? '').slice(0, 30), verdict: f.verdict, note: String(f.note ?? '').slice(0, 140), quote: String(f.quote).slice(0, 300), source: source.url } : null;
-  }).filter(Boolean).slice(0, 8);
+    return found ? { aspect: ['repair', 'parts'].includes(f.aspect) ? f.aspect : 'reliability', engine: String(f.engine ?? '').slice(0, 30), verdict: f.verdict, note: String(f.note ?? '').slice(0, 140), quote: String(f.quote).slice(0, 300), host: hostOf(source.url), fixedBy: (Array.isArray(f.fixedBy) ? f.fixedBy : []).map((x) => plain(String(x)).trim()).filter((x) => x.length >= 4).slice(0, 6), source: source.url } : null;
+  }).filter(Boolean).slice(0, 10);
 }
 
-function queryLanguages(regions = []) {
-  const names = [...new Set((regions ?? []).map((code) => countryByCode(String(code ?? '').toUpperCase())?.name).filter(Boolean))];
-  return [...names.map((name) => `the main language of ${name}`), 'English'];
+export function queryLanguages(regions = [], group = '') {
+  const languages = ['English', 'German'];
+  for (const code of regions ?? []) {
+    const key = String(code ?? '').toUpperCase();
+    const country = countryByCode(key);
+    const language = REGION_LANGUAGES[key] ?? (country ? `the main language of ${country.name}` : '');
+    if (language) languages.push(language);
+  }
+  const make = plain(group).trim().split(/\s+/)[0];
+  if (MAKE_LANGUAGES[make]) languages.push(MAKE_LANGUAGES[make]);
+  const seen = new Set();
+  return languages.filter((language) => {
+    const key = language.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function mentionsModel(title, name) {
@@ -642,22 +670,28 @@ export class ResearchEngine {
     for (const row of kept) if (row.group) counts.set(row.group, (counts.get(row.group) ?? 0) + 1);
     const groups = [...counts].sort((a, b) => b[1] - a[1]).map(([g]) => g).filter((g) => !(known[g] && now - Date.parse(known[g].at) < GROUP_FACTS_TTL_MS)).slice(0, GROUP_KNOWLEDGE_GROUPS);
     if (!groups.length) return 0;
-    const languages = queryLanguages((project.brief ?? this.briefOf(project)).regions);
+    const knowledgeSources = knowledgeSourcesFor('used-vehicle');
     let added = 0;
     for (const group of groups) {
       try {
+        const languages = queryLanguages((project.brief ?? this.briefOf(project)).regions, group);
         const engines = [...new Set(kept.filter((r) => r.group === group && r.engine).map((r) => r.engine))].slice(0, 6);
-        const plan = await this.router.complete({ purpose: 'decompose', tier: 'deep', messages: groupQueryPrompt({ group, engines, languages, kind: project.brief?.kind?.label ?? '' }) });
-        const queries = (Array.isArray(plan?.data?.queries) ? plan.data.queries : []).map((q) => String(q ?? '').trim()).filter((q) => q && plain(q).includes(plain(group).split(' ').at(-1))).slice(0, 4);
+        const plan = await this.router.complete({ purpose: 'decompose', tier: 'deep', messages: groupQueryPrompt({ group, engines, languages, kind: project.brief?.kind?.label ?? '', sources: knowledgeSources }) });
+        const queries = (Array.isArray(plan?.data?.queries) ? plan.data.queries : []).map((q) => String(q ?? '').trim()).filter((q) => q && plain(q).includes(plain(group).split(' ').at(-1))).slice(0, GROUP_QUERIES);
         if (!queries.length) continue;
-        const sources = (await this.search.search(queries, { maxSources: 5 })).filter((s) => String(s.text ?? '').length > 200);
+        const sources = (await this.search.search(queries, { maxSources: GROUP_SOURCES })).filter((s) => String(s.text ?? '').length > 200);
         if (!sources.length) continue;
         const shown = sources.map((s, i) => ({ ...s, id: `G${i + 1}` }));
-        const reply = await this.router.complete({ purpose: 'research', tier: 'deep', messages: groupFactsPrompt({ group, engines, sources: shown }) });
-        const facts = verifiedGroupFacts(reply?.data?.facts, shown);
+        const facts = [];
+        for (let i = 0; i < shown.length; i += GROUP_PAGES_PER_CALL) {
+          const batch = shown.slice(i, i + GROUP_PAGES_PER_CALL);
+          const reply = await this.router.complete({ purpose: 'research', tier: 'deep', messages: groupFactsPrompt({ group, engines, sources: batch, languages }) }).catch(() => null);
+          facts.push(...verifiedGroupFacts(reply?.data?.facts, batch));
+        }
         project.groupFacts = { ...(project.groupFacts ?? {}), [group]: { at: new Date().toISOString(), facts, sources: shown.map((s) => s.url) } };
         added += facts.length;
-        this.emit(project, 'decision', `${group}: ${facts.length} owner and expert fact(s) with quotes found on ${shown.length} page(s)${facts.length ? ` — ${facts.slice(0, 3).map((f) => `${f.verdict}${f.engine ? ` ${f.engine}` : ''}`).join(', ')}` : ''}`);
+        const agreed = consensusOf(facts).filter((c) => c.hosts.length >= MIN_AGREEING_SITES);
+        this.emit(project, 'decision', `${group}: ${facts.length} quoted owner and expert fact(s) from ${new Set(facts.map((f) => f.host)).size} site(s) out of ${shown.length} page(s) read; ${agreed.length} agreed by at least ${MIN_AGREEING_SITES} independent sites${agreed.length ? ` — ${agreed.slice(0, 3).map((c) => `${c.verdict}${c.engine ? ` ${c.engine}` : ''} (${c.hosts.length} sites)`).join(', ')}` : ''}`);
       } catch (error) {
         this.emit(project, 'warn', `${group}: owner and expert facts not gathered: ${String(error?.message ?? error).slice(0, 140)}`);
       }
@@ -1055,7 +1089,28 @@ export class ResearchEngine {
 
   async itemGateOptions(project) {
     const convert = this.rates ? await this.rates.converter().catch(() => undefined) : undefined;
-    return { valueRange: project.acceptance?.valueRange ?? null, unit: project.acceptance?.unit ?? '', kind: templateById(project.templateId)?.itemKind ?? null, located: (project.brief ?? this.briefOf(project)).located !== false, pageFacts: project.listingFacts ?? null, ...(convert ? { convert } : {}) };
+    return { valueRange: project.acceptance?.valueRange ?? null, unit: project.acceptance?.unit ?? '', kind: templateById(project.templateId)?.itemKind ?? null, located: (project.brief ?? this.briefOf(project)).located !== false, pageFacts: project.listingFacts ?? null, valueFacts: project.valueFacts ?? null, ...(convert ? { convert } : {}) };
+  }
+
+  async calibrateValueFacts(project) {
+    if (!this.router || this.demo) return false;
+    const known = project.listingFacts ?? {};
+    const kept = new Set((project.candidates?.kept ?? []).map((r) => listingKey(r.url)));
+    const texts = Object.entries(known).filter(([, f]) => f.text).sort(([a], [b]) => Number(kept.has(b)) - Number(kept.has(a))).map(([, f]) => f.text);
+    if (texts.length < VALUE_FACT_TEXTS / 2 || (project.valueFacts && project.valueFacts.calibratedOn >= Math.min(VALUE_FACT_TEXTS, texts.length))) return false;
+    const sample = texts.slice(0, VALUE_FACT_TEXTS);
+    try {
+      const messages = valueFactsPrompt({ question: project.question, texts: sample });
+      const replies = await Promise.all(Array.from({ length: CALIBRATION_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
+      const merged = mergeValueFacts(replies);
+      if (merged.samples < 2) throw new Error(`only ${merged.samples} of ${CALIBRATION_SAMPLES} proposals answered`);
+      project.valueFacts = applyValueFacts(merged, texts);
+      this.emit(project, 'decision', `value facts calibrated on ${sample.length} ads (kept by ${Math.ceil(merged.samples / 2)} of ${merged.samples} proposals and found in at least 2 ads): for ${project.valueFacts.for.join(', ') || 'none'}; against ${project.valueFacts.against.join(', ') || 'none'}`);
+      return true;
+    } catch (error) {
+      this.emit(project, 'decision', `value facts not calibrated: ${String(error.message).slice(0, 160)}`);
+      return false;
+    }
   }
 
   async readListingFacts(project) {
@@ -1065,7 +1120,7 @@ export class ResearchEngine {
     const kept = new Set((project.candidates?.kept ?? []).map((r) => listingKey(r.url)));
     const rows = [...project.nodes, { sources: project.sweep?.pages ?? [] }].flatMap((n) => (n.sources ?? []).flatMap((s) => s.listings ?? []));
     const wanted = [...new Map(rows.filter((r) => r?.url && groupOf(r, models) && listingFacts(r).year === null).map((r) => [listingKey(r.url), r])).entries()]
-      .filter(([key]) => !known[key])
+      .filter(([key]) => !known[key] || (known[key].read && known[key].text === undefined))
       .sort(([a], [b]) => Number(kept.has(b)) - Number(kept.has(a)))
       .slice(0, FACT_PAGES);
     let read = 0;
@@ -1195,6 +1250,13 @@ export class ResearchEngine {
       if (compacted) this.emit(project, 'tree', `stored page text and links capped for ${compacted} source(s) to keep memory small`);
       const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
+      if (project.acceptance?.itemCount && (project.brief ?? this.briefOf(project)).located) {
+        const pruned = dropListingWork(project.nodes);
+        if (pruned.dropped.length) {
+          project.nodes = pruned.nodes;
+          this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${pruned.dropped.join(', ')}`);
+        }
+      }
       this.regrade(project);
       this.monitorPass(project);
       const listingsFirst = Boolean(project.acceptance?.itemCount && this.search?.readPage && !this.demo);
@@ -1203,7 +1265,9 @@ export class ResearchEngine {
         await this.collectCandidates(project, { sweep: true });
         await this.planKnowledgeQueries(project);
         const knew = await this.gatherGroupKnowledge(project);
-        if ((await this.readListingFacts(project)) || knew) await this.collectCandidates(project, { sweep: false });
+        const readFacts = await this.readListingFacts(project);
+        const calibratedFacts = await this.calibrateValueFacts(project);
+        if (readFacts || calibratedFacts || knew) await this.collectCandidates(project, { sweep: false });
         await this.store.save(project);
         const stoppedAfterListings = await this.stopIfCancelled(project, id, release);
         if (stoppedAfterListings) return stoppedAfterListings;

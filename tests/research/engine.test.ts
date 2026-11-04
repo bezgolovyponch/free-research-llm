@@ -6,7 +6,7 @@ import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
-import { ResearchEngine, TEAM_TTL_MS, needsSiteFit } from '../../src/research/engine.mjs';
+import { ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
@@ -1243,9 +1243,29 @@ describe('knowledge queries about the item groups found', () => {
     const leaf = project.nodes[1];
     expect(leaf.searchQueries[0]).toBe('Škoda Fabia 1.4 MPI zkušenosti majitelů fórum');
     expect(leaf.searchQueries).not.toContain('best laptops 2026');
-    expect(JSON.stringify(calls[0])).toContain('the main language of Czechia');
+    expect(JSON.stringify(calls[0])).toContain('Czech');
     await (engine as unknown as { planKnowledgeQueries: (p: unknown) => Promise<number | null> }).planKnowledgeQueries(project);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('owner and expert knowledge from worldwide sources', () => {
+  it('searches in English, German, the asked country language and the make home language, each once', () => {
+    const skoda = queryLanguages(['CZ'], 'skoda fabia');
+    for (const language of ['Czech', 'English', 'German']) expect(skoda.filter((l) => l === language)).toHaveLength(1);
+    expect(queryLanguages(['CZ'], 'peugeot 207')).toContain('French');
+    expect(queryLanguages([], 'volkswagen golf')).toContain('German');
+  });
+
+  it('asks for queries spread across the languages and half of them restricted with site: to the source register', async () => {
+    const register = JSON.parse(await fs.readFile(new URL('../../src/research/knowledgesources.json', import.meta.url), 'utf8'));
+    const expected = ['tuv.com', 'adac.de', 'dekra.de', 'which.co.uk', 'whatcar.com', 'consumerreports.org', 'carcomplaints.com', 'nhtsa.gov', 'motor-talk.de', 'honestjohn.co.uk', 'reddit.com', 'briskoda.net', 'auto.cz', 'cebia.cz'];
+    const sources = register.sources.filter((source: { concept: string }) => source.concept === 'used-vehicle');
+    expect(sources.map((source: { site: string }) => source.site)).toEqual(expected);
+    const prompt = groupQueryPrompt({ group: 'skoda fabia', engines: ['1.2 HTP'], languages: queryLanguages(['CZ'], 'skoda fabia'), kind: 'car', sources }).map((message: { content: string }) => message.content).join('\n');
+    for (const site of expected) expect(prompt).toContain(`site:${site}`);
+    expect(prompt).toContain('Every query names "skoda fabia".');
+    expect(prompt).toContain('Czech');
   });
 });
 
@@ -1300,3 +1320,18 @@ describe('listing facts read from each ad page', () => {
     expect(await engine.readListingFacts(project as never)).toBe(0);
   });
 });
+
+describe('value facts calibrated on ad texts', () => {
+  it('keeps phrases most of three proposals name and at least two ads state, once per market', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-vfacts-'));
+    const reply = { for: ['servisní kniha', 'nové rozvody'], against: ['koroze'] };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { return { content: JSON.stringify(reply), model: 'stub', provider: 'stub', usage: {} }; } };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [provider] }), search: fakeSearch, store: new ProjectStore({ dir }) } as never);
+    const texts = Array.from({ length: 24 }, (_, i) => (i % 2 ? 'prodám, servisní kniha, koroze minimální' : 'prodám, nové rozvody'));
+    const project = { id: 'p', question: 'Which used cars are worth buying?', listingFacts: Object.fromEntries(texts.map((text, i) => [`auto.bazos.cz#${i}`, { text, read: true }])), candidates: { kept: [] } };
+    expect(await engine.calibrateValueFacts(project as never)).toBe(true);
+    expect((project as { valueFacts: unknown }).valueFacts).toEqual({ for: ['servisni kniha', 'nove rozvody'], against: ['koroze'], calibratedOn: 24 });
+    expect(await engine.calibrateValueFacts(project as never)).toBe(false);
+  });
+});
+
