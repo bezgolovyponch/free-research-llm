@@ -21,6 +21,7 @@ import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
+import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, mergeFindings } from './domain.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
@@ -86,6 +87,9 @@ const GROUP_QUERIES = 8;
 const GROUP_SOURCES = 12;
 const GROUP_PAGES_PER_CALL = 4;
 const GROUP_FACTS_TTL_MS = 30 * 24 * 3600 * 1000;
+const DOMAIN_QUERIES = 8;
+const DOMAIN_SOURCES = 12;
+const DOMAIN_PAGES_PER_CALL = 4;
 
 const KNOWLEDGE_SOURCES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8'));
 const MAKE_LANGUAGES = KNOWLEDGE_SOURCES.makeLanguages ?? {};
@@ -526,6 +530,34 @@ export class ResearchEngine {
       this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
       return project.decisionModel ?? null;
     }
+  }
+
+  async studyDomain(project) {
+    if (!this.router || this.demo || !this.search?.search) return true;
+    if (project.domain?.ready) return true;
+    const purpose = project.decisionModel?.purpose ?? '';
+    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages: ['English'] }) }).catch(() => null);
+    const queries = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 4).slice(0, DOMAIN_QUERIES);
+    if (!queries.length) return true;
+    const found = await this.search.search(queries, { maxSources: DOMAIN_SOURCES }).catch(() => []);
+    const sources = (Array.isArray(found) ? found : []).map((source, index) => ({ ...source, id: `D${index + 1}` }));
+    const replies = [];
+    for (let index = 0; index < sources.length; index += DOMAIN_PAGES_PER_CALL) {
+      const batch = sources.slice(index, index + DOMAIN_PAGES_PER_CALL);
+      const answer = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainFindingsPrompt({ question: project.question, purpose, sources: batch }) }).catch(() => null);
+      replies.push(answer);
+    }
+    const findings = mergeFindings(replies, sources);
+    const understanding = domainUnderstanding(findings);
+    project.domain = { ...understanding, at: new Date().toISOString() };
+    const summary = [understanding.object[0], understanding.terms.slice(0, 3).join(', '), understanding.where[0]].filter(Boolean).join(' · ');
+    this.emit(project, 'decision', `understood before searching: ${summary || 'the pages say little about the item yet'}`);
+    if (!understanding.ready) {
+      project.phase = 'needs-understanding';
+      this.emit(project, 'phase', 'research paused: not enough sources explain what the item is and what it is called — add a hint');
+      return false;
+    }
+    return true;
   }
 
   async ensurePurpose(project) {
@@ -1366,6 +1398,10 @@ export class ResearchEngine {
     try {
       project = await this.load(id);
       if (!this.quiet.has(id)) this.rejoinTeam(id);
+      if (!(await this.studyDomain(project))) {
+        await this.store.save(project);
+        return project;
+      }
       if (!project.nodes.length) await this.decompose(project);
       this.reground(project);
       if (!await this.ensurePurpose(project)) {
