@@ -2,6 +2,7 @@ import { PURPOSE_CLASS } from './ranking.mjs';
 import { extractJson } from '../research/json.mjs';
 import { ProviderError } from './provider.mjs';
 import { MAX_PROMPT_TOKENS, familyOf } from './ranking.mjs';
+import { paidDailyTokens, paidProviderIds } from './presets.mjs';
 
 export class NoModelAvailableError extends Error {}
 
@@ -71,7 +72,7 @@ const MAX_WAIT_ROUNDS = 3;
 const REPAIR_INSTRUCTION = 'Your previous reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.';
 
 export class ModelRouter {
-  constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {}, outcomes = null }) {
+  constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {}, outcomes = null, paid = null, env = process.env, paidCap = null }) {
     this.outcomes = outcomes;
     this.providers = providers;
     this.routeOrder = routeOrder;
@@ -87,8 +88,11 @@ export class ModelRouter {
     this.failureStreak = new Map();
     this.streakBenches = new Map();
     this.cooldownReason = new Map();
+    this.tokenTally = new Map();
     this.ledger = [];
     this.calls = 0;
+    this.paidIds = new Set(paid ?? paidProviderIds(env));
+    this.paidCap = paidCap ?? paidDailyTokens(env);
   }
 
   get ready() {
@@ -112,12 +116,13 @@ export class ModelRouter {
 
   available({ avoid, tier = 'fast', purpose, tokens = 0 } = {}) {
     const time = this.now();
+    this.restPaidProviders(time);
     const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
     const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
     const ranked = this.demoteDead(this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose));
-    const usable = [...ranked, ...this.lastResortLocals(tier, purpose, tokens, time)];
+    const usable = this.demotePaid([...ranked, ...this.lastResortLocals(tier, purpose, tokens, time)]);
     if (!avoid) return usable;
     const author = this.providers.find((p) => p.id === avoid);
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
@@ -125,7 +130,48 @@ export class ModelRouter {
     const other = usable.filter((p) => p.id !== avoid && family(p) !== authorFamily);
     const sameFamily = usable.filter((p) => p.id !== avoid && family(p) === authorFamily);
     const preferred = [...this.demoteSlow(other, tier), ...this.demoteSlow(sameFamily, tier)];
-    return preferred.length ? [...preferred, ...usable.filter((p) => p.id === avoid)] : usable;
+    return preferred.length ? this.demotePaid([...preferred, ...usable.filter((p) => p.id === avoid)]) : usable;
+  }
+
+  isPaid(provider) {
+    if (!provider) return false;
+    return this.paidIds.has(provider.id) || provider.paid === true || provider.preset?.paid === true;
+  }
+
+  demotePaid(providers) {
+    const paid = providers.filter((p) => this.isPaid(p));
+    if (!paid.length) return providers;
+    const free = providers.filter((p) => !this.isPaid(p));
+    return free.length ? [...free, ...paid] : providers;
+  }
+
+  paidTokensToday(providerId, now = this.now()) {
+    const day = new Date(now).toISOString().slice(0, 10);
+    const tally = this.tokenTally.get(providerId);
+    const counted = tally && tally.day === day ? tally.tokens : 0;
+    const logged = this.ledger.filter((r) => r.provider === providerId && String(r.ts ?? '').slice(0, 10) === day).reduce((n, r) => n + (Number(r.tokens) || 0), 0);
+    return Math.max(counted, logged);
+  }
+
+  cappedPaidProviders(now = this.now()) {
+    const capped = new Map();
+    for (const p of this.providers) {
+      if (!this.isPaid(p)) continue;
+      const tokens = this.paidTokensToday(p.id, now);
+      if (tokens >= this.paidCap) capped.set(p.id, tokens);
+    }
+    return capped;
+  }
+
+  restPaidProviders(now = this.now()) {
+    const until = nextUtcMidnight(now);
+    const capped = this.cappedPaidProviders(now);
+    for (const [id, tokens] of capped) {
+      if ((this.cooldownUntil.get(id) ?? 0) >= until) continue;
+      this.cooldownUntil.set(id, until);
+      this.cooldownReason.set(id, `paid daily cap reached (${tokens} tokens)`);
+    }
+    return capped;
   }
 
   lastResortLocals(tier, purpose, tokens, time) {
@@ -195,6 +241,14 @@ export class ModelRouter {
     const row = { ts: new Date(this.now()).toISOString(), ...entry };
     this.ledger.push(row);
     if (this.ledger.length > 500) this.ledger.shift();
+    if (row.provider && row.provider !== 'router') {
+      const tokens = Number(row.tokens) || 0;
+      if (tokens > 0) {
+        const day = String(row.ts).slice(0, 10);
+        const tally = this.tokenTally.get(row.provider);
+        this.tokenTally.set(row.provider, { day, tokens: (tally && tally.day === day ? tally.tokens : 0) + tokens });
+      }
+    }
     this.onLedger(row);
   }
 
@@ -417,6 +471,7 @@ export class ModelRouter {
 
   status() {
     const time = this.now();
+    this.restPaidProviders(time);
     return this.providers.map((p) => ({
       ...p.describe(),
       coolingDownMs: Math.max(0, (this.cooldownUntil.get(p.id) ?? 0) - time),
