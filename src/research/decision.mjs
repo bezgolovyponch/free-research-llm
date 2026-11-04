@@ -380,8 +380,8 @@ export class DecisionModeler {
     return Boolean(m && m.version === DECISION_MODEL_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2);
   }
 
-  async build(project) {
-    if (this.fresh(project)) return project.decisionModel;
+  async build(project, { force = false } = {}) {
+    if (this.fresh(project) && !force) return project.decisionModel;
     const question = project.question;
     const guidance = String(project.guidance ?? '');
     const examples = this.cases ? await this.cases.retrieve(question) : [];

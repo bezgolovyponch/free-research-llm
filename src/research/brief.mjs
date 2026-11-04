@@ -103,9 +103,22 @@ function namesOf(code) {
   return c ? [c.name, ...c.aliases] : [];
 }
 
-function namedCountries(text) {
+export function namedCountries(text) {
   const t = plain(text);
   return COUNTRIES.filter(([, name, aliases]) => [name, ...aliases].some((w) => mentions(t, w))).map(([code]) => code);
+}
+
+export function countryPhrases(text) {
+  const value = String(text ?? '');
+  const hits = [];
+  for (const [code, name, aliases] of COUNTRIES) {
+    for (const word of [name, ...aliases]) {
+      if (!word) continue;
+      const match = value.match(new RegExp(`(?:^|[^\\p{L}\\p{N}])${escape(word)}(?![\\p{L}\\p{N}])`, 'iu'));
+      if (match) hits.push({ code, phrase: match[0].trim() });
+    }
+  }
+  return hits;
 }
 
 function groupsIn(text) {
