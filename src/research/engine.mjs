@@ -1716,7 +1716,10 @@ export class ResearchEngine {
     if (typeof guidance === 'string' && expected === undefined && acceptance === undefined) return this.setGuidance(id, guidance);
     if (this.running.has(id)) throw new ProjectBusyError('stop the run before editing');
     const project = await this.load(id);
-    if (typeof guidance === 'string') project.guidance = guidance.trim().slice(0, GUIDANCE_LIMIT);
+    if (typeof guidance === 'string') {
+      project.guidance = guidance.trim().slice(0, GUIDANCE_LIMIT);
+      delete project.hubSources;
+    }
     const nextExpected = typeof expected === 'string' ? expected : project.acceptance?.expected;
     project.acceptance = { ...normalizeAcceptance(acceptance ?? project.acceptance ?? {}, nextExpected), locked: Boolean(acceptance) || Boolean(project.acceptance?.locked) };
     project.acceptanceResult = null;
@@ -1727,6 +1730,7 @@ export class ResearchEngine {
   async setGuidance(id, guidance) {
     const project = await this.load(id);
     project.guidance = String(guidance).trim().slice(0, GUIDANCE_LIMIT);
+    delete project.hubSources;
     this.emit(project, 'edit', project.guidance ? `hints updated: ${project.guidance.slice(0, 160)}` : 'hints cleared');
     return this.store.save(project);
   }

@@ -1488,6 +1488,15 @@ describe('domain learned before the tree is planned', () => {
 });
 
 describe('hub search', () => {
+  it('searches the hubs again after the hints change', async () => {
+    const engine = new ResearchEngine({ store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers' });
+    project.hubSources = [{ url: 'https://old.example/' }];
+    await engine.store.save(project);
+    const updated = await engine.setGuidance(project.id, 'suppliers in NL, DE');
+    expect(updated.hubSources).toBeUndefined();
+  });
+
   function hubRouter() {
     const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
     return {
