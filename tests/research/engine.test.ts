@@ -53,7 +53,8 @@ describe('ResearchEngine', () => {
     const onDisk = JSON.parse(await fs.readFile(path.join(dir, `${project.id}.json`), 'utf8'));
     expect(onDisk.report.verdict).toBe(done.report.verdict);
     const markers = provider.calls.map((c) => c.marker);
-    expect(markers[0]).toBe(TASK_MARKERS.decompose);
+    expect(markers[0]).toBeUndefined();
+    expect(markers[1]).toBe(TASK_MARKERS.decompose);
     expect(markers.at(-1)).toBe(TASK_MARKERS.synthesize);
   });
 
@@ -1332,6 +1333,71 @@ describe('value facts calibrated on ad texts', () => {
     expect(await engine.calibrateValueFacts(project as never)).toBe(true);
     expect((project as { valueFacts: unknown }).valueFacts).toEqual({ for: ['servisni kniha', 'nove rozvody'], against: ['koroze'], calibratedOn: 24 });
     expect(await engine.calibrateValueFacts(project as never)).toBe(false);
+  });
+});
+
+describe('domain learned before the tree is planned', () => {
+  const sentences = ['Fermented bean paste is sold in blocks.', 'Grades are named by color.', 'Sold in regional markets.'];
+  const endings = ['', ' there', ' locally'];
+
+  function domainProvider() {
+    const scripted = new ScriptedProvider();
+    return {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        if (prompt.includes('TASK=DOMAIN_QUERIES')) {
+          return { content: JSON.stringify({ queries: ['what is fermented bean paste', 'how is fermented bean paste graded', 'fermented bean paste grades and units'] }), model: 'm', provider: 'demo', usage: {} };
+        }
+        if (prompt.includes('TASK=DOMAIN_FINDINGS')) {
+          const pages = [...prompt.matchAll(/PAGE (D\d+)\nURL: [^\n]*\nTEXT:\n([^\n]*)/g)];
+          const findings = pages.flatMap(([, id, text]) => {
+            const quotes = (text.match(/[^.]+\./g) ?? []).slice(0, 3);
+            return [
+              { aspect: 'object', statement: 'fermented bean paste is sold in blocks', quote: quotes[0], sourceId: id },
+              { aspect: 'terms', statement: 'grades are named by color', quote: quotes[1], sourceId: id },
+              { aspect: 'where', statement: 'sold in regional markets', quote: quotes[2], sourceId: id },
+            ];
+          });
+          return { content: JSON.stringify({ findings }), model: 'm', provider: 'demo', usage: {} };
+        }
+        return scripted.chat(args as never);
+      },
+    };
+  }
+
+  function domainSearch(hosts: number) {
+    const pages = Array.from({ length: hosts }, (_, i) => ({ kind: 'web', title: 'Bean paste', url: `https://host${i + 1}.example/paste`, domain: `host${i + 1}.example`, snippet: 's', text: sentences.map((sentence) => `${sentence.replace('.', '')} ${endings[i]}.`).join(' ') }));
+    return {
+      enabled: true,
+      lastErrors: [],
+      async search() {
+        return pages;
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+  }
+
+  it('learns what the item is from several hosts before searching, and says so in the log', async () => {
+    const { engine } = engineWith(domainProvider(), domainSearch(3));
+    const project = await engine.createProject({ question: 'Is buying fermented bean paste for resale in Poland profitable?' });
+    const done = await engine.run(project.id);
+    const domain = (done as unknown as { domain: { ready: boolean; terms: string[] } }).domain;
+    expect(domain.ready).toBe(true);
+    expect(domain.terms).toContain('grades are named by color');
+    expect(done.log.some((l: { message: string }) => l.message.startsWith('understood before searching'))).toBe(true);
+    expect(done.nodes.length).toBeGreaterThan(0);
+  });
+
+  it('pauses before the tree when only one host explains the item', async () => {
+    const { engine } = engineWith(domainProvider(), domainSearch(1));
+    const project = await engine.createProject({ question: 'Is buying fermented bean paste for resale in Poland profitable?' });
+    const done = await engine.run(project.id);
+    expect(done.phase).toBe('needs-understanding');
+    expect(done.nodes).toHaveLength(0);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'phase' && l.message.includes('not enough sources explain what the item is'))).toBe(true);
   });
 });
 
