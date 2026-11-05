@@ -300,7 +300,11 @@ export function hintCandidates(hint) {
   return String(hint ?? '')
     .split(/[,;:\n/]|\s+or\s+|\s+and\s+/i)
     .map((part) => part.replace(/\s+/g, ' ').trim())
-    .filter((part) => part.length >= 3 && significantWords(part).length > 0);
+    .filter((part) => part.length >= 3 && significantWords(part).length > 0 && !namesPlace(part));
+}
+
+function namesPlace(part) {
+  return part.split(/[^\p{L}\p{N}]+/u).some((token) => countryName(token)) || namedCountries(part).length > 0;
 }
 
 export function supportedHintTerms(hint, sources = []) {
