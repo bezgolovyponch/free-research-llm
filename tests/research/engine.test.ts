@@ -1429,6 +1429,33 @@ describe('domain learned before the tree is planned', () => {
     expect(project.domain.basis).toBe('validated on 3000 listing titles');
     expect(project.log.some((l: { message: string }) => l.message.includes('basis validated on 3000 listing titles'))).toBe(true);
   });
+
+  it('does not pause for a listed kind whose titles were not matched, and takes its terms from the kind', async () => {
+    const emptySearch = {
+      enabled: true,
+      lastErrors: [],
+      async search() {
+        return [];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const { engine } = engineWith(domainProvider(), emptySearch);
+    const project = {
+      id: 'p',
+      question: 'Which trendy used cars priced 2000-4000 EUR are for sale right now in Germany, Poland or Czechia',
+      decisionModel: {
+        kind: { label: 'used car', verified: { titles: 157, matched: 0, share: 0 } },
+        calibrated: undefined,
+      },
+      log: [],
+    };
+    const ok = await engine.studyDomain(project as never);
+    expect(ok).toBe(true);
+    expect(project.phase).not.toBe('needs-understanding');
+    expect(project.domain.ready).toBe(true);
+    expect(project.domain.terms).toContain('used car');
+    expect(project.domain.basis).toBe('listed kind: used car');
+  });
 });
 
 describe('hub search', () => {
