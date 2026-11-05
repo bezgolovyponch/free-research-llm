@@ -535,6 +535,7 @@ export class ResearchEngine {
   async searchHubs(project) {
     const brief = project.brief ?? this.briefOf(project);
     if (brief.located !== false) return 0;
+    if (project.hubSources) return project.hubSources.length;
     if (this.demo || !this.router || !this.search?.search) return 0;
     const hubs = hubsFrom(project.domain, project.guidance);
     if (!hubs.length) return 0;

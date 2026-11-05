@@ -1443,6 +1443,9 @@ describe('hub search', () => {
     expect(router.calls[0].messages[1].content).toContain('Netherlands');
     expect(router.calls[0].messages[1].content).toContain('United Kingdom');
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('hub search: 1 page(s) from Germany, Netherlands, United Kingdom'))).toBe(true);
+    expect(await engine.searchHubs(project)).toBe(1);
+    expect(router.calls).toHaveLength(1);
+    expect(asked).toHaveLength(1);
   });
 
   it('does not look for hubs when the kind has its own listing portal', async () => {
