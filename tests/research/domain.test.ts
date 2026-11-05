@@ -4,7 +4,10 @@ import {
   domainFindingsPrompt,
   domainQueryPrompt,
   domainUnderstanding,
+  hintCandidates,
   mergeFindings,
+  mentionsTerm,
+  supportedHintTerms,
   verifiedFindings,
 } from '../../src/research/domain.mjs';
 
@@ -92,6 +95,22 @@ describe('domain prompts', () => {
     expect(messages[1].content).toContain('vintage clothing');
   });
 
+  it('names the object to study and the user hint, and asks for the trade, not brand history', () => {
+    const messages = domainQueryPrompt({
+      question: 'Who sells Barbour jackets in second hand?',
+      purpose: 'buying stock',
+      languages: ['English', 'German'],
+      object: 'branded second-hand clothing, vintage clothing, grade A',
+      hint: 'branded vintage clothing wholesale: graded A/cream, sold per kg in bales',
+    });
+    expect(messages[1].content).toContain('OBJECT TO STUDY');
+    expect(messages[1].content).toContain('branded second-hand clothing, vintage clothing, grade A');
+    expect(messages[1].content).toContain('USER HINT');
+    expect(messages[1].content).toContain('graded A/cream');
+    expect(messages[1].content).toContain('TRADE');
+    expect(messages[1].content).toMatch(/history of the brands/);
+  });
+
   it('asks for findings from the given pages only and cuts page text at 3000 chars', () => {
     const messages = domainFindingsPrompt({ question: 'What is grade A?', purpose: 'buying', sources: [{ id: 'D1', url: 'https://a.example/x', text: 'X'.repeat(3000) + 'TAILMARKER' }] });
     expect(messages[1].content).toContain('PAGE D1');
@@ -99,6 +118,30 @@ describe('domain prompts', () => {
     expect(messages[1].content).toContain('X'.repeat(3000));
     expect(messages[1].content).not.toContain('TAILMARKER');
     expect(messages[1].content).toContain('"findings"');
+  });
+});
+
+describe('hint vocabulary', () => {
+  const hint = 'branded vintage clothing wholesale: graded A/cream, sold per kg in bales or curated bundles, suppliers in NL, DE, UK';
+
+  it('splits a hint into candidate phrases', () => {
+    const candidates = hintCandidates(hint);
+    expect(candidates).toContain('graded A');
+    expect(candidates).toContain('cream');
+    expect(candidates).toContain('sold per kg in bales');
+    expect(candidates).toContain('curated bundles');
+  });
+
+  it('matches a term on a page even when the page says it differently', () => {
+    expect(mentionsTerm('Wholesalers sell grade A clothing in bales of about 45 kilograms.', 'graded A')).toBe(true);
+    expect(mentionsTerm('Wiping rags and textile waste are sold alongside clothing bales.', 'graded A')).toBe(false);
+  });
+
+  it('keeps a hint phrase only when two hosts say it', () => {
+    const terms = supportedHintTerms(hint, pages);
+    expect(terms).toContain('graded A');
+    expect(terms).not.toContain('curated bundles');
+    expect(supportedHintTerms(hint, [pages[0]])).not.toContain('graded A');
   });
 });
 
