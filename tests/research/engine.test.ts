@@ -1399,5 +1399,35 @@ describe('domain learned before the tree is planned', () => {
     expect(done.nodes).toHaveLength(0);
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'phase' && l.message.includes('not enough sources explain what the item is'))).toBe(true);
   });
+
+  it('does not pause for a listed kind validated on real listing titles, and takes its terms from the kind', async () => {
+    const emptySearch = {
+      enabled: true,
+      lastErrors: [],
+      async search() {
+        return [];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const { engine } = engineWith(domainProvider(), emptySearch);
+    const project = {
+      id: 'p',
+      question: 'Which used cars are worth buying in Germany?',
+      brief: { located: true, regions: ['DE'] },
+      decisionModel: {
+        kind: { label: 'used car', terms: ['limousine', 'station wagon'], verified: { titles: 3000, matched: 2900, share: 0.97 } },
+        subtype: { models: ['golf', 'octavia'] },
+      },
+      log: [],
+    };
+    const ok = await engine.studyDomain(project as never);
+    expect(ok).toBe(true);
+    expect(project.phase).not.toBe('needs-understanding');
+    expect(project.domain.ready).toBe(true);
+    expect(project.domain.terms).toContain('limousine');
+    expect(project.domain.terms).toContain('golf');
+    expect(project.domain.basis).toBe('validated on 3000 listing titles');
+    expect(project.log.some((l: { message: string }) => l.message.includes('basis validated on 3000 listing titles'))).toBe(true);
+  });
 });
 
