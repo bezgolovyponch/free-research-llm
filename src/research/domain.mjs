@@ -5,6 +5,7 @@ import { COUNTRIES, countryByCode, namedCountries } from './brief.mjs';
 const REGION_LANGUAGES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8')).regionLanguages ?? {};
 
 const HUB_MAX = 8;
+export const HUB_QUERIES = 4;
 
 function countryRow(token) {
   const text = String(token ?? '').trim().replace(/[^\p{L}\p{N}]/gu, '');
@@ -60,8 +61,9 @@ ${termList.join(', ') || 'none'}
 HUBS (country and the language to search in):
 ${hubLines || 'none'}
 
-Write exactly 2 search queries for every hub, in that hub's language, using the words of the trade for the object as a trader there would write them: translate the terms naturally into the language of the hub (Dutch "vintage groothandel", German "Vintage Großhandel").
+Write exactly ${HUB_QUERIES} search queries for every hub, in that hub's language, using the words of the trade for the object as a trader there would write them: translate the terms naturally into the language of the hub (Dutch "vintage groothandel", German "Vintage Großhandel").
 The queries must aim at the sellers' own websites: their shops, warehouses, exporters and trade companies, not marketplaces, aggregators, directories or classifieds.
+One query must name the wholesale signal words of the hub language: bales, per kg, B2B, export.
 Every query is a plain web search query, names the object concretely, and reads like a practitioner or a trade site would search. No site: filters, no operators.
 Answer with JSON only: {"queries": [{"country": "...", "language": "...", "query": "..."}]}`,
     },

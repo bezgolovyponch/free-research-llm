@@ -1530,6 +1530,15 @@ describe('domain learned before the tree is planned', () => {
 });
 
 describe('hub search', () => {
+  it('searches the hubs again after the hints change', async () => {
+    const engine = new ResearchEngine({ store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers' });
+    project.hubSources = [{ url: 'https://old.example/' }];
+    await engine.store.save(project);
+    const updated = await engine.setGuidance(project.id, 'suppliers in NL, DE');
+    expect(updated.hubSources).toBeUndefined();
+  });
+
   function hubRouter() {
     const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
     return {
@@ -1566,14 +1575,39 @@ describe('hub search', () => {
     const found = await engine.searchHubs(project);
     expect(found).toBe(1);
     expect(project.hubSources).toHaveLength(1);
-    expect(asked[0]).toEqual(['vintage groothandel', 'Vintage Großhandel']);
+    expect(asked).toEqual([['vintage groothandel'], ['Vintage Großhandel']]);
     expect(router.calls[0]).toMatchObject({ purpose: 'decision-model', tier: 'deep' });
     expect(router.calls[0].messages[1].content).toContain('Netherlands');
     expect(router.calls[0].messages[1].content).toContain('United Kingdom');
+    expect(router.calls[0].messages[1].content).toContain('4 search queries');
+    expect(router.calls[0].messages[1].content).toMatch(/bales|per kg|B2B|export/i);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('hub search: 1 page(s) from Germany, Netherlands, United Kingdom'))).toBe(true);
     expect(await engine.searchHubs(project)).toBe(1);
     expect(router.calls).toHaveLength(1);
-    expect(asked).toHaveLength(1);
+    expect(asked).toHaveLength(2);
+  });
+
+  it('deduplicates pages across the per-hub searches by url', async () => {
+    const router = hubRouter();
+    const asked: string[][] = [];
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries: string[]) {
+        asked.push(queries);
+        return [{ kind: 'web', title: 'Supplier', url: 'https://shop.example/a', domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing sold in bales' }];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers in the Netherlands and Germany' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['the biggest sorting plants stand in the Netherlands and Germany'] };
+    project.guidance = 'suppliers in NL, DE, UK';
+    const found = await engine.searchHubs(project);
+    expect(found).toBe(1);
+    expect(project.hubSources).toHaveLength(1);
+    expect(asked).toHaveLength(2);
   });
 
   it('does not look for hubs when the kind has its own listing portal', async () => {

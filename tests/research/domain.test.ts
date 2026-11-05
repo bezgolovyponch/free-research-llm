@@ -158,7 +158,7 @@ describe('trade hubs', () => {
     expect(hubsFrom(null, 'no country named here')).toEqual([]);
   });
 
-  it('asks for one query per hub, in the language of that hub', () => {
+  it('asks for four queries per hub, including the wholesale signal words of the hub language', () => {
     const prompt = hubQueryPrompt({ object: 'vintage clothing', terms: ['grade A'], hubs: ['Netherlands', 'Germany', 'United Kingdom'] });
     const content = prompt[1].content;
     expect(content).toContain('Netherlands');
@@ -168,6 +168,8 @@ describe('trade hubs', () => {
     expect(content).toContain('German');
     expect(content).toContain('grade A');
     expect(content).toContain('vintage clothing');
+    expect(content).toContain('4 search queries');
+    expect(content).toMatch(/bales|per kg|B2B|export/i);
   });
 });
 
