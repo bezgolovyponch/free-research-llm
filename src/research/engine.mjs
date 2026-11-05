@@ -15,7 +15,7 @@ import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
-import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn } from './brief.mjs';
+import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionsIn } from './brief.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
@@ -536,7 +536,12 @@ export class ResearchEngine {
     if (!this.router || this.demo || !this.search?.search) return true;
     if (project.domain?.ready) return true;
     const purpose = project.decisionModel?.purpose ?? '';
-    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages: ['English'] }) }).catch(() => null);
+    const kind = project.decisionModel?.kind ?? null;
+    const object = kind ? [kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
+    const hint = project.guidance ?? '';
+    const brief = project.brief ?? this.briefOf(project);
+    const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
+    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages, object, hint }) }).catch(() => null);
     const queries = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 4).slice(0, DOMAIN_QUERIES);
     if (!queries.length) return true;
     const found = await this.search.search(queries, { maxSources: DOMAIN_SOURCES }).catch(() => []);
@@ -548,10 +553,14 @@ export class ResearchEngine {
       replies.push(answer);
     }
     const findings = mergeFindings(replies, sources);
-    const understanding = domainUnderstanding(findings);
+    const understanding = domainUnderstanding(findings, { hint, sources });
     project.domain = { ...understanding, at: new Date().toISOString() };
-    const summary = [understanding.object[0], understanding.terms.slice(0, 3).join(', '), understanding.where[0]].filter(Boolean).join(' · ');
-    this.emit(project, 'decision', `understood before searching: ${summary || 'the pages say little about the item yet'}`);
+    const summary = [
+      `object ${kind?.label || understanding.object[0] || 'not named yet'}`,
+      `terms ${understanding.terms.slice(0, 3).join(', ') || 'not named yet'}`,
+      `where ${understanding.where.join('; ') || 'not found yet'}`,
+    ].join(' · ');
+    this.emit(project, 'decision', `understood before searching: ${summary}`);
     if (!understanding.ready) {
       project.phase = 'needs-understanding';
       this.emit(project, 'phase', 'research paused: not enough sources explain what the item is and what it is called — add a hint');
