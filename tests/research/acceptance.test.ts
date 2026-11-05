@@ -233,6 +233,8 @@ describe('listing price on the page', () => {
     ];
     const deliverables = entityDeliverables(nodes as never, { terms: ['branded second-hand clothing wholesale', 'second-hand clothing'], kindLabel: 'wholesale branded second-hand clothing' });
     expect(deliverables).toHaveLength(2);
+    const uk = ["a", "b", "c"].map((name) => ({ url: `https://${name}-bales.co.uk/`, title: `${name} bales`, text: "Branded second-hand clothing wholesale in bales." }));
+    expect(entityDeliverables([{ id: "U", sources: uk }] as never, { terms: ["branded second-hand clothing wholesale"], kindLabel: "wholesale clothing provider" })).toHaveLength(3);
     expect(deliverables.map((d: { url: string }) => d.url).sort()).toEqual(['https://msgroup-secondhandclothes.com/', 'https://secondhandbales.com/'].sort());
   });
 });
