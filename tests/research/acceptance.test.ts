@@ -358,6 +358,30 @@ describe('purpose checks from the user\'s words', () => {
     expect(result!.checks.find((c: { id: string }) => c.id === 'purpose-kind')).toMatchObject({ value: 1, passed: true });
   });
 
+  it('passes a swept listing of a portal that lists the kind even when the page never uses its words', async () => {
+    const pages: Record<string, { text: string; status: number }> = {
+      'https://auto.bazos.cz/inzerat/225881782/citroen-c3.php': { text: 'Citroen C3 1.4i 1.6MPI 75kw, 54 kW, 180 000 km, benzín, cena 15 000 Kč. '.repeat(4), status: 200 },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const items = [{ title: 'Citroen C3 1.4i', url: Object.keys(pages)[0], value: 15000, unit: 'CZK', nodeId: 'sweep', harvested: true }];
+    const result = await checker.evaluate(normalizeAcceptance(CAR.acceptance), items, { located: true, kind: CAR.decisionModel.kind, purpose: purposeChecks(CAR) });
+    const purpose = result!.checks.find((c: { id: string }) => c.id === 'purpose-kind');
+    expect(purpose).toMatchObject({ label: 'Page shows the asked hatchback (your words)', value: 1, passed: true });
+    expect(result!.items.map((i: { purpose: { passed: boolean }[] }) => i.purpose[0].passed)).toEqual([true]);
+  });
+
+  it('keeps the asked kind word check for a listing that was not harvested from a portal sweep', async () => {
+    const pages: Record<string, { text: string; status: number }> = {
+      'https://auto.bazos.cz/inzerat/225881782/citroen-c3.php': { text: 'Citroen C3 1.4i 1.6MPI 75kw, 54 kW, 180 000 km, benzín, cena 15 000 Kč. '.repeat(4), status: 200 },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const items = [{ title: 'Citroen C3 1.4i', url: Object.keys(pages)[0], value: 15000, unit: 'CZK', nodeId: 'D1', harvested: true }];
+    const result = await checker.evaluate(normalizeAcceptance(CAR.acceptance), items, { located: true, kind: CAR.decisionModel.kind, purpose: purposeChecks(CAR) });
+    const purpose = result!.checks.find((c: { id: string }) => c.id === 'purpose-kind');
+    expect(purpose).toMatchObject({ label: 'Page shows the asked hatchback (your words)', value: 0, passed: false });
+    expect(result!.items.map((i: { purpose: { passed: boolean }[] }) => i.purpose[0].passed)).toEqual([false]);
+  });
+
   it('counts a wholesale row only when its own page names one of the asked brands', async () => {
     const pages: Record<string, { text: string; status: number }> = {
       'https://wuhanhaisen.en.made-in-china.com/product/BZdTfAtPJDGu/China-Wholesale-Thrift-Clothing-Bundle.html': { text: 'Wholesale second hand clothing bales, used clothing wholesale lots, Ralph Lauren and Barbour mix, 45 kg bales. '.repeat(4), status: 200 },

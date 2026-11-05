@@ -226,6 +226,7 @@ function nearName(page, name) {
 
 function purposePass(criterion, pageText, item) {
   if (criterion.type === 'kind') {
+    if (item?.harvested && item?.nodeId === 'sweep') return true;
     if (kindOnPage(pageText, { terms: criterion.terms })) return true;
     const subtype = criterion.subtype;
     if (!subtype?.models?.length) return false;
