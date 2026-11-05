@@ -21,7 +21,7 @@ import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
-import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, mergeFindings } from './domain.mjs';
+import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings } from './domain.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
@@ -530,6 +530,20 @@ export class ResearchEngine {
       this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
       return project.decisionModel ?? null;
     }
+  }
+
+  async searchHubs(project) {
+    const brief = project.brief ?? this.briefOf(project);
+    if (brief.located !== false) return 0;
+    if (this.demo || !this.router || !this.search?.search) return 0;
+    const hubs = hubsFrom(project.domain, project.guidance);
+    if (!hubs.length) return 0;
+    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: hubQueryPrompt({ object: project.decisionModel?.kind?.label ?? '', terms: project.domain?.terms ?? [], hubs }) }).catch(() => null);
+    const queries = (reply?.data?.queries ?? []).map((query) => String(query?.query ?? query ?? '').trim()).filter(Boolean).slice(0, 16);
+    const sources = queries.length ? await this.search.search(queries, { maxSources: 30 }).catch(() => []) : [];
+    project.hubSources = sources;
+    this.emit(project, 'candidates', `hub search: ${sources.length} page(s) from ${hubs.join(', ')}`);
+    return sources.length;
   }
 
   async studyDomain(project) {
@@ -1369,7 +1383,7 @@ export class ResearchEngine {
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
     const deliverables = brief.located === false
-      ? entityDeliverables(project.nodes, { terms: project.domain?.terms?.length ? project.domain.terms : project.decisionModel?.kind?.terms ?? [], not: project.domain?.not?.length ? project.domain.not : project.decisionModel?.kind?.not ?? [], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label })
+      ? entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: project.domain?.terms?.length ? project.domain.terms : project.decisionModel?.kind?.terms ?? [], not: project.domain?.not?.length ? project.domain.not : project.decisionModel?.kind?.not ?? [], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label })
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]);
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
@@ -1414,6 +1428,7 @@ export class ResearchEngine {
         await this.store.save(project);
         return project;
       }
+      await this.searchHubs(project);
       if (!project.nodes.length) await this.decompose(project);
       this.reground(project);
       if (!await this.ensurePurpose(project)) {

@@ -1,4 +1,72 @@
+import { readFileSync } from 'node:fs';
 import { plain } from './itemgate.mjs';
+import { COUNTRIES, countryByCode, namedCountries } from './brief.mjs';
+
+const REGION_LANGUAGES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8')).regionLanguages ?? {};
+
+const HUB_MAX = 8;
+
+function countryRow(token) {
+  const text = String(token ?? '').trim().replace(/[^\p{L}\p{N}]/gu, '');
+  if (!text) return null;
+  const upper = text.toUpperCase();
+  const code = COUNTRIES.find(([c]) => c === upper);
+  if (code && (text.length !== 2 || text === upper)) return code;
+  return COUNTRIES.find(([, name, aliases]) => name.toUpperCase() === upper || aliases.some((alias) => alias.toUpperCase() === upper)) ?? null;
+}
+
+function countryName(token) {
+  const row = countryRow(token);
+  return row ? row[1] : null;
+}
+
+function languageOf(country) {
+  const row = COUNTRIES.find(([, name]) => name === country);
+  if (!row) return 'English';
+  return REGION_LANGUAGES[row[0]] ?? `the main language of ${country}`;
+}
+
+export function hubsFrom(domain, hint) {
+  const hubs = [];
+  const add = (name) => {
+    if (name && !hubs.includes(name)) hubs.push(name);
+  };
+  const whereText = (Array.isArray(domain?.where) ? domain.where : []).map((statement) => String(statement ?? '')).join(' ');
+  for (const code of namedCountries(whereText)) add(countryByCode(code)?.name);
+  const hintText = String(hint ?? '');
+  for (const token of hintText.split(/[^\p{L}\p{N}]+/u)) add(countryName(token));
+  for (const code of namedCountries(hintText)) add(countryByCode(code)?.name);
+  return hubs.slice(0, HUB_MAX);
+}
+
+export function hubQueryPrompt({ object = '', terms = [], hubs = [] } = {}) {
+  const list = (Array.isArray(hubs) ? hubs : [hubs]).map((hub) => String(hub ?? '').trim()).filter(Boolean);
+  const objectLine = String(object ?? '').replace(/\s+/g, ' ').trim();
+  const termList = (Array.isArray(terms) ? terms : [terms]).map((term) => String(term ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const hubLines = list.map((hub) => `- ${hub}: ${languageOf(hub)}`).join('\n');
+  return [
+    { role: 'system', content: 'You are a trade search planner for research. You reply with a single JSON object only, no prose, no code fences.' },
+    {
+      role: 'user',
+      content: `TASK=HUB_QUERIES
+Find the sellers of this item in the trade hubs where it lives, in the language of each hub.
+
+OBJECT TO FIND:
+${objectLine || 'not stated'}
+
+WORDS OF THE TRADE:
+${termList.join(', ') || 'none'}
+
+HUBS (country and the language to search in):
+${hubLines || 'none'}
+
+Write exactly 2 search queries for every hub, in that hub's language, using the words of the trade for the object as a trader there would write them: translate the terms naturally into the language of the hub (Dutch "vintage groothandel", German "Vintage Großhandel").
+The queries must aim at the sellers' own websites: their shops, warehouses, exporters and trade companies, not marketplaces, aggregators, directories or classifieds.
+Every query is a plain web search query, names the object concretely, and reads like a practitioner or a trade site would search. No site: filters, no operators.
+Answer with JSON only: {"queries": [{"country": "...", "language": "...", "query": "..."}]}`,
+    },
+  ];
+}
 
 export const DOMAIN_ASPECTS = ['object', 'process', 'actors', 'terms', 'quality', 'where', 'not', 'use'];
 

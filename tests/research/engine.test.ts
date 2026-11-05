@@ -1401,3 +1401,62 @@ describe('domain learned before the tree is planned', () => {
   });
 });
 
+describe('hub search', () => {
+  function hubRouter() {
+    const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
+    return {
+      calls,
+      complete: async (req: { purpose: string; tier: string; messages: Array<{ role: string; content: string }> }) => {
+        calls.push(req);
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: 'vintage groothandel' }, { country: 'DE', language: 'German', query: 'Vintage Großhandel' }] } };
+      },
+    };
+  }
+
+  function hubSearch() {
+    const asked: string[][] = [];
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries: string[]) {
+        asked.push(queries);
+        return [{ kind: 'web', title: 'Supplier', url: 'https://shop.example/a', domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing sold in bales' }];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    return { asked, search };
+  }
+
+  it('asks each trade hub for its own sellers and keeps the pages', async () => {
+    const router = hubRouter();
+    const { asked, search } = hubSearch();
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers in the Netherlands and Germany' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['the biggest sorting plants stand in the Netherlands and Germany'] };
+    project.guidance = 'suppliers in NL, DE, UK';
+    const found = await engine.searchHubs(project);
+    expect(found).toBe(1);
+    expect(project.hubSources).toHaveLength(1);
+    expect(asked[0]).toEqual(['vintage groothandel', 'Vintage Großhandel']);
+    expect(router.calls[0]).toMatchObject({ purpose: 'decision-model', tier: 'deep' });
+    expect(router.calls[0].messages[1].content).toContain('Netherlands');
+    expect(router.calls[0].messages[1].content).toContain('United Kingdom');
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('hub search: 1 page(s) from Germany, Netherlands, United Kingdom'))).toBe(true);
+  });
+
+  it('does not look for hubs when the kind has its own listing portal', async () => {
+    const router = hubRouter();
+    const { asked, search } = hubSearch();
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find used hatchback cars for sale within 300 km of Prague' });
+    project.brief = { ...engine.briefOf(project), located: true };
+    project.domain = { ready: true, terms: ['hatchback'], where: ['cars are sold in Czechia'] };
+    project.guidance = 'suppliers in NL, DE, UK';
+    expect(await engine.searchHubs(project)).toBe(0);
+    expect(project.hubSources).toBeUndefined();
+    expect(router.calls).toHaveLength(0);
+    expect(asked).toHaveLength(0);
+  });
+});
+
