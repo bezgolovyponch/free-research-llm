@@ -268,14 +268,14 @@ const ANCHOR_MIN_LENGTH = 4;
 
 function anchorWords(kindLabel) {
   const label = typeof kindLabel === 'string' ? kindLabel : `${kindLabel?.label ?? ''} ${kindLabel?.object ?? ''}`;
-  return new Set(plain(label).split(/[^a-z0-9]+/).filter((word) => word.length >= ANCHOR_MIN_LENGTH));
+  return new Set(plain(label).split(/[^a-z0-9]+/).filter((word) => word.length >= ANCHOR_MIN_LENGTH).map((word) => word.slice(0, KIND_STEM)));
 }
 
 function anchoredTerm(matched, anchors) {
   if (!anchors.size) return true;
   return matched.some((term) => {
     const words = termWords(term);
-    return words.length >= 2 && words.some((word) => anchors.has(word));
+    return words.length >= 2 && words.some((word) => anchors.has(word.slice(0, KIND_STEM)));
   });
 }
 

@@ -155,6 +155,8 @@ describe('listing price on the page', () => {
       },
     ];
     expect(entityDeliverables(dairy as never, { terms: ['branded vintage clothing wholesale', 'cream'] })).toEqual([]);
+    const grader = [{ id: 'A', sources: [{ url: 'https://msgroup-secondhandclothes.com/how-sorting-grading/', title: 'How Sorting & Grading Define the Quality of Second-Hand Clothes', text: 'High-quality second-hand clothes, graded and sorted by professionals.' }] }];
+    expect(entityDeliverables(grader as never, { terms: ['second hand clothes'], kindLabel: 'wholesale clothing provider' }).map((d) => d.url)).toEqual(['https://msgroup-secondhandclothes.com/']);
     const twoWords = [
       {
         id: 'A',

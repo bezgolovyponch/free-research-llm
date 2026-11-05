@@ -1395,7 +1395,7 @@ export class ResearchEngine {
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
     const deliverables = brief.located === false
-      ? entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: project.domain?.terms?.length ? project.domain.terms : project.decisionModel?.kind?.terms ?? [], not: project.domain?.not?.length ? project.domain.not : project.decisionModel?.kind?.not ?? [], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label })
+      ? entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label })
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]);
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;

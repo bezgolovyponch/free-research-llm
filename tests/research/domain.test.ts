@@ -148,6 +148,10 @@ describe('hint vocabulary', () => {
 });
 
 describe('trade hubs', () => {
+  it('keeps the places of a hint out of the words of the trade', () => {
+    expect(hintCandidates('branded vintage clothing wholesale: graded A/cream, sold per kg in bales, suppliers in NL, DE, UK, IT')).toEqual(['branded vintage clothing wholesale', 'graded A', 'cream', 'sold per kg in bales']);
+  });
+
   it('reads the countries of a hint as the hubs where the sellers live', () => {
     expect(hubsFrom(null, 'suppliers in NL, DE, UK')).toEqual(['Netherlands', 'Germany', 'United Kingdom']);
     expect(hubsFrom({ where: ['the biggest sorting plants stand in the Netherlands and Germany'] }, 'suppliers in NL, DE, UK')).toEqual(['Germany', 'Netherlands', 'United Kingdom']);
