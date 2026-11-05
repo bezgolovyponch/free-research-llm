@@ -281,7 +281,19 @@ function anchoredTerm(matched, anchors) {
 
 const DIRECTORY_LISTINGS = 10;
 const DIRECTORY_PATHS = 5;
+const MARKETPLACE_SUBDOMAINS = 3;
+const SECOND_LEVEL_LABELS = new Set(['co', 'com', 'org', 'net', 'ac', 'gov', 'edu']);
+const KNOWN_B2B_MARKETPLACES = new Set(['made-in-china.com', 'alibaba.com', 'tradewheel.com', 'tradekey.com', 'ec21.com', 'globalsources.com', 'indiamart.com']);
+const LISTICLE_TITLE = /(?:^top\s+\d+|^\d+\s+best|^best\s+.+\s+near|near\s+[a-z]+|^(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|hundred)\s+best)/i;
+const REVIEW_NEWS_HOST = /yelp|tripadvisor|news/i;
+const WHOLESALE_SIGNAL = /\b(?:wholesale|bulk|bales?|per\s+kg|container|b2b|export|groothandel|großhandel|ingrosso|hurtownia|didmena|velkoobchod)\b/i;
 const GENERIC_SEGMENTS = new Set(['about', 'about-us', 'contact', 'contact-us', 'blog', 'news', 'faq', 'help', 'privacy', 'terms', 'search', 'category', 'categories', 'product', 'products', 'sitemap', 'login', 'register', 'cart', 'jobs', 'careers', 'press', 'media', 'home', 'index', 'suppliers', 'vendors', 'manufacturers', 'companies', 'directory', 'browse']);
+
+function registrableDomain(host) {
+  const labels = host.split('.');
+  const secondLevelSuffix = labels.length > 2 && labels.at(-1).length === 2 && SECOND_LEVEL_LABELS.has(labels.at(-2));
+  return labels.slice(secondLevelSuffix ? -3 : -2).join('.');
+}
 
 function productPath(parsed) {
   const path = parsed.pathname.toLowerCase().replace(/\/+$/, '');
@@ -321,9 +333,27 @@ export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = ''
     paths.set(page.host, set);
   }
   for (const [host, set] of paths) if (set.size >= DIRECTORY_PATHS) directories.add(host);
+  const domains = new Map();
+  for (const page of pages) {
+    const domain = registrableDomain(page.host);
+    const set = domains.get(domain) ?? new Set();
+    set.add(page.host);
+    domains.set(domain, set);
+  }
+  const marketplaces = new Set();
+  for (const [domain, hosts] of domains) {
+    if (KNOWN_B2B_MARKETPLACES.has(domain) || hosts.size >= MARKETPLACE_SUBDOMAINS) {
+      for (const host of hosts) marketplaces.add(host);
+    }
+  }
+  const wholesale = typeof kindLabel === 'string' && /wholesale/i.test(kindLabel);
   const hosts = new Map();
   for (const page of pages) {
     if (directories.has(page.host)) continue;
+    if (marketplaces.has(page.host)) continue;
+    if (REVIEW_NEWS_HOST.test(page.host)) continue;
+    if (LISTICLE_TITLE.test(String(page.source.title ?? ''))) continue;
+    if (wholesale && !WHOLESALE_SIGNAL.test(page.pageText)) continue;
     const { matched, ok } = matchedTerms(page.pageText, wanted);
     if (!ok) continue;
     if (!anchoredTerm(matched, anchors)) continue;

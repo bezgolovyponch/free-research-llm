@@ -155,7 +155,7 @@ describe('listing price on the page', () => {
       },
     ];
     expect(entityDeliverables(dairy as never, { terms: ['branded vintage clothing wholesale', 'cream'] })).toEqual([]);
-    const grader = [{ id: 'A', sources: [{ url: 'https://msgroup-secondhandclothes.com/how-sorting-grading/', title: 'How Sorting & Grading Define the Quality of Second-Hand Clothes', text: 'High-quality second-hand clothes, graded and sorted by professionals.' }] }];
+    const grader = [{ id: 'A', sources: [{ url: 'https://msgroup-secondhandclothes.com/how-sorting-grading/', title: 'How Sorting & Grading Define the Quality of Second-Hand Clothes', text: 'High-quality second-hand clothes, graded and sorted by professionals. Wholesale second-hand clothing by the container.' }] }];
     expect(entityDeliverables(grader as never, { terms: ['second hand clothes'], kindLabel: 'wholesale clothing provider' }).map((d) => d.url)).toEqual(['https://msgroup-secondhandclothes.com/']);
     const twoWords = [
       {
@@ -213,6 +213,29 @@ describe('listing price on the page', () => {
       },
     ];
     expect(entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'] })).toEqual([]);
+  });
+
+  it('keeps only real supplier websites for a wholesale kind, excluding marketplace stores, listicles, news and non-wholesale shops', () => {
+    const nodes = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://wuhanhaisen.en.made-in-china.com/product/1', title: 'Wuhanhaisen second-hand clothing', text: 'Branded second-hand clothing wholesale, graded A, bales of cream garments.' },
+          { url: 'https://usedshoe.en.made-in-china.com/product/2', title: 'Used shoes wholesale', text: 'Used shoes and second-hand clothing wholesale in bulk.' },
+          { url: 'https://www.yelp.com/biz/five-best-second-hand-shops-prague', title: 'Five Best Second-Hand Shops in Prague', text: 'Best second-hand shops in Prague for vintage clothing.' },
+          { url: 'https://www.praguemorning.cz/five-best-second-hand-shops/', title: 'Five Best Second-Hand Shops in Prague', text: 'A list of the five best second-hand shops in Prague.' },
+          { url: 'https://www.newsanyway.com/article/123', title: 'Second-hand clothing market news', text: 'Second-hand clothing market grows in Central Europe.' },
+          { url: 'https://www.lulavintageprague.cz/', title: 'Lula Vintage', text: 'vintage fashion store in Prague' },
+          { url: 'https://www.secondhandbales.com/', title: 'Secondhand Bales', text: 'Branded second-hand clothing wholesale, graded A, bales of cream garments by the container.' },
+          { url: 'https://www.msgroup-secondhandclothes.com/how-sorting-grading/', title: 'How Sorting & Grading Define the Quality of Second-Hand Clothes', text: 'High-quality second-hand clothes, graded and sorted by professionals. We export full containers of graded second-hand clothing wholesale.' },
+        ],
+      },
+    ];
+    const deliverables = entityDeliverables(nodes as never, { terms: ['branded second-hand clothing wholesale', 'second-hand clothing'], kindLabel: 'wholesale branded second-hand clothing' });
+    expect(deliverables).toHaveLength(2);
+    const uk = ["a", "b", "c"].map((name) => ({ url: `https://${name}-bales.co.uk/`, title: `${name} bales`, text: "Branded second-hand clothing wholesale in bales." }));
+    expect(entityDeliverables([{ id: "U", sources: uk }] as never, { terms: ["branded second-hand clothing wholesale"], kindLabel: "wholesale clothing provider" })).toHaveLength(3);
+    expect(deliverables.map((d: { url: string }) => d.url).sort()).toEqual(['https://msgroup-secondhandclothes.com/', 'https://secondhandbales.com/'].sort());
   });
 });
 
