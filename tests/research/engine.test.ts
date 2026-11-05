@@ -1485,6 +1485,48 @@ describe('domain learned before the tree is planned', () => {
     expect(project.domain.terms).toContain('used car');
     expect(project.domain.basis).toBe('portal listings: 1');
   });
+
+  it('clears the stale pause phase and continues researching when a re-run passes the domain study', async () => {
+    const emptySearch = {
+      enabled: true,
+      lastErrors: [],
+      async search() {
+        return [];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const { engine } = engineWith(domainProvider(), emptySearch);
+    const project = await engine.createProject({
+      question: 'Which trendy used cars priced 2000-4000 EUR are for sale right now in Germany, Poland or Czechia?',
+    });
+    project.phase = 'needs-understanding';
+    project.nodes = Array.from({ length: 20 }, (_, i) => ({
+      id: `D${i + 1}`,
+      parentId: null,
+      status: 'verified',
+      question: `piece ${i + 1}`,
+      searchQueries: [`query ${i + 1}`],
+      dependsOn: [],
+    }));
+    project.decisionModel = {
+      kind: {
+        label: 'used car',
+        terms: [],
+        verified: { titles: 157, matched: 0, share: 0 },
+        validated: { terms: ['used car'] },
+      },
+      subtype: { models: ['golf'] },
+      calibrated: undefined,
+      purpose: 'check resale value',
+    };
+    project.sweep = { pages: [{ url: 'https://www.autoscout24.de/lst?atype=C', listings: [{ title: 'Used Golf 1.8T, 2005', price: 3000, url: 'https://www.autoscout24.de/used/1' }] }] };
+    await engine.store.save(project as never);
+
+    const done = await engine.run(project.id);
+    expect(done.phase).not.toBe('needs-understanding');
+    expect(done.log.some((l: { message: string }) => l.message.startsWith('understood before searching'))).toBe(true);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'phase' && l.message === 'researching sub-questions in dependency order')).toBe(true);
+  });
 });
 
 describe('hub search', () => {
