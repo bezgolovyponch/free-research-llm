@@ -254,6 +254,88 @@ export function collectDeliverables(nodes) {
   return items.map((item, i) => [item, i]).sort(([a, i], [b, j]) => deliveryRank(a) - deliveryRank(b) || i - j).map(([item]) => item);
 }
 
+function termWords(term) {
+  return plain(term).split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+function matchedTerms(pageText, terms) {
+  const matched = [...new Set((terms ?? []).filter(Boolean).map((term) => plain(term).trim()).filter(Boolean))].filter((term) => kindOnPage(pageText, { terms: [term] }));
+  const multiWord = matched.some((term) => termWords(term).length >= 2);
+  return { matched, ok: multiWord || matched.length >= 2 };
+}
+
+const ANCHOR_MIN_LENGTH = 4;
+
+function anchorWords(kindLabel) {
+  const label = typeof kindLabel === 'string' ? kindLabel : `${kindLabel?.label ?? ''} ${kindLabel?.object ?? ''}`;
+  return new Set(plain(label).split(/[^a-z0-9]+/).filter((word) => word.length >= ANCHOR_MIN_LENGTH));
+}
+
+function anchoredTerm(matched, anchors) {
+  if (!anchors.size) return true;
+  return matched.some((term) => {
+    const words = termWords(term);
+    return words.length >= 2 && words.some((word) => anchors.has(word));
+  });
+}
+
+const DIRECTORY_LISTINGS = 10;
+const DIRECTORY_PATHS = 5;
+const GENERIC_SEGMENTS = new Set(['about', 'about-us', 'contact', 'contact-us', 'blog', 'news', 'faq', 'help', 'privacy', 'terms', 'search', 'category', 'categories', 'product', 'products', 'sitemap', 'login', 'register', 'cart', 'jobs', 'careers', 'press', 'media', 'home', 'index', 'suppliers', 'vendors', 'manufacturers', 'companies', 'directory', 'browse']);
+
+function productPath(parsed) {
+  const path = parsed.pathname.toLowerCase().replace(/\/+$/, '');
+  const segments = path.split('/').filter(Boolean);
+  if (!segments.length) return '';
+  return segments.every((segment) => GENERIC_SEGMENTS.has(segment)) ? '' : path;
+}
+
+export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '' } = {}) {
+  const wanted = (terms ?? []).filter(Boolean);
+  const banned = (not ?? []).map((phrase) => plain(phrase).trim()).filter(Boolean);
+  const anchors = anchorWords(kindLabel);
+  const pages = [];
+  for (const node of nodes ?? []) {
+    for (const source of node.sources ?? []) {
+      const url = String(source?.url ?? '');
+      if (!url) continue;
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        continue;
+      }
+      const host = parsed.hostname.replace(/^www\./, '');
+      if (!host) continue;
+      pages.push({ node, source, url, host, parsed, pageText: `${source.title ?? ''} ${source.text ?? ''}` });
+    }
+  }
+  const paths = new Map();
+  const directories = new Set();
+  for (const page of pages) {
+    if ((page.source.listings?.length ?? 0) >= DIRECTORY_LISTINGS) directories.add(page.host);
+    const path = productPath(page.parsed);
+    if (!path) continue;
+    const set = paths.get(page.host) ?? new Set();
+    set.add(path);
+    paths.set(page.host, set);
+  }
+  for (const [host, set] of paths) if (set.size >= DIRECTORY_PATHS) directories.add(host);
+  const hosts = new Map();
+  for (const page of pages) {
+    if (directories.has(page.host)) continue;
+    const { matched, ok } = matchedTerms(page.pageText, wanted);
+    if (!ok) continue;
+    if (!anchoredTerm(matched, anchors)) continue;
+    if (banned.some((phrase) => plain(page.pageText).includes(phrase))) continue;
+    const hits = matched.length;
+    const current = hosts.get(page.host);
+    if (current && current.hits >= hits) continue;
+    hosts.set(page.host, { hits, deliverable: { title: text(page.source.title, 200) || page.host, url: `${page.parsed.protocol}//${page.host}/`, value: null, unit: '', nodeId: page.node.id, evidence: page.url } });
+  }
+  return [...hosts.values()].sort((a, b) => b.hits - a.hits).map((entry) => entry.deliverable);
+}
+
 const identity = (value) => value;
 
 export function inRange(amounts, spec, itemValue, convert = identity) {

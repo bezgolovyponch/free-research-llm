@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, hasCriteria, headlinePrice, inRange, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, hasCriteria, headlinePrice, inRange, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -125,6 +125,92 @@ describe('listing price on the page', () => {
     expect(collectDeliverables(nodes as never).map((i: { url: string; nodeId: string }) => `${i.nodeId} ${i.url}`)).toEqual(['D2 https://a.example/ad/3', 'D1 https://a.example/ad/1']);
     const mixed = [{ id: 'D1', status: 'weak', finding: { items: [{ url: 'u1', harvested: true }, { url: 'u2', harvested: true, value: 15000 }] } }, { id: 'D2', status: 'verified', finding: { items: [{ url: 'u3' }] } }];
     expect(collectDeliverables(mixed as never).map((i: { url: string }) => i.url)).toEqual(['u3', 'u2', 'u1']);
+  });
+
+  it('delivers one supplier website per host for a kind no portal lists', () => {
+    const nodes = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://www.tradewheel.com/product/fish-dryer-steam-valve-12345.html', title: 'Fish dryer with steam valve', text: 'Fish dryer, steam valve and lighters in bulk. Trade tools and spare parts sold here.' },
+          { url: 'https://www.supplier-one.com/about-us', title: 'Vintage clothing wholesale', text: 'We trade branded vintage clothing wholesale, graded A quality, cream and white stock.' },
+          { url: 'https://supplier-two.com/contact', title: 'Graded A vintage stock', text: 'Supplier of branded vintage clothing wholesale, graded A, cream garments by the lot.' },
+        ],
+      },
+    ];
+    const deliverables = entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'], not: ['spare parts'] });
+    expect(deliverables).toHaveLength(2);
+    expect(deliverables.map((d: { url: string }) => d.url)).toEqual(['https://supplier-one.com/', 'https://supplier-two.com/']);
+    expect(deliverables[0]).toEqual({ title: 'Vintage clothing wholesale', url: 'https://supplier-one.com/', value: null, unit: '', nodeId: 'A', evidence: 'https://www.supplier-one.com/about-us' });
+    expect(deliverables[1]).toMatchObject({ title: 'Graded A vintage stock', nodeId: 'A', evidence: 'https://supplier-two.com/contact' });
+  });
+
+  it('needs a multi-word term or two different terms, so a dairy page with one word is not a supplier', () => {
+    const dairy = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://www.fda.gov/food/food-ingredients/cream', title: 'Cream in food', text: 'Cream, milk and butter for food manufacturers. Cream is a dairy product.' },
+        ],
+      },
+    ];
+    expect(entityDeliverables(dairy as never, { terms: ['branded vintage clothing wholesale', 'cream'] })).toEqual([]);
+    const twoWords = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://supplier-three.com/', title: 'Cream and clothing wholesale', text: 'Cream and clothing wholesale by the lot for graders.' },
+        ],
+      },
+    ];
+    expect(entityDeliverables(twoWords as never, { terms: ['cream', 'clothing'] }).map((d: { url: string }) => d.url)).toEqual(['https://supplier-three.com/']);
+  });
+
+  it('anchors a matched term to the kind label, so a dairy page is not a clothing supplier', () => {
+    const dairy = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://www.fda.gov/food/food-ingredients/cream', title: 'Cream in food', text: 'Grade A cream, milk and butter for food manufacturers.' },
+        ],
+      },
+    ];
+    expect(entityDeliverables(dairy as never, { terms: ['graded A', 'cream'], kindLabel: 'wholesale clothing provider' })).toEqual([]);
+    const clothing = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://supplier-four.com/', title: 'Vintage clothing wholesale', text: 'Branded vintage clothing wholesale by the lot, graded A.' },
+        ],
+      },
+    ];
+    expect(entityDeliverables(clothing as never, { terms: ['graded A', 'branded vintage clothing wholesale'], kindLabel: 'wholesale clothing provider' }).map((d: { url: string }) => d.url)).toEqual(['https://supplier-four.com/']);
+  });
+
+  it('keeps a marketplace with twelve parsed listings out of the deliverables', () => {
+    const nodes = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://www.made-in-china.com/product-search.html', title: 'Branded vintage clothing wholesale', text: 'Branded vintage clothing wholesale, graded A, from many factories.', listings: Array.from({ length: 12 }, (_, i) => ({ url: `https://www.made-in-china.com/product/vintage-${1000 + i}.html` })) },
+        ],
+      },
+    ];
+    expect(entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'] })).toEqual([]);
+  });
+
+  it('keeps a directory host with five different product paths out of the deliverables', () => {
+    const nodes = [
+      {
+        id: 'A',
+        sources: Array.from({ length: 5 }, (_, i) => ({
+          url: `https://www.firmy.cz/firmy/vintage-clothing-${i}`,
+          title: 'Vintage clothing wholesale',
+          text: 'Branded vintage clothing wholesale, graded A, cream and white stock.',
+        })),
+      },
+    ];
+    expect(entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'] })).toEqual([]);
   });
 });
 
