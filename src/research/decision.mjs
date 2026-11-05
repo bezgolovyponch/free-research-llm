@@ -277,9 +277,9 @@ export function modelText(model) {
   if (model.value) lines.push(`Value: ${model.value}`);
   if (model.needs?.length) lines.push(`Needs: ${model.needs.map((n) => `${n.need} (${n.kind}${n.sources?.length ? `: ${n.sources.join(', ')}` : ''})`).join('; ')}`);
   if (model.concept) lines.push(`Concept: ${model.concept}`);
-  if (model.criteria.length) lines.push(`Decision model (code measures each listing): ${model.criteria.map((c) => `${MEASURES[c.measure].label} ${c.op} ${c.value} ${MEASURES[c.measure].unit} (${c.source})`).join('; ')}`);
-  if (model.noLimit.length) lines.push(`Asked but no limit stated, so not checked: ${model.noLimit.map((c) => MEASURES[c.measure].label).join('; ')}`);
-  if (model.missing.length) lines.push(`Not modelled yet (no code check): ${model.missing.join('; ')}`);
+  if (model.criteria?.length) lines.push(`Decision model (code measures each listing): ${model.criteria.map((c) => `${MEASURES[c.measure].label} ${c.op} ${c.value} ${MEASURES[c.measure].unit} (${c.source})`).join('; ')}`);
+  if (model.noLimit?.length) lines.push(`Asked but no limit stated, so not checked: ${model.noLimit.map((c) => MEASURES[c.measure].label).join('; ')}`);
+  if (model.missing?.length) lines.push(`Not modelled yet (no code check): ${model.missing.join('; ')}`);
   return lines.join('\n');
 }
 
