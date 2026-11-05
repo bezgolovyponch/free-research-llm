@@ -554,11 +554,22 @@ export class ResearchEngine {
     }
     const findings = mergeFindings(replies, sources);
     const understanding = domainUnderstanding(findings, { hint, sources });
+    const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
+    const listedAndVerified = Boolean(brief.located) && (verifiedTitles > 0 || Boolean(project.decisionModel?.calibrated));
+    if (listedAndVerified) {
+      if (!understanding.terms.length) {
+        const kindTerms = [...(kind?.terms ?? []), ...(project.decisionModel?.subtype?.models ?? [])].map((term) => String(term ?? '').trim()).filter(Boolean);
+        understanding.terms = [...new Set(kindTerms)];
+      }
+      understanding.ready = true;
+      understanding.basis = `validated on ${verifiedTitles || Number(project.decisionModel?.calibratedOn ?? 0)} listing titles`;
+    }
     project.domain = { ...understanding, at: new Date().toISOString() };
     const summary = [
       `object ${kind?.label || understanding.object[0] || 'not named yet'}`,
       `terms ${understanding.terms.slice(0, 3).join(', ') || 'not named yet'}`,
       `where ${understanding.where.join('; ') || 'not found yet'}`,
+      ...(understanding.basis ? [`basis ${understanding.basis}`] : []),
     ].join(' · ');
     this.emit(project, 'decision', `understood before searching: ${summary}`);
     if (!understanding.ready) {
