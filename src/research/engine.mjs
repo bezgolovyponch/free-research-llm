@@ -571,15 +571,20 @@ export class ResearchEngine {
     const understanding = domainUnderstanding(findings, { hint, sources });
     const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
     const matchedTitles = Number(project.decisionModel?.kind?.verified?.matched ?? 0);
+    const sweptListings = (project.sweep?.pages ?? []).reduce((n, page) => n + (page.listings?.length ?? 0), 0);
     const listedAndVerified = Boolean(brief.located) && (verifiedTitles > 0 || Boolean(project.decisionModel?.calibrated));
-    if (listedAndVerified) {
+    if (listedAndVerified || sweptListings > 0) {
       if (!understanding.terms.length) {
         const kindTerms = [...(kind?.terms ?? []), ...(project.decisionModel?.subtype?.models ?? [])].map((term) => String(term ?? '').trim()).filter(Boolean);
         if (!kindTerms.length && kind?.label) kindTerms.push(String(kind.label).trim());
         understanding.terms = [...new Set(kindTerms)];
       }
       understanding.ready = true;
-      understanding.basis = matchedTitles > 0 ? `validated on ${verifiedTitles || Number(project.decisionModel?.calibratedOn ?? 0)} listing titles` : `listed kind: ${kind?.label ?? 'the item'}`;
+      understanding.basis = matchedTitles > 0
+        ? `validated on ${verifiedTitles || Number(project.decisionModel?.calibratedOn ?? 0)} listing titles`
+        : sweptListings > 0
+          ? `portal listings: ${sweptListings}`
+          : `listed kind: ${kind?.label ?? 'the item'}`;
     }
     project.domain = { ...understanding, at: new Date().toISOString() };
     const summary = [

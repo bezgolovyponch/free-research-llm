@@ -1456,6 +1456,35 @@ describe('domain learned before the tree is planned', () => {
     expect(project.domain.terms).toContain('used car');
     expect(project.domain.basis).toBe('listed kind: used car');
   });
+
+  it('does not pause when the portal sweep already produced listings, and takes its terms from the kind', async () => {
+    const emptySearch = {
+      enabled: true,
+      lastErrors: [],
+      async search() {
+        return [];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const { engine } = engineWith(domainProvider(), emptySearch);
+    const project = {
+      id: 'p',
+      question: 'Which trendy used cars priced 2000-4000 EUR are for sale right now in Germany, Poland or Czechia',
+      brief: { located: false, regions: ['DE', 'PL', 'CZ'] },
+      decisionModel: {
+        kind: { label: 'used car', terms: [], verified: { titles: 157, matched: 0, share: 0 } },
+        calibrated: undefined,
+      },
+      sweep: { pages: [{ url: 'https://www.autoscout24.de/lst?atype=C', listings: [{ title: 'Used Golf 1.8T, 2005', price: 3000, url: 'https://www.autoscout24.de/used/1' }] }] },
+      log: [],
+    };
+    const ok = await engine.studyDomain(project as never);
+    expect(ok).toBe(true);
+    expect(project.phase).not.toBe('needs-understanding');
+    expect(project.domain.ready).toBe(true);
+    expect(project.domain.terms).toContain('used car');
+    expect(project.domain.basis).toBe('portal listings: 1');
+  });
 });
 
 describe('hub search', () => {
