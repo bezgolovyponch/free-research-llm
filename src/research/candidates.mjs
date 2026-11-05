@@ -5,6 +5,15 @@ import { plain, screenItem } from './itemgate.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { explorePoints } from './site.mjs';
 import { pricePerM2Medians } from './strategy.mjs';
+import { roundRobin } from './portals.mjs';
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return String(url ?? '').toLowerCase();
+  }
+}
 
 export const MAX_KEPT = 1000;
 export const MAX_TO_CHECK = 100;
@@ -264,6 +273,7 @@ export function buildCandidates(nodes, brief, options = {}) {
   if (kept.some((row) => Number.isFinite(row.underpriced))) kept.sort(() => 0);
   else if (kept.some((row) => row.valueIndex !== null && row.valueIndex !== undefined)) kept.sort((a, b) => (a.valueIndex ?? Infinity) - (b.valueIndex ?? Infinity) || (a.km ?? Infinity) - (b.km ?? Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
   else kept.sort((a, b) => Number(b.coast) - Number(a.coast) || (a.value ?? Infinity) - (b.value ?? Infinity));
+  if (nodes.some((n) => n.id === 'sweep' && (n.sources ?? []).some((s) => (s.listings ?? []).length > 0))) kept = roundRobin(kept, (row) => hostOf(row.url));
   return {
     found,
     kept: kept.slice(0, MAX_KEPT),

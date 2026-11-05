@@ -218,4 +218,16 @@ describe('far below its peers is checked, not ranked first', () => {
     expect(table.kept.map((r: { value: number }) => r.value)).toEqual([40000, 42000, 45000]);
     expect(table.toCheck.find((r: { value: number }) => r.value === 9000)?.toCheck).toMatch(/far below its peers/);
   });
+
+  it('keeps every portal that returned listings when the sweep table is capped at 1000', async () => {
+    const { buildCandidates } = await import('../../src/research/candidates.mjs');
+    const ad = (n: number, host: string, value: number) => ({ title: `Škoda Fabia ${n}`, url: `${host}/inzerat/22590${n}000/x.php`, value, unit: 'CZK' });
+    const bazos = Array.from({ length: 990 }, (_, i) => ad(i, 'https://auto.bazos.cz', 20000));
+    const autoscout = Array.from({ length: 20 }, (_, i) => ad(i, 'https://www.autoscout24.de', 35000));
+    const nodes = [{ id: 'sweep', sources: [{ id: 'P1', url: 'https://auto.bazos.cz/skoda/', locale: 'cs', kindPage: true, listings: bazos }, { id: 'P2', url: 'https://www.autoscout24.de/lst?atype=C', listings: autoscout }] }];
+    const brief = { kind: { label: 'used car', terms: ['skoda'] }, regions: [], valueRange: [0, 65000], unit: 'CZK', excludes: [] };
+    const table = buildCandidates(nodes, brief, {});
+    expect(table.kept).toHaveLength(1000);
+    expect(table.kept.filter((r: { url: string }) => String(r.url).includes('autoscout24'))).toHaveLength(20);
+  });
 });
