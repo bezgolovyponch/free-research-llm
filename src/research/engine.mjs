@@ -21,7 +21,7 @@ import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
-import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings } from './domain.mjs';
+import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
@@ -90,6 +90,7 @@ const GROUP_FACTS_TTL_MS = 30 * 24 * 3600 * 1000;
 const DOMAIN_QUERIES = 8;
 const DOMAIN_SOURCES = 12;
 const DOMAIN_PAGES_PER_CALL = 4;
+const HUB_SOURCES = 15;
 
 const KNOWLEDGE_SOURCES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8'));
 const MAKE_LANGUAGES = KNOWLEDGE_SOURCES.makeLanguages ?? {};
@@ -540,8 +541,32 @@ export class ResearchEngine {
     const hubs = hubsFrom(project.domain, project.guidance);
     if (!hubs.length) return 0;
     const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: hubQueryPrompt({ object: project.decisionModel?.kind?.label ?? '', terms: project.domain?.terms ?? [], hubs }) }).catch(() => null);
-    const queries = (reply?.data?.queries ?? []).map((query) => String(query?.query ?? query ?? '').trim()).filter(Boolean).slice(0, 16);
-    const sources = queries.length ? await this.search.search(queries, { maxSources: 30 }).catch(() => []) : [];
+    const queries = (reply?.data?.queries ?? [])
+      .map((query) => ({ country: query?.country ?? null, query: String(query?.query ?? query ?? '').trim() }))
+      .filter((query) => query.query)
+      .slice(0, hubs.length * HUB_QUERIES);
+    if (!queries.length) {
+      project.hubSources = [];
+      return 0;
+    }
+    const groups = new Map();
+    for (const query of queries) {
+      const key = query.country || 'shared';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(query.query);
+    }
+    const sources = [];
+    const seen = new Set();
+    let nonce = 0;
+    for (const groupQueries of groups.values()) {
+      const found = await this.search.search(groupQueries, { maxSources: HUB_SOURCES }).catch(() => []);
+      for (const source of found) {
+        const key = source?.url ?? `n${nonce++}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        sources.push(source);
+      }
+    }
     project.hubSources = sources;
     this.emit(project, 'candidates', `hub search: ${sources.length} page(s) from ${hubs.join(', ')}`);
     return sources.length;
