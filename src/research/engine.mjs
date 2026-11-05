@@ -1447,6 +1447,9 @@ export class ResearchEngine {
         await this.store.save(project);
         return project;
       }
+      if (project.phase === 'needs-understanding') {
+        project.phase = 'created';
+      }
       await this.searchHubs(project);
       if (!project.nodes.length) await this.decompose(project);
       this.reground(project);
