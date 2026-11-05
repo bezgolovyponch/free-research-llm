@@ -5,6 +5,8 @@ import {
   domainQueryPrompt,
   domainUnderstanding,
   hintCandidates,
+  hubQueryPrompt,
+  hubsFrom,
   mergeFindings,
   mentionsTerm,
   supportedHintTerms,
@@ -142,6 +144,26 @@ describe('hint vocabulary', () => {
     expect(terms).toContain('graded A');
     expect(terms).not.toContain('curated bundles');
     expect(supportedHintTerms(hint, [pages[0]])).not.toContain('graded A');
+  });
+});
+
+describe('trade hubs', () => {
+  it('reads the countries of a hint as the hubs where the sellers live', () => {
+    expect(hubsFrom(null, 'suppliers in NL, DE, UK')).toEqual(['Netherlands', 'Germany', 'United Kingdom']);
+    expect(hubsFrom({ where: ['the biggest sorting plants stand in the Netherlands and Germany'] }, 'suppliers in NL, DE, UK')).toEqual(['Germany', 'Netherlands', 'United Kingdom']);
+    expect(hubsFrom(null, 'no country named here')).toEqual([]);
+  });
+
+  it('asks for one query per hub, in the language of that hub', () => {
+    const prompt = hubQueryPrompt({ object: 'vintage clothing', terms: ['grade A'], hubs: ['Netherlands', 'Germany', 'United Kingdom'] });
+    const content = prompt[1].content;
+    expect(content).toContain('Netherlands');
+    expect(content).toContain('Germany');
+    expect(content).toContain('United Kingdom');
+    expect(content).toContain('Dutch');
+    expect(content).toContain('German');
+    expect(content).toContain('grade A');
+    expect(content).toContain('vintage clothing');
   });
 });
 
