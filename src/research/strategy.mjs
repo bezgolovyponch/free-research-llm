@@ -1,4 +1,5 @@
 import { plain } from './itemgate.mjs';
+import { SEA_WORDS } from './brief.mjs';
 import { PERCEIVED_MAX_C } from './cci.mjs';
 import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
@@ -55,7 +56,7 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'kind', label: 'a plot of land for sale', words: /\b(?:plot|land|terreno|parcel)/i, measure: 'item gate on every listing (kind, sale, single page)' },
     { id: 'price', label: 'price within the budget', words: /\d[\d.,\s]*(?:€|eur|euro|zł|zl|pln|kč|kc|czk|\$|usd|£|gbp|₺|(?<![a-z])tl(?![a-z])|try|₫|vnđ|vnd)|(?:€|eur|euro|zł|zl|pln|kč|kc|czk|\$|usd|£|gbp|₺|(?<![a-z])tl(?![a-z])|try|₫|vnđ|vnd)\s?\d|\bmax\b|budget/i, measure: 'price read from the listing, converted at ECB rates' },
     { id: 'region', label: 'in the countries you named', words: null, measure: 'country from the site address, language or listing text' },
-    { id: 'sea', label: 'sea within an e-bike ride', words: /\b(?:sea|ocean|coast|beach|e-?bike)/i, measure: 'distance to the OpenStreetMap coastline from the listing location' },
+    { id: 'sea', label: 'sea within an e-bike ride', words: SEA_WORDS, measure: 'distance to the OpenStreetMap coastline from the listing location' },
     { id: 'season', label: 'camping months a year', words: /\bmonths?\b|season|climate|weather/i, measure: 'Camping Climate Index (Ma 2021) from Open-Meteo daily weather of 2025 in the 0.25° cell of the listing: months with a mean index above 3 (acceptable, good or optimal in Ma 2021 Table 4; an adverse-weather day is set to 3, unfavorable)' },
     { id: 'noAc', label: 'mild: no air conditioning', words: /\bmild\b|air ?condition|temperature|heat/i, measure: 'hottest month average daily high at most 32.2 °C (perceived maximum, Fisichelli et al. 2015, cited by Ma 2021), days above 34 °C counted as exceptions' },
     { id: 'trend', label: 'strong price increase trend', words: /price increase|\btrend\b|appreciat|grow/i, measure: 'Eurostat house price index of the country vs the EU average (country level, not land)' },
@@ -155,7 +156,7 @@ export function clausesOf(question) {
   return String(question ?? '').split(/,|;|\bbut also\b|\band also\b|\bso\b/i).map((c) => c.trim()).filter((c) => c.split(/\s+/).length >= 2);
 }
 
-export function foundationOf(strategy, project) {
+export function foundationOf(strategy, project, { exclude = [] } = {}) {
   const question = String(project?.question ?? '');
   const guidance = String(project?.guidance ?? '');
   const months = question.match(/(\d{1,2})\s*months?\b/i);
@@ -165,13 +166,25 @@ export function foundationOf(strategy, project) {
     ...(months ? { minWorkableMonths: { value: Math.min(12, Number(months[1])), source: 'question' } } : {}),
     ...(km ? { ebikeKm: { value: Number(km[1]), source: 'guidance' } } : {}),
   };
-  const clauses = clausesOf(question).map((text) => ({ text, criteria: criteriaOfText(strategy, text) }));
-  const modelled = clauses.filter((c) => c.criteria.length);
-  return { rules, criteria: strategy.criteria.map(({ id, label, measure }) => ({ id, label, measure })), clauses, complete: modelled.length === clauses.length, missing: clauses.filter((c) => !c.criteria.length).map((c) => c.text) };
+  const dropped = new Map(exclude.map((e) => [e.id, e.reason]));
+  const clauses = clausesOf(question).map((text) => {
+    const found = criteriaOfText(strategy, text);
+    return { text, criteria: found.filter((id) => !dropped.has(id)), excluded: found.filter((id) => dropped.has(id)) };
+  });
+  const modelled = clauses.filter((c) => c.criteria.length || c.excluded.length);
+  const excluded = clauses.flatMap((c) => c.excluded.map((id) => ({ id, clause: c.text, reason: dropped.get(id) })));
+  return { rules, criteria: strategy.criteria.map(({ id, label, measure }) => ({ id, label, measure })), clauses, complete: modelled.length === clauses.length, missing: clauses.filter((c) => !c.criteria.length && !c.excluded.length).map((c) => c.text), excluded };
 }
 
 export function askedCriteria(foundation) {
   return foundation?.clauses?.length ? [...new Set(foundation.clauses.flatMap((c) => c.criteria))] : null;
+}
+
+export function asksSea(foundation, coastal = false) {
+  if (coastal) return true;
+  if (!foundation) return false;
+  const asked = askedCriteria(foundation);
+  return asked === null || asked.includes('sea');
 }
 
 export function foundationText(foundation) {
@@ -180,6 +193,7 @@ export function foundationText(foundation) {
   const has = (id) => keepCheck(id, askedCriteria(foundation));
   const lines = [`Decision model (code checks every listing against it; a listing counts only when every check is measured and met): ${has('sea') ? `sea within ${r.ebikeKm.value} km by e-bike; ` : ''}${has('season') ? `at least ${r.minWorkableMonths.value} camping months (Camping Climate Index above 3, acceptable or better, Ma 2021 Table 4); ` : ''}${has('noAc') ? `hottest month average high at most ${r.maxHottest.value} °C, days above 34 °C shown as exceptions (no air conditioning${r.maxHottest.source === 'assumption' ? '; this limit is assumed, not taken from your words or a source' : r.maxHottest.source === 'ma2021' ? '; the perceived maximum from Fisichelli et al. 2015, cited by Ma 2021' : ''}); ` : ''}room for ${r.minUnits.value}+ units; a legal path for the buyer; ${has('trend') ? 'country price trend above the EU average; ' : ''}entry cost = price + transfer tax + ${r.minUnits.value} bell tents.`];
   if (foundation.missing.length) lines.push(`Not modelled yet (no code check): ${foundation.missing.join('; ')}`);
+  if (foundation.excluded?.length) lines.push(`Not applied: ${foundation.excluded.map((e) => `${foundation.criteria.find((c) => c.id === e.id)?.label ?? e.id}${e.reason ? ` (${e.reason})` : ''}`).join('; ')}`);
   return lines.join('\n');
 }
 
@@ -285,7 +299,7 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
       potential.push(`${explorePoints(site)} beaches, viewpoints, sights, reserves and trails within 15 km`);
       draw = true;
     }
-    if (failed.some((c) => c.id === 'season') && site.coastKm !== null && site.coastKm !== undefined && site.coastKm <= ebike) {
+    if (keepCheck('sea', asked) && failed.some((c) => c.id === 'season') && site.coastKm !== null && site.coastKm !== undefined && site.coastKm <= ebike) {
       potential.push(`sea ${site.coastKm} km: a strong short-season location`);
       draw = true;
     }

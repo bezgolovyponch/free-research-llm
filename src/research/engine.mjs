@@ -25,7 +25,7 @@ import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, mergeFind
 import { listingKey } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
-import { applyStrategy, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
+import { applyStrategy, asksSea, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
@@ -437,9 +437,10 @@ export class ResearchEngine {
     const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: { ...template, itemKind: kind } });
     if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
-    const foundation = strategy ? withModelRules(foundationOf(strategy, project), model) : null;
+    const foundation = strategy ? withModelRules(foundationOf(strategy, project, { exclude: brief.seaImpossible ? [{ id: 'sea', reason: 'no coastline in the countries you named' }] : [] }), model) : null;
     const located = Boolean(template.itemKind) ? true : model?.kind?.validated ? false : (!kind || listedKind(kind));
-    project.brief = { ...brief, located, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    const seaAsked = asksSea(foundation, brief.coastal) || Boolean(model?.criteria?.some((c) => c.measure === 'coastKm'));
+    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -792,7 +793,7 @@ export class ResearchEngine {
         const c = table.parcels;
         if (c) this.emit(project, 'candidates', `official parcel records: ${c.matched} of ${c.eligible} listing(s) matched a land-registry parcel by the number the listing states, ${c.missed} state no parcel number or none matched, ${c.pending} still to look up`);
       }
-      if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (${brief.coastal ? 'sea distance, ' : ''}climate from 2025 daily weather per 0.25° cell, things to explore within 15 km)${brief.coastal ? `, ${s.far} farther than an e-bike ride from the sea` : ''}, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
+      if (s) this.emit(project, 'candidates', `site fit: ${s.assessed} listing(s) measured (${brief.asksSea ? 'sea distance, ' : ''}climate from 2025 daily weather per 0.25° cell, things to explore within 15 km)${brief.coastal ? `, ${s.far} farther than an e-bike ride from the sea` : ''}, ${s.unlocated} without a location, ${s.pending} queued, ${s.failed} failed`);
     }
     if (strategy) {
       table = applyStrategy(table, strategy, { convert: options.convert, retrieved: project.strategyCheck ?? null, foundation: brief.foundation });
@@ -806,6 +807,7 @@ export class ResearchEngine {
     }
     if (strategy && this.verifier) table = applyVerification(table, await readVerification(this.verifier.dir, project.id));
     table = withProposals(table);
+    table.asksSea = brief.asksSea;
     project.candidates = table;
     if (strategy && this.verifier) this.startVerification(project);
     if (project.report) this.planActions(project);

@@ -82,6 +82,14 @@ describe('candidate table', () => {
     expect(lines[2]).toBe('- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated | sea 2.5 km, beach 3 km | 9 workable months (6 comfortable), hottest month max 27.5°C | 16 beaches, viewpoints, sights, reserves and trails within 15 km | zoning agricultural | about 30 pitches');
   });
 
+  it('omits the sea distance and the ranking mention of it when the research does not ask for the sea', () => {
+    const measured = { ...table, asksSea: false, sites: { assessed: 1 }, kept: [{ ...table.kept[0], site: { coastKm: 2.5, beachKm: 3, beaches: 4, viewpoints: 6, attractions: 2, reserves: 1, protectedAreas: 1, hikingRoutes: 2, lodging: 30, campsites: 2, climate: { workable: 9, comfortable: 6, hottest: 27.5, coldest: 7 } }, fit: { score: 0.71, zoning: 'agricultural', pitches: 30 } }] };
+    const lines = shortlistText(measured, 1).split('\n');
+    expect(lines[2]).not.toContain('sea 2.5 km');
+    expect(lines[0]).not.toContain('sea distance, ');
+    expect(lines[0]).toContain('ranked by code-measured fit (workable months');
+  });
+
   it('keeps an autoscout listing read from a seed portal page and screens the same listing from a plain page as another kind', () => {
     const carKind = { label: 'used car', terms: ['used car', 'gebrauchtwagen', 'uzywany samochod', 'pouzite auto'] };
     const carBrief = buildBrief({ question: 'Used cars, 2000 to 4000 EUR', acceptance: { expected: '20 used cars', itemCount: 20, valueRange: [2000, 4000], unit: 'EUR' }, template: { itemKind: carKind } });

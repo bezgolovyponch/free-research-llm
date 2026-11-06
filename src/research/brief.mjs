@@ -72,11 +72,12 @@ export const COUNTRIES = [
   ['CH', 'Switzerland', ['schweiz', 'suisse', 'svizzera'], ''],
   ['IS', 'Iceland', [], ''],
 ];
+const LANDLOCKED = new Set(['AT', 'CH', 'CZ', 'HU', 'LU', 'MK', 'RS', 'SK']);
 const ONE_COUNTRY_LANGUAGES = { pt: 'PT', el: 'GR', tr: 'TR', vi: 'VN', hr: 'HR', bg: 'BG', it: 'IT', ro: 'RO', pl: 'PL', cs: 'CZ', sk: 'SK', sl: 'SI', hu: 'HU', fi: 'FI', sv: 'SE', da: 'DK', et: 'EE', lv: 'LV', lt: 'LT', sq: 'AL', ka: 'GE' };
 const GROUPS = { EU: /\b(?:eu|european union|e\.u\.)\b/ };
 const GENERIC_TLDS = new Set(['co', 'io', 'ai', 'me', 'tv', 'cc', 'fm', 'ly', 'to', 'gg', 'app']);
 const TLD_ALIASES = { uk: 'GB' };
-const COAST = /\b(?:sea|ocean|coast(?:al)?|beach|seaside|shore|seafront)\b/;
+export const SEA_WORDS = /\b(?:sea|ocean|coast(?:al)?|beach|seaside|shore|seafront)\b/;
 const COAST_ON_PAGE = /\b(?:sea|ocean|coast|coastal|beach|seaside|seafront|sea view|praia|playa|plage|spiaggia|mar|deniz|denize|sahil|plaj|bai bien|gan bien|thalassa|paralia|strand|kust|mora|uvala|uvale|pogled na more|plaza|plazi|bord de mer|vista mare|frente mar|denize sifir)\b/;
 const NEWS_PATH = /\/(?:news|noticias|noticia|blog|tin-tuc|tin-thi-truong|haber|actualite|articles?|magazine|guide|guides|deco)(?:\/|$|-)/i;
 const MIN_TEXT_MENTIONS = 2;
@@ -173,6 +174,8 @@ export function buildBrief({ question = '', acceptance = {}, constraints = {}, t
   const groups = openGroups(words);
   const lists = Boolean(acceptance?.itemCount);
   const budget = acceptance?.valueRange ? null : budgetOf(question, acceptance?.expected);
+  const seaAsked = SEA_WORDS.test(plain(words));
+  const seaImpossible = seaAsked && regions.length > 0 && regions.every((code) => LANDLOCKED.has(code));
   return {
     kind: lists ? template?.itemKind ?? null : null,
     itemCount: acceptance?.itemCount ?? null,
@@ -182,7 +185,8 @@ export function buildBrief({ question = '', acceptance = {}, constraints = {}, t
     regions,
     groups,
     narrowed: narrowedGroups(words),
-    coastal: COAST.test(plain(words)),
+    coastal: seaAsked && !seaImpossible,
+    seaImpossible,
     excludes: lists ? ['offered for rent', 'offered as a swap', 'wanted ads', 'news, blog or guide pages', 'search or category pages'] : [],
   };
 }
@@ -196,6 +200,7 @@ export function describeBrief(brief) {
     brief.kind ? `Deliver: ${brief.itemCount ?? 'a list of'} single ${brief.kind.label} listing pages for sale` : 'Deliver: a decision memo',
     brief.valueRange ? `Hard limit: price ${brief.valueRange[0]}–${brief.valueRange[1]} ${brief.unit}`.trim() : '',
     `Where: ${where}${brief.coastal ? ' (near the sea)' : ''}${brief.narrowed?.length ? ` · ${brief.narrowed.join('; ')}` : ''}`,
+    brief.seaImpossible ? 'No coastline in the countries you named: the sea criterion is not applied.' : '',
     brief.excludes.length ? `Exclude: ${brief.excludes.join('; ')}` : '',
   ];
   return lines.filter(Boolean).join('\n');

@@ -8,6 +8,7 @@ const row = (more: object) => ({ title: 'Terreno rústico com 1.516,54 m² em Mi
 const project = {
   id: 'p1',
   question: 'Find plots for glamping',
+  brief: { asksSea: true },
   acceptance: { expected: '50 plots', unit: 'EUR' },
   acceptanceResult: { score: 0.32, checks: [{ label: 'At least 50 valid items', value: 0.32 }], items: [{ title: 'Model pick', url: 'https://other.example/1', value: 5000, currency: 'EUR', nodeId: 'D1' }] },
   report: { verdict: 'GO-IF' },
@@ -59,6 +60,17 @@ describe('results workbook: every table, exact links, typed numbers', () => {
     expect(rows[0][col('price')]).toBe(1700);
     expect(rows[0][col('longitude')]).toBe(-8.7);
     expect(rows[2][col('sea km')]).toBe('>25');
+  });
+
+  it('drops the sea columns when the research does not ask for the sea', () => {
+    const inland = { ...project, brief: { asksSea: false } };
+    const [header, ...rows] = plotRows(inland);
+    const col = (name: string) => header.indexOf(name);
+    expect(header).not.toContain('sea km');
+    expect(header).not.toContain('beach km');
+    expect(header).toContain('named lake km');
+    expect(rows[0].length).toBe(header.length);
+    expect(rows[0][col('named lake km')]).toBe(6.2);
   });
 
   it('shows lodging and campsites apart, and one column per decision-model check', () => {

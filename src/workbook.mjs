@@ -92,11 +92,12 @@ function attrColumns(rows) {
 
 export function plotRows(project) {
   const c = project.candidates ?? {};
+  const sea = project.brief?.asksSea ?? c.asksSea ?? Boolean(project.brief?.coastal);
   const listed = [...(c.kept ?? []).map((r) => ['your countries', r]), ...(c.toCheck ?? []).map((r) => ['to check (price or country not shown)', r]), ...(c.outside ?? []).map((r) => ['outside your countries', r])];
   const rows = listed.map(([, r]) => r);
   const ids = checkIds(rows);
   const unit = project.acceptance?.unit || 'EUR';
-  const rawHeader = ['list', 'counted in the result', 'tier', 'external check', 'external check notes', 'title', 'url', 'price', 'currency', `price in ${unit}`, 'entry cost EUR', 'area', 'area unit', 'area m²', 'area in title m²', 'area matches title', 'glamping units', 'place', 'country', 'sea km', 'beach km', 'named lake km', 'workable months', 'comfortable months', 'hottest month avg high °C', 'things to explore within 15 km', 'lodging within 15 km', 'campsites within 15 km', 'zoning', 'checks met %', ...checkLabels(rows, ids), 'verdict', 'why', 'trade-offs', 'risks', 'legal path', 'found on', 'read by', 'latitude', 'longitude'];
+  const rawHeader = ['list', 'counted in the result', 'tier', 'external check', 'external check notes', 'title', 'url', 'price', 'currency', `price in ${unit}`, 'entry cost EUR', 'area', 'area unit', 'area m²', 'area in title m²', 'area matches title', 'glamping units', 'place', 'country', ...(sea ? ['sea km', 'beach km'] : []), 'named lake km', 'workable months', 'comfortable months', 'hottest month avg high °C', 'things to explore within 15 km', 'lodging within 15 km', 'campsites within 15 km', 'zoning', 'checks met %', ...checkLabels(rows, ids), 'verdict', 'why', 'trade-offs', 'risks', 'legal path', 'found on', 'read by', 'latitude', 'longitude'];
   const body = listed.map(([list, r]) => {
     const plan = r.plan ?? {};
     const site = r.site ?? null;
@@ -125,8 +126,7 @@ export function plotRows(project) {
       num(plan.units),
       r.place ?? '',
       r.country ?? '',
-      site ? (site.coastKm === null || site.coastKm === undefined ? '>25' : num(site.coastKm)) : '',
-      site ? num(site.beachKm) : '',
+      ...(sea ? [site ? (site.coastKm === null || site.coastKm === undefined ? '>25' : num(site.coastKm)) : '', site ? num(site.beachKm) : ''] : []),
       site?.lakesNamed ? num(site.lakeKm) : '',
       num(site?.climate?.workable),
       num(site?.climate?.comfortable),
