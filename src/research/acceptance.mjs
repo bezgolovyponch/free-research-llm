@@ -415,7 +415,15 @@ export function kindOnPage(text, kind) {
 }
 
 export function qualifies(item, spec) {
-  return Boolean(item.live && item.listing && (!spec.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
+  const entity = Boolean(item.evidence);
+  return Boolean(item.live && (entity || item.listing) && (!spec.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
+}
+
+function pageIsLive(page, item, located, allowRedirect = false) {
+  const status = Number(page?.status ?? 0);
+  const text = String(page?.text ?? '');
+  const redirected = allowRedirect && status >= 300 && status < 400;
+  return status >= 200 && status < 400 && (redirected || text.length >= MIN_LIVE_TEXT) && (!located || isDeepLink(item.url));
 }
 
 export class AcceptanceChecker {
@@ -438,9 +446,22 @@ export class AcceptanceChecker {
   }
 
   async inspect(item, spec, { located = true, kind = null, purpose = [] } = {}) {
-    const page = this.readPage ? await this.readPage(item.url) : { text: '', status: 0 };
-    const pageText = String(page.text ?? '');
-    const live = page.status >= 200 && page.status < 400 && pageText.length >= MIN_LIVE_TEXT && (!located || isDeepLink(item.url));
+    const entity = Boolean(item.evidence);
+    const root = this.readPage ? await this.readPage(item.url) : { text: '', status: 0 };
+    const rootLive = pageIsLive(root, item, located, entity);
+    let pageText = '';
+    let live = false;
+    if (entity && item.evidence && item.evidence !== item.url && this.readPage) {
+      const evidence = await this.readPage(item.evidence).catch(() => null);
+      if (pageIsLive(evidence, item, located, true)) {
+        pageText = String(evidence.text ?? '');
+        live = true;
+      }
+    }
+    if (!pageText && rootLive) {
+      pageText = String(root.text ?? '');
+      live = true;
+    }
     const amounts = parseAmounts(pageText);
     return {
       ...item,
