@@ -69,8 +69,8 @@ describe('candidate table', () => {
     const text = shortlistText(table, 1);
     expect(text.split('\n')).toEqual(['TABLE COUNTS (computed by code, final): found 9, kept 3 (the result list), to check 2, screened out 4 (price outside 0–20000 EUR 1, offered for rent, not for sale 1, not a plot of land 1, offered as a swap, not for sale 1, outside the asked regions 1)', 'First 1 of the 3 kept rows:', '- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated']);
     expect(shortlistText(null)).toBe('');
-    expect(tableVerdict({ tiers: { fits: 3, 'trade-off': 44, unverified: 24, blocked: 34 } }, 50)).toBe('Decision model: 3 plots of the 50 asked fit every check; 44 trade-offs with their potential; 24 to confirm; 0 weak; 34 blocked by law');
-    expect(tableVerdict({ tiers: { fits: 1, 'trade-off': 1, unverified: 0, blocked: 0 } })).toBe('Decision model: 1 plot fit every check; 1 trade-off with their potential; 0 to confirm; 0 weak; 0 blocked by law');
+    expect(tableVerdict({ tiers: { fits: 3, 'trade-off': 44, unverified: 24, blocked: 34 } }, 50)).toBe('Decision model: 3 results of the 50 asked fit every check; 44 trade-offs with their potential; 24 to confirm; 0 weak; 34 blocked by law');
+    expect(tableVerdict({ tiers: { fits: 1, 'trade-off': 1, unverified: 0, blocked: 0 } })).toBe('Decision model: 1 result fit every check; 1 trade-off with their potential; 0 to confirm; 0 weak; 0 blocked by law');
     expect(tableVerdict({})).toBe('');
     const tiered = { ...table, kept: [{ ...table.kept[0], plan: { tier: 'fits', verdict: 'fits every criterion', why: ['sea 2.5 km'], risks: ['ask the Câmara'] } }, { ...table.kept[0], url: 'https://imo.example/far', plan: { tier: 'trade-off', verdict: 'trade-off', why: [], risks: [] } }] };
     expect(candidateDeliverables(tiered).map((d: { url: string }) => d.url)).toEqual([table.kept[0].url]);

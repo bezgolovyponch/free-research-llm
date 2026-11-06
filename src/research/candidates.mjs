@@ -327,11 +327,11 @@ export function tableVerdict(candidates, itemCount = null) {
   }
   const target = itemCount ? ` of the ${itemCount} asked` : '';
   const v = candidates.verification;
-  const verified = v ? ` (externally verified: ${v.confirmed} confirmed, ${v.refuted} refuted, ${v.unconfirmed + v.pending} not yet confirmed; a plot counts only when it fits every check and is confirmed)` : '';
+  const verified = v ? ` (externally verified: ${v.confirmed} confirmed, ${v.refuted} refuted, ${v.unconfirmed + v.pending} not yet confirmed; a result counts only when it fits every check and is confirmed)` : '';
   const fits = t.fits ?? 0;
   const tradeOff = t['trade-off'] ?? 0;
   const unverified = t.unverified ?? 0;
   const weak = t.weak ?? 0;
   const blocked = t.blocked ?? 0;
-  return `Decision model: ${fits} plot${fits === 1 ? '' : 's'}${target} fit every check${verified}; ${tradeOff} trade-off${tradeOff === 1 ? '' : 's'} with their potential; ${unverified} to confirm; ${weak} weak; ${blocked} blocked by law`;
+  return `Decision model: ${fits} result${fits === 1 ? '' : 's'}${target} fit every check${verified}; ${tradeOff} trade-off${tradeOff === 1 ? '' : 's'} with their potential; ${unverified} to confirm; ${weak} weak; ${blocked} blocked by law`;
 }
