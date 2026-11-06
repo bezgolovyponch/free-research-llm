@@ -147,6 +147,24 @@ describe('site measurements', () => {
     const fit = fitOf({ title: 'Poljoprivredno zemljište 240 m od uvale', value: 12110, area: 1211 }, { hpi: 13.9 });
     expect(fit).toEqual({ zoning: 'agricultural', pitches: 18, hpi: 13.9 });
   });
+
+  it('omits the coastline statement from the Overpass query when the research does not ask for the sea', () => {
+    expect(overpassQuery(VIR.lat, VIR.lon, 10, true)).toContain('[natural=coastline]');
+    expect(overpassQuery(VIR.lat, VIR.lon, 10, false)).not.toContain('[natural=coastline]');
+    expect(overpassQuery(VIR.lat, VIR.lon, 10, false)).toContain('[natural=beach]');
+  });
+
+  it('never consults the coastline file when the research does not ask for the sea', async () => {
+    const net = fakeNet({ geocode: { 'Vir, Croatia': VIR } });
+    let coastFileCalls = 0;
+    const coastFile = { nearestKm: async () => { coastFileCalls++; return 14; } };
+    const noCoast = async (url: string, init?: { body?: string }) => (url.includes('overpass') ? { elements: [] } : net.fetchJson(url, init));
+    const assessor = new SiteAssessor({ fetchJson: noCoast, sleep: noSleep, coastFile: coastFile as never });
+    const site = await assessor.assess(VIR.lat, VIR.lon, { sea: false });
+    expect(site.coastKm).toBeNull();
+    expect(site.coastBy).toBeUndefined();
+    expect(coastFileCalls).toBe(0);
+  });
 });
 
 describe('SiteAssessor', () => {

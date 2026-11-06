@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, radiusIn, regionsIn, sourceCountry } from '../../src/research/brief.mjs';
+import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, radiusIn, regionsIn, SEA_WORDS, sourceCountry } from '../../src/research/brief.mjs';
 
 const kind = { label: 'plot of land', terms: ['land', 'terreno'] };
 const plots = buildBrief({
@@ -178,5 +178,32 @@ describe('onConcept for kinds not sold on listing portals', () => {
     const kind = { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing'] };
     expect(onConcept(source, { kind, regions: ['CZ'], located: true })).toBe(false);
     expect(onConcept(source, { kind, regions: ['CZ'], located: false })).toBe(true);
+  });
+});
+
+describe('the sea criterion: asked by the user words, not by a coastal case', () => {
+  it('asks for the sea on sea, ocean, coast, beach, seaside, shore and seafront, and nothing else', () => {
+    for (const w of ['sea', 'ocean', 'coast', 'coastal', 'beach', 'seaside', 'shore', 'seafront']) expect(SEA_WORDS.test(w)).toBe(true);
+    for (const w of ['lake', 'river', 'mountain', 'forest', 'plot', 'land']) expect(SEA_WORDS.test(w)).toBe(false);
+  });
+
+  it('is coastal when the words ask for the sea, and not coastal when they do not', () => {
+    const coastal = buildBrief({ question: 'Find plots near the sea, 20000EUR max', acceptance: { expected: '50 plots in EU, Vietnam and Turkey', itemCount: 50, valueRange: [0, 20000], unit: 'EUR' }, template: { itemKind: kind } });
+    expect(coastal).toMatchObject({ coastal: true, seaImpossible: false });
+    const inland = buildBrief({ question: 'Find plots for glamping in the Czech Republic', acceptance: { expected: '10 plots', itemCount: 10, valueRange: [0, 1000000], unit: 'CZK' }, template: { itemKind: kind } });
+    expect(inland).toMatchObject({ coastal: false, seaImpossible: false });
+  });
+
+  it('says the sea is impossible and does not apply it when every named country is landlocked', () => {
+    const cz = buildBrief({ question: 'Find plots near the sea in the Czech Republic', acceptance: { expected: '10 plots', itemCount: 10, valueRange: [0, 1000000], unit: 'CZK' }, template: { itemKind: kind } });
+    expect(cz).toMatchObject({ coastal: false, seaImpossible: true, regions: ['CZ'] });
+    expect(describeBrief(cz)).toContain('No coastline in the countries you named: the sea criterion is not applied.');
+    const both = buildBrief({ question: 'Find plots near the sea in the Czech Republic and Slovakia', acceptance: { expected: '10 plots', itemCount: 10, valueRange: [0, 1000000], unit: 'CZK' }, template: { itemKind: kind } });
+    expect(both).toMatchObject({ coastal: false, seaImpossible: true, regions: ['CZ', 'SK'] });
+  });
+
+  it('still asks for the sea when one of the named countries has a coast', () => {
+    const mixed = buildBrief({ question: 'Find plots near the sea in the Czech Republic and Portugal', acceptance: { expected: '10 plots', itemCount: 10, valueRange: [0, 20000], unit: 'EUR' }, template: { itemKind: kind } });
+    expect(mixed).toMatchObject({ coastal: true, seaImpossible: false, regions: ['CZ', 'PT'] });
   });
 });

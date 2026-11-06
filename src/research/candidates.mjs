@@ -300,19 +300,21 @@ export function candidateDeliverables(candidates) {
   return (candidates?.kept ?? []).filter((row) => countsTowardResult(row, candidates)).map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, nodeId: row.nodeId, harvested: true, candidate: true }));
 }
 
-function siteText(row) {
+function siteText(row, sea) {
   if (row.plan) return ` | ${row.plan.tier}: ${row.plan.verdict} | why: ${row.plan.why.join('; ')}${row.plan.risks.length ? ` | risks: ${row.plan.risks.join('; ')}` : ''}`;
   const site = row.site;
   if (!site) return row.siteNote ? ` | ${row.siteNote}` : '';
   const season = site.climate ? ` | ${site.climate.workable} workable months (${site.climate.comfortable} comfortable), hottest month max ${site.climate.hottest}°C` : '';
-  return ` | sea ${site.coastKm ?? '?'} km, beach ${site.beachKm ?? '?'} km${season} | ${explorePoints(site)} beaches, viewpoints, sights, reserves and trails within 15 km | zoning ${row.fit.zoning}${row.fit.pitches !== null ? ` | about ${row.fit.pitches} pitches` : ''}`;
+  const coast = sea ? ` | sea ${site.coastKm ?? '?'} km, beach ${site.beachKm ?? '?'} km` : '';
+  return `${coast}${season} | ${explorePoints(site)} beaches, viewpoints, sights, reserves and trails within 15 km | zoning ${row.fit.zoning}${row.fit.pitches !== null ? ` | about ${row.fit.pitches} pitches` : ''}`;
 }
 
 export function shortlistText(candidates, limit = 15) {
   if (!candidates) return '';
+  const sea = candidates.asksSea ?? Boolean(candidates.kept?.some((r) => r.site?.coastKm !== undefined && r.site?.coastKm !== null));
   const reasons = Object.entries(candidates.screened ?? {}).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(', ');
-  const rows = (candidates.kept ?? []).slice(0, limit).map((r) => `- ${r.title} | ${r.value ?? r.price} ${r.unit || r.currency} | ${r.area ? `${r.area} ${r.areaUnit}` : 'area n/a'} | ${r.place || r.country || 'place n/a'}${r.coast ? ' | coast stated' : ''}${siteText(r)}`);
-  const ranked = candidates.sites ? `, ranked by code-measured fit (sea distance, workable months, no-AC heat, things to explore, price trend, cost, zoning)` : '';
+  const rows = (candidates.kept ?? []).slice(0, limit).map((r) => `- ${r.title} | ${r.value ?? r.price} ${r.unit || r.currency} | ${r.area ? `${r.area} ${r.areaUnit}` : 'area n/a'} | ${r.place || r.country || 'place n/a'}${r.coast ? ' | coast stated' : ''}${siteText(r, sea)}`);
+  const ranked = candidates.sites ? `, ranked by code-measured fit (${sea ? 'sea distance, ' : ''}workable months, no-AC heat, things to explore, price trend, cost, zoning)` : '';
   const kept = candidates.keptCount ?? 0;
   return [`TABLE COUNTS (computed by code, final): found ${candidates.found}, kept ${kept} (the result list)${ranked}, to check ${candidates.toCheckCount}, screened out ${candidates.screenedCount}${reasons ? ` (${reasons})` : ''}`, `First ${Math.min(limit, kept)} of the ${kept} kept rows:`, ...rows].join('\n');
 }

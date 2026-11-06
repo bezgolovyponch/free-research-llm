@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, quoteFound, StrategyRetriever, strategyFor, unitsFor, foundationOf, foundationText, askedCriteria, withoutOwningOf, WITHOUT_OWNING_GROUP } from '../../src/research/strategy.mjs';
+import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, quoteFound, StrategyRetriever, strategyFor, unitsFor, foundationOf, foundationText, askedCriteria, asksSea, withoutOwningOf, WITHOUT_OWNING_GROUP } from '../../src/research/strategy.mjs';
 
 const rules = GLAMPING_LOW_ENTRY.rules;
 const toEur = (value: number, from: string) => (from === 'GBP' ? value * 1.2 : value);
@@ -392,6 +392,55 @@ describe('asked criteria filtering', () => {
     expect(text2).toContain('price trend above the EU average');
     expect(foundationText({ ...f2, clauses: [] })).toContain('sea within 20 km by e-bike');
     expect(askedCriteria({ ...f2, clauses: [] })).toBeNull();
+  });
+});
+
+describe('asksSea: the sea criterion only enters the decision model when it was asked', () => {
+  it('is true when coastal is true even with no foundation', () => {
+    expect(asksSea(null, true)).toBe(true);
+  });
+
+  it('is false for a null or empty foundation', () => {
+    expect(asksSea(null)).toBe(false);
+    expect(asksSea(undefined)).toBe(false);
+  });
+
+  it('is true only when askedCriteria includes sea', () => {
+    const withSea = foundationOf(GLAMPING_LOW_ENTRY, { question: 'Find plots near the sea' });
+    expect(asksSea(withSea)).toBe(true);
+    const noSea = foundationOf(GLAMPING_LOW_ENTRY, { question: 'Find plots for glamping' });
+    expect(asksSea(noSea)).toBe(false);
+  });
+});
+
+describe('foundationOf: an excluded sea criterion is reported instead of missing', () => {
+  const czQuestion = { question: 'Find plots near the sea in the Czech Republic' };
+
+  it('keeps the clause complete and reports it as excluded with a reason', () => {
+    const f = foundationOf(GLAMPING_LOW_ENTRY, czQuestion, { exclude: [{ id: 'sea', reason: 'no coastline in the countries you named' }] });
+    expect(f.complete).toBe(true);
+    expect(f.missing).toEqual([]);
+    expect(f.excluded).toEqual([{ id: 'sea', clause: expect.any(String), reason: 'no coastline in the countries you named' }]);
+  });
+
+  it('prints "Not applied: sea within an e-bike ride (...)" and does not name sea as an active check', () => {
+    const f = foundationOf(GLAMPING_LOW_ENTRY, czQuestion, { exclude: [{ id: 'sea', reason: 'no coastline in the countries you named' }] });
+    expect(foundationText(f)).toContain("Not applied: sea within an e-bike ride (no coastline in the countries you named)");
+    expect(foundationText(f)).not.toContain('sea within 20 km by e-bike');
+  });
+});
+
+describe('short-season sea potential only counts when the sea was asked', () => {
+  const shortSea = { ...nazare, site: site(5, { climate: climate(6, 25) }) };
+
+  it('adds the sea potential when sea is asked and season fails', () => {
+    const withSea = planFor(shortSea, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5, asked: ['sea', 'season'] });
+    expect(withSea.potential).toContain('sea 5 km: a strong short-season location');
+  });
+
+  it('never adds the sea potential when sea was not asked', () => {
+    const withoutSea = planFor(shortSea, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 5.5, asked: ['season'] });
+    expect(withoutSea.potential).not.toContain('sea 5 km: a strong short-season location');
   });
 });
 

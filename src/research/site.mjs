@@ -97,11 +97,11 @@ export function siteKey(lat, lon) {
   return `${(Math.round(lat * 50) / 50).toFixed(2)},${(Math.round(lon * 50) / 50).toFixed(2)}`;
 }
 
-export function overpassQuery(lat, lon, coastKm = 10) {
+export function overpassQuery(lat, lon, coastKm = 10, sea = true) {
   const near = `(around:${NEAR_KM * 1000},${lat},${lon})`;
   return [
     '[out:json][timeout:120];',
-    `way(around:${coastKm * 1000},${lat},${lon})[natural=coastline];out geom;`,
+    ...(sea ? [`way(around:${coastKm * 1000},${lat},${lon})[natural=coastline];out geom;`] : []),
     `nwr${near}[natural=beach];out center;`,
     `nwr${near}${LAKE_FILTER};out center;`,
     ...Object.values(COUNT_FILTERS).map((f) => `nwr${near}${f};out count;`),
@@ -215,6 +215,16 @@ export function titlePlaces(title, kindTerms = []) {
 
 export function titlePlace(title, kindTerms = []) {
   return titlePlaces(title, kindTerms)[0] ?? null;
+}
+
+function pendingSite() {
+  return { coastKm: null, beachKm: null, mapPending: true, beaches: 0, viewpoints: 0, attractions: 0, reserves: 0, protectedAreas: 0, hikingRoutes: 0, campsites: 0, lodging: 0 };
+}
+
+export function withoutSea(site) {
+  if (!site) return site;
+  const { coastKm, coastBy, ...rest } = site;
+  return rest;
 }
 
 export function shortSite(site) {
@@ -481,9 +491,9 @@ export class SiteAssessor {
     return null;
   }
 
-  async assess(lat, lon, { map = true } = {}) {
+  async assess(lat, lon, { map = true, sea = true } = {}) {
     const stored = this.cachedSite(lat, lon);
-    const cached = stored && !stored.mapPending ? await this.withFileCoast(lat, lon, stored) : stored;
+    const cached = stored && !stored.mapPending ? (sea ? await this.withFileCoast(lat, lon, stored) : stored) : stored;
     if (cached?.climate?.cci && !(cached.mapPending && map)) return cached === stored ? cached : this.keepSite(lat, lon, cached);
     const climate = cached?.climate?.cci ? cached.climate : await this.climate(lat, lon);
     if (cached && !cached.mapPending) return this.keepSite(lat, lon, { ...cached, climate });
@@ -491,14 +501,14 @@ export class SiteAssessor {
     if (map) {
       try {
         const post = (query) => this.overpass(query);
-        site = parseSurroundings(await post(overpassQuery(lat, lon)), lat, lon);
-        if (site.coastKm === null) site.coastKm = parseCoast(await post(coastQuery(lat, lon)), lat, lon);
+        site = parseSurroundings(await post(overpassQuery(lat, lon, 10, sea)), lat, lon);
+        if (sea && site.coastKm === null) site.coastKm = parseCoast(await post(coastQuery(lat, lon)), lat, lon);
       } catch (error) {
-        if (!this.coastFile) throw error;
+        if (sea && !this.coastFile) throw error;
       }
     }
-    if (site) site = await this.withFileCoast(lat, lon, site);
-    if (!site) site = cached ?? (await this.siteFromCoastFile(lat, lon));
+    if (site && sea) site = await this.withFileCoast(lat, lon, site);
+    if (!site) site = cached ?? (sea ? await this.siteFromCoastFile(lat, lon) : pendingSite());
     if (!site) throw new Error('map service busy and no coastline file');
     return this.keepSite(lat, lon, { ...site, climate });
   }
@@ -609,6 +619,7 @@ export class SiteAssessor {
 
   async measureRows(rows, brief, ctx) {
     const { readPage, onProgress, stats, started } = ctx;
+    const sea = brief?.asksSea ?? Boolean(brief?.coastal);
     const slots = new Array(rows.length);
     for (const index of measureOrder(rows, this.store)) {
       const original = rows[index];
@@ -635,7 +646,7 @@ export class SiteAssessor {
         }
         stats.located++;
         let site = this.cachedSite(point.lat, point.lon);
-        if (site && !site.mapPending && site.coastKm === null) {
+        if (sea && site && !site.mapPending && site.coastKm === null) {
           const filled = await this.withFileCoast(point.lat, point.lon, site);
           if (filled !== site) site = this.keepSite(point.lat, point.lon, filled);
         }
@@ -648,7 +659,7 @@ export class SiteAssessor {
           }
           ctx.fresh++;
           if (mapAllowed) ctx.maps = (ctx.maps ?? 0) + 1;
-          site = await this.assess(point.lat, point.lon, { map: mapAllowed });
+          site = await this.assess(point.lat, point.lon, { map: mapAllowed, sea });
           onProgress(stats);
         }
         stats.assessed++;
@@ -659,7 +670,7 @@ export class SiteAssessor {
         }
         const conflict = await this.titleConflict(row, point, brief);
         const trend = await this.priceTrend(row.countryCode);
-        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(site), fit: fitOf(row, { hpi: trend?.real ?? null }), ...(conflict ? { placeConflict: conflict } : {}) };
+        const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(sea ? site : withoutSea(site)), fit: fitOf(row, { hpi: trend?.real ?? null }), ...(conflict ? { placeConflict: conflict } : {}) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
           put('far', assessed);
