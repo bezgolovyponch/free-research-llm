@@ -76,6 +76,18 @@ describe('valid items only', () => {
     expect(count.detail).toMatch(/^1 of 3 delivered pass every check; first 3 inspected/);
   });
 
+  it('counts a supplier site as a valid item when its evidence page is live, though its root is blocked', async () => {
+    const text = 'Ralph Lauren and Barbour second hand clothing wholesale in bales. '.repeat(10);
+    const pages: Record<string, { status: number; text: string }> = { 'https://zagumi.com/': { status: 403, text: '' }, 'https://zagumi.com/wholesale': { status: 200, text } };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const supplier = { url: 'https://zagumi.com/', evidence: 'https://zagumi.com/wholesale', title: 'Zagumi' };
+    const result = await checker.evaluate({ itemCount: 1, urlsLive: true, mustMention: [] }, [supplier], { located: false });
+    expect(result.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 1 });
+    expect(result.items[0].live).toBe(true);
+    const listing = await checker.evaluate({ itemCount: 1, urlsLive: true, mustMention: [] }, [{ url: 'https://zagumi.com/wholesale', title: 'x' }], { located: true });
+    expect(listing.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 0 });
+  });
+
   it('says how many of the delivered items it inspected when the list is longer than the check needs', async () => {
     const urls = Array.from({ length: 10 }, (_, i) => `https://a.example/anuncio/plot-ID1iZBr${i}`);
     const checker = new AcceptanceChecker({ readPage: async () => ({ status: 200, text: 'Rustic plot for sale 18 000 EUR near the coast '.repeat(20) }) });
