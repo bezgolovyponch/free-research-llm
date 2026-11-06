@@ -271,7 +271,7 @@ describe('ResearchEngine', () => {
     expect(done.candidates).toMatchObject({ keptCount: 0, tiers: { fits: 0, unverified: 4 }, screened: { 'price outside 0–20000 EUR': 1 } });
     expect(done.candidates.kept.map((r: { value: number }) => r.value)).toEqual([9000, 12000, 15000, 19000]);
     expect(done.candidates.kept[0].plan.verdict).toContain('location not measured yet');
-    expect(done.report.verdict).toContain('Decision model: 0 plots of the 4 asked fit every check; 0 trade-offs with their potential; 4 to confirm; 0 weak; 0 blocked by law — model memo:');
+    expect(done.report.verdict).toContain('Decision model: 0 results of the 4 asked fit every check; 0 trade-offs with their potential; 4 to confirm; 0 weak; 0 blocked by law — model memo:');
     expect(done.acceptanceResult.items.filter((i: { candidate?: boolean }) => i.candidate)).toEqual([]);
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && /portal sweep: 12 listing page\(s\) read by code/.test(l.message))).toBe(true);
     expect(reads).toContain('https://www.imovirtual.com/pt/resultados/comprar/terreno/faro?priceMax=20000');
