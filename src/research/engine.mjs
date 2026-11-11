@@ -9,6 +9,7 @@ import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researc
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding, withMeaning } from './verify.mjs';
+import { OfflineError } from '../llm/router.mjs';
 import { claimsToCheck, contextOf, isStale, normalizeVote, resolveFromSources, supportAudit, supportPrompt, supportRecord, termCheck, toConfirm } from './support.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
@@ -1570,10 +1571,11 @@ export class ResearchEngine {
       return await this.store.save(project);
     } catch (error) {
       if (project) {
-        project.phase = 'error';
-        project.error = error.message;
-        appendAppMessage(project, `Research stopped with an error: ${error.message}. Press Run to resume; finished nodes are kept.`);
-        if (!this.quiet.has(id)) await this.onStop(project, { reason: `error: ${error.message}` }).catch(() => {});
+        const offline = error instanceof OfflineError;
+        project.phase = offline ? 'paused' : 'error';
+        project.error = offline ? null : error.message;
+        appendAppMessage(project, offline ? `The network was down and every model provider was unreachable. Press Run to resume; finished nodes are kept.` : `Research stopped with an error: ${error.message}. Press Run to resume; finished nodes are kept.`);
+        if (!this.quiet.has(id)) await this.onStop(project, { reason: offline ? 'offline: network down' : `error: ${error.message}` }).catch(() => {});
         this.emit(project, 'error', error.message);
         await this.store.save(project);
       }

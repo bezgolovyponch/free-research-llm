@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
-import { ModelRouter } from '../../src/llm/router.mjs';
+import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
@@ -1623,5 +1623,34 @@ describe('hub search', () => {
     expect(router.calls).toHaveLength(0);
     expect(asked).toHaveLength(0);
   });
+
+  it('pauses the project instead of erroring when the network is down', async () => {
+    const provider = netProvider('a');
+    const router = new ModelRouter({ providers: [provider], offlineBackoff: [1], offlineWaitMs: 1 });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Should I open a bakery in Brno next year?' });
+    await expect(engine.run(project.id)).rejects.toBeInstanceOf(OfflineError);
+    const saved = await engine.store.get(project.id);
+    expect(saved.phase).toBe('paused');
+    expect(saved.error).toBeNull();
+    expect(saved.chats.Q.some((m: { role: string; content: string }) => m.role === 'app' && /network was down/i.test(m.content))).toBe(true);
+    expect(saved.log.some((l: { type: string; message: string }) => l.type === 'error')).toBe(true);
+  });
 });
+
+function netProvider(id: string, networkFailures = Number.POSITIVE_INFINITY) {
+  let n = 0;
+  return {
+    id,
+    ready: true,
+    calls: [],
+    async chat() {
+      this.calls.push(1);
+      n++;
+      if (n <= networkFailures) throw new ProviderError(`${id} unreachable: fetch failed`, { status: 0, provider: id });
+      return { content: '{"ok":true}', model: `${id}-m`, provider: id, usage: {} };
+    },
+    describe: () => ({ id }),
+  };
+}
 

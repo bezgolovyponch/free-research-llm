@@ -5,8 +5,15 @@ import { MAX_PROMPT_TOKENS, familyOf } from './ranking.mjs';
 import { paidDailyTokens, paidProviderIds } from './presets.mjs';
 
 export class NoModelAvailableError extends Error {}
+export class OfflineError extends NoModelAvailableError {}
 
 const DEFAULT_COOLDOWN_MS = 60000;
+export const OFFLINE_WAIT_MS = 20 * 60 * 1000;
+export const OFFLINE_BACKOFF_MS = [15 * 1000, 30 * 1000, 60 * 1000, 60 * 1000];
+const NETWORK_ERROR = /unreachable|fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ETIMEDOUT/i;
+function isNetworkError(message) {
+  return NETWORK_ERROR.test(String(message ?? ''));
+}
 export const SLOW_FACTOR = 4;
 export const SLOW_FLOOR_MS = 20000;
 const MIN_TIMED_CALLS = 3;
@@ -72,7 +79,7 @@ const MAX_WAIT_ROUNDS = 3;
 const REPAIR_INSTRUCTION = 'Your previous reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.';
 
 export class ModelRouter {
-  constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {}, outcomes = null, paid = null, env = process.env, paidCap = null }) {
+  constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {}, outcomes = null, paid = null, env = process.env, paidCap = null, offlineBackoff = OFFLINE_BACKOFF_MS, offlineWaitMs = OFFLINE_WAIT_MS }) {
     this.outcomes = outcomes;
     this.providers = providers;
     this.routeOrder = routeOrder;
@@ -93,6 +100,8 @@ export class ModelRouter {
     this.calls = 0;
     this.paidIds = new Set(paid ?? paidProviderIds(env));
     this.paidCap = paidCap ?? paidDailyTokens(env);
+    this.offlineBackoff = offlineBackoff;
+    this.offlineWaitMs = offlineWaitMs;
   }
 
   get ready() {
@@ -384,6 +393,42 @@ export class ModelRouter {
     return waits.length ? Math.max(0, Math.min(...waits)) : Infinity;
   }
 
+  snapshotProviderState(providers) {
+    const snapshot = new Map();
+    for (const p of providers) {
+      snapshot.set(p.id, {
+        failureStreak: this.failureStreak.get(p.id),
+        timeoutStreak: this.timeoutStreak.get(p.id),
+        computeErrorStreak: this.computeErrorStreak.get(p.id),
+        streakBenches: this.streakBenches.get(p.id),
+        cooldownUntil: this.cooldownUntil.get(p.id),
+        cooldownReason: this.cooldownReason.get(p.id),
+      });
+    }
+    return snapshot;
+  }
+
+  restoreProviderState(snapshot) {
+    for (const [id, state] of snapshot) {
+      if (state.failureStreak === undefined) this.failureStreak.delete(id); else this.failureStreak.set(id, state.failureStreak);
+      if (state.timeoutStreak === undefined) this.timeoutStreak.delete(id); else this.timeoutStreak.set(id, state.timeoutStreak);
+      if (state.computeErrorStreak === undefined) this.computeErrorStreak.delete(id); else this.computeErrorStreak.set(id, state.computeErrorStreak);
+      if (state.streakBenches === undefined) this.streakBenches.delete(id); else this.streakBenches.set(id, state.streakBenches);
+      if (state.cooldownUntil === undefined) this.cooldownUntil.delete(id); else this.cooldownUntil.set(id, state.cooldownUntil);
+      if (state.cooldownReason === undefined) this.cooldownReason.delete(id); else this.cooldownReason.set(id, state.cooldownReason);
+    }
+  }
+
+  async waitOffline(offline) {
+    if (this.maxWaitMs <= 0) return false;
+    const step = this.offlineBackoff[offline.step] ?? this.offlineBackoff[this.offlineBackoff.length - 1];
+    if (offline.waited + step > this.offlineWaitMs) return false;
+    offline.step++;
+    offline.waited += step;
+    await this.sleep(step);
+    return true;
+  }
+
   async waitForCooldown({ avoid, tier, purpose, tokens }) {
     const wait = this.shortestCooldownMs();
     if (wait > this.maxWaitMs) return [];
@@ -449,17 +494,34 @@ export class ModelRouter {
     const request = { messages, tier, json, purpose, temperature };
     const errors = [];
     const tokens = estimateTokens(messages);
+    const offline = { step: 0, waited: 0 };
     let candidates = this.available({ avoid, tier, purpose, tokens });
-    for (let round = 0; round < MAX_WAIT_ROUNDS; round++) {
+    let round = 0;
+    let offlineExhausted = false;
+    while (round < MAX_WAIT_ROUNDS) {
       if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose, tokens });
       if (!candidates.length) break;
+      const stateBefore = this.snapshotProviderState(candidates);
       const reply = await this.tryProviders(candidates, request, errors);
       if (reply) return reply;
+      if (errors.length && errors.every((error) => isNetworkError(error))) {
+        this.restoreProviderState(stateBefore);
+        if (await this.waitOffline(offline)) {
+          candidates = this.available({ avoid, tier, purpose, tokens });
+          continue;
+        }
+        offlineExhausted = true;
+        break;
+      }
       if (this.shortestCooldownMs() === 0) break;
       candidates = [];
+      round++;
     }
     if (!errors.length) {
       throw new NoModelAvailableError(this.ready ? 'all free model quotas are cooling down after rate limits; retry in a minute' : 'no model provider is configured — open Setup');
+    }
+    if (offlineExhausted) {
+      throw new OfflineError(`offline: every provider failed for ${purpose}: ${errors.join(' || ').slice(0, 600)}`);
     }
     throw new NoModelAvailableError(`every provider failed for ${purpose}: ${errors.join(' || ').slice(0, 600)}`);
   }
