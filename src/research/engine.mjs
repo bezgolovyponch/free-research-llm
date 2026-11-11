@@ -4,7 +4,7 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, entityDeliverables, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -1429,9 +1429,9 @@ export class ResearchEngine {
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
-    const deliverables = brief.located === false
+    const deliverables = (brief.located === false
       ? entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label })
-      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]);
+      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))])).filter((d) => !isExcludedSurfaceUrl(d.url));
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage: this.cachedPageReader(pages), convert });

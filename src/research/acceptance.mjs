@@ -287,6 +287,18 @@ const SECOND_LEVEL_LABELS = new Set(['co', 'com', 'org', 'net', 'ac', 'gov', 'ed
 const KNOWN_B2B_MARKETPLACES = new Set(['made-in-china.com', 'alibaba.com', 'tradewheel.com', 'tradekey.com', 'ec21.com', 'globalsources.com', 'indiamart.com']);
 const LISTICLE_TITLE = /(?:^top\s+\d+|^\d+\s+best|^best\s+.+\s+near|near\s+[a-z]+|^(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|hundred)\s+best)/i;
 const REVIEW_NEWS_HOST = /yelp|tripadvisor|news/i;
+const BLOG_GUIDE_PATH = /\/(?:blog|blogs|guide|guides)\//i;
+const SUPPLIER_DIRECTORY_HOSTS = new Set(['accio.com', 'apparelsearch.com']);
+export function isExcludedSurfaceUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(String(url ?? ''));
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname.replace(/^www\./, '');
+  return SUPPLIER_DIRECTORY_HOSTS.has(host) || BLOG_GUIDE_PATH.test(parsed.pathname);
+}
 const WHOLESALE_SIGNAL = /\b(?:wholesale|bulk|bales?|per\s+kg|container|b2b|export|groothandel|großhandel|ingrosso|hurtownia|didmena|velkoobchod)\b/i;
 const GENERIC_SEGMENTS = new Set(['about', 'about-us', 'contact', 'contact-us', 'blog', 'news', 'faq', 'help', 'privacy', 'terms', 'search', 'category', 'categories', 'product', 'products', 'sitemap', 'login', 'register', 'cart', 'jobs', 'careers', 'press', 'media', 'home', 'index', 'suppliers', 'vendors', 'manufacturers', 'companies', 'directory', 'browse']);
 
@@ -354,6 +366,7 @@ export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = ''
     if (marketplaces.has(page.host)) continue;
     if (REVIEW_NEWS_HOST.test(page.host)) continue;
     if (LISTICLE_TITLE.test(String(page.source.title ?? ''))) continue;
+    if (isExcludedSurfaceUrl(page.url)) continue;
     if (wholesale && !WHOLESALE_SIGNAL.test(page.pageText)) continue;
     const { matched, ok } = matchedTerms(page.pageText, wanted);
     if (!ok) continue;

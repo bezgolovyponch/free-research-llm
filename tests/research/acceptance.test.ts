@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, hasCriteria, headlinePrice, inRange, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -249,6 +249,22 @@ describe('listing price on the page', () => {
     expect(entityDeliverables([{ id: "U", sources: uk }] as never, { terms: ["branded second-hand clothing wholesale"], kindLabel: "wholesale clothing provider" })).toHaveLength(3);
     expect(deliverables.map((d: { url: string }) => d.url).sort()).toEqual(['https://msgroup-secondhandclothes.com/', 'https://secondhandbales.com/'].sort());
   });
+
+  it('excludes blog and guide pages even when they carry the asked terms', () => {
+    const nodes = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://www.excellent-vintage.com/en/blog/complete-guide-vintage-wholesale-clothing-netherlands-2026', title: 'Vintage Wholesale Clothing Netherlands: Complete Guide 2026', text: 'A vintage wholesale clothing supplier in the Netherlands sells secondhand clothing in bulk to resellers, by the bale. Think a hundred Ralph Lauren shorts.' },
+          { url: 'https://www.usfripe.com/blogs/news/where-to-buy-vintage-clothing-wholesale-in-europe-2026-guide', title: 'Where to Buy Vintage Clothing Wholesale in Europe (2026 Guide)', text: 'The best vintage clothing wholesale suppliers in Europe for 2026, branded second-hand fashion.' },
+          { url: 'https://www.supplier-one.com/', title: 'Vintage clothing wholesale', text: 'Branded vintage clothing wholesale, graded A, cream garments by the lot.' },
+        ],
+      },
+    ];
+    const deliverables = entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'secondhand clothing'], kindLabel: 'wholesale clothing provider' });
+    expect(deliverables).toHaveLength(1);
+    expect(deliverables.map((d: { url: string }) => d.url)).toEqual(['https://supplier-one.com/']);
+  });
 });
 
 describe('prices in more currencies and scales', () => {
@@ -447,5 +463,43 @@ describe('kindOnPage', () => {
     expect(kindOnPage('China Wholesale Second Hand Supplier Bale Used Clothes', kind)).toBe(true);
     expect(kindOnPage('The North Face jackets, shop the new collection', kind)).toBe(false);
     expect(kindOnPage('eBay launches pre-loved fashion on Love Island', kind)).toBe(false);
+  });
+});
+
+describe('isExcludedSurfaceUrl', () => {
+  it('flags the audited blog, guide and supplier-directory pages and nothing else', () => {
+    const excluded = [
+      'https://www.usfripe.com/blogs/news/where-to-buy-vintage-clothing-wholesale-in-europe-2026-guide',
+      'https://www.excellent-vintage.com/en/blog/complete-guide-vintage-wholesale-clothing-netherlands-2026',
+      'https://recyclingitaly.com/blog/wholesale-second-hand-clothes-in-germany-for-b2b',
+      'https://accio.com/',
+      'https://www.accio.com/supplier/germany-wholesaler-used-clothes',
+      'https://apparelsearch.com/wholesale_clothing/wholesale_used_clothing.htm',
+    ];
+    for (const url of excluded) expect(isExcludedSurfaceUrl(url), url).toBe(true);
+    const kept = [
+      'https://zagumi.com/nl/used-clothing/',
+      'https://wiltex.eu/second-hand-clothing/',
+      'https://auto.bazos.cz/inzerat/225881782/citroen-c3.php',
+      'https://www.imovirtual.com/pt/anuncio/terreno-urbano-coimbra-20-000-ID1iZBr',
+      'not a url',
+    ];
+    for (const url of kept) expect(isExcludedSurfaceUrl(url), url).toBe(false);
+  });
+
+  it('keeps accio.com and apparelsearch.com out of entityDeliverables', () => {
+    const nodes = [
+      {
+        id: 'A',
+        sources: [
+          { url: 'https://accio.com/', title: 'Germany Wholesaler Used Clothes: Top Suppliers & Bulk Deals', text: 'Results from 138900+ products and 3500+ suppliers. Wholesale second hand clothing in bulk bales by the container.' },
+          { url: 'https://apparelsearch.com/wholesale_clothing/wholesale_used_clothing.htm', title: 'Wholesale Used Clothing', text: 'Used Clothing Wholesaler Directory: processors collect, sort, bale and ship secondhand clothing by the container. Wholesale second hand clothing.' },
+          { url: 'https://zagumi.com/nl/used-clothing/', title: 'Groothandel gebruikte kleding in balen - Zagumi', text: 'Groothandel gebruikte kleding in balen, wholesale second hand clothing per kg by the container.' },
+        ],
+      },
+    ];
+    const deliverables = entityDeliverables(nodes as never, { terms: ['wholesale second hand clothing'], kindLabel: 'wholesale clothing provider' });
+    expect(deliverables).toHaveLength(1);
+    expect(deliverables.map((d: { url: string }) => d.url)).toEqual(['https://zagumi.com/']);
   });
 });
