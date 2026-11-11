@@ -5,7 +5,7 @@ const MAX_REJECTED = 20;
 const SEARCH_TITLE = /\b(?:search|results|listings)\b/i;
 const SWAP = /(?:\btrade\b|\bswap\b|\btroca\b|\bpermuta|\btakas\b|\bechange\b)/i;
 const RENTAL = /(?:arrend|alug|alquil|kiralik|for[ -]rent|to[ -]rent|\brent(?:al|ing)?\b|a[ -]louer|\blouer\b|\bverhuur|\bmiete|pron[aá]j[eé]m|pronajm|\bn[aá]jem\b|\bwynaj[eę]m)/i;
-const WANTED = /(?:\bkoup[ií]m\b|\bhled[aá]m\b|\bpopt[aá]v[aá]m\b|\bkupi[eę]\b|\bszukam\b|\bwanted\b|\blooking for\b)/i;
+const WANTED = /(?:\bkoup[ií](?:m|me|te)?\b|\bhled[aá](?:m|e|me|te|j[ií])?\b|\bpopt[aá]v[aá](?:m|š|me|te|j[ií])?\b|\bkupi[eę]\b|\bkup(?:uji|ujeme|ujete|uj[ií])\b|\bszukam\b|\bwanted\b|\blooking for\b|\bsh[aá]n[aeěiío](?:m|t|me|te|ime|ete)?\b)/i;
 
 function priceOf(value) {
   if (value === null || value === undefined || value === '') return null;

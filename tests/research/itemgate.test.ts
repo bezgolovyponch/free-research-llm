@@ -39,6 +39,11 @@ describe('item gate: rentals, word ends, broken links', () => {
     expect(screenItem({ title: 'Prodej pozemku s nájemcem 800 m²', url: 'https://www.sreality.cz/detail/prodej/pozemek/zahrada/obora-obora-/2274426956' }, cz).ok).toBe(true);
   });
 
+  it('refuses a Czech car wanted ad that says "sháním" (I am looking for)', () => {
+    const car = { ...options, kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'] } };
+    expect(screenItem({ title: 'Toyota Yaris, sháním', url: 'https://auto.bazos.cz/inzerat/225000004/toyota-yaris-shanim.php', value: 20000, unit: 'CZK' }, car).reasons).toContain('a wanted ad, not an offer');
+  });
+
   it('matches a land word only as a whole word, plural allowed', () => {
     const vn = { label: 'plot of land', terms: ['dat', 'land', 'terreno'] };
     expect(screenItem({ title: 'Delhi in July', url: 'https://en.climate-data.org/asia/india/delhi/delhi-967662/' }, { kind: vn }).reasons).toContain('not a plot of land');
