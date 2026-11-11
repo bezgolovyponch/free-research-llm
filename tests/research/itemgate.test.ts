@@ -150,3 +150,23 @@ describe('item gate: body variants of a swept portal page are refused like any o
     expect(screenItem({ title: 'VW Golf kombi 1.6 TDI', url: 'https://www.autoscout24.de/angebote/vw-golf-kombi-16-tdi-d0b6741d-3dd5-47ce-804b-718ffdbb7507', value: 8900, unit: 'EUR' }, wagon).ok).toBe(true);
   });
 });
+
+describe('item gate: instalment, leasing and deposit ads are refused', () => {
+  const carKind = { label: 'used car', terms: ['used car', 'auto', 'gebrauchtwagen'], not: ['parts', 'kola'] };
+  const carOptions = { valueRange: [0, 65000], unit: 'CZK', kind: carKind, kindKnown: true };
+
+  it('refuses Czech na splátky / akontace ads priced at the deposit on bazos.cz', () => {
+    expect(screenItem({ title: 'ŠKODA FABIA III 1.4 TDi na SPLÁTKY BEZ REGISTRU', url: 'https://auto.bazos.cz/inzerat/226300001/skoda-fabia-iii-14-tdi-na-splatky-bez-registru.php', value: 9900, unit: 'CZK' }, carOptions).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+    expect(screenItem({ title: 'Auto na splátky, akontace 10 000 Kč, leasing', url: 'https://auto.bazos.cz/inzerat/226300002/auto-na-splatky-akontace.php', value: 10000, unit: 'CZK' }, carOptions).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+  });
+
+  it('refuses German Finanzierung / Anzahlung / Rate ads on autoscout24.de and Polish raty ads', () => {
+    expect(screenItem({ title: 'Skoda Fabia III 1.4 TDI Finanzierung, Anzahlung 2.000 EUR', url: 'https://www.autoscout24.de/angebote/skoda-fabia-iii-14-tdi-finanzierung-anzahlung-2000-eur-d0b6741d-3dd5-47ce-804b-718ffdbb7507', value: 2000, unit: 'EUR' }, { ...carOptions, unit: 'EUR' }).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+    expect(screenItem({ title: 'VW Golf 1.6 in Raten, Leasing möglich', url: 'https://www.autoscout24.de/angebote/vw-golf-16-in-raten-leasing-d0b6741d-3dd5-47ce-804b-718ffdbb7507', value: 199, unit: 'EUR' }, { ...carOptions, unit: 'EUR' }).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+    expect(screenItem({ title: 'Sprzedam auto na raty, leasing', url: 'https://auto.bazos.cz/inzerat/226300003/sprzedam-auto-na-raty-leasing.php', value: 500, unit: 'CZK' }, carOptions).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+  });
+
+  it('keeps a plain for-sale ad whose title has none of those words', () => {
+    expect(screenItem({ title: 'Dacia Sandero 1.2i LPG', url: 'https://auto.bazos.cz/inzerat/226135083/dacia-sandero-12i-lpg.php', value: 25000, unit: 'CZK' }, carOptions)).toMatchObject({ ok: true, priced: true });
+  });
+});
