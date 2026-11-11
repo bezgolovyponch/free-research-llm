@@ -35,14 +35,14 @@ import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCov
 import { compactProject, compactSources } from './compact.mjs';
 import { plain, screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
-import { BLOCKING, auditFeedback, auditTree, cleanTitle, dropListingWork, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
+import { BLOCKING, auditFeedback, auditTree, cleanTitle, kindWordsOf, markListingWork, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { captureBaseline, championChallenger, lineageFor, recordChampionGap, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
-const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
-const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0 };
+const DONE = new Set(['verified', 'supported', 'weak', 'unsupported', 'covered']);
+const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, covered: 2 };
 const LOG_LIMIT = 300;
 const MAX_ATTEMPTS = 3;
 const MAX_ATTACHMENTS = 6;
@@ -404,9 +404,8 @@ export class ResearchEngine {
       await this.ensureDecisionModel(project);
       const brief = this.briefOf(project);
       if (brief.located) {
-        const pruned = dropListingWork(project.nodes);
-        project.nodes = pruned.nodes;
-        if (pruned.dropped.length) this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${pruned.dropped.join(', ')}`);
+        const marked = markListingWork(project.nodes, kindWordsOf(brief.kind ?? project.decisionModel?.kind));
+        if (marked.covered.length) this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${marked.covered.join(', ')}`);
       } else this.emit(project, 'tree', `no listing portal is known for "${brief.kind?.label ?? 'this item'}": the pieces that find the items are researched, and ${brief.regions.join(', ') || 'the asked place'} is where the result is used, not a filter on sources`);
     }
     const model = project.decisionModel;
@@ -1497,13 +1496,6 @@ export class ResearchEngine {
       const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       for (const fix of fixes.filter((f) => f.code === 'scope')) this.emit(project, 'tree', fix.detail);
-      if (project.acceptance?.itemCount && (project.brief ?? this.briefOf(project)).located) {
-        const pruned = dropListingWork(project.nodes);
-        if (pruned.dropped.length) {
-          project.nodes = pruned.nodes;
-          this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${pruned.dropped.join(', ')}`);
-        }
-      }
       this.regrade(project);
       this.monitorPass(project);
       const listingsFirst = Boolean(project.acceptance?.itemCount && this.search?.readPage && !this.demo);
