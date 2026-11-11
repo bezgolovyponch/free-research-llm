@@ -1283,7 +1283,36 @@ describe('distance from the asked place', () => {
     expect(out.kept.map((r) => r.title)).toEqual(['berlin', 'munich', 'no place']);
     expect(out.toCheck[0]).toMatchObject({ title: 'hamburg', toCheck: expect.stringMatching(/^farther than 300 km from prague \(\d+ km\)$/) });
     expect(out.keptCount).toBe(3);
-    expect(events.some((m) => /distance from prague: 3 listing\(s\) measured, 1 farther than 300 km, 1 without a stated place/.test(m))).toBe(true);
+    expect((out.kept.find((r) => r.title === 'no place') as { unmeasured?: boolean }).unmeasured).toBe(true);
+    expect(events.some((m) => /distance from prague: 3 listing\(s\) measured, 1 farther than 300 km, 1 not measurable/.test(m))).toBe(true);
+  });
+
+  it('measures every row, not only the first 60, and geocodes each distinct place once', async () => {
+    const events: string[] = [];
+    const calls: string[] = [];
+    const engine = new ResearchEngine({ router: null, search: null, store: { cache: new Map(), save: async (p: unknown) => p }, sites: { geocode: async (place: string) => { calls.push(place); return { lat: 50.0875 + (calls.length % 7) * 0.01, lon: 14.4213 }; } }, onEvent: (_id: string, e: { message: string }) => events.push(e.message) } as never);
+    const rows = Array.from({ length: 100 }, (_, i) => ({ title: `car ${i}`, url: `https://auto.bazos.cz/inzerat/226${String(i).padStart(6, '0')}/x.php`, value: 30000, unit: 'CZK', place: i < 30 ? 'Praha' : `place ${i}` }));
+    const table = { kept: rows, toCheck: [], keptCount: 100, toCheckCount: 0 };
+    const project = { id: 'p', area: { point: { lat: 50.0875, lon: 14.4213 }, km: 300, place: 'prague' }, log: [] };
+    const out = await (engine as unknown as { measureDistances: (p: unknown, t: unknown) => Promise<typeof table> }).measureDistances(project, table);
+    expect(out.kept.filter((r) => Number.isFinite((r as { distanceKm?: number }).distanceKm))).toHaveLength(100);
+    expect(calls.filter((c) => c === 'Praha')).toHaveLength(1);
+    expect(calls).toHaveLength(71);
+    expect(events.some((m) => /distance from prague: 100 listing\(s\) measured, 0 farther than 300 km, 0 not measurable/.test(m))).toBe(true);
+  });
+
+  it('marks rows whose place cannot be geocoded as unmeasured instead of silently within range', async () => {
+    const events: string[] = [];
+    const engine = new ResearchEngine({ router: null, search: null, store: { cache: new Map(), save: async (p: unknown) => p }, sites: { geocode: async () => null }, onEvent: (_id: string, e: { message: string }) => events.push(e.message) } as never);
+    const table = { kept: [
+      { title: 'geocode fails', url: 'https://auto.bazos.cz/inzerat/226000001/x.php', value: 30000, unit: 'CZK', place: 'Nowhere', countryCode: 'CZ' },
+      { title: 'no place at all', url: 'https://auto.bazos.cz/inzerat/226000002/x.php', value: 30000, unit: 'CZK' },
+    ], toCheck: [], keptCount: 2, toCheckCount: 0 };
+    const project = { id: 'p', area: { point: { lat: 50.0875, lon: 14.4213 }, km: 300, place: 'prague' }, log: [] };
+    const out = await (engine as unknown as { measureDistances: (p: unknown, t: unknown) => Promise<typeof table> }).measureDistances(project, table);
+    expect(out.kept.every((r) => (r as { unmeasured?: boolean }).unmeasured === true)).toBe(true);
+    expect(out.kept.every((r) => !Number.isFinite((r as { distanceKm?: number }).distanceKm))).toBe(true);
+    expect(events.some((m) => /distance from prague: 0 listing\(s\) measured, 0 farther than 300 km, 2 not measurable/.test(m))).toBe(true);
   });
 });
 
