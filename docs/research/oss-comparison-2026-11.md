@@ -47,6 +47,7 @@ All fetched with `curl -sL` on the raw GitHub `main` branch; every fetch returne
 - **Files that would change**: `src/research/evidence.mjs` (+ possibly a new module under `src/research/`).
 - **How to test**: add `tests/research/evidence.test.mjs` cases for usefulness-scored ranking vs BM25 fallback; run `npx vitest run tests/research/evidence.test.mjs`.
 - **Effort**: S / M.
+- **Lead check (2026-11-11)**: the quote is real (README line 231, inside link markup). Jev needs a paid `TYPESAFE_API_KEY`; the README says it falls back to BM25 without one — which is what we already run. Adopt only as a free-model usefulness judge, if quota allows.
 
 ### 2 — Add a token-budget-bounded deep-research loop
 
