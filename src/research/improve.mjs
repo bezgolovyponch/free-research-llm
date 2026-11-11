@@ -173,6 +173,7 @@ export function restRotation(targets, trials = []) {
 }
 
 export const STALL_TRIALS = 20;
+export const PLATEAU_TRIALS = 12;
 
 export function stallCheck(project, now = Date.now()) {
   const trials = project.improve?.trials ?? [];
@@ -193,6 +194,21 @@ export function stallCheck(project, now = Date.now()) {
 
 export function stallMessage(stall) {
   return `The self-improving loop is stalled: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h without a kept change${stall.weakest ? `; the weakest expected-result check is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%` : ''}. It now steers every proposal toward new evidence for that check and refuses repeats${stall.refusedRemovals.length ? ` (removals already refused: ${stall.refusedRemovals.join(', ')})` : ''}.`;
+}
+
+export function plateauStopReason() {
+  return `plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`;
+}
+
+export function plateauCheck(trials = []) {
+  const sinceKept = [];
+  for (const t of trials) {
+    if (t.outcome === 'kept') sinceKept.length = 0;
+    else if (t.outcome === 'provider-outage' || t.outcome === 'error') continue;
+    else sinceKept.push(t);
+  }
+  const plateaued = sinceKept.length >= PLATEAU_TRIALS;
+  return { plateaued, trialsSinceKept: sinceKept.length };
 }
 
 export const REPEAT_SIMILARITY = 0.85;
@@ -497,20 +513,27 @@ export class ProjectImprover {
     state.best = state.measure(project);
     await this.record(id, { baseline: state.best.score, best: state.best.score });
     let quiet = 0;
+    let stopReason = state.stopped ? 'stopped by user' : 'time limit reached';
     await this.saveCheckpoint(id, state);
     while (this.live(state)) {
       const improved = await this.whenModelsAnswer(id, state, () => this.pass(id, state));
       await this.saveCheckpoint(id, state);
       if (this.engine.siteWarm?.get(id)?.ready) await this.rebase(id, state);
       quiet = improved ? 0 : quiet + 1;
+      let plateaued = false;
       await state.lock.run(async () => {
         const current = await this.engine.load(id);
-        await this.record(id, { passes: (current.improve?.passes ?? 0) + 1, quietPasses: quiet, stall: stallCheck(current, this.now()) });
+        const improve = await this.record(id, { passes: (current.improve?.passes ?? 0) + 1, quietPasses: quiet, stall: stallCheck(current, this.now()) });
+        plateaued = plateauCheck(improve?.trials ?? []).plateaued;
       });
+      if (plateaued) {
+        stopReason = plateauStopReason();
+        break;
+      }
     }
     state.spawn = null;
     this.engine.leave(id);
-    await this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
+    await this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason });
   }
 
   async rebase(id, state) {

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { NOISE_MIN_SAMPLES, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, noiseFloor, purposeScore, resultsRubric, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, loopCanImprove, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage, trialVerdict } from '../../src/research/improve.mjs';
+import { NOISE_MIN_SAMPLES, PLATEAU_TRIALS, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, noiseFloor, plateauCheck, plateauStopReason, purposeScore, resultsRubric, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, loopCanImprove, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage, trialVerdict } from '../../src/research/improve.mjs';
 import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -127,7 +127,7 @@ describe('ProjectImprover', () => {
     for (let i = 0; i < 500 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
     const saved = await engine.load(project.id);
     expect(saved.improve.active).toBe(false);
-    expect(saved.improve.stopReason).toBe('time limit reached');
+    expect(saved.improve.stopReason).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
     expect(saved.improve.baseline).toBeGreaterThan(0);
     expect(saved.improve.trials.length).toBeGreaterThan(0);
     expect(new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome))).toEqual(new Set(['no-change', 'no-gain', 'repeat']));
@@ -314,7 +314,7 @@ describe('ProjectImprover through provider outages', () => {
     expect(failures).toBe(2);
     expect(sleeps.slice(0, 2)).toEqual([300000, 300000]);
     expect(saved.improve.error ?? null).toBeNull();
-    expect(saved.improve.stopReason).toBe('time limit reached');
+    expect(saved.improve.stopReason).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
     expect(saved.improve.lastPause.reason).toMatch(/every provider failed for synthesize/);
     expect(saved.log.some((l: { message: string }) => /loop paused 5 min/.test(l.message))).toBe(true);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
@@ -373,6 +373,10 @@ describe('ProjectImprover handoffs', () => {
 
     clock = 0;
     const second = new ProjectImprover({ engine, now: () => clock, sleep: async () => {} });
+    second.pass = async () => false;
+    const resumed = await engine.load(project.id);
+    resumed.improve = { ...resumed.improve, trials: [] };
+    await engine.store.save(resumed);
     second.start(project.id, { hours: 4 });
     await new Promise((r) => setTimeout(r, 30));
     await second.shutdown();
@@ -751,6 +755,66 @@ describe('a trial that researches only what it changed', () => {
     await engine.checkAcceptance(project as never, pages);
     expect(reads).toEqual([one]);
     expect({ score: project.acceptanceResult.score, checks: project.acceptanceResult.checks }).toEqual(first);
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
+describe('plateau', () => {
+  const t0 = Date.parse('2026-10-24T10:00:00Z');
+  const at = (min: number) => new Date(t0 + min * 60000).toISOString();
+  const plateau = () => plateauStopReason();
+
+  it('stops the loop after PLATEAU_TRIALS non-kept finished trials in a row', () => {
+    const trials = Array.from({ length: PLATEAU_TRIALS }, (_, i) => ({ nodeId: 'D1.1', outcome: 'reverted-whole', change: `try ${i}`, at: at(i) }));
+    expect(plateauCheck(trials).plateaued).toBe(true);
+    expect(plateauCheck(trials).trialsSinceKept).toBe(PLATEAU_TRIALS);
+    expect(plateauCheck(trials.slice(0, PLATEAU_TRIALS - 1)).plateaued).toBe(false);
+  });
+
+  it('resets the count when a trial is kept', () => {
+    const trials = [
+      ...Array.from({ length: PLATEAU_TRIALS - 1 }, (_, i) => ({ nodeId: 'D1.1', outcome: 'reverted-whole', change: `try ${i}`, at: at(i) })),
+      { nodeId: 'D1.1', outcome: 'kept', change: 'k', at: at(PLATEAU_TRIALS - 1) },
+      { nodeId: 'D1.1', outcome: 'reverted-whole', change: 'after', at: at(PLATEAU_TRIALS) },
+    ];
+    expect(plateauCheck(trials).plateaued).toBe(false);
+    expect(plateauCheck(trials).trialsSinceKept).toBe(1);
+  });
+
+  it('does not count provider outages or errors toward the plateau', () => {
+    const trials = [
+      ...Array.from({ length: PLATEAU_TRIALS }, (_, i) => ({ nodeId: 'D1.1', outcome: i % 2 ? 'provider-outage' : 'error', change: `outage ${i}`, at: at(i) })),
+    ];
+    expect(plateauCheck(trials).plateaued).toBe(false);
+    expect(plateauCheck(trials).trialsSinceKept).toBe(0);
+    const mixed = [
+      ...Array.from({ length: PLATEAU_TRIALS - 1 }, (_, i) => ({ nodeId: 'D1.1', outcome: i % 2 ? 'provider-outage' : 'reverted-whole', change: `m ${i}`, at: at(i) })),
+      { nodeId: 'D1.1', outcome: 'kept', change: 'k', at: at(PLATEAU_TRIALS - 1) },
+    ];
+    expect(plateauCheck(mixed).plateaued).toBe(false);
+  });
+
+  it('says the plateau stop reason out loud', () => {
+    expect(plateau()).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
+  });
+
+  it('ends the loop with the plateau stop reason instead of running until the time limit', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-plateau-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), lanes: 1 });
+    const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    await engine.run(project.id);
+    let clock = 0;
+    const improver = new ProjectImprover({ engine, now: () => (clock += 1000), sleep: async () => {} });
+    // never propose a change that can be kept: every trial is a no-gain / repeat
+    improver.propose = async () => ({ change: 'nothing useful', searchQueries: ['x'] });
+    improver.start(project.id, { hours: 1 });
+    for (let i = 0; i < 1000 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    const saved = await engine.load(project.id);
+    expect(saved.improve.active).toBe(false);
+    expect(saved.improve.stopReason).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
+    expect(saved.improve.trials.length).toBeGreaterThanOrEqual(PLATEAU_TRIALS);
+    expect(saved.improve.trials.every((t: { outcome: string }) => t.outcome !== 'kept')).toBe(true);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 });
