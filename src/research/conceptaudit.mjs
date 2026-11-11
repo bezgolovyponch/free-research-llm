@@ -1,7 +1,7 @@
 import { countsTowardResult } from './candidates.mjs';
 import { supportAudit } from './support.mjs';
 import { TEMPLATES } from './templates.mjs';
-import { listingWork } from './treeaudit.mjs';
+import { kindWordsOf, listingWork } from './treeaudit.mjs';
 
 const RESULT_WORD = /^(?:listings?|results?|items?|cars?|plots?|candidates?|offers?|properties|property|links?)$/i;
 
@@ -164,7 +164,8 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
 
   if (Number(p.acceptance?.itemCount) > 0 && Array.isArray(p.nodes) && p.brief?.located !== false) {
     const leaves = p.nodes.filter((n) => !p.nodes.some((m) => m.parentId === n.id));
-    const ids = leaves.filter((n) => listingWork(n.question)).map((n) => n.id);
+    const words = kindWordsOf(p.brief?.kind ?? p.decisionModel?.kind);
+    const ids = leaves.filter((n) => n.status !== 'covered' && listingWork(n.question, words)).map((n) => n.id);
     add('C18', 'A list research leaves per-listing work to code', 'warn', !ids.length, ids.length ? `${ids.length} piece(s) do per-listing work code should do: ${ids.slice(0, 6).join(', ')}` : 'No piece does per-listing work.');
   }
 
