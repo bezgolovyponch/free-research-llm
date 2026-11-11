@@ -37,7 +37,7 @@ const ITEMS = [
     source: 'Systematic review flow: identification, screening, appraisal',
     enforcedBy: [
       ['src/research/sweep.mjs', 'CandidateSweeper'],
-      ['src/research/treeaudit.mjs', 'dropListingWork'],
+      ['src/research/treeaudit.mjs', 'markListingWork'],
       ['src/research/portals.mjs', 'listedKind'],
     ],
   },

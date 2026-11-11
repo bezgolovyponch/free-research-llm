@@ -143,15 +143,32 @@ describe('listing work that code does on the candidate table', () => {
     node('D5.2', 'D5', 'Assess seller reputation based on reviews or dealer status.'),
   ];
 
-  it('drops the per-listing pieces and keeps the knowledge and judgment ones', async () => {
-    const { dropListingWork } = await import('../../src/research/treeaudit.mjs');
-    const { nodes, dropped } = dropListingWork(carTree());
-    expect(dropped).toEqual(['D1', 'D1.1', 'D1.2', 'D1.3', 'D2', 'D2.1', 'D2.2', 'D3', 'D3.1', 'D3.2', 'D5.1']);
-    expect(nodes.map((n: { id: string }) => n.id)).toEqual(['Q', 'D4', 'D4.1', 'D4.2', 'D5', 'D5.2']);
+  it('marks the per-listing pieces as covered and removes nothing', async () => {
+    const { markListingWork } = await import('../../src/research/treeaudit.mjs');
+    const nodes = carTree();
+    const { covered } = markListingWork(nodes);
+    expect(covered).toEqual(['D1', 'D1.1', 'D1.2', 'D1.3', 'D2', 'D2.1', 'D2.2', 'D3', 'D3.1', 'D3.2', 'D5.1']);
+    expect(nodes.map((n: { id: string }) => n.id)).toEqual(['Q', 'D1', 'D1.1', 'D1.2', 'D1.3', 'D2', 'D2.1', 'D2.2', 'D3', 'D3.1', 'D3.2', 'D4', 'D4.1', 'D4.2', 'D5', 'D5.1', 'D5.2']);
+    for (const id of covered) expect(nodes.find((n: { id: string }) => n.id === id)).toMatchObject({ status: 'covered', coveredBy: 'candidate-table' });
+    for (const id of ['Q', 'D4', 'D4.1', 'D4.2', 'D5', 'D5.2']) expect(nodes.find((n: { id: string }) => n.id === id)?.status).not.toBe('covered');
   });
 
-  it('tells listing work apart from knowledge a listing cannot show, and never drops the root', async () => {
-    const { listingWork, dropListingWork } = await import('../../src/research/treeaudit.mjs');
+  it('keeps sources, listings and findings of a marked node untouched', async () => {
+    const { markListingWork } = await import('../../src/research/treeaudit.mjs');
+    const nodes = [
+      { id: 'Q', parentId: null, title: 'Q', question: 'q' },
+      { id: 'D1', parentId: 'Q', status: 'verified', title: 'Listed parcels', question: 'Which coastal land parcels in Portugal are listed for sale under 20,000 EUR?', sources: [{ id: 'S1', url: 'https://a.example', listings: [{ url: 'https://a.example/ad/1', value: 19000, unit: 'EUR' }] }], finding: { answer: 'one plot', items: [{ url: 'https://a.example/ad/1' }] } },
+    ];
+    const { covered } = markListingWork(nodes);
+    expect(covered).toEqual(['D1']);
+    expect(nodes).toHaveLength(2);
+    expect(nodes[1].sources?.[0].listings).toHaveLength(1);
+    expect(nodes[1].finding?.items).toHaveLength(1);
+    expect(nodes[1]).toMatchObject({ status: 'covered', coveredBy: 'candidate-table' });
+  });
+
+  it('tells listing work apart from knowledge a listing cannot show, and never marks the root', async () => {
+    const { listingWork, markListingWork } = await import('../../src/research/treeaudit.mjs');
     expect(listingWork('List hatchbacks <= 65,000 CZK on auto.cz within 300km.')).toBe(true);
     expect(listingWork('Which specific hatchback listings exist on German marketplaces?')).toBe(true);
     expect(listingWork('Do candidates meet the 300km radius and hatchback body type criteria?')).toBe(true);
@@ -159,7 +176,9 @@ describe('listing work that code does on the candidate table', () => {
     expect(listingWork('Compare engine types and mileage against market norms for the price.')).toBe(false);
     expect(listingWork('Check empirical reliability data for specific models in the candidate pool.')).toBe(false);
     expect(listingWork('Assess seller reputation based on reviews or dealer status.')).toBe(false);
-    expect(dropListingWork([node('Q', 'Q', 'Which specific listings exist?')]).nodes.map((n: { id: string }) => n.id)).toEqual(['Q']);
+    const root = node('Q', 'Q', 'Which specific listings exist?');
+    expect(markListingWork([root]).covered).toEqual([]);
+    expect(root.status).toBeUndefined();
   });
 });
 
@@ -229,23 +248,55 @@ describe('narrowing pieces to the asked countries', () => {
 });
 
 describe('per-listing yes/no checks go to code, knowledge stays', () => {
-  it('drops checks phrased as questions and keeps engine, owner and repair knowledge', async () => {
+  it('marks checks phrased as questions and keeps engine, owner and repair knowledge', async () => {
     const { listingWork } = await import('../../src/research/treeaudit.mjs');
-    for (const q of ['Do identified ads respect the ≤65,000 CZK price ceiling?', 'Is listed price ≤65,000 CZK or equivalent EUR?', 'Are remaining ads confirmed hatchbacks?', 'Is body style ambiguous or non-hatchback?']) expect(listingWork(q)).toBe(true);
+    for (const q of ['Do identified ads respect the ≤65,000 CZK price ceiling?', 'Is listed price ≤65,000 CZK or equivalent EUR?', 'Are remaining ads confirmed hatchbacks?']) expect(listingWork(q)).toBe(true);
     for (const q of ['Which engines in these models are most reliable?', 'What do owner communities report about the Fabia 1.2 HTP engine?', 'What are typical repair costs for a 2008 Kia Rio?']) expect(listingWork(q)).toBe(false);
+  });
+
+  it('keeps item-specific vocabulary out of the generic rule and takes it from the brief kind instead', async () => {
+    const { listingWork, kindWordsOf } = await import('../../src/research/treeaudit.mjs');
+    expect(listingWork('Is body style ambiguous or non-hatchback?')).toBe(false);
+    expect(kindWordsOf({ not: ['engine'], subtype: { variants: ['body style', 'body type'] } })).toEqual(['engine', 'body style', 'body type']);
+    expect(listingWork('Is body style ambiguous or non-hatchback?', kindWordsOf({ subtype: { variants: ['body style', 'body type'] } }))).toBe(true);
+    expect(listingWork('Is the listed price within the ceiling?', kindWordsOf({ not: ['engine'] }))).toBe(true);
   });
 });
 
 describe('per-listing yes/no checks behind a title', () => {
-  it('drops a yes/no check on listings even when its title comes first (car research 0c750f, D3.2)', async () => {
-    const { dropListingWork } = await import('../../src/research/treeaudit.mjs');
+  it('marks a yes/no check on listings even when its title comes first (car research 0c750f, D3.2)', async () => {
+    const { markListingWork } = await import('../../src/research/treeaudit.mjs');
     const nodes = [
       { id: 'Q', parentId: null, title: 'Q', question: 'Which cars?' },
       { id: 'D3', parentId: 'Q', title: 'Screen body type', question: 'Are remaining ads confirmed hatchbacks?' },
       { id: 'D3.2', parentId: 'D3', title: 'Exclude ambiguous bodies', question: 'Is body style ambiguous or non\u2011hatchback?' },
       { id: 'D4', parentId: 'Q', title: 'Engine reliability', question: 'Which engines of these models do owners report as durable?' },
     ];
-    expect(dropListingWork(nodes).dropped.sort()).toEqual(['D3', 'D3.2']);
+    const { covered } = markListingWork(nodes, ['body style', 'body type']);
+    expect(covered.sort()).toEqual(['D3', 'D3.2']);
+    expect(nodes).toHaveLength(4);
+    expect(nodes.find((n) => n.id === 'D3.2')).toMatchObject({ status: 'covered', coveredBy: 'candidate-table' });
+    expect(nodes.find((n) => n.id === 'D4')?.status).not.toBe('covered');
+  });
+});
+
+describe('listing-for-sale phrasings from research b7772e (coastal land in Portugal)', () => {
+  it('marks "listed for sale" / "are listed" leaves and leaves zoning and preparation-cost questions to research', async () => {
+    const { listingWork, markListingWork } = await import('../../src/research/treeaudit.mjs');
+    expect(listingWork('Which coastal land parcels in Portugal are listed for sale under 20,000 EUR, within 5 km of the sea')).toBe(true);
+    expect(listingWork('What specific land parcels in each asked country are listed?')).toBe(true);
+    expect(listingWork('What zoning categories allow tourism accommodation on coastal plots in each country?')).toBe(false);
+    expect(listingWork('What does it typically cost (EUR) and how long does it take to make rough rural land glamping-ready?')).toBe(false);
+    const nodes = [
+      { id: 'Q', parentId: null, title: 'Q', question: 'q' },
+      { id: 'D1', parentId: 'Q', title: 'Parcels for sale', question: 'Which coastal land parcels in Portugal are listed for sale under 20,000 EUR, within 5 km of the sea' },
+      { id: 'D2', parentId: 'Q', title: 'Zoning', question: 'What zoning categories allow tourism accommodation on coastal plots in each country?' },
+      { id: 'D3', parentId: 'Q', title: 'Preparation', question: 'What does it typically cost (EUR) and how long does it take to make rough rural land glamping-ready?' },
+    ];
+    const { covered } = markListingWork(nodes);
+    expect(covered).toEqual(['D1']);
+    expect(nodes.find((n) => n.id === 'D1')).toMatchObject({ status: 'covered', coveredBy: 'candidate-table' });
+    expect(nodes.filter((n) => n.status === 'covered')).toHaveLength(1);
   });
 });
 
