@@ -200,11 +200,15 @@ export function plateauStopReason() {
   return `plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`;
 }
 
-export function plateauCheck(trials = []) {
+const NOT_A_MEASURED_TRIAL = new Set(['provider-outage', 'error', 'reverted-stopped', 'conflict']);
+
+export function plateauCheck(trials = [], startedAt = null) {
   const sinceKept = [];
+  const start = startedAt ? Date.parse(startedAt) : -Infinity;
   for (const t of trials) {
+    if (t.at && Date.parse(t.at) < start) continue;
     if (t.outcome === 'kept') sinceKept.length = 0;
-    else if (t.outcome === 'provider-outage' || t.outcome === 'error') continue;
+    else if (NOT_A_MEASURED_TRIAL.has(t.outcome)) continue;
     else sinceKept.push(t);
   }
   const plateaued = sinceKept.length >= PLATEAU_TRIALS;
@@ -524,7 +528,7 @@ export class ProjectImprover {
       await state.lock.run(async () => {
         const current = await this.engine.load(id);
         const improve = await this.record(id, { passes: (current.improve?.passes ?? 0) + 1, quietPasses: quiet, stall: stallCheck(current, this.now()) });
-        plateaued = plateauCheck(improve?.trials ?? []).plateaued;
+        plateaued = plateauCheck(improve?.trials ?? [], improve?.startedAt).plateaued;
       });
       if (plateaued) {
         stopReason = plateauStopReason();

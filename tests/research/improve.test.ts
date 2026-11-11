@@ -794,6 +794,15 @@ describe('plateau', () => {
     expect(plateauCheck(mixed).plateaued).toBe(false);
   });
 
+  it('counts only the trials of the current loop run and skips stopped or conflicting trials', () => {
+    const earlier = Array.from({ length: PLATEAU_TRIALS }, (_, i) => ({ nodeId: 'D1.1', outcome: 'no-gain', change: `old ${i}`, at: at(i) }));
+    const current = [{ nodeId: 'D1.1', outcome: 'no-gain', change: 'new', at: at(100) }];
+    expect(plateauCheck([...earlier, ...current], at(50)).trialsSinceKept).toBe(1);
+    expect(plateauCheck([...earlier, ...current]).plateaued).toBe(true);
+    const interrupted = Array.from({ length: PLATEAU_TRIALS }, (_, i) => ({ nodeId: 'D1.1', outcome: i % 2 ? 'reverted-stopped' : 'conflict', change: `s ${i}`, at: at(i) }));
+    expect(plateauCheck(interrupted).trialsSinceKept).toBe(0);
+  });
+
   it('says the plateau stop reason out loud', () => {
     expect(plateau()).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
   });
