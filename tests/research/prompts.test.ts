@@ -11,11 +11,17 @@ describe('variantPrompt', () => {
     expect(text(null)).not.toMatch(/STALLED|REFUSED/);
   });
 
-  it('steers a stalled loop toward new evidence for the weakest check and lists refused removals', () => {
-    const prompt = text({ stalled: true, trialsSinceKept: 200, hoursSinceKept: 11.2, weakest: { label: 'At least 50 valid items', value: 0.1 }, refusedRemovals: ['D4', 'D5'] });
-    expect(prompt).toMatch(/THE LOOP IS STALLED: 200 trials in 11.2 h kept nothing\. The weakest expected-result check is "At least 50 valid items" at 10%\./);
-    expect(prompt).toMatch(/NEW evidence for that check/);
+  it('steers a stalled loop toward new evidence for the lowest check below 100% and lists refused removals', () => {
+    const prompt = text({ stalled: true, trialsSinceKept: 200, hoursSinceKept: 11.2, weakest: { label: 'At least 50 valid items', value: 0.1 }, failingPieces: [], refusedRemovals: ['D4', 'D5'] });
+    expect(prompt).toMatch(/THE LOOP IS STALLED: 200 trials in 11.2 h kept nothing\. The lowest expected-result check below 100% is "At least 50 valid items" at 10%\./);
+    expect(prompt).toMatch(/NEW evidence for what can still gain/);
     expect(prompt).toMatch(/REMOVALS ALREADY TESTED AND REFUSED \(never propose them again\): D4, D5/);
+  });
+
+  it('names the failing pieces when every check is at 100%', () => {
+    const prompt = text({ stalled: true, trialsSinceKept: 200, hoursSinceKept: 11.2, weakest: null, failingPieces: ['D2', 'D3'], refusedRemovals: [] });
+    expect(prompt).toMatch(/Every expected-result check is at 100%, but these pieces do not pass: D2, D3\./);
+    expect(prompt).not.toMatch(/weakest expected-result check/i);
   });
 });
 

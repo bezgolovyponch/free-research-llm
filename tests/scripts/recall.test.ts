@@ -12,8 +12,8 @@ function runCli(args: string[]): string {
 }
 
 describe('process lessons store', () => {
-  it('holds one entry per failure class F1 to F14', () => {
-    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14']);
+  it('holds one entry per failure class F1 to F14 plus F16 (F15 is taken by a parallel worker)', () => {
+    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14', 'F16']);
     for (const lesson of lessons) {
       expect(typeof lesson.title).toBe('string');
       expect(lesson.title.length).toBeGreaterThan(0);

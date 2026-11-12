@@ -286,7 +286,12 @@ export function variantPrompt({ project, node, score, trials, stall = null, play
   const sources = (node.sources ?? []).filter((s) => s.url).slice(0, 8).map((s) => `${s.id} ${s.title} <${s.url}> (${(s.links ?? []).length} links)`).join('\n') || 'none';
   const tried = trials.slice(-6).map((t) => `- ${t.change} -> ${t.outcome} (${t.score})`).join('\n') || 'none';
   const refused = stall?.refusedRemovals?.length ? `\nREMOVALS ALREADY TESTED AND REFUSED (never propose them again): ${stall.refusedRemovals.join(', ')}` : '';
-  const stalled = stall?.stalled ? `\nTHE LOOP IS STALLED: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h kept nothing.${stall.weakest ? ` The weakest expected-result check is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%.` : ''} Removing or re-wording pieces has not raised the score. Propose a change that brings NEW evidence for that check: exact public pages to read (sourceUrls), local-language queries, a source type not used yet, or a region not covered yet.` : '';
+  const stallTarget = stall?.weakest
+    ? ` The lowest expected-result check below 100% is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%.`
+    : stall?.failingPieces?.length
+      ? ` Every expected-result check is at 100%, but these pieces do not pass: ${stall.failingPieces.join(', ')}.`
+      : '';
+  const stalled = stall?.stalled ? `\nTHE LOOP IS STALLED: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h kept nothing.${stallTarget} Removing or re-wording pieces has not raised the score. Propose a change that brings NEW evidence for what can still gain: exact public pages to read (sourceUrls), local-language queries, a source type not used yet, or a region not covered yet.` : '';
   return [
     { role: 'system', content: SYSTEM },
     {
