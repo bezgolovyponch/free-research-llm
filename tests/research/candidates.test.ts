@@ -293,6 +293,7 @@ describe('rows that pass every hard criterion are never set aside or capped (rec
       const row = table.kept.find((r: { url: string }) => r.url === url);
       expect(row, url).toBeTruthy();
       expect(row?.lowCut).toBeGreaterThan(row?.value ?? 0);
+      expect(row?.valueNotes?.some((n: string) => n.startsWith('price far below'))).toBe(true);
       expect(table.toCheck.some((r: { url: string }) => r.url === url)).toBe(false);
     }
     const cheapest = table.kept.find((r: { url: string }) => r.url === realPlots[0][1]);

@@ -227,6 +227,10 @@ export function passesEveryHardCriterion(row, verdict, brief) {
   return true;
 }
 
+function lowPriceNote(cut, unit) {
+  return `price far below what most listings of this kind cost (under ${cut} ${unit}): likely a part, a deposit or an instalment`;
+}
+
 export function implausiblyLow(rows) {
   const priced = rows.filter((r) => Number.isFinite(r.value) && r.value > 0);
   if (priced.length < MIN_PRICE_SAMPLE) return [];
@@ -281,10 +285,13 @@ export function buildCandidates(nodes, brief, options = {}) {
     (verdict.missing.length ? toCheck : kept).push(publicRow(row, verdict, unit));
   }
   for (const row of implausiblyLow(kept)) {
-    if (hardPass.has(row.url)) continue;
+    if (hardPass.has(row.url)) {
+      row.valueNotes = [...(row.valueNotes ?? []), lowPriceNote(row.lowCut, unit)];
+      continue;
+    }
     kept.splice(kept.indexOf(row), 1);
     const { lowCut, ...rest } = row;
-    toCheck.push({ ...rest, toCheck: [rest.toCheck, `price far below what most listings of this kind cost (under ${lowCut} ${unit}): likely a part, a deposit or an instalment`].filter(Boolean).join('; ') });
+    toCheck.push({ ...rest, toCheck: [rest.toCheck, lowPriceNote(lowCut, unit)].filter(Boolean).join('; ') });
   }
   if (brief?.subtype?.models?.length) {
     const compared = valueVsPeers(kept, brief.subtype.models);
