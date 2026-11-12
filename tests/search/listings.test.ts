@@ -117,6 +117,45 @@ describe('listing extraction', () => {
     expect(pathTemplate('https://a.example/announces/other-real+estate-catalonia-spain/107193361/')).toBe('a.example/announces/~/*');
   });
 
+  it('listingKey separates two bazos ads ending in 2004', () => {
+    const fabia = 'https://auto.bazos.cz/inzerat/225780289/skoda-fabia-12-htp-2004.php';
+    const octavia = 'https://auto.bazos.cz/inzerat/225619567/skoda-octavia-2004.php';
+    expect(listingKey(fabia)).toBe('auto.bazos.cz#225780289');
+    expect(listingKey(octavia)).toBe('auto.bazos.cz#225619567');
+    expect(listingKey('https://auto.bazos.cz/inzerat/226121047/prodam-seat-altea-tento-vikend-14999.php')).not.toBe(listingKey('https://auto.bazos.cz/inzerat/226117355/prodam-seat-ibiza-tento-vikend-cena-jen-14999.php'));
+    expect(listingKey('https://auto.bazos.cz/inzerat/226316805/peugeot-207-14-trendy-rv-2006-naj-180000-km.php')).not.toBe(listingKey('https://auto.bazos.cz/inzerat/226271917/meriva-16i-r09-180000-km-bez-koroze.php'));
+    expect(listingKey('https://www.imovirtual.com/pt/anuncio/terreno-rustico-de-0-65ha-localizado-a-cerca-de-250mt-da-localidade-ID1aYKL')).toBe('imovirtual.com#id1aykl');
+    expect(listingKey('https://www.emlakjet.com/ilan/balcity-canakkale-biga-gulec-mahallesinde-4-donum-yatirim-firsati-20034681')).toBe('emlakjet.com#20034681');
+    expect(listingKey('https://www.autoscout24.de/angebote/volkswagen-polo-iv-scheckheft-hu-02-2028-benzin-schwarz-cat_ma74gr100099ge174va162mt27')).not.toBe(listingKey('https://www.autoscout24.de/angebote/volkswagen-polo-v-trendline-benzin-schwarz-cat_ma74gr100099ge175va3919mt271tr260-7c047'));
+  });
+
+  it('merge keeps area and unit from one method', () => {
+    const ads = [
+      { slug: 'terreno-rustico-de-0-65ha-localizado-a-cerca-de-250mt-da-localidade-ID1aYKL', title: 'Terreno rústico de 0,65Ha localizado a cerca de 250mt da localidade...', price: 5500, m2: 6500, card: '5500 € 0,85 €/m² Terreno rústico de 0,65Ha localizado a cerca de 250mt da localidade... Santa Cruz, Almodôvar, Beja Preço por metro quadrado 6500 m² Profissional' },
+      { slug: 'terreno-rustico-de-1-85ha-localizado-1-km-a-sudeste-da-localidade-d-ID1aYKN', title: 'Terreno rústico de 1,85Ha localizado 1 Km a sudeste da localidade d...', price: 8000, m2: 18500, card: '8000 € 0,43 €/m² Terreno rústico de 1,85Ha localizado 1 Km a sudeste da localidade d... Santa Cruz, Almodôvar, Beja Preço por metro quadrado 18500 m² Profissional' },
+      { slug: '2-terrenos-rusticos-0-6-ha-sobral-da-adica-ID1gGos', title: '2 Terrenos Rústicos 0,6 Ha | Sobral da Adiça', price: 20000, m2: 6000, card: '20 000 € 3,33 €/m² 2 Terrenos Rústicos 0,6 Ha | Sobral da Adiça Rua das Terçarias, Santo Agostinho e São João Baptista e Santo Amador, Moura, Beja Preço por metro quadrado 6000 m² Venda Segura' },
+    ];
+    const records = ads.map((ad, n) => ({ id: n + 1, title: ad.title, href: `[lang]/ad/${ad.slug}`, totalPrice: { value: ad.price, currency: 'EUR' }, areaInSquareMeters: ad.m2 }));
+    const next = { props: { pageProps: { data: { searchAds: { items: records } } } } };
+    const cards = ads.map((ad) => `<article><a href="/pt/anuncio/${ad.slug}">${ad.title}</a><p>${ad.card}</p></article>`).join('');
+    const page = 'https://www.imovirtual.com/pt/resultados/comprar/terreno/beja?priceMax=20000&page=2';
+    const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(next)}</script>${cards}`;
+    expect(fromCards(html, page).items.map((item: { area: number; areaUnit: string }) => [item.area, item.areaUnit])).toEqual([[0.65, 'ha'], [1.85, 'ha'], [0.6, 'ha']]);
+    const { items, methods } = extractListings(html, page);
+    expect(methods).toEqual(['embedded-json', 'cards']);
+    expect(items.map((item: { area: number; areaUnit?: string }) => [item.area, item.areaUnit || 'm²'])).toEqual([[6500, 'm²'], [18500, 'm²'], [6000, 'm²']]);
+    expect(items[0]).toMatchObject({ value: 5500, unit: 'EUR', via: ['embedded-json', 'cards'] });
+    const tarla = [
+      { slug: 'balcity-canakkale-biga-gulec-mahallesinde-4-donum-yatirim-firsati-20034681', title: 'Balcity - Çanakkale | Biga Güleç Mahallesinde 4 Dönüm Yatırım Fırsatı', card: 'Çanakkale, Biga 4001 m² · Su Hattı, Yolu Açılmış · 189/m² · 28.10.2026 757.500 ₺ BalCity Gayrimenkul İrfan Olgun Ara' },
+      { slug: 'balcity-karesi-toybelen-de-6-donum-imar-sinirinda-tarla-20032026', title: "Balcity- Karesi/toybelen'de 6 Dönüm İmar Sınırında Tarla", card: 'Balıkesir, Karesi 6000 m² · Elektrik Hattı, Su Hattı +1 · 243/m² · 28.10.2026 1.455.000 ₺ BalCity Gayrimenkul İrfan Olgun Ara' },
+      { slug: 'balcity-canakkale-lapseki-kizildam-da-436-m2-satilik-tarla-20020864', title: "Balcity - Çanakkale | Lapseki Kızıldam'da 436 M2 Satılık Tarla", card: 'Çanakkale, Lapseki 436 m² · Su Hattı, Yolu Açılmış · 521/m² · 24.10.2026 227.000 ₺ BalCity Gayrimenkul İrfan Olgun Ara' },
+    ];
+    const ld = { '@type': 'ItemList', itemListElement: tarla.map((ad) => ({ '@type': 'ListItem', item: { '@type': 'Residence', name: ad.title, url: 'https://www.emlakjet.com/ilan/' + ad.slug } })) };
+    const turkish = extractListings('<script type="application/ld+json">' + JSON.stringify(ld) + '</script>' + tarla.map((ad) => '<div><a href="/ilan/' + ad.slug + '">' + ad.title + '</a><p>' + ad.card + '</p></div>').join(''), 'https://www.emlakjet.com/satilik-tarla/canakkale?sayfa=3');
+    expect(turkish.methods).toEqual(['json-ld', 'cards']);
+    expect(turkish.items.map((item: { area: number; areaUnit: string }) => [item.area, item.areaUnit])).toEqual([[4, 'dönüm'], [6, 'dönüm'], [436, 'm2']]);
+  });
+
   it('reads the largest stated area of a page in square metres, hectares included', async () => {
     const { areaFromText } = await import('../../src/search/listings.mjs');
     expect(areaFromText('Área bruta 120 m² · Área do terreno: 2 500 m²')).toBe(2500);

@@ -75,7 +75,7 @@ export const COUNTRIES = [
 const LANDLOCKED = new Set(['AT', 'CH', 'CZ', 'HU', 'LU', 'MK', 'RS', 'SK']);
 const ONE_COUNTRY_LANGUAGES = { pt: 'PT', el: 'GR', tr: 'TR', vi: 'VN', hr: 'HR', bg: 'BG', it: 'IT', ro: 'RO', pl: 'PL', cs: 'CZ', sk: 'SK', sl: 'SI', hu: 'HU', fi: 'FI', sv: 'SE', da: 'DK', et: 'EE', lv: 'LV', lt: 'LT', sq: 'AL', ka: 'GE' };
 const GROUPS = { EU: /\b(?:eu|european union|e\.u\.)\b/ };
-const GENERIC_TLDS = new Set(['co', 'io', 'ai', 'me', 'tv', 'cc', 'fm', 'ly', 'to', 'gg', 'app']);
+const GENERIC_TLDS = new Set(['co', 'io', 'ai', 'me', 'tv', 'cc', 'fm', 'ly', 'to', 'gg', 'app', 'eu']);
 const TLD_ALIASES = { uk: 'GB' };
 export const SEA_WORDS = /\b(?:sea|ocean|coast(?:al)?|beach|seaside|shore|seafront)\b/;
 const COAST_ON_PAGE = /\b(?:sea|ocean|coast|coastal|beach|seaside|seafront|sea view|praia|playa|plage|spiaggia|mar|deniz|denize|sahil|plaj|bai bien|gan bien|thalassa|paralia|strand|kust|mora|uvala|uvale|pogled na more|plaza|plazi|bord de mer|vista mare|frente mar|denize sifir)\b/;
@@ -194,17 +194,21 @@ export function buildBrief({ question = '', acceptance = {}, constraints = {}, t
   };
 }
 
+const LISTING_ONLY_EXCLUDES = new Set(['offered for rent', 'offered as a swap', 'wanted ads']);
+
 export function describeBrief(brief) {
   if (!brief) return '';
   const grouped = new Set((brief.groups ?? []).flatMap((g) => COUNTRIES.filter((row) => row[3] === g).map(([code]) => code)));
   const names = [...(brief.groups ?? []).map((g) => `${g} (${COUNTRIES.filter((row) => row[3] === g).length} countries)`), ...brief.regions.filter((c) => !grouped.has(c)).map((c) => countryByCode(c)?.name)];
   const where = names.length ? names.join(', ') : 'any country';
+  const entities = Boolean(brief.kind) && brief.located === false;
+  const excludes = entities ? brief.excludes.filter((reason) => !LISTING_ONLY_EXCLUDES.has(reason)) : brief.excludes;
   const lines = [
-    brief.kind ? `Deliver: ${brief.itemCount ?? 'a list of'} single ${brief.kind.label} listing pages for sale` : 'Deliver: a decision memo',
+    entities ? `Deliver: ${brief.itemCount ?? 'a list of'} results of the kind "${brief.kind.label}", each with its own website` : brief.kind ? `Deliver: ${brief.itemCount ?? 'a list of'} single ${brief.kind.label} listing pages for sale` : 'Deliver: a decision memo',
     brief.valueRange ? `Hard limit: price ${brief.valueRange[0]}–${brief.valueRange[1]} ${brief.unit}`.trim() : '',
-    `Where: ${where}${brief.coastal ? ' (near the sea)' : ''}${brief.narrowed?.length ? ` · ${brief.narrowed.join('; ')}` : ''}`,
+    entities && names.length ? `Used in: ${where} (sources may be anywhere)` : `Where: ${where}${brief.coastal ? ' (near the sea)' : ''}${brief.narrowed?.length ? ` · ${brief.narrowed.join('; ')}` : ''}`,
     brief.seaImpossible ? 'No coastline in the countries you named: the sea criterion is not applied.' : '',
-    brief.excludes.length ? `Exclude: ${brief.excludes.join('; ')}` : '',
+    excludes.length ? `Exclude: ${excludes.join('; ')}` : '',
   ];
   return lines.filter(Boolean).join('\n');
 }
@@ -213,7 +217,8 @@ function tldCountry(url) {
   try {
     const tld = new URL(url).hostname.split('.').pop().toLowerCase();
     if (GENERIC_TLDS.has(tld)) return '';
-    return /^[a-z]{2}$/.test(tld) ? TLD_ALIASES[tld] ?? tld.toUpperCase() : '';
+    const code = /^[a-z]{2}$/.test(tld) ? TLD_ALIASES[tld] ?? tld.toUpperCase() : '';
+    return countryByCode(code) ? code : '';
   } catch {
     return '';
   }

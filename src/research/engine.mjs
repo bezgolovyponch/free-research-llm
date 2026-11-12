@@ -19,7 +19,7 @@ import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
-import { buildCandidates, candidateDeliverables, shortlistText, tableVerdict } from './candidates.mjs';
+import { buildCandidates, candidateDeliverables, lowPriceCut, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
 import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
@@ -60,6 +60,22 @@ export const GEOCODE_BATCH = 12;
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
 export class ResearchCancelled extends Error {}
+
+function fullPriceTitles(pages) {
+  const byUnit = new Map();
+  for (const page of pages ?? []) {
+    for (const listing of page.listings ?? []) {
+      if (!listing.title || listing.value === null || listing.value === undefined || !Number.isFinite(Number(listing.value))) continue;
+      const unit = String(listing.unit ?? '');
+      if (!byUnit.has(unit)) byUnit.set(unit, []);
+      byUnit.get(unit).push({ title: String(listing.title), value: Number(listing.value) });
+    }
+  }
+  return [...byUnit.values()].flatMap((rows) => {
+    const cut = lowPriceCut(rows);
+    return cut === null ? [] : rows.filter((row) => row.value >= cut).map((row) => row.title);
+  });
+}
 
 function calibrationTitles(pages, max = CALIBRATION_TITLES) {
   const lists = (pages ?? []).map((page) => (page.listings ?? []).map((listing) => String(listing.title ?? '')).filter(Boolean));
@@ -434,14 +450,14 @@ export class ResearchEngine {
   briefOf(project) {
     const template = templateById(project.templateId);
     const model = project.decisionModel ?? null;
-    const kind = template.itemKind ?? (model?.kind?.terms?.length ? { label: model.kind.label, terms: model.kind.terms } : null);
+    const kind = template.itemKind ?? (model?.kind?.terms?.length ? { label: model.kind.label, terms: model.kind.terms, ...Object.fromEntries(['not', 'condition', 'upgrades'].filter((key) => model.kind[key]?.length).map((key) => [key, model.kind[key]])) } : null);
     const brief = buildBrief({ question: project.question, acceptance: project.acceptance, constraints: project.constraints, template: { ...template, itemKind: kind } });
     if (!brief.regions.length && project.area?.countries?.length) brief.regions = project.area.countries;
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project, { exclude: brief.seaImpossible ? [{ id: 'sea', reason: 'no coastline in the countries you named' }] : [] }), model) : null;
     const located = Boolean(template.itemKind) ? true : model?.kind?.validated ? false : (!kind || listedKind(kind));
     const seaAsked = asksSea(foundation, brief.coastal) || Boolean(model?.criteria?.some((c) => c.measure === 'coastKm'));
-    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief(brief), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief({ ...brief, located }), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -761,7 +777,7 @@ export class ResearchEngine {
           const replies = await Promise.all(Array.from({ length: CALIBRATION_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
           const merged = mergeCalibrations(replies);
           if (merged.samples < 2) throw new Error(`only ${merged.samples} of ${CALIBRATION_SAMPLES} calibration proposals answered`);
-          const applied = applyCalibration(kind, merged, titles);
+          const applied = applyCalibration(kind, merged, titles, { itemTitles: fullPriceTitles(project.sweep.pages) });
           const before = project.decisionModel.subtype;
           project.decisionModel.kind = applied.kind;
           project.decisionModel.subtype = grew && before ? { ...before, ...(applied.subtype ?? {}), models: [...new Set([...(before.models ?? []), ...(applied.subtype?.models ?? [])])], variants: [...new Set([...(before.variants ?? []), ...(applied.subtype?.variants ?? [])])] } : applied.subtype;

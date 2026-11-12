@@ -210,16 +210,23 @@ export const MIN_PRICE_SAMPLE = 20;
 const MAD_SCALE = 1.4826;
 const LOW_PRICE_MADS = 2.5;
 
-export function implausiblyLow(rows) {
-  const priced = rows.filter((r) => Number.isFinite(r.value) && r.value > 0);
-  if (priced.length < MIN_PRICE_SAMPLE) return [];
+const pricedRows = (rows) => rows.filter((r) => Number.isFinite(r.value) && r.value > 0);
+
+export function lowPriceCut(rows) {
+  const priced = pricedRows(rows);
+  if (priced.length < MIN_PRICE_SAMPLE) return null;
   const logs = priced.map((r) => Math.log(r.value)).sort((a, b) => a - b);
   const middle = (list) => list[Math.floor(list.length / 2)];
   const median = middle(logs);
   const mad = middle(logs.map((v) => Math.abs(v - median)).sort((a, b) => a - b));
-  if (!(mad > 0)) return [];
-  const cut = Math.round(Math.exp(median - LOW_PRICE_MADS * MAD_SCALE * mad));
-  return priced.filter((r) => r.value < cut).map((r) => Object.assign(r, { lowCut: cut }));
+  if (!(mad > 0)) return null;
+  return Math.round(Math.exp(median - LOW_PRICE_MADS * MAD_SCALE * mad));
+}
+
+export function implausiblyLow(rows) {
+  const cut = lowPriceCut(rows);
+  if (cut === null) return [];
+  return pricedRows(rows).filter((r) => r.value < cut).map((r) => Object.assign(r, { lowCut: cut }));
 }
 
 export function valuationNote(brief) {
