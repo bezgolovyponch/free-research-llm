@@ -1194,6 +1194,20 @@ describe('meaning check of claims', () => {
     expect(kept.map((s: { url: string }) => s.url)).toEqual(['https://www.sauto.cz/ojete']);
     expect(project.log.some((l: { message: string }) => l.message === 'D1: 1 source(s) dropped before any model call — off topic (whc.unesco.org)')).toBe(true);
   });
+
+  it('counts and names the sources kept from outside the asked country for an entity list, without dropping them', () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = { id: 'p', brief: { kind: { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing'] }, located: false, regions: ['CZ'] }, log: [] as Array<{ message: string }> };
+    const node = { id: 'D1', title: 'Which wholesalers sell branded second-hand clothing?', question: 'wholesale second-hand clothing suppliers', metric: 'count' };
+    const sources = [
+      { kind: 'web', title: 'Groothandel gebruikte kleding in balen - Zagumi', url: 'https://www.zagumi.com/nl/used-clothing/', domain: 'zagumi.com', locale: 'en_US', snippet: 'Zagumi levert gebruikte kleding van topkwaliteit voor uw tweedehandskledingbedrijf.', text: 'Groothandel gebruikte kleding in balen - Zagumi Facebook YouTube Home \n Leverancier van gebruikte kledingbalen \n Crème kwaliteit' },
+      { kind: 'web', title: 'Search', url: 'https://en.firmy.cz/top/Obchody-a-obchudky/Bazary-a-zastavarny/Second-handy', domain: 'en.firmy.cz', locale: 'en', snippet: 'The 20 best companies: Second-hand textile sellers', text: 'The 20 best companies: Second-hand textile sellers in the Czech Republic • Firmy.cz', listings: [{ title: 'Sponsored Brumla.cz', url: 'https://en.firmy.cz/company/12716704-brumla-cz-benesov.html' }] },
+    ];
+    const kept = engine.onConceptOnly(project as never, node as never, sources);
+    expect(kept.map((s: { url: string }) => s.url)).toEqual(['https://www.zagumi.com/nl/used-clothing/', 'https://en.firmy.cz/top/Obchody-a-obchudky/Bazary-a-zastavarny/Second-handy']);
+    expect(project.log.map((l) => l.message)).toContain('D1: 1 source(s) kept from outside CZ — for an entity list the asked place is where the result is used (zagumi.com)');
+    expect(project.log.some((l) => l.message.includes('dropped before any model call'))).toBe(false);
+  });
 });
 
 describe('list-first research flow', () => {

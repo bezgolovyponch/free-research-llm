@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, radiusIn, regionsIn, SEA_WORDS, sourceCountry } from '../../src/research/brief.mjs';
+import { budgetOf, buildBrief, describeBrief, isNewsPage, itemCountry, localeCountry, mentionsCoast, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn, SEA_WORDS, sourceCountry } from '../../src/research/brief.mjs';
 
 const kind = { label: 'plot of land', terms: ['land', 'terreno'] };
 const plots = buildBrief({
@@ -178,6 +178,63 @@ describe('onConcept for kinds not sold on listing portals', () => {
     const kind = { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing'] };
     expect(onConcept(source, { kind, regions: ['CZ'], located: true })).toBe(false);
     expect(onConcept(source, { kind, regions: ['CZ'], located: false })).toBe(true);
+  });
+});
+
+describe('region verdict for an entity list (brief.located === false)', () => {
+  const regions = ['CZ'];
+  const wholesale = { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing'] };
+  const zagumi = {
+    kind: 'web',
+    title: 'Groothandel gebruikte kleding in balen - Zagumi',
+    url: 'https://www.zagumi.com/nl/used-clothing/',
+    domain: 'zagumi.com',
+    locale: 'en_US',
+    snippet: 'Zagumi levert gebruikte kleding van topkwaliteit voor uw tweedehandskledingbedrijf. Neem contact met ons op voor meer informatie over de import en export ...',
+    text: 'Groothandel gebruikte kleding in balen - Zagumi Facebook YouTube Home \n Leverancier van gebruikte kledingbalen \n Crème kwaliteit\n Kleding van crèmekwaliteit, geschikt voor de hogere markt.\n Merkartikelen\n Van luxeartikelen tot sportmerken, internationale merkartikelen behoren tot de topmerken.\n Cijfer A/B\n Flexibel en breed assortiment, inclusief klasse A en B.\n Room + Extra Mix\n Gemengde Cream grade en Extra grade, wat resulteert in nog betere kwaliteit tweedehands balen.\n Sneakers\n Ongebruikte, vlekkeloze, gesorteerde en ECHTE merksneakers in een breed scala aan maten, geschikt voor mannen en vrouwen',
+  };
+  const firmy = {
+    kind: 'web',
+    title: 'Search',
+    url: 'https://en.firmy.cz/top/Obchody-a-obchudky/Bazary-a-zastavarny/Second-handy',
+    domain: 'en.firmy.cz',
+    locale: 'en',
+    snippet: 'The 20 best companies: Second-hand textile sellers',
+    text: 'The 20 best companies: Second-hand textile sellers in the Czech Republic • Firmy.cz Webová stránka je dostupná i v českém jazyce. Přejete si zobrazit českou verzi? Zobrazit českou verzi zavřít Search\n clear search Searching in location_on Czech republic The 20 best companies: Second-hand textile sellers',
+  };
+  const wiltex = {
+    kind: 'web',
+    title: 'Second-Hand Clothing Importer - Wiltex Wholesale',
+    url: 'https://wiltex.eu/second-hand-clothing/',
+    domain: 'wiltex.eu',
+    locale: '',
+    snippet: 'The reason for this is that the clothes offered are sorted and carefully selected. Cream (Class A) is the highest possible quality, among which there are brand- ...',
+    text: 'The reason for this is that the clothes offered are sorted and carefully selected. Cream (Class A) is the highest possible quality, among which there are brand- ...',
+  };
+  const addedShippingSentence = 'We ship full pallets to the Czech Republic and Slovakia within three working days.';
+
+  it('flags a Dutch supplier page as outside the asked country while onConcept still keeps it', () => {
+    expect(regionVerdict(zagumi, regions)).toEqual({ status: 'outside', code: '', text: 'outside CZ' });
+    expect(onConcept(zagumi, { kind: wholesale, regions, located: false })).toBe(true);
+    expect(onConcept(zagumi, { kind: wholesale, regions, located: true })).toBe(false);
+  });
+
+  it('places a .cz directory page in the asked country', () => {
+    expect(regionVerdict(firmy, regions)).toEqual({ status: 'in', code: 'CZ', text: 'in CZ' });
+  });
+
+  it('re-admits a Polish supplier page that states delivery to the asked country, only when the shipping word is near the country name', () => {
+    expect(regionVerdict(wiltex, regions)).toEqual({ status: 'outside', code: '', text: 'outside CZ' });
+    expect(regionVerdict({ ...wiltex, text: `${wiltex.text} ${addedShippingSentence}` }, regions)).toEqual({ status: 'ships', code: 'CZ', text: 'ships to CZ' });
+    expect(regionVerdict({ ...zagumi, text: `${zagumi.text} Czech Republic` }, regions)).toEqual({ status: 'names', code: 'CZ', text: 'names CZ' });
+  });
+
+  it('has no verdict for user files or when no country is asked, and names the asked countries briefly', () => {
+    expect(regionVerdict({ kind: 'data', url: '', title: 'my file' }, regions)).toBeNull();
+    expect(regionVerdict(zagumi, [])).toBeNull();
+    expect(regionLabel(['CZ'])).toBe('CZ');
+    expect(regionLabel(['DE', 'PL', 'CZ'])).toBe('DE/PL/CZ');
+    expect(regionLabel(plots.regions)).toBe('the 29 asked countries');
   });
 });
 
