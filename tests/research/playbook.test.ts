@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HARMFUL_LIMIT, demonstrations, frontier, gateTrace, ledger, pieceType, playbookText, refusedByLedger, similarChange, typeStats } from '../../src/research/playbook.mjs';
+import { HARMFUL_LIMIT, LEDGER_SIMILARITY, demonstrations, frontier, gateTrace, ledger, pieceType, playbookText, refusedByLedger, similarChange, typeStats } from '../../src/research/playbook.mjs';
 
 const node = (id: string, parentId: string, more = {}) => ({ id, parentId, title: id, question: `find land listings ${id}`, method: 'lookup', status: 'weak', searchQueries: [], sourceUrls: [], ...more });
 const nodes = [node('D1', 'Q'), node('D1.1', 'D1'), node('D1.2', 'D1', { status: 'verified', searchQueries: ['terreno rustico venda'], sourceUrls: ['https://imo.example/r', 'https://gov.example/never-read'], sources: [{ url: 'https://imo.example/r', text: 'terrenos' }, { url: 'https://gov.example/never-read', text: '' }] }), node('D2', 'Q', { question: 'tax rate', method: 'calculation' }), node('D1.3', 'D1')];
@@ -53,5 +53,19 @@ describe('playbook: GEPA-style reflection, Pareto frontier of kept changes, demo
     const shown = playbookText({ nodes, improve: { trials } }, nodes[4]);
     expect(shown.failing).toBe(1);
     expect(shown.text).toContain('- tested 3 times on 2 piece(s), 0 kept: Add local-language portal queries');
+  });
+
+  it('a change like a kept one is not refused as "never kept": the D1.2.1 proposal of 09:27:56Z resembles the change kept on D2.2 at 09:05:58Z', async () => {
+    const fs = await import('node:fs/promises');
+    const tested = JSON.parse(await fs.readFile(new URL('../fixtures/b2f5b7-tested-trials.json', import.meta.url), 'utf8'));
+    const type = 'sub-question|lookup|fact';
+    const proposed = "Replace the abstract lookup with direct reads of the public per-brand catalog and 'brands we stock' pages on a source type not yet used for this piece — the B2B second-hand wholesale marketplaces' own brand-filtered category URLs (Faire, An";
+    const kept = tested.find((t: { at: string }) => t.at === '2026-11-04T09:05:58.866Z');
+    expect(kept).toMatchObject({ nodeId: 'D2.2', outcome: 'kept', before: 0.597, score: 0.619 });
+    expect(similarChange(kept.change, proposed)).toBeGreaterThanOrEqual(LEDGER_SIMILARITY);
+    expect(refusedByLedger(tested, [], type, proposed)).toBeNull();
+    const withoutKept = tested.filter((t: { outcome: string }) => t.outcome !== 'kept');
+    expect(refusedByLedger(withoutKept, [], type, proposed)).toMatchObject({ helpful: 0 });
+    expect(refusedByLedger(tested, [], 'driver|lookup|fact', proposed)).toBeNull();
   });
 });

@@ -435,6 +435,26 @@ export class Verifier {
   }
 }
 
+const RENAME_TRIES = 5;
+
+export function recordWriter(out, id) {
+  const file = path.join(out, `${id}.json`);
+  const partial = `${file}.tmp`;
+  return async (record) => {
+    await fs.writeFile(partial, JSON.stringify(record, null, 1));
+    if (!record.complete) return;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await fs.rename(partial, file);
+        return;
+      } catch (error) {
+        if (attempt >= RENAME_TRIES) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+      }
+    }
+  };
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const [id] = argv;
   const dataAt = argv.indexOf('--data');
@@ -449,7 +469,7 @@ export async function main(argv = process.argv.slice(2)) {
   const project = JSON.parse(await fs.readFile(path.join(projectsDir, `${id}.json`), 'utf8'));
   const out = path.join(dataDir, 'verification');
   await fs.mkdir(out, { recursive: true });
-  const save = (record) => fs.writeFile(path.join(out, `${id}.json`), JSON.stringify(record, null, 1));
+  const save = recordWriter(out, id);
   const verifier = new Verifier({ cacheDir: out });
   const record = await verifier.verify(project, { onRow: save });
   record.claims = await verifier.verifyClaims(project);

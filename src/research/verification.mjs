@@ -17,7 +17,7 @@ export function verifiableSignature(candidates) {
 export async function readVerification(dir, id) {
   try {
     const record = JSON.parse(await fs.readFile(path.join(dir, `${id}.json`), 'utf8'));
-    return record && Array.isArray(record.results) ? record : null;
+    return record && Array.isArray(record.results) && record.complete !== false ? record : null;
   } catch {
     return null;
   }

@@ -28,7 +28,7 @@ export function attachTerminalSockets(server, { hub, gate }) {
     if (!match) return reject(socket, 404, 'Not Found');
     const access = gate.decide(req, url);
     if (!access.allowed || access.share) return reject(socket, 401, 'Unauthorized');
-    if (!sameOrigin(req)) return reject(socket, 403, 'Forbidden');
+    if (!sameOrigin(req) || gate.foreignHost(req)) return reject(socket, 403, 'Forbidden');
     const session = hub.get(match[1]);
     if (!session) return reject(socket, 404, 'Not Found');
     wss.handleUpgrade(req, socket, head, (ws) => {

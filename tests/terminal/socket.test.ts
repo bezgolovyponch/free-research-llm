@@ -25,6 +25,7 @@ describe('terminal socket', () => {
     const session = await hub.create();
     const base = `ws://127.0.0.1:${port}/api/terminal/${session.id}/ws`;
     expect((await open(base, { origin: 'https://evil.example' })).status).toBe(403);
+    expect((await open(base, { origin: `http://attacker.example:${port}`, host: `attacker.example:${port}` })).status).toBe(403);
     expect((await open(base, { origin: `http://127.0.0.1:${port}`, 'x-forwarded-for': '1.2.3.4' })).status).toBe(401);
     expect((await open(`${base}?share=tok`, { origin: `http://127.0.0.1:${port}`, 'x-forwarded-for': '1.2.3.4' })).status).toBe(401);
     expect((await open(`ws://127.0.0.1:${port}/api/terminal/000000000000/ws`, { origin: `http://127.0.0.1:${port}` })).status).toBe(404);

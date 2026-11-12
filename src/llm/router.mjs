@@ -11,9 +11,6 @@ const DEFAULT_COOLDOWN_MS = 60000;
 export const OFFLINE_WAIT_MS = 20 * 60 * 1000;
 export const OFFLINE_BACKOFF_MS = [15 * 1000, 30 * 1000, 60 * 1000, 60 * 1000];
 const NETWORK_ERROR = /unreachable|fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ETIMEDOUT/i;
-function isNetworkError(message) {
-  return NETWORK_ERROR.test(String(message ?? ''));
-}
 export const SLOW_FACTOR = 4;
 export const SLOW_FLOOR_MS = 20000;
 const MIN_TIMED_CALLS = 3;
@@ -28,6 +25,10 @@ export const TIMEOUTS_BEFORE_BENCH = 2;
 export const TIMEOUT_BENCH_MS = 10 * 60 * 1000;
 export const COMPUTE_ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 const TIMED_OUT = /unreachable: timed out/;
+function isNetworkError(message) {
+  const text = String(message ?? '');
+  return NETWORK_ERROR.test(text) && !TIMED_OUT.test(text);
+}
 const BAD_KEY_MS = 6 * 3600 * 1000;
 export const PAYMENT_REST_MS = 24 * 3600 * 1000;
 const PAYMENT_REQUIRED = /payment required|subscription (?:is )?required|requires? a (?:paid|subscription)|upgrade your plan/i;
