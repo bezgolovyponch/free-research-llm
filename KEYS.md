@@ -20,11 +20,11 @@ Checked against each provider's own docs on **2026-10-18**. Free tiers change of
 | 3 — nice | **Firecrawl** | search (open source, self-hostable) | free monthly credits (search costs 2 credits per 10 results) | no |
 | 3 — nice | **OpenRouter** | extra free models | 20 req/min; 50 req/day (1,000/day after buying $10 credit) | no |
 | 3 — nice | **Serper** | Google results | 2,500 queries **once** (not monthly) | no |
-| 4 — optional | SambaNova | DeepSeek-V3.2 for free | 20 req/min, **20 req/day**, 200K tokens/day | no |
+| 4 — optional | SambaNova | DeepSeek-V3.2 for free | 20 req/min; no daily cap seen by the app (38 of 38 calls and 331K tokens answered on 2026-11-03) | no |
 | 4 — optional | Cloudflare Workers AI | small extra pool | 10,000 neurons/day | no |
 | 4 — optional | Cohere | `command-a` model | 1,000 calls/month (trial key) | no |
 | 4 — optional | Puter | GPT/Claude/Gemini via one token | your Puter account's free monthly allowance (size not published); you pay Puter if you exceed it | no |
-| built in | **Pollinations** (no key) | works with zero keys, so the app always has a model | anonymous: **1 reply per 30 s per IP** (HTTP 402 `FREE_LIMIT`), model `gpt-oss-20b`; prompts go to a public third-party API. Off: `FRL_POLLINATIONS=0`. A free key from https://enter.pollinations.ai raises limits (`POLLINATIONS_API_KEY`) | no |
+| built in | **Pollinations** (no key) | works with zero keys, so the app always has a model | anonymous: **1 reply per 45 s per IP** (HTTP 402 `FREE_LIMIT`, as its own error stated on 2026-11-02), model `gpt-oss-20b`; prompts go to a public third-party API. Off: `FRL_POLLINATIONS=0`. A free key from https://enter.pollinations.ai raises limits (`POLLINATIONS_API_KEY`) | no |
 | skip | ~~GitHub Models~~ | **retired 2026-07-30** | — | — |
 | skip | Hugging Face | free accounts get **no** monthly inference credits now | — | — |
 | skip | Brave Search | free plan removed Feb 2026: $5/month credit (~1,000 searches) but **a card is required** and use above it is billed. Works in the app (`BRAVE_API_KEY`) if you accept that | — | yes |

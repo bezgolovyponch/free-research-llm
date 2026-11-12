@@ -283,6 +283,53 @@ describe('App reports in the app conversation', () => {
   });
 });
 
+describe('App loop flags after a restart', () => {
+  it('settleStale clears a loop flag nobody holds, so a finished research stops looking busy', async () => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { ScriptedProvider } = await import('../src/llm/scripted-provider.mjs');
+    const { resultsNature } = await import('../src/research/blockers.mjs');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-stale-loop-'));
+    const app = new App({ env: {}, dataDir: dir, providers: [new ScriptedProvider()], search: { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ backends: [] }) } });
+    const project = await app.engine.createProject({ question: 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback' });
+    project.phase = 'done';
+    project.improve = { trials: [], active: true, startedAt: '2026-11-04T00:17:26.392Z', deadline: '2026-11-04T11:14:19.686Z', finishedAt: '2026-11-04T00:12:50.617Z', stopReason: 'stopped by user', error: null, hours: 10.9481375, scope: [], exclude: [], baseline: 0.71, best: 0.71 };
+    await app.store.save(project);
+    expect(resultsNature(await app.engine.load(project.id)).lines.join(' ')).toContain('The self-improving loop is running until 2026-11-04 11:14Z');
+    expect(await app.settleStale()).toEqual([project.id]);
+    const settled = await app.engine.load(project.id);
+    expect(settled.phase).toBe('done');
+    expect(settled.improve).toMatchObject({ active: false, stopReason: 'app stopped', baseline: 0.71, best: 0.71 });
+    expect(resultsNature(settled).lines.join(' ')).not.toContain('loop is running');
+    expect((await app.store.list())[0].loop).toMatchObject({ active: false, stopReason: 'app stopped' });
+    expect(await app.settleStale()).toEqual([]);
+    await new Promise((r) => setTimeout(r, 50));
+    await app.logs.queue;
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+
+  it('leaves the flag of a loop that is running alone', async () => {
+    const fs = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { ScriptedProvider } = await import('../src/llm/scripted-provider.mjs');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-live-loop-'));
+    const app = new App({ env: {}, dataDir: dir, providers: [new ScriptedProvider()], search: { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ backends: [] }) } });
+    const project = await app.engine.createProject({ question: 'Which kiosk spot in Brno pays back fastest?' });
+    project.phase = 'done';
+    project.improve = { trials: [], active: true, deadline: '2026-11-04T11:14:19.686Z' };
+    await app.store.save(project);
+    app.improver.active.set(project.id, { stopped: false, deadline: Date.now() + 3600000 });
+    expect(await app.settleStale()).toEqual([]);
+    expect((await app.engine.load(project.id)).improve.active).toBe(true);
+    app.improver.active.delete(project.id);
+    await new Promise((r) => setTimeout(r, 50));
+    await app.logs.queue;
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
 describe('build id', () => {
   it('changes when the page or the package changes, so open pages reload themselves after an update', () => {
     expect(buildId('a', 'b')).toMatch(/^[0-9a-f]{12}$/);

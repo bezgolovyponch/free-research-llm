@@ -598,7 +598,7 @@ describe('a loop that cannot get stuck', () => {
     expect(restingPieces([1, 2, 3].map((i) => ({ nodeId: 'D3', outcome: 'provider-outage', at: at(i) })), t0 + 10 * 60000).size).toBe(0);
   });
 
-  it('researches the changed pieces once and re-measures from the cached pages, refusing to keep anything before the noise is measured', async () => {
+  it('researches the changed pieces, researches them again for the second measurement, and refuses to keep anything before the noise is measured', async () => {
     const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [] } };
     let saved = structuredClone(project);
     const scores = [0.5, 0.29];
@@ -622,11 +622,13 @@ describe('a loop that cannot get stuck', () => {
     trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
     const base = { at: at(0), nodeId: 'D3', before: 0.3 };
     expect(await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toEqual({ kept: false });
-    expect(runs).toHaveLength(1);
+    expect(runs).toHaveLength(2);
     expect(runs[0]).toMatchObject({ memo: false, reuse: true, pieces: ['D3'] });
+    expect(runs[1]).toMatchObject({ memo: false, reuse: true, pieces: ['D3'] });
     expect(runs[0].pages).toBeInstanceOf(Map);
     expect(state.pages).toBe(runs[0].pages);
-    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'reverted-noise', score: 0.29, detail: expect.stringMatching(/^measured 0\.5, re-measured 0\.29 from the cached pages; noise not yet measured/) });
+    expect(runs[1].pages).toBeUndefined();
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'reverted-noise', score: 0.29, detail: expect.stringMatching(/^measured 0\.5, re-measured 0\.29 after researching the same pieces again; noise not yet measured/) });
     expect(saved.improve.remeasureNoise).toEqual([-0.21]);
     expect(saved.nodes.find((n) => n.id === 'D3')!.question).toBe('permits?');
   });
@@ -655,7 +657,7 @@ describe('a loop that cannot get stuck', () => {
     trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
     const base = { at: at(0), nodeId: 'D3', before: 0.3 };
     expect(await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state)).toMatchObject({ kept: true, score: { score: 0.395 } });
-    expect(runs).toEqual(['run']);
+    expect(runs).toEqual(['run', 'run']);
     expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'kept', score: 0.395, remeasured: 0.395 });
     expect(state.best.score).toBe(0.395);
     expect(saved.improve.remeasureNoise).toEqual([0, 0, 0, 0, 0, -0.005]);

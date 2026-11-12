@@ -387,10 +387,12 @@ export class ProjectImprover {
 
   async shutdown() {
     for (const [id, state] of this.active) {
+      const byUser = Boolean(this.stopped(state));
       state.stopped = true;
       state.shutdown = true;
       if (state.before) await this.restore(id, state.before).catch(() => {});
-      await this.saveHandoff(id, 'app stopped', { loopHoursLeft: Math.max(0, (state.deadline - this.now()) / 3600000), loopScope: state.scope ?? [], loopExclude: state.exclude ?? [] });
+      if (byUser) await this.saveHandoff(id, 'loop stopped by user');
+      else await this.saveHandoff(id, 'app stopped', { loopHoursLeft: Math.max(0, (state.deadline - this.now()) / 3600000), loopScope: state.scope ?? [], loopExclude: state.exclude ?? [] });
     }
   }
 
@@ -537,7 +539,7 @@ export class ProjectImprover {
     state.pages = new Map();
     state.lock = new Mutex();
     state.measure = (p) => (scope.length ? scopeScore(p, scope, [...state.pieces], exclude) : projectScore(p, [...state.pieces]));
-    await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, scope, exclude, error: null });
+    await this.record(id, { active: true, startedAt: new Date(this.now()).toISOString(), deadline: new Date(state.deadline).toISOString(), hours: state.hours, scope, exclude, error: null, finishedAt: null, stopReason: null });
     project = await this.whenModelsAnswer(id, state, () => (project.phase !== 'done' ? this.engine.run(id, { sweep: true, pages: state.pages }) : this.engine.regroundAndRescore(id, { sweep: true, pages: state.pages })));
     if (!project) return this.record(id, { active: false, finishedAt: new Date(this.now()).toISOString(), stopReason: state.stopped ? 'stopped by user' : 'time limit reached' });
     state.pieces = new Set(scoredPieces(project, scope, exclude));
@@ -547,6 +549,10 @@ export class ProjectImprover {
     let stopReason = state.stopped ? 'stopped by user' : 'time limit reached';
     await this.saveCheckpoint(id, state);
     while (this.live(state)) {
+      if (!improvementTargets(await this.engine.load(id), scope, exclude).length) {
+        stopReason = 'nothing left to improve in the selection';
+        break;
+      }
       const improved = await this.whenModelsAnswer(id, state, () => this.pass(id, state));
       await this.saveCheckpoint(id, state);
       if (this.engine.siteWarm?.get(id)?.ready) await this.rebase(id, state);
@@ -747,14 +753,15 @@ export class ProjectImprover {
       if (researched) merged.nodes[merged.nodes.findIndex((n) => n.id === nodeId)] = structuredClone(project.nodes.find((n) => n.id === nodeId));
       const pieces = [...new Set([...touched, ...merged.nodes.filter((n) => n.status === 'pending' && !beforePending.has(n.id)).map((n) => n.id)])];
       await this.engine.store.save({ ...merged, chats: current.chats, log: current.log, improve: current.improve }, { reason: `loop: trial applied on ${nodeId}: ${String(change).slice(0, 160)}`, userAction: removed.length ? 'loop' : null });
-      const after = await this.engine.run(id, { memo: false, pieces, reuse: true, pages });
-      if (this.stopped(state) || after.phase === 'cancelled') return await reject('reverted-stopped');
-      const outage = after.nodes.find((n) => n.status === 'failed' && QUOTA_ERROR.test(n.error ?? ''));
-      if (outage) {
+      const outageOf = (run) => run.nodes.find((n) => n.status === 'failed' && QUOTA_ERROR.test(n.error ?? ''));
+      const rejectOutage = async (outage) => {
         const result = await reject('provider-outage', `${outage.id}: ${String(outage.error).slice(0, 160)}; not counted against the change`);
         await this.sleep(Math.min(QUOTA_PAUSE_MS, Math.max(0, state.deadline - this.now())));
         return result;
-      }
+      };
+      const after = await this.engine.run(id, { memo: false, pieces, reuse: true, pages });
+      if (this.stopped(state) || after.phase === 'cancelled') return await reject('reverted-stopped');
+      if (outageOf(after)) return await rejectOutage(outageOf(after));
       const broken = regressions(before, after);
       if (broken.length) return await reject('reverted-regression', `breaks passing check(s): ${broken.join(', ')}`);
       if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`);
@@ -763,13 +770,19 @@ export class ProjectImprover {
       const score = measure(after);
       const minGain = removed.length ? REMOVAL_MIN_GAIN : MIN_GAIN;
       if (score.score - best.score > minGain) {
-        const remeasured = this.engine.remeasure ? await this.engine.remeasure(id, { pages }) : after;
-        const again = measure(remeasured);
-        if (this.stopped(state)) return await reject('reverted-stopped');
+        const fresh = await this.engine.load(id);
+        for (const t of touched) if (fresh.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(fresh, t);
+        await this.engine.store.save(fresh, { reason: `loop: second measurement of the trial on ${nodeId}` });
+        const second = await this.engine.run(id, { memo: false, pieces, reuse: true });
+        if (this.stopped(state) || second.phase === 'cancelled') return await reject('reverted-stopped');
+        if (outageOf(second)) return await rejectOutage(outageOf(second));
+        const brokenAgain = regressions(before, second);
+        if (brokenAgain.length) return await reject('reverted-regression', `breaks passing check(s) when researched again: ${brokenAgain.join(', ')}`);
+        const again = measure(second);
         const remeasureNoise = [...(current.improve?.remeasureNoise ?? []), round(again.score - score.score)].slice(-NOISE_SAMPLES);
         await this.record(id, { remeasureNoise });
         const verdict = trialVerdict(best.score, Math.min(score.score, again.score), removed, remeasureNoise);
-        if (!verdict.ok) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} from the cached pages; ${verdict.reason}`, Math.min(score.score, again.score));
+        if (!verdict.ok) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} after researching the same pieces again; ${verdict.reason}`, Math.min(score.score, again.score));
         const kept = again;
         for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
         state.best = kept;

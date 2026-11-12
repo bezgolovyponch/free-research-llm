@@ -198,6 +198,47 @@ describe('router ranking', () => {
   });
 });
 
+describe('daily limits against the measured ledger (2026-11-03)', () => {
+  it('a provider still answering is not ranked as spent: SambaNova answered 38 of 38 calls that day', async () => {
+    const fs = await import('node:fs/promises');
+    const rows = JSON.parse(await fs.readFile(new URL('../fixtures/model-calls-2026-11-03.json', import.meta.url), 'utf8'));
+    const at = Date.parse('2026-11-03T23:59:00Z');
+    const sambanova = rows.filter((r: { provider: string }) => r.provider === 'sambanova');
+    expect([sambanova.length, sambanova.filter((r: { ok: boolean }) => r.ok).length]).toEqual([38, 38]);
+    const usage = usageInfo(rows, { now: at }).providers;
+    expect(usage.sambanova.today).toMatchObject({ requests: 38, limit: null, used: null });
+    const ps = [
+      { id: 'gemini', label: 'Gemini', state: 'ready', deep: 'gemini-3.5-flash-lite', fast: 'gemini-3.5-flash-lite', coolingDownMs: 0 },
+      { id: 'cerebras', label: 'Cerebras', state: 'ready', deep: 'gpt-oss-120b', fast: 'gpt-oss-120b', coolingDownMs: 0 },
+      { id: 'sambanova', label: 'SambaNova', state: 'ready', deep: 'DeepSeek-V3.2', fast: 'gpt-oss-120b', coolingDownMs: 0 },
+      { id: 'groq', label: 'Groq', state: 'ready', deep: 'openai/gpt-oss-120b', fast: 'openai/gpt-oss-20b', coolingDownMs: 0 },
+      { id: 'cohere', label: 'Cohere', state: 'ready', deep: 'command-a-03-2025', fast: 'command-a-03-2025', coolingDownMs: 0 },
+      { id: 'pollinations', label: 'Pollinations', state: 'ready', deep: 'openai-fast', fast: 'openai-fast', coolingDownMs: 0 },
+    ];
+    const plan = (u: Record<string, unknown>) => purposePlan({ providers: ps, stats: providerStats(rows, { now: at }), usage: u as never, enabled: ps.map((p) => p.id), rng: () => 0.5, env: {} }).orders;
+    const measured = plan(usage);
+    const withoutItsUsage = plan({ ...usage, sambanova: undefined });
+    for (const cls of ['top', 'research', 'volume']) expect(measured[cls].indexOf('sambanova'), cls).toBe(withoutItsUsage[cls].indexOf('sambanova'));
+    expect(measured.volume.indexOf('sambanova')).toBeLessThan(measured.volume.length - 1);
+  });
+
+  it('states the Pollinations pace its own error names: 1 reply every 45 seconds per IP', async () => {
+    const fs = await import('node:fs/promises');
+    const rows = JSON.parse(await fs.readFile(new URL('../fixtures/model-calls-2026-11-03.json', import.meta.url), 'utf8'));
+    const refusal = rows.find((r: { provider: string; error?: string }) => r.provider === 'pollinations' && /every \d+ seconds/.test(r.error ?? ''));
+    expect(refusal.error).toContain('1 reply every 45 seconds per IP');
+    const { DAILY_LIMITS } = await import('../../src/llm/ranking.mjs');
+    const { FREE_TIERS: FREE_TIER } = await import('../../src/llm/admin.mjs');
+    const { PROVIDER_PRESETS } = await import('../../src/llm/presets.mjs');
+    expect(PROVIDER_PRESETS.find((p: { id: string }) => p.id === 'pollinations').minIntervalMs).toBe(45000);
+    for (const text of [DAILY_LIMITS.pollinations.note, CAPABILITY.pollinations[1], FREE_TIER.pollinations]) {
+      expect(text).toContain('45 s');
+      expect(text).not.toContain('30 s');
+    }
+    for (const text of [DAILY_LIMITS.sambanova.note, FREE_TIER.sambanova, PROVIDER_PRESETS.find((p: { id: string }) => p.id === 'sambanova').label]) expect(text).not.toMatch(/20 (?:req|requests)\/day/);
+  });
+});
+
 describe('providers that never answered', () => {
   it('ranks a provider whose calls all failed after ones that answered and never reserves it, whatever its prior', () => {
     const ps = [

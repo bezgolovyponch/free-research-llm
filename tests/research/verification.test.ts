@@ -68,6 +68,47 @@ describe('external verification on the app side', () => {
     expect(out.verification.confirmed).toBe(3);
   });
 
+  it('an incomplete record does not replace the last complete one: the count holds while the verifier runs again', async () => {
+    const { recordWriter } = await import('../../verifier/verify.mjs');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-verif-run-'));
+    const id = 'find-appropriate-plots-to-buy-fo-b7772e';
+    const plots: Array<[string, string, string]> = [
+      ['https://www.imovirtual.com/pt/anuncio/terreno-agricola-novo-em-paiao-figueira-da-foz-ID1j2CF', 'fits', 'confirmed'],
+      ['https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1h5zV', 'fits', 'confirmed'],
+      ['https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1h5zP', 'fits', 'confirmed'],
+      ['https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1j7NP', 'fits', 'confirmed'],
+      ['https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1icmH', 'fits', 'unconfirmed'],
+      ['https://www.pisos.com/comprar/terreno-rafelcofer_centro_urbano-65859308247_525029/', 'trade-off', 'confirmed'],
+      ['https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1isDS', 'trade-off', 'refuted'],
+    ];
+    const stored = { tiers: { fits: 5 }, kept: plots.map(([url, tier]) => row(url, tier)) };
+    const results = plots.map(([url, , verdict]) => ({ url, verdict, checks: [] }));
+    const full = { id, at: '2026-11-12T13:52:18.332Z', inputs: 'b6c4b6bb7195121af0c676dea939ff6a4b8548886a988e86bb626b88ab64090d', results, confirmed: results.filter((r) => r.verdict === 'confirmed').map((r) => r.url), complete: true };
+    const save = recordWriter(dir, id);
+    await save(full);
+    expect(applyVerification(stored, await readVerification(dir, id))).toMatchObject({ keptCount: 4, verification: { confirmed: 5, refuted: 1, unconfirmed: 1, pending: 0 } });
+
+    const running = { ...full, at: '2026-11-12T14:05:00.000Z', results: results.slice(0, 2), confirmed: full.confirmed.slice(0, 2), complete: false };
+    await save(running);
+    expect((await readVerification(dir, id))?.at).toBe('2026-11-12T13:52:18.332Z');
+    expect(applyVerification(stored, await readVerification(dir, id))).toMatchObject({ keptCount: 4, verification: { confirmed: 5, pending: 0 } });
+
+    const next = { ...full, at: '2026-11-12T14:40:00.000Z', results: results.map((r) => (r.url.endsWith('ID1icmH') ? { ...r, verdict: 'confirmed' } : r)) };
+    await save(next);
+    expect((await fs.readdir(dir)).sort()).toEqual([`${id}.json`]);
+    expect(applyVerification(stored, await readVerification(dir, id))).toMatchObject({ keptCount: 5, verification: { at: '2026-11-12T14:40:00.000Z', confirmed: 6 } });
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('ignores a record the verifier did not finish, instead of reading its missing rows as nothing confirmed by a complete run', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-verif-half-'));
+    await fs.writeFile(path.join(dir, 'half.json'), JSON.stringify({ ...record, complete: false }));
+    await fs.writeFile(path.join(dir, 'done.json'), JSON.stringify({ ...record, complete: true }));
+    expect(await readVerification(dir, 'half')).toBeNull();
+    expect((await readVerification(dir, 'done'))?.results).toHaveLength(2);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   it('reads the verifier\'s record read-only and treats a missing or broken file as no verification', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-verif-'));
     await fs.writeFile(path.join(dir, 'p1.json'), JSON.stringify(record));

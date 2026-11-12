@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -184,6 +185,59 @@ describe('HTTP server', () => {
     expect(detail.status).toBe(200);
     expect(detail.body).toMatchObject({ ticket: { id: ticket.id }, attempts: [{ step: 'claude', gate: 'FAIL  tests' }] });
     expect((await call('GET', '/api/changes/C999')).status).toBe(404);
+  });
+
+  it('decide passes the chosen implementer: "with free models" never starts Claude Code, even when the model proposed it', async () => {
+    const started: Array<[string, string]> = [];
+    app.coder.start = ((id: string, engine: string) => { started.push([id, engine]); return { started: true, message: `${id} queued for the ${engine} coder` }; }) as typeof app.coder.start;
+    app.coder.available = (() => true) as typeof app.coder.available;
+    const sent = await call('POST', '/api/chat', { message: 'make the Run button green in the header' });
+    expect(sent.body.proposals[0]).toMatchObject({ type: 'change', engine: 'claude', state: 'proposed' });
+    const decided = await call('POST', '/api/chat/decide', { at: sent.body.thread.at(-1).at, pid: sent.body.proposals[0].pid, accept: true, engine: 'free' });
+    expect(decided.body.proposal).toMatchObject({ state: 'done', engine: 'free', result: { engine: 'free' } });
+    expect(started).toEqual([[decided.body.proposal.result.ticketId, 'free']]);
+    expect(await app.changes.get(decided.body.proposal.result.ticketId)).toMatchObject({ engine: 'free' });
+    const again = await call('POST', '/api/chat', { message: 'make the Run button green in the header' });
+    expect((await call('POST', '/api/chat/decide', { at: again.body.thread.at(-1).at, pid: again.body.proposals[0].pid, accept: true, engine: 'gpt' })).status).toBe(409);
+  });
+
+  it('refuses cross-site writes and a foreign Host on this computer, and keeps the page of the app working', async () => {
+    const port = new URL(base).port;
+    const raw = (method: string, url: string, headers: Record<string, string>, body = '') => new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const request = http.request({ host: '127.0.0.1', port, path: url, method, headers }, (res) => {
+        let text = '';
+        res.on('data', (chunk) => { text += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: text }));
+      });
+      request.on('error', reject);
+      request.end(body);
+    });
+    const keys: unknown[][] = [];
+    const setKey = app.setKey;
+    app.setKey = (async (...args: unknown[]) => { keys.push(args); }) as never;
+    try {
+      const host = `127.0.0.1:${port}`;
+      const hostile = JSON.stringify({ provider: 'custom', key: 'k', baseURL: 'https://evil.example/v1' });
+      const simple = { host, origin: 'https://evil.example', 'content-type': 'text/plain' };
+      const crossSite = await raw('POST', '/api/keys', simple, hostile);
+      expect(crossSite.status).toBe(403);
+      expect(crossSite.body).toMatch(/another website/);
+      expect((await raw('POST', '/api/terminal', simple, JSON.stringify({ cols: 80 }))).status).toBe(403);
+      expect((await raw('POST', '/api/keys', { ...simple, origin: 'null' }, hostile)).status).toBe(403);
+      expect(keys).toEqual([]);
+      expect(app.terminal.list()).toEqual([]);
+      const rebound = await raw('GET', '/api/status', { host: `attacker.example:${port}` });
+      expect(rebound.status).toBe(403);
+      expect(rebound.body).not.toMatch(/providers/);
+      expect((await raw('GET', '/', { host: `attacker.example:${port}` })).status).toBe(403);
+      expect((await raw('GET', '/api/status', { host })).status).toBe(200);
+      expect((await raw('GET', '/api/status', { host: `localhost:${port}` })).status).toBe(200);
+      const own = JSON.stringify({ provider: 'custom', key: 'k', baseURL: 'http://localhost:3001/v1' });
+      expect((await raw('POST', '/api/keys', { host, origin: `http://${host}`, 'content-type': 'application/json' }, own)).status).toBe(200);
+      expect(keys).toEqual([['custom', 'k', 'http://localhost:3001/v1']]);
+    } finally {
+      app.setKey = setKey;
+    }
   });
 
   it('serves the results exports and the current action plan with every project', async () => {

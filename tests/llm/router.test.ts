@@ -1057,6 +1057,31 @@ describe('ModelRouter network outages', () => {
     expect(router.failureStreak.get('a')).toBeFalsy();
   });
 
+  it('a provider that times out is benched, not waited for as if the network were down', async () => {
+    const waits: number[] = [];
+    let now = Date.parse('2026-11-04T11:49:56Z');
+    const slow = (id: string) => ({ id, ready: true, calls: [] as number[], async chat() { this.calls.push(1); now += 240000; throw new ProviderError(`${id} unreachable: timed out`, { status: 0, provider: id }); }, describe: () => ({ id }) });
+    const fcc = slow('fcc');
+    const router = new ModelRouter({ providers: [fcc], now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; } });
+    const failure = await router.complete({ tier: 'deep', purpose: 'research', messages: [] }).catch((error: Error) => error);
+    expect(failure).toBeInstanceOf(NoModelAvailableError);
+    expect(failure).not.toBeInstanceOf(OfflineError);
+    expect((failure as Error).message).toMatch(/^every provider failed for research: fcc unreachable: timed out/);
+    expect(fcc.calls.length).toBeLessThanOrEqual(2);
+    expect(waits.reduce((s, w) => s + w, 0)).toBeLessThanOrEqual(65000);
+    if (fcc.calls.length < 2) await router.complete({ tier: 'deep', purpose: 'research', messages: [] }).catch(() => null);
+    expect(fcc.calls.length).toBe(2);
+    expect(router.cooldownUntil.get('fcc')).toBe(now + TIMEOUT_BENCH_MS);
+    expect(router.status().find((p: { coolingReason: string | null }) => p.coolingReason)?.coolingReason).toMatch(/too slow: 2 timeouts in a row/);
+
+    const three = ['fcc', 'pollinations', 'openrouter'].map(slow);
+    const rollup = new ModelRouter({ providers: three, now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; } });
+    const all = await rollup.complete({ tier: 'deep', purpose: 'rollup', messages: [] }).catch((error: Error) => error);
+    expect(all).not.toBeInstanceOf(OfflineError);
+    for (const id of ['fcc', 'pollinations', 'openrouter']) expect((all as Error).message).toContain(`${id} unreachable: timed out`);
+    expect(three.reduce((n, p) => n + p.calls.length, 0)).toBeLessThanOrEqual(6);
+  });
+
   it('keeps today behaviour when a mix of network and HTTP errors happens', async () => {
     const waits: number[] = [];
     let now = 1000000;
