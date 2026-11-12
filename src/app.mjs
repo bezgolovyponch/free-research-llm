@@ -476,12 +476,13 @@ export class App {
     };
   }
 
-  async getPrinciples(type = null) {
+  async getPrinciples(type = null, { kind = null } = {}) {
     await this.lessons.load();
-    const allTypes = [...new Set(this.lessons.lessons.map((l) => l.type).filter(Boolean))];
+    const pool = kind === null ? this.lessons.lessons : this.lessons.lessons.filter((l) => l.kind === kind);
+    const allTypes = [...new Set(pool.map((l) => l.type).filter(Boolean))];
     const result = {};
     for (const t of type ? [type] : allTypes) {
-      result[t] = principlesFrom(this.lessons.lessons, t);
+      result[t] = principlesFrom(pool, t);
     }
     return result;
   }

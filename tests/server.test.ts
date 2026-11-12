@@ -88,6 +88,24 @@ describe('HTTP server', () => {
     expect(res.body).toMatchObject({ source: [{ change: 'Portuguese rural parks need municipal plan approval', verdict: 'helps' }] });
   });
 
+  it('filters /api/principles?project=<id> to the research kind of that project', async () => {
+    await app.store.save({ id: 'kind-filter-test-1', question: 'Plots to buy for glamping', nodes: [], brief: { kind: { label: 'plot of land', terms: ['plot', 'terreno'] } } });
+    await app.lessons.add([
+      { type: 'source', kind: 'plot of land', change: 'Read the listing page itself, e.g. https://www.imovirtual.com/pt/anuncio/terreno-rustico-em-paiao-figueira-da-foz-ID1j2CX, not the search snippet', outcome: 'kept', gain: 0.1, researchId: 'p1' },
+      { type: 'source', kind: 'plot of land', change: 'Read the listing page itself, e.g. https://www.imovirtual.com/pt/anuncio/terreno-rustico-em-paiao-figueira-da-foz-ID1j2CX, not the search snippet', outcome: 'kept', gain: 0.1, researchId: 'p2' },
+      { type: 'source', kind: 'plot of land', change: 'Read the listing page itself, e.g. https://www.imovirtual.com/pt/anuncio/terreno-rustico-em-paiao-figueira-da-foz-ID1j2CX, not the search snippet', outcome: 'kept', gain: 0.1, researchId: 'p3' },
+      { type: 'source', kind: 'wholesale second-hand clothing supplier', change: 'Replace the search-engine lookups with brand-filtered category pages on https://www.zagumi.com/nl/used-clothing/', outcome: 'kept', gain: 0.2, researchId: 'b2f5b7' },
+      { type: 'source', kind: 'wholesale second-hand clothing supplier', change: 'Replace the search-engine lookups with brand-filtered category pages on https://www.zagumi.com/nl/used-clothing/', outcome: 'kept', gain: 0.2, researchId: 'b2f5b7x' },
+      { type: 'source', kind: 'wholesale second-hand clothing supplier', change: 'Replace the search-engine lookups with brand-filtered category pages on https://www.zagumi.com/nl/used-clothing/', outcome: 'kept', gain: 0.2, researchId: 'b2f5b7y' },
+    ]);
+    const res = await call('GET', '/api/principles?project=kind-filter-test-1');
+    expect(res.status).toBe(200);
+    const changes = Object.values(res.body).flat().map((p: { change: string }) => p.change);
+    expect(changes).toContain('Read the listing page itself, e.g. https://www.imovirtual.com/pt/anuncio/terreno-rustico-em-paiao-figueira-da-foz-ID1j2CX, not the search snippet');
+    expect(changes).not.toContain('Replace the search-engine lookups with brand-filtered category pages on https://www.zagumi.com/nl/used-clothing/');
+    expect((await call('GET', '/api/principles?project=missing-project')).status).toBe(404);
+  });
+
   it('reports the meaning check and the nature of the results, and rechecks claims on request', { timeout: 90000 }, async () => {
     const created = await call('POST', '/api/projects', { question: 'Which camp permit costs apply in Czechia?' });
     const done = await waitFor(created.body.id, 'done');

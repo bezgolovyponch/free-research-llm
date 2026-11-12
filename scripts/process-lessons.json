@@ -89,5 +89,21 @@
     "signal": "the launcher error itself; the worktree path missing from the launcher preflight output",
     "cause": "the launcher checked the model and the spec but not the working copy it was going to run in",
     "prevention": "launcher preflight: verify the worktree path exists, is a registered git worktree of this repo and has a clean node_modules link, and refuse to start with the missing path named"
+  },
+  {
+    "id": "F8",
+    "title": "lessons from one research leak into unrelated researches",
+    "touches": [
+      "src/research/lessons.mjs",
+      "src/research/improve.mjs",
+      "src/app.mjs",
+      "src/server.mjs",
+      "public/index.html",
+      "tests/research/lessons.test.ts",
+      "tests/server.test.ts"
+    ],
+    "signal": "the Results tab of a plot research shows improve-loop tweaks of a clothing-supplier research (e.g. brand-filtered category pages on Vinted), and the improve prompt of one research carries another research's mixed or harmful verdicts",
+    "cause": "lessons were grouped only by piece type (sub-question|lookup|fact etc.) with no item kind, and every principle verdict (helps, mixed, does not help) was rendered as an instruction to the proposer",
+    "prevention": "every lesson stores the research's item kind (brief/decision-model kind label) and LessonBook.forType only returns lessons of the same type AND same kind (kindless lessons are never shared); only verdict 'helps' principles enter the playbook (helpsOnly in propose); the cross-research principles card moved from the Results tab to the Loop tab and calls /api/principles?project=<id>, filtered to the project's kind — covered by tests/research/lessons.test.ts (same-kind sharing, mixed not passed, helps passed) and tests/server.test.ts (?project= kind filter)"
   }
 ]
