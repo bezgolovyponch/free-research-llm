@@ -62,7 +62,9 @@ export function alike(a, b, threshold = SIMILAR) {
 const textOf = (n) => `${String(n.title ?? '').replace(ID_PREFIX, '')} ${n.question ?? ''}`;
 
 const LISTING_ACTION = /\b(?:list|find|identify|search|scrape|collect|calculate|compute|convert|verify|check|confirm|assess)\b/i;
-const LISTING_TARGET = /\b(?:listings?|urls?|links?|ads?|items?|priced|distances?)\b/i;
+const LIST_ORDER = /^\s*list\b/i;
+const LISTING_NAMED = /\b(?:listings?|urls?|links?|ads?)\b/i;
+const LISTING_DETAIL = /\b(?:items?|priced|distances?)\b|[≤≥<>]/i;
 const LISTING_SALE = /\b(?:listed\s+for\s+sale|for\s+sale|are\s+listed|on\s+the\s+market)\b/i;
 const NOT_LISTING_KNOWLEDGE = /\b(?:reliab|fault|defect|problem|issue|cost|norm|rule|law|legal|tax|insurance|trend|depreciat|review|reput|communit|forum|empirical|statistic|typical|durab|longevity|owner|experience|maintenance|repair|safety|resale)\w*|\bmarket(?!place)\w*/i;
 
@@ -81,7 +83,8 @@ export function listingWork(question, kindWords = []) {
   if (!text.trim() || NOT_LISTING_KNOWLEDGE.test(text)) return false;
   const kindHit = kindWords.length ? new RegExp(`\\b(?:${kindWords.map(escapeRe).join('|')})`, 'i').test(text) : false;
   if (YES_NO_CHECK.test(text) && (CHECKED_BY_CODE.test(text) || kindHit)) return true;
-  return LISTING_ACTION.test(text) || LISTING_TARGET.test(text) || LISTING_SALE.test(text);
+  if (LISTING_SALE.test(text) || LISTING_NAMED.test(text) || LIST_ORDER.test(text)) return true;
+  return LISTING_ACTION.test(text) && (LISTING_DETAIL.test(text) || kindHit);
 }
 
 export function markListingWork(nodes, kindWords = []) {
