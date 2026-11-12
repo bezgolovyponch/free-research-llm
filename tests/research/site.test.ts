@@ -476,6 +476,19 @@ describe('SiteAssessor', () => {
     await assessor.geocode('B, Croatia');
     expect(waits).toEqual([1100]);
   });
+
+  it('keeps the gap between lookups when many are asked at once', async () => {
+    const sent: number[] = [];
+    let t = 0;
+    const net = fakeNet({ geocode: { 'A, Croatia': VIR, 'B, Croatia': VIR, 'C, Croatia': VIR } });
+    const fetchJson = async (url: string) => {
+      sent.push(t);
+      return net.fetchJson(url);
+    };
+    const assessor = new SiteAssessor({ fetchJson, now: () => t, sleep: async (ms: number) => { t += ms; } });
+    await Promise.all(['A, Croatia', 'B, Croatia', 'C, Croatia'].map((q) => assessor.geocode(q)));
+    expect(sent).toEqual([0, 1100, 2200]);
+  });
 });
 
 describe('countries within a radius', () => {

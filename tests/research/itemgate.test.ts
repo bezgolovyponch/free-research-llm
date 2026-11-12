@@ -123,3 +123,50 @@ describe('items of a kind no listing portal sells', () => {
     expect(screenItem(provider, { located: false }).reasons).not.toContain('not a single listing page');
   });
 });
+
+describe('item gate: body variants of a swept portal page are refused like any other row', () => {
+  const carKind = { label: 'used car', terms: ['used car', 'auto', 'gebrauchtwagen'], not: ['parts', 'kola'] };
+  const carOptions = { valueRange: [0, 65000], unit: 'CZK', kind: carKind, kindKnown: true };
+
+  it('refuses combi, sedan, cabrio, coupe and kabriolet ads from bazos.cz and autoscout24.de', () => {
+    const variants: [string, string][] = [
+      ['Škoda Fabia combi 1.9 TDI 74kW, STK do 07/2028', 'https://auto.bazos.cz/inzerat/226177092/skoda-fabia-combi-19-tdi-74kw-stk-do-072028.php'],
+      ['Honda Civic sedan 1.4', 'https://auto.bazos.cz/inzerat/226246758/honda-civic-sedan.php'],
+      ['Seat Ibiza polocabrio 1.4 16V', 'https://auto.bazos.cz/inzerat/226126807/seat-ibiza-polocabrio-14-16v.php'],
+      ['Honda Civic Coupe 1.6 LS', 'https://auto.bazos.cz/inzerat/225954846/honda-civic-coupe-16-ls.php'],
+      ['Peugeot 207 CC kabriolet, platná STK', 'https://auto.bazos.cz/inzerat/226292885/peugeot-207-cc-kabriolet-platna-stk-dalnicni-znamka-fu.php'],
+      ['VW Golf Variant 1.6 TDI DSG', 'https://www.autoscout24.de/angebote/vw-golf-variant-16-tdi-dsg-bluemotion-technologies-d0b6741d-3dd5-47ce-804b-718ffdbb7507'],
+      ['Skoda Octavia III kombi 2.0 TDI', 'https://www.autoscout24.de/angebote/skoda-octavia-iii-kombi-20-tdi-dsg-ambition-ma55gr201150ge1074va3624mt3255tr480648-d0b6741d-3dd5-47ce-804b-718ffdbb7507'],
+    ];
+    for (const [title, url] of variants) {
+      expect(screenItem({ title, url, value: 41000, unit: 'CZK' }, carOptions).reasons, title).toContain('a body variant (combi, sedan, cabrio, convertible, ...), not the asked body type');
+    }
+    expect(screenItem({ title: 'Honda Civic 1.4 i klima', url: 'https://auto.bazos.cz/inzerat/226067979/honda-civic-14-i-klima.php', value: 15000, unit: 'CZK' }, carOptions)).toMatchObject({ ok: true, priced: true });
+    expect(screenItem({ title: 'Kia Picanto 1.0 45kW, 81 500 km', url: 'https://auto.bazos.cz/inzerat/225839661/kia-picanto-10-45kw-81500km.php', value: 30000, unit: 'CZK' }, carOptions).ok).toBe(true);
+  });
+
+  it('still accepts a body variant when the asked kind itself is that body type', () => {
+    const wagon = { valueRange: [0, 65000], unit: 'CZK', kind: { label: 'station wagon', terms: ['station wagon', 'kombi'] }, kindKnown: false };
+    expect(screenItem({ title: 'VW Golf kombi 1.6 TDI', url: 'https://www.autoscout24.de/angebote/vw-golf-kombi-16-tdi-d0b6741d-3dd5-47ce-804b-718ffdbb7507', value: 8900, unit: 'EUR' }, wagon).ok).toBe(true);
+  });
+});
+
+describe('item gate: instalment, leasing and deposit ads are refused', () => {
+  const carKind = { label: 'used car', terms: ['used car', 'auto', 'gebrauchtwagen'], not: ['parts', 'kola'] };
+  const carOptions = { valueRange: [0, 65000], unit: 'CZK', kind: carKind, kindKnown: true };
+
+  it('refuses Czech na splátky / akontace ads priced at the deposit on bazos.cz', () => {
+    expect(screenItem({ title: 'ŠKODA FABIA III 1.4 TDi na SPLÁTKY BEZ REGISTRU', url: 'https://auto.bazos.cz/inzerat/226300001/skoda-fabia-iii-14-tdi-na-splatky-bez-registru.php', value: 9900, unit: 'CZK' }, carOptions).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+    expect(screenItem({ title: 'Auto na splátky, akontace 10 000 Kč, leasing', url: 'https://auto.bazos.cz/inzerat/226300002/auto-na-splatky-akontace.php', value: 10000, unit: 'CZK' }, carOptions).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+  });
+
+  it('refuses German Finanzierung / Anzahlung / Rate ads on autoscout24.de and Polish raty ads', () => {
+    expect(screenItem({ title: 'Skoda Fabia III 1.4 TDI Finanzierung, Anzahlung 2.000 EUR', url: 'https://www.autoscout24.de/angebote/skoda-fabia-iii-14-tdi-finanzierung-anzahlung-2000-eur-d0b6741d-3dd5-47ce-804b-718ffdbb7507', value: 2000, unit: 'EUR' }, { ...carOptions, unit: 'EUR' }).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+    expect(screenItem({ title: 'VW Golf 1.6 in Raten, Leasing möglich', url: 'https://www.autoscout24.de/angebote/vw-golf-16-in-raten-leasing-d0b6741d-3dd5-47ce-804b-718ffdbb7507', value: 199, unit: 'EUR' }, { ...carOptions, unit: 'EUR' }).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+    expect(screenItem({ title: 'Sprzedam auto na raty, leasing', url: 'https://auto.bazos.cz/inzerat/226300003/sprzedam-auto-na-raty-leasing.php', value: 500, unit: 'CZK' }, carOptions).reasons).toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+  });
+
+  it('keeps a plain for-sale ad whose title has none of those words', () => {
+    expect(screenItem({ title: 'Dacia Sandero 1.2i LPG', url: 'https://auto.bazos.cz/inzerat/226135083/dacia-sandero-12i-lpg.php', value: 25000, unit: 'CZK' }, carOptions)).toMatchObject({ ok: true, priced: true });
+  });
+});

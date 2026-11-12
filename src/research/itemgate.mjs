@@ -6,6 +6,8 @@ const SEARCH_TITLE = /\b(?:search|results|listings)\b/i;
 const SWAP = /(?:\btrade\b|\bswap\b|\btroca\b|\bpermuta|\btakas\b|\bechange\b)/i;
 const RENTAL = /(?:arrend|alug|alquil|kiralik|for[ -]rent|to[ -]rent|\brent(?:al|ing)?\b|a[ -]louer|\blouer\b|\bverhuur|\bmiete|pron[aá]j[eé]m|pronajm|\bn[aá]jem\b|\bwynaj[eę]m)/i;
 const WANTED = /(?:\bkoup[ií](?:m|me|te)?\b|\bhled[aá](?:m|e|me|te|j[ií])?\b|\bpopt[aá]v[aá](?:m|š|me|te|j[ií])?\b|\bkupi[eę]\b|\bkup(?:uji|ujeme|ujete|uj[ií])\b|\bszukam\b|\bwanted\b|\blooking for\b|\bsh[aá]n[aeěiío](?:m|t|me|te|ime|ete)?\b)/i;
+const BODY_VARIANT = /(?:\b(?:combi|kombi|sedan|saloon|limousine|cabriolet|kabriolet|convertible|coupe|cupe|estate|wagon|variant|aerodeck|berlingo|picasso|verso|sw|st)\b|\w*cabrio\w*)/i;
+const INSTALMENT = /(?:\bspl[aá]tk\w*|\bakontac\w*|\bleasing\w*|\braty\b|\brat[aey]\b|\bfinanzierung\b|\banzahlung\b|\brate\b|\braten\b|\bteilzahlung\b|\binstallment\b)/i;
 
 function priceOf(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -52,6 +54,8 @@ export function screenItem(item, { valueRange = null, unit = '', convert = (v) =
   if (kind && RENTAL.test(offer)) reasons.push('offered for rent, not for sale');
   if (kind && SWAP.test(offer)) reasons.push('offered as a swap, not for sale');
   if (kind && WANTED.test(offer)) reasons.push('a wanted ad, not an offer');
+  if (kind && BODY_VARIANT.test(offer) && !BODY_VARIANT.test(plain((kind.terms ?? []).join(' ')))) reasons.push('a body variant (combi, sedan, cabrio, convertible, ...), not the asked body type');
+  if (kind && INSTALMENT.test(offer)) reasons.push('an instalment, leasing or deposit ad, not a sale at the full price');
   const raw = priceOf(item.value);
   if (valueRange && raw !== null) {
     const wanted = currencyOf(unit);

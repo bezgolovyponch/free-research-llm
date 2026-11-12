@@ -223,8 +223,28 @@ describe('far below its peers is checked, not ranked first', () => {
     const nodes = [{ id: 'sweep', sources: [{ id: 'P1', url: 'https://auto.bazos.cz/skoda/', locale: 'cs', kindPage: true, listings: [ad(1, 'Škoda Fabia 1.4', 40000), ad(2, 'Škoda Fabia 1.2', 42000), ad(3, 'Škoda Fabia combi', 45000), ad(4, 'Škoda Fabia motor 1.4', 9000)] }] }];
     const brief = { kind: { label: 'used car', terms: ['auto'] }, regions: ['CZ'], valueRange: [0, 65000], unit: 'CZK', excludes: [], subtype: { label: 'hatchback', models: ['skoda fabia'] } };
     const table = buildCandidates(nodes, brief, {});
-    expect(table.kept.map((r: { value: number }) => r.value)).toEqual([40000, 42000, 45000]);
+    expect(table.kept.map((r: { value: number }) => r.value)).toEqual([40000, 42000]);
+    expect(table.screened['a body variant (combi, sedan, cabrio, convertible, ...), not the asked body type']).toBe(1);
     expect(table.toCheck.find((r: { value: number }) => r.value === 9000)?.toCheck).toMatch(/far below its peers/);
+  });
+
+  it('screens body-variant words out of rows added by the portal sweep, through the same item gate as any other row', async () => {
+    const { buildCandidates } = await import('../../src/research/candidates.mjs');
+    const brief = { kind: { label: 'used car', terms: ['auto'] }, regions: ['CZ'], valueRange: [0, 65000], unit: 'CZK', excludes: [], subtype: { label: 'hatchback', models: ['honda civic', 'skoda fabia', 'seat ibiza'] } };
+    const nodes = [{ id: 'sweep', sources: [{ id: 'P1', url: 'https://auto.bazos.cz/auto/', locale: 'cs', kindPage: true, listings: [
+      { title: 'Honda Civic 1.4 i klima', url: 'https://auto.bazos.cz/inzerat/226067979/honda-civic-14-i-klima.php', value: 15000, unit: 'CZK' },
+      { title: 'Honda Civic sedan', url: 'https://auto.bazos.cz/inzerat/226246758/honda-civic-sedan.php', value: 41000, unit: 'CZK' },
+      { title: 'Škoda Fabia combi 1.9 TDI 74kW', url: 'https://auto.bazos.cz/inzerat/226177092/skoda-fabia-combi-19-tdi-74kw-stk-do-072028.php', value: 39900, unit: 'CZK' },
+      { title: 'Seat Ibiza polocabrio 1.4 16V', url: 'https://auto.bazos.cz/inzerat/226126807/seat-ibiza-polocabrio-14-16v.php', value: 39000, unit: 'CZK' },
+    ] }] }];
+    const table = buildCandidates(nodes, brief, {});
+    expect(table.kept.map((r: { url: string }) => r.url)).toEqual(['https://auto.bazos.cz/inzerat/226067979/honda-civic-14-i-klima.php']);
+    expect(table.examples.map((e: { url: string }) => e.url).sort()).toEqual([
+      'https://auto.bazos.cz/inzerat/226126807/seat-ibiza-polocabrio-14-16v.php',
+      'https://auto.bazos.cz/inzerat/226177092/skoda-fabia-combi-19-tdi-74kw-stk-do-072028.php',
+      'https://auto.bazos.cz/inzerat/226246758/honda-civic-sedan.php',
+    ]);
+    expect(table.screened['a body variant (combi, sedan, cabrio, convertible, ...), not the asked body type']).toBe(3);
   });
 
   it('keeps every portal that returned listings when the sweep table is capped at 1000', async () => {

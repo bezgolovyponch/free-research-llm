@@ -55,7 +55,7 @@ export const CALIBRATION_TITLES = 60;
 export const CALIBRATION_SAMPLES = 3;
 export const RECALIBRATE_GROWTH = 3;
 export const QUERY_PLAN_GROUPS = 6;
-export const MAX_DISTANCE_LOOKUPS = 60;
+export const GEOCODE_BATCH = 12;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -472,34 +472,50 @@ export class ResearchEngine {
     const rows = [...(table.kept ?? []), ...(table.toCheck ?? [])];
     const keptRows = new Set(table.kept ?? []);
     const moved = [];
-    let lookups = 0;
+    const cache = new Map();
+    const geocode = (stated, countryCode) => {
+      const key = `${String(countryCode ?? '').toLowerCase()}|${stated.toLowerCase()}`;
+      if (!cache.has(key)) {
+        cache.set(key, Promise.resolve().then(() => this.sites.geocode(stated, String(countryCode ?? ''))).catch(() => null));
+      }
+      return cache.get(key);
+    };
+    const pending = [];
+    for (const row of rows) {
+      if (Number.isFinite(row.lat) && Number.isFinite(row.lon)) continue;
+      const attrs = row.attrs ?? {};
+      const stated = String(row.place ?? '').trim() || [attrs['location.city'], attrs['location.zip']].filter((v) => typeof v === 'string' && v.trim()).join(', ');
+      if (!stated) continue;
+      pending.push({ row, stated, countryCode: row.countryCode || attrs['location.countryCode'] || '' });
+    }
+    for (let i = 0; i < pending.length && !this.cancelled?.has?.(project.id); i += GEOCODE_BATCH) {
+      await Promise.all(pending.slice(i, i + GEOCODE_BATCH).map(async (entry) => {
+        entry.point = await geocode(entry.stated, entry.countryCode);
+      }));
+    }
     let measured = 0;
     let far = 0;
-    let unplaced = 0;
-    for (const row of rows) {
-      let point = Number.isFinite(row.lat) && Number.isFinite(row.lon) ? { lat: row.lat, lon: row.lon } : null;
-      if (!point) {
-        const attrs = row.attrs ?? {};
-        const stated = String(row.place ?? '').trim() || [attrs['location.city'], attrs['location.zip']].filter((v) => typeof v === 'string' && v.trim()).join(', ');
-        if (!stated) {
-          unplaced++;
-          continue;
-        }
-        if (lookups >= MAX_DISTANCE_LOOKUPS) continue;
-        lookups++;
-        try {
-          point = await this.sites.geocode(stated, row.countryCode || attrs['location.countryCode'] || '');
-        } catch {
-          point = null;
-        }
-        if (!point) continue;
-      }
+    let unmeasured = 0;
+    const measure = (row, point) => {
       const distanceKm = Math.round(haversineKm(origin.lat, origin.lon, point.lat, point.lon));
       row.distanceKm = distanceKm;
       measured++;
-      if (!(distanceKm > limit)) continue;
-      far++;
-      if (keptRows.has(row)) moved.push(row);
+      if (distanceKm > limit) {
+        far++;
+        if (keptRows.has(row)) moved.push(row);
+      }
+    };
+    for (const row of rows) {
+      if (Number.isFinite(row.lat) && Number.isFinite(row.lon)) measure(row, { lat: row.lat, lon: row.lon });
+    }
+    for (const entry of pending) {
+      if (entry.point) measure(entry.row, entry.point);
+    }
+    for (const row of rows) {
+      if (!Number.isFinite(row.distanceKm)) {
+        row.unmeasured = true;
+        unmeasured++;
+      }
     }
     if (moved.length) {
       table.kept = (table.kept ?? []).filter((row) => !keptRows.has(row) || !moved.includes(row));
@@ -507,7 +523,7 @@ export class ResearchEngine {
       table.keptCount = (table.keptCount ?? 0) - moved.length;
       table.toCheckCount = (table.toCheckCount ?? 0) + moved.length;
     }
-    this.emit(project, 'candidates', `distance from ${place}: ${measured} listing(s) measured, ${far} farther than ${limit} km, ${unplaced} without a stated place`);
+    this.emit(project, 'candidates', `distance from ${place}: ${measured} listing(s) measured, ${far} farther than ${limit} km, ${unmeasured} not measurable (marked unmeasured)`);
     return table;
   }
 
