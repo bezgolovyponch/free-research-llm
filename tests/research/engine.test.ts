@@ -1668,6 +1668,23 @@ describe('hub search', () => {
     expect(saved.chats.Q.some((m: { role: string; content: string }) => m.role === 'app' && /network was down/i.test(m.content))).toBe(true);
     expect(saved.log.some((l: { type: string; message: string }) => l.type === 'error')).toBe(true);
   });
+
+  it('keeps blog, guide and supplier-directory pages out of report.deliverables', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with highest price/value ratio for a retail second hand shop business in Czech Republic' });
+    project.report = { ...(project.report ?? {}) } as never;
+    project.acceptance = { ...(project.acceptance ?? {}), itemCount: 20, urlsLive: true, valueRange: null, mustMention: [] } as never;
+    project.candidates = {
+      kept: [
+        { title: 'Germany Wholesaler Used Clothes: Top Suppliers & Bulk Deals', url: 'https://accio.com/', price: null, currency: '', nodeId: 'D1' },
+        { title: 'Wholesale Used Clothing', url: 'https://apparelsearch.com/wholesale_clothing/wholesale_used_clothing.htm', price: null, currency: '', nodeId: 'D1' },
+        { title: 'Where to Buy Vintage Clothing Wholesale in Europe (2026 Guide)', url: 'https://www.usfripe.com/blogs/news/where-to-buy-vintage-clothing-wholesale-in-europe-2026-guide', price: null, currency: '', nodeId: 'D2' },
+        { title: 'Groothandel gebruikte kleding in balen - Zagumi', url: 'https://zagumi.com/nl/used-clothing/', price: null, currency: '', nodeId: 'D3' },
+      ],
+    } as never;
+    await engine.checkAcceptance(project);
+    expect(project.report.deliverables.map((d: { url: string }) => d.url)).toEqual(['https://zagumi.com/nl/used-clothing/']);
+  });
 });
 
 function netProvider(id: string, networkFailures = Number.POSITIVE_INFINITY) {
