@@ -267,6 +267,7 @@ export class SiteAssessor {
     this.loaded = !file;
     this.writing = Promise.resolve();
     this.lastGeocode = -Infinity;
+    this.geocodeQueue = Promise.resolve();
     this.reads = 0;
     this.limits = MODES.budget;
   }
@@ -361,13 +362,21 @@ export class SiteAssessor {
     return this.fresh(entry) ? entry.site : null;
   }
 
+  geocodeTurn() {
+    const turn = this.geocodeQueue.then(async () => {
+      const wait = this.lastGeocode + GEOCODE_GAP_MS - this.now();
+      if (wait > 0) await this.sleep(wait);
+      this.lastGeocode = this.now();
+    });
+    this.geocodeQueue = turn.catch(() => {});
+    return turn;
+  }
+
   async geocode(query, countryCode = '') {
     const key = `${countryCode.toLowerCase()}|${query.toLowerCase()}`;
     const known = this.store.places[key];
     if (this.fresh(known)) return known.point;
-    const wait = this.lastGeocode + GEOCODE_GAP_MS - this.now();
-    if (wait > 0) await this.sleep(wait);
-    this.lastGeocode = this.now();
+    await this.geocodeTurn();
     const only = /^[A-Z]{2}$/.test(countryCode) ? `&countrycodes=${countryCode.toLowerCase()}` : '';
     const found = await this.fetchJson(`${NOMINATIM_URL}?format=json&limit=1${only}&q=${encodeURIComponent(query)}`);
     const hit = Array.isArray(found) ? found[0] : null;
@@ -382,9 +391,7 @@ export class SiteAssessor {
     const key = `rev|${lat.toFixed(2)}|${lon.toFixed(2)}`;
     const known = this.store.places[key];
     if (this.fresh(known)) return known.point;
-    const wait = this.lastGeocode + GEOCODE_GAP_MS - this.now();
-    if (wait > 0) await this.sleep(wait);
-    this.lastGeocode = this.now();
+    await this.geocodeTurn();
     const found = await this.fetchJson(`${NOMINATIM_URL.replace(/\/search$/, '')}/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`);
     const code = String(found?.address?.country_code ?? '').toUpperCase();
     const point = code || null;
@@ -397,9 +404,7 @@ export class SiteAssessor {
     const key = `centre|${place.toLowerCase()}`;
     const known = this.store.places[key];
     if (this.fresh(known)) return known.point;
-    const wait = this.lastGeocode + GEOCODE_GAP_MS - this.now();
-    if (wait > 0) await this.sleep(wait);
-    this.lastGeocode = this.now();
+    await this.geocodeTurn();
     const found = await this.fetchJson(`${NOMINATIM_URL}?format=json&limit=1&q=${encodeURIComponent(place)}`);
     const hit = Array.isArray(found) ? found[0] : null;
     const point = hit && Number(hit.place_rank) > COUNTRY_PLACE_RANK ? { lat: Number(hit.lat), lon: Number(hit.lon), by: `place "${place}"` } : null;
