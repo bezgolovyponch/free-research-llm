@@ -908,6 +908,67 @@ describe('ResearchEngine', () => {
     expect(rewritten.report.kind).toBe('decision');
   });
 
+  it('re-attempts a weak leaf on a second run', async () => {
+    const scripted = new ScriptedProvider();
+    const researchCalls: string[] = [];
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        if (prompt.includes(TASK_MARKERS.research)) researchCalls.push(/SUB-QUESTION (\S+):/.exec(prompt)?.[1] ?? '');
+        return scripted.chat(args as never);
+      },
+    };
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Should I open a bakery in Brno next year?' });
+    const done = await engine.run(project.id);
+    expect(done.nodes.every((n: { status: string }) => n.status === 'verified')).toBe(true);
+    const leaf = done.nodes.find((n: { id: string }) => n.id === 'D1.1');
+    leaf.status = 'weak';
+    leaf.finding = { answer: 'OLD WEAK ANSWER for D1.1', claims: [{ text: 'old claim 5', sourceIds: ['S1'], quote: 'about the question', assumption: false }], confidence: 'low' };
+    leaf.verification = { grade: 'weak', score: 50, checks: [{ id: 'attribution', label: 'Each claim is backed by a verbatim quote found in its source', passed: false, detail: 'old' }], failures: ['old'] };
+    await engine.store.save(done);
+    const before = researchCalls.length;
+    const rerun = await engine.run(project.id);
+    expect(rerun.phase).toBe('done');
+    expect(researchCalls.slice(before)).toContain('D1.1');
+    const leafAfter = rerun.nodes.find((n: { id: string }) => n.id === 'D1.1');
+    expect(leafAfter.status).toBe('verified');
+    expect(leafAfter.finding.answer).not.toBe('OLD WEAK ANSWER for D1.1');
+  });
+
+  it('keeps the previous finding of a weak leaf when the re-attempt on a second run grades lower', async () => {
+    const scripted = new ScriptedProvider();
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        const nodeId = /SUB-QUESTION (\S+):/.exec(prompt)?.[1] ?? '';
+        if (prompt.includes(TASK_MARKERS.research) && nodeId === 'D1.1') {
+          return { content: JSON.stringify({ answer: 'made up on the re-attempt', claims: [{ text: 'price 5', sourceIds: ['S99'] }], confidence: 'high' }), model: 'm', provider: 'demo', usage: {} };
+        }
+        return scripted.chat(args as never);
+      },
+    };
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Should I open a bakery in Brno next year?' });
+    const done = await engine.run(project.id);
+    const leaf = done.nodes.find((n: { id: string }) => n.id === 'D1.1');
+    leaf.status = 'weak';
+    leaf.finding = { answer: 'OLD WEAK ANSWER for D1.1', claims: [{ text: 'old claim 5', sourceIds: ['S1'], quote: 'about the question', assumption: false }], confidence: 'low' };
+    leaf.verification = { grade: 'weak', score: 50, checks: [{ id: 'attribution', label: 'Each claim is backed by a verbatim quote found in its source', passed: false, detail: 'old' }], failures: ['old'] };
+    await engine.store.save(done);
+    const rerun = await engine.run(project.id);
+    const leafAfter = rerun.nodes.find((n: { id: string }) => n.id === 'D1.1');
+    expect(leafAfter.status).toBe('weak');
+    expect(leafAfter.finding.answer).toBe('OLD WEAK ANSWER for D1.1');
+    expect(leafAfter.verification.grade).toBe('weak');
+  });
+
   it('does not search the web for a private company\'s own figures and sends the piece to Clarify; other pieces get company-scoped queries', async () => {
     const asked: string[][] = [];
     const search = { enabled: true, lastErrors: [], search: async (queries: string[]) => { asked.push(queries); return [{ kind: 'web', title: 'Boltz pricing', url: 'https://boltz.com/pricing', domain: 'boltz.com', text: 'Boltz pricing per seat 100 EUR', query: queries[0] }]; } };

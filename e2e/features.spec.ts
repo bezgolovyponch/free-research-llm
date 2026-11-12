@@ -54,7 +54,7 @@ test('results tab shows what was delivered and has its own chat', async ({ page 
   await page.getByRole('button', { name: 'Research now' }).click();
   await expect(page.locator('#phasePill')).toContainText('done', { timeout: 40000 });
   await page.locator('.tabs .tab', { hasText: 'Results' }).click();
-  await expect(page.locator('#resultsBody')).toContainText('What the research found', { timeout: 40000 });
+  await expect(page.locator('#resultsBody')).toContainText('Still weak, and why', { timeout: 40000 });
   await expect(page.locator('#resultsBody')).toContainText('Memo verdict');
   await noSideScroll(page);
   await expect(page.locator('#resultsBody')).toContainText('Best estimate');
