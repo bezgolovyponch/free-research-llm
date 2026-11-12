@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { NOISE_MIN_SAMPLES, PLATEAU_TRIALS, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, noiseFloor, plateauCheck, plateauStopReason, purposeScore, resultsRubric, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, loopCanImprove, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage, trialVerdict } from '../../src/research/improve.mjs';
+import { NOISE_MIN_SAMPLES, PLATEAU_TRIALS, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, failingPieces, noiseFloor, nothingLeftToGain, plateauCheck, purposeScore, resultsRubric, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, loopCanImprove, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage, trialVerdict } from '../../src/research/improve.mjs';
 import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -127,7 +127,7 @@ describe('ProjectImprover', () => {
     for (let i = 0; i < 500 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
     const saved = await engine.load(project.id);
     expect(saved.improve.active).toBe(false);
-    expect(saved.improve.stopReason).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
+    expect(saved.improve.stopReason).toBe('time limit reached');
     expect(saved.improve.baseline).toBeGreaterThan(0);
     expect(saved.improve.trials.length).toBeGreaterThan(0);
     expect(new Set(saved.improve.trials.map((t: { outcome: string }) => t.outcome))).toEqual(new Set(['no-change', 'no-gain', 'repeat']));
@@ -314,7 +314,7 @@ describe('ProjectImprover through provider outages', () => {
     expect(failures).toBe(2);
     expect(sleeps.slice(0, 2)).toEqual([300000, 300000]);
     expect(saved.improve.error ?? null).toBeNull();
-    expect(saved.improve.stopReason).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
+    expect(saved.improve.stopReason).toBe('time limit reached');
     expect(saved.improve.lastPause.reason).toMatch(/every provider failed for synthesize/);
     expect(saved.log.some((l: { message: string }) => /loop paused 5 min/.test(l.message))).toBe(true);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
@@ -478,13 +478,40 @@ describe('a loop that cannot get stuck', () => {
     expect(REPEAT_SIMILARITY).toBe(0.85);
   });
 
-  it('reports a stall after 20 trials without a kept change, with the weakest check and the refused removals', () => {
+  it('reports a stall after 20 trials without a kept change, with the lowest check below 100% and the refused removals', () => {
     const futile = Array.from({ length: STALL_TRIALS }, (_, i) => ({ nodeId: 'Q', removedPieceId: i % 2 ? 'D4' : 'D1, D18', change: `try ${i}`, outcome: 'reverted-whole', at: at(30 + i) }));
     const project = { improve: { startedAt: at(0), trials: [{ nodeId: 'D2', outcome: 'kept', change: 'k', at: at(10) }, ...futile] }, acceptanceResult: { checks: [{ label: 'Value in range', value: 0.6 }, { label: 'At least 50 valid items', value: 0.1 }] } };
     const stall = stallCheck(project, t0 + 130 * 60000);
-    expect(stall).toEqual({ stalled: true, trialsSinceKept: 20, hoursSinceKept: 2, weakest: { label: 'At least 50 valid items', value: 0.1 }, refusedRemovals: ['D1', 'D18', 'D4'] });
+    expect(stall).toEqual({ stalled: true, trialsSinceKept: 20, hoursSinceKept: 2, weakest: { label: 'At least 50 valid items', value: 0.1 }, failingPieces: [], refusedRemovals: ['D1', 'D18', 'D4'] });
     expect(stallMessage(stall)).toMatch(/stalled: 20 trials in 2 h .*"At least 50 valid items" at 10%.*D1, D18, D4/);
     expect(stallCheck({ ...project, improve: { ...project.improve, trials: futile.slice(1) } }, t0 + 130 * 60000)).toMatchObject({ stalled: false, trialsSinceKept: 19, hoursSinceKept: 2.2 });
+  });
+
+  it('never steers at a check already at 100%, and targets the failing pieces when every check is at 100%', () => {
+    const t0b = Date.parse('2026-10-24T10:00:00Z');
+    const atb = (min: number) => new Date(t0b + min * 60000).toISOString();
+    const futile = Array.from({ length: STALL_TRIALS }, (_, i) => ({ nodeId: 'Q', change: `try ${i}`, outcome: 'reverted-whole', at: atb(30 + i) }));
+    const nodes = [
+      { id: 'D1', parentId: 'Q', status: 'verified', specs: [], dependsOn: [] },
+      { id: 'D2', parentId: 'Q', status: 'weak', specs: [], dependsOn: [] },
+      { id: 'D3', parentId: 'Q', status: 'supported', specs: [{ id: 'R1', minGrade: 'supported', mustMention: ['sea view'], needsNumber: false, valueRange: null, itemCount: null, last: { passed: false } }], dependsOn: [] },
+    ];
+    const base = { improve: { startedAt: atb(0), trials: futile }, nodes, acceptanceResult: { score: 0.807, checks: [
+      { id: 'count', label: 'At least 50 valid items', value: 1 },
+      { id: 'live', label: 'Links open a real page', value: 0.47 },
+      { id: 'range', label: 'Value within 0–20000 EUR', value: 1 },
+    ] } };
+    const stall = stallCheck(base, t0b + 130 * 60000);
+    expect(stall.weakest).toEqual({ label: 'Links open a real page', value: 0.47 });
+    expect(stall.failingPieces).toEqual([]);
+    const allFull = { ...base, acceptanceResult: { score: 1, checks: [
+      { id: 'count', label: 'At least 50 valid items', value: 1 },
+      { id: 'live', label: 'Links open a real page', value: 1 },
+    ] } };
+    const stallPieces = stallCheck(allFull, t0b + 130 * 60000);
+    expect(stallPieces.weakest).toBeNull();
+    expect(stallPieces.failingPieces).toEqual(['D2', 'D3']);
+    expect(stallMessage(stallPieces)).toMatch(/stalled: 20 trials in 2\.2 h .*every expected-result check is at 100% but these pieces do not pass: D2, D3/);
   });
 
   it('posts the stall to the research chat once, when it starts', async () => {
@@ -762,9 +789,8 @@ describe('a trial that researches only what it changed', () => {
 describe('plateau', () => {
   const t0 = Date.parse('2026-10-24T10:00:00Z');
   const at = (min: number) => new Date(t0 + min * 60000).toISOString();
-  const plateau = () => plateauStopReason();
 
-  it('stops the loop after PLATEAU_TRIALS non-kept finished trials in a row', () => {
+  it('counts PLATEAU_TRIALS non-kept finished trials in a row', () => {
     const trials = Array.from({ length: PLATEAU_TRIALS }, (_, i) => ({ nodeId: 'D1.1', outcome: 'reverted-whole', change: `try ${i}`, at: at(i) }));
     expect(plateauCheck(trials).plateaued).toBe(true);
     expect(plateauCheck(trials).trialsSinceKept).toBe(PLATEAU_TRIALS);
@@ -803,11 +829,7 @@ describe('plateau', () => {
     expect(plateauCheck(interrupted).trialsSinceKept).toBe(0);
   });
 
-  it('says the plateau stop reason out loud', () => {
-    expect(plateau()).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
-  });
-
-  it('ends the loop with the plateau stop reason instead of running until the time limit', async () => {
+  it('keeps looping through a plateau while time is left and ends at the deadline, not at the plateau', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-plateau-'));
     const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
     const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }), lanes: 1 });
@@ -817,13 +839,37 @@ describe('plateau', () => {
     const improver = new ProjectImprover({ engine, now: () => (clock += 1000), sleep: async () => {} });
     // never propose a change that can be kept: every trial is a no-gain / repeat
     improver.propose = async () => ({ change: 'nothing useful', searchQueries: ['x'] });
-    improver.start(project.id, { hours: 1 });
+    improver.start(project.id, { hours: 0.05 });
     for (let i = 0; i < 1000 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
     const saved = await engine.load(project.id);
     expect(saved.improve.active).toBe(false);
-    expect(saved.improve.stopReason).toBe(`plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`);
+    expect(saved.improve.stopReason).toBe('time limit reached');
     expect(saved.improve.trials.length).toBeGreaterThanOrEqual(PLATEAU_TRIALS);
     expect(saved.improve.trials.every((t: { outcome: string }) => t.outcome !== 'kept')).toBe(true);
+    expect(saved.improve.stall?.stalled).toBe(true);
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+});
+
+describe('nothing left to gain', () => {
+  const nodes = [
+    { id: 'D1', parentId: 'Q', status: 'verified', specs: [], dependsOn: [] },
+    { id: 'D2', parentId: 'Q', status: 'supported', specs: [], dependsOn: [] },
+  ];
+  const fullChecks = [
+    { id: 'count', label: 'At least 50 valid items', value: 1 },
+    { id: 'live', label: 'Links open a real page', value: 1 },
+  ];
+
+  it('ends early only when every acceptance check is at 100% and every piece passes', () => {
+    const perfect = { nodes, acceptanceResult: { score: 1, checks: fullChecks } };
+    expect(nothingLeftToGain(perfect)).toEqual({ ok: true, reason: 'nothing left to gain: every expected-result check is at 100% and every piece passes' });
+    expect(nothingLeftToGain({ ...perfect, acceptanceResult: { score: 0.807, checks: [...fullChecks, { id: 'range', label: 'Value within 0–20000 EUR', value: 0.807 }] } }).ok).toBe(false);
+    const weakPiece = { nodes: [...nodes, { id: 'D3', parentId: 'Q', status: 'weak', specs: [], dependsOn: [] }], acceptanceResult: { score: 1, checks: fullChecks } };
+    const withWeak = nothingLeftToGain(weakPiece);
+    expect(withWeak.ok).toBe(false);
+    expect(withWeak.failingPieces).toEqual(['D3']);
+    expect(failingPieces(weakPiece)).toEqual(['D3']);
+    expect(nothingLeftToGain({ nodes, acceptanceResult: null }).ok).toBe(false);
   });
 });

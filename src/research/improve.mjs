@@ -179,29 +179,50 @@ export function restRotation(targets, trials = []) {
 export const STALL_TRIALS = 20;
 export const PLATEAU_TRIALS = 12;
 
+const PIECE_PASSING = new Set(['verified', 'supported']);
+
+export function failingPieces(project) {
+  if (!Array.isArray(project.nodes)) return [];
+  const passing = passingSpecs(project);
+  return project.nodes.filter((n) => !PIECE_PASSING.has(n.status) || (n.specs ?? []).some((s) => !passing.has(`${n.id}/${s.id}`))).map((n) => n.id);
+}
+
+export function nothingLeftToGain(project) {
+  const checks = project.acceptanceResult?.checks ?? [];
+  const failing = failingPieces(project);
+  if (checks.length && checks.every((c) => c.value >= 0.999) && !failing.length) {
+    return { ok: true, reason: 'nothing left to gain: every expected-result check is at 100% and every piece passes' };
+  }
+  return { ok: false, checksBelowFull: checks.filter((c) => c.value < 0.999).map((c) => c.label), failingPieces: failing };
+}
+
 export function stallCheck(project, now = Date.now()) {
   const trials = project.improve?.trials ?? [];
   const lastKept = trials.map((t) => t.outcome).lastIndexOf('kept');
   const since = trials.slice(lastKept + 1).filter((t) => t.outcome !== 'provider-outage');
   const firstSeen = Math.min(...[since[0]?.at, project.improve?.startedAt].filter(Boolean).map(Date.parse), now);
   const from = lastKept >= 0 ? Date.parse(trials[lastKept].at) : firstSeen;
-  const weakest = [...(project.acceptanceResult?.checks ?? [])].sort((a, b) => a.value - b.value)[0] ?? null;
+  const belowFull = [...(project.acceptanceResult?.checks ?? [])].filter((c) => c.value < 0.999).sort((a, b) => a.value - b.value);
+  const weakest = belowFull[0] ? { label: belowFull[0].label, value: belowFull[0].value } : null;
+  const failing = failingPieces(project);
   const refusedRemovals = [...new Set(since.filter((t) => t.removedPieceId && FUTILE.has(t.outcome)).flatMap((t) => t.removedPieceId.split(', ')))];
   return {
     stalled: since.length >= STALL_TRIALS,
     trialsSinceKept: since.length,
     hoursSinceKept: Math.round(((now - from) / 3600000) * 10) / 10,
-    weakest: weakest ? { label: weakest.label, value: weakest.value } : null,
+    weakest,
+    failingPieces: weakest ? [] : failing.slice(0, 8),
     refusedRemovals,
   };
 }
 
 export function stallMessage(stall) {
-  return `The self-improving loop is stalled: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h without a kept change${stall.weakest ? `; the weakest expected-result check is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%` : ''}. It now steers every proposal toward new evidence for that check and refuses repeats${stall.refusedRemovals.length ? ` (removals already refused: ${stall.refusedRemovals.join(', ')})` : ''}.`;
-}
-
-export function plateauStopReason() {
-  return `plateau: ${PLATEAU_TRIALS} trials in a row without a gain above the noise floor`;
+  const target = stall.weakest
+    ? `the lowest expected-result check below 100% is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%`
+    : stall.failingPieces?.length
+      ? `every expected-result check is at 100% but these pieces do not pass: ${stall.failingPieces.join(', ')}`
+      : 'no expected-result check is below 100%';
+  return `The self-improving loop is stalled: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h without a kept change; ${target}. It now steers every proposal toward what can still gain and refuses repeats${stall.refusedRemovals.length ? ` (removals already refused: ${stall.refusedRemovals.join(', ')})` : ''}.`;
 }
 
 const NOT_A_MEASURED_TRIAL = new Set(['provider-outage', 'error', 'reverted-stopped', 'conflict']);
@@ -528,14 +549,17 @@ export class ProjectImprover {
       await this.saveCheckpoint(id, state);
       if (this.engine.siteWarm?.get(id)?.ready) await this.rebase(id, state);
       quiet = improved ? 0 : quiet + 1;
-      let plateaued = false;
+      let done = null;
       await state.lock.run(async () => {
         const current = await this.engine.load(id);
-        const improve = await this.record(id, { passes: (current.improve?.passes ?? 0) + 1, quietPasses: quiet, stall: stallCheck(current, this.now()) });
-        plateaued = plateauCheck(improve?.trials ?? [], improve?.startedAt).plateaued;
+        const stall = stallCheck(current, this.now());
+        const plateau = plateauCheck(current.improve?.trials ?? [], current.improve?.startedAt);
+        const gain = nothingLeftToGain(current);
+        await this.record(id, { passes: (current.improve?.passes ?? 0) + 1, quietPasses: quiet, stall: { ...stall, stalled: stall.stalled || plateau.plateaued } });
+        if (gain.ok) done = gain.reason;
       });
-      if (plateaued) {
-        stopReason = plateauStopReason();
+      if (done) {
+        stopReason = done;
         break;
       }
     }

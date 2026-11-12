@@ -191,5 +191,18 @@
     "signal": "heap OOM (JavaScript heap out of memory / FATAL ERROR: Reached heap limit) in data/logs/server.out while the server was loading research data, on a machine with plenty of free RAM",
     "cause": "every launch path (frl start spawn, launchd plist, Windows logon task, systemd unit, start.command) started node with the default max-old-space-size (~2 GB on 64-bit), so a large research exhausted the old space and the process died",
     "prevention": "every launch path passes --max-old-space-size=4096 to node before src/server.mjs, defined once as NODE_HEAP_FLAG in src/service.mjs and reused by src/frl.mjs and the three service definitions; tests/frl.test.ts and tests/service.test.ts assert the flag precedes server.mjs in the frl start spawn args, each service definition and start.command. Note: an already installed launchd plist only picks this up after node src/frl.mjs install is rerun"
+  },
+  {
+    "id": "F16",
+    "title": "the self-improving loop stopped on a plateau instead of running for the hours the user chose, and steered at a check already at 100%",
+    "touches": [
+      "src/research/improve.mjs",
+      "src/research/prompts.mjs",
+      "tests/research/improve.test.ts",
+      "tests/research/prompts.test.ts"
+    ],
+    "signal": "find-appropriate-plots-to-buy-fo-b7772e started the improve loop with ~24 h, ended at 2026-11-12T20:57Z with \"plateau: 12 trials in a row...\", resumed after restart 22:15Z with 22.8 h left and ended again 22:44Z on a plateau; the 22:25Z stall message named \"At least 50 valid items\" at 100% as the weakest check while the score was 0.807 and only 14 of 30 pieces passed",
+    "cause": "commit 0edee7a made ProjectImprover.loop break on PLATEAU_TRIALS=12 non-kept trials, overriding the user's deadline, and stallCheck picked the weakest acceptance check by raw value even at 100%, so steering aimed at a check that cannot gain while the real deficit (pieces not passing) was ignored",
+    "prevention": "a plateau only switches steering (the recorded stall flips to stalled, as the stall path does) and the loop runs until the deadline, the user stops it, or nothingLeftToGain says every acceptance check is at 100% and every piece passes (that stop reason says exactly that); stallCheck targets the lowest check below 100%, else names the failing pieces, never a check already at 100%; tests/research/improve.test.ts \"keeps looping through a plateau while time is left\", \"never steers at a check already at 100%\" and \"nothing left to gain\" cover it"
   }
 ]
