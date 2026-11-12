@@ -85,6 +85,7 @@ function checkAttribution(finding) {
   if (!String(finding?.answer ?? '').trim()) return null;
   if (!(finding?.claims ?? []).length) return check('attribution', 'Each claim is backed by a verbatim quote found in its source', false, 'the answer has no claims behind it');
   const s = attributionSummary(finding.claims);
+  if (s.assumedOnly) return check('attribution', 'Each claim is backed by a verbatim quote found in its source', false, 'the answer rests only on assumptions: no claim carries a quote from a fetched source');
   const missing = finding.claims.filter((c) => c.attributed === false).map((c) => `"${String(c.text).slice(0, 70)}"${c.attributionNote ? ` (${c.attributionNote})` : ''}`);
   return check('attribution', 'Each claim is backed by a verbatim quote found in its source', s.passed, `${s.attributed} of ${s.factual} claim(s) carry a quote found in the cited source${missing.length ? `; not backed: ${missing.join('; ').slice(0, 240)}` : ''}`);
 }

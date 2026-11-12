@@ -407,6 +407,7 @@ export class ProjectImprover {
       } finally {
         this.active.delete(id);
         this.engine.quiet.delete(id);
+        this.engine.cancelled.delete(id);
         if (!state.shutdown) await this.saveHandoff(id, state.stopped ? 'loop stopped by user' : 'loop ended');
       }
     })();
@@ -458,6 +459,7 @@ export class ProjectImprover {
         } finally {
           this.active.delete(id);
           this.engine.quiet.delete(id);
+          this.engine.cancelled.delete(id);
           if (!slice.shutdown) await this.saveHandoff(id, 'improve-all slice ended');
         }
       }

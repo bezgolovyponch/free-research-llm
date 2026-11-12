@@ -831,6 +831,40 @@ describe('ResearchEngine', () => {
     const stopped = await engine.run(project.id);
     expect(stopped.phase).toBe('cancelled');
     expect(stopped.report).toBeNull();
+    expect(engine.cancelled.has(project.id)).toBe(false);
+  });
+
+  it('a resumed failed leaf re-rolls its parent', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with proven good quality for a second hand shop in Czech Republic' });
+    const piece = (id: string, parentId: string, title: string, question: string, more: object) => ({ id, parentId, title, question, method: 'lookup', dependsOn: [], impact: 4, uncertainty: 3, sources: [], attempts: 1, ...more });
+    const stale = { answer: 'Suppliers stock the target brands with varying SKU counts.', claims: [], items: [], confidence: 'low', gaps: [] };
+    project.nodes = [
+      piece('D4', 'Q', 'Assortment breadth', 'Do the suppliers stock the target brands?', { status: 'unsupported', finding: stale, verification: { grade: 'unsupported', score: 50, checks: [], failures: [], rolledUpFrom: ['D4.1:failed', 'D4.2:supported'] } }),
+      piece('D4.1', 'D4', 'Brand presence', 'Which target brands does each supplier list?', { status: 'failed', error: 'all free model quotas are cooling down after rate limits; retry in a minute' }),
+      piece('D4.2', 'D4', 'SKU quantity', 'Count distinct SKUs for each target brand per supplier', { status: 'supported', finding: { answer: 'Supplier catalogs list the brands.', claims: [], items: [], confidence: 'low', gaps: [] }, verification: { grade: 'supported', score: 100, checks: [], failures: [] } }),
+    ];
+    project.phase = 'error';
+    await engine.store.save(project);
+    const done = await engine.run(project.id);
+    const byId = Object.fromEntries(done.nodes.map((n: { id: string }) => [n.id, n]));
+    expect(byId['D4.1'].status).not.toBe('failed');
+    expect(byId['D4'].verification.rolledUpFrom).toEqual([`D4.1:${byId['D4.1'].status}`, 'D4.2:supported']);
+    expect(byId['D4'].finding).not.toEqual(stale);
+  });
+
+  it('a drift downgrade of a leaf sends its parent back to be rolled up', () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const drift = { baseline: { values: [4], at: '2026-11-05T02:10:00.000Z' }, samples: [{ values: [1], score: 0.84, at: '2026-11-06T13:45:00.000Z' }] };
+    const project = { id: 'p', log: [], nodes: [
+      { id: 'D4', parentId: 'Q', status: 'supported', dependsOn: [], finding: { answer: 'Suppliers stock the target brands.' }, verification: { grade: 'supported', rolledUpFrom: ['D4.1:supported', 'D4.2:supported'] } },
+      { id: 'D4.1', parentId: 'D4', status: 'supported', dependsOn: [], finding: { answer: '4 suppliers list Barbour.' }, verification: { grade: 'supported' }, drift },
+      { id: 'D4.2', parentId: 'D4', status: 'supported', dependsOn: [], finding: { answer: 'Supplier catalogs list the brands.' }, verification: { grade: 'supported' } },
+    ] };
+    const changed = engine.monitorPass(project as never);
+    if (!changed.length) throw new Error('the stored drift sample of D4.1 no longer triggers a drift downgrade: rebuild this fixture from monitor.mjs');
+    expect(project.nodes.map((n) => [n.id, n.status])).toEqual([['D4', 'pending'], ['D4.1', 'pending'], ['D4.2', 'supported']]);
+    expect(project.nodes[0].finding).toBeNull();
   });
 
   it('honours a stop raised while collecting candidates', async () => {
@@ -1126,8 +1160,8 @@ describe('meaning check of claims', () => {
 
   function votingEngine(votes: Record<string, string>) {
     const { engine, router } = engineWith(new ScriptedProvider());
-    const calls: { purpose: string; tier: string; avoid?: string; quote: string }[] = [];
-    router.complete = (async (request: { purpose: string; tier: string; avoid?: string; messages: { content: string }[] }) => {
+    const calls: { purpose: string; tier: string; avoid?: string | string[]; quote: string }[] = [];
+    router.complete = (async (request: { purpose: string; tier: string; avoid?: string | string[]; messages: { content: string }[] }) => {
       const asked = /QUOTE: (.*)/.exec(request.messages[1].content)?.[1] ?? '';
       calls.push({ purpose: request.purpose, tier: request.tier, avoid: request.avoid, quote: asked });
       const provider = request.purpose === 'support' ? 'gemini' : 'groq';
@@ -1144,7 +1178,7 @@ describe('meaning check of claims', () => {
     expect(result).toEqual({ checked: 1, open: 1 });
     expect(calls.slice(0, 2)).toEqual([
       { purpose: 'support', tier: 'deep', avoid: 'cerebras', quote: `${quote}. Delivery is extra.` },
-      { purpose: 'support-second', tier: 'fast', avoid: 'gemini', quote: `${quote}. Delivery is extra.` },
+      { purpose: 'support-second', tier: 'fast', avoid: ['cerebras', 'gemini'], quote: `${quote}. Delivery is extra.` },
     ]);
     const support = finding.claims[0].support;
     expect(support.verdict).toBe('disagree');
@@ -1181,6 +1215,51 @@ describe('meaning check of claims', () => {
     const saved = await engine.load(project.id);
     expect(saved.nodes[0].finding.claims[0].support.verdict).toBe('supported');
     expect(saved.supportAudit).toMatchObject({ checked: 1, supported: 1, stale: 0 });
+  });
+
+  it('the second meaning vote avoids the author', async () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    const avoided: Array<{ purpose: string; avoid: unknown }> = [];
+    router.complete = (async (request: { purpose: string; avoid?: unknown }) => {
+      avoided.push({ purpose: request.purpose, avoid: request.avoid });
+      return request.purpose === 'support' ? { data: { supports: 'yes', reason: 'Exact match' }, provider: 'pollinations', model: 'openai-fast' } : { data: { supports: 'yes', reason: '' }, provider: 'groq', model: 'openai/gpt-oss-20b' };
+    }) as typeof router.complete;
+    const said = "Testimonials underscore the company's reputation, boasting a 4.9/5 rating from 44 reviews.";
+    const finding = { answer: 'Ora Industries has a 4.9/5 rating from 44 reviews.', claims: [{ text: 'Ora Industries has a 4.9/5 rating from 44 reviews.', quote: said, sourceIds: ['S1'], attributed: true }] };
+    await engine.checkSupport({ id: 'p', nodes: [] }, { id: 'D3.2', method: 'lookup', sources: [{ id: 'S1', text: said }] }, finding, 'gemini');
+    expect(avoided).toEqual([{ purpose: 'support', avoid: 'gemini' }, { purpose: 'support-second', avoid: ['gemini', 'pollinations'] }]);
+  });
+
+  it('keeps the earlier meaning record when no model answers a recheck, and rechecks it next time', async () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'What does a camp permit cost in Czechia?' });
+    const older = { version: 1, verdict: 'supported', votes: [{ provider: 'groq', model: 'm', vote: 'yes', reason: '' }, { provider: 'cerebras', model: 'm', vote: 'yes', reason: '' }], missing: [], cause: '', at: '2026-10-27T08:41:14.185Z' };
+    const finding = { answer: 'A permit costs €950.', claims: [{ text: 'A permit costs €950', quote: 'The permit costs €950 for a camp', sourceIds: ['S1'], attributed: true, support: older }] };
+    project.nodes = [{ id: 'D1', parentId: 'Q', title: 'Permit', question: 'Permit cost?', method: 'lookup', dependsOn: [], status: 'verified', finding, sources: [{ id: 'S1', text: 'The permit costs €950 for a camp.' }], verification: { grade: 'verified', score: 100, checks: [], failures: [] }, model: 'gemini/m' }];
+    await engine.store.save(project);
+    const answer = router.complete;
+    router.complete = (async () => { throw new Error('all free model quotas are cooling down after rate limits; retry in a minute'); }) as typeof router.complete;
+    const outage = await engine.recheckSupport(project.id);
+    expect(outage.message).toBe('rechecked 0 piece(s), 0 claim(s): 0 to confirm; no model answered for 1 claim(s), they stay due for a recheck');
+    const kept = await engine.load(project.id);
+    expect(kept.nodes[0].status).toBe('verified');
+    expect(kept.nodes[0].finding.claims[0].support).toEqual(older);
+    router.complete = (async () => ({ data: { supports: 'yes', reason: '' }, provider: 'groq', model: 'groq-m' })) as typeof router.complete;
+    expect((await engine.recheckSupport(project.id)).message).toBe('rechecked 1 piece(s), 1 claim(s): 0 to confirm');
+    expect((await engine.load(project.id)).nodes[0].finding.claims[0].support).toMatchObject({ version: 2, verdict: 'supported' });
+    router.complete = answer;
+  });
+
+  it('a stop on an idle research does not block the next action', async () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    router.complete = (async () => ({ data: { supports: 'yes', reason: '' }, provider: 'groq', model: 'groq-m' })) as typeof router.complete;
+    const project = await engine.createProject({ question: 'What does a camp permit cost in Czechia?' });
+    const finding = { answer: 'A permit costs €950.', claims: [{ text: 'A permit costs €950', quote: 'The permit costs €950 for a camp', sourceIds: ['S1'], attributed: true }] };
+    project.nodes = [{ id: 'D1', parentId: 'Q', title: 'Permit', question: 'Permit cost?', method: 'lookup', dependsOn: [], status: 'supported', finding, sources: [{ id: 'S1', text: 'The permit costs €950 for a camp.' }], verification: { grade: 'supported', score: 100, checks: [], failures: [] }, model: 'gemini/m' }];
+    await engine.store.save(project);
+    engine.cancel(project.id);
+    expect(engine.cancelled.has(project.id)).toBe(false);
+    await expect(engine.recheckSupport(project.id)).resolves.toMatchObject({ ok: true, message: 'rechecked 1 piece(s), 1 claim(s): 0 to confirm' });
   });
 
   it('drops pages that share fewer than two topic terms with the node before any model call', async () => {

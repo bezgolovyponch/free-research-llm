@@ -16,7 +16,7 @@ describe('external verification on the app side', () => {
   it('counts only plots the external verifier confirmed; refuted and unchecked ones never count (fail-closed)', () => {
     const out = applyVerification(table, record);
     expect(out.keptCount).toBe(1);
-    expect(out.verification).toEqual({ at: '2026-10-26T18:00:00Z', fits: 3, checked: 4, confirmed: 1, refuted: 1, unconfirmed: 0, pending: 2 });
+    expect(out.verification).toEqual({ at: '2026-10-26T18:00:00Z', fits: 3, checked: 4, confirmed: 1, refuted: 1, unconfirmed: 0, pending: 2, fitsConfirmed: 1, fitsRefuted: 1, fitsOpen: 1 });
     expect(out.kept.find((r: { url: string }) => r.url === 'b').verified).toEqual({ verdict: 'refuted', failed: ['sea within 20 km: refuted (no coastline within 25 km)'], at: '2026-10-26T18:00:00Z' });
     expect(out.kept.find((r: { url: string }) => r.url === 'c').verified.verdict).toBe('pending');
     expect(out.kept.find((r: { url: string }) => r.url === 'd').verified.verdict).toBe('pending');
@@ -76,5 +76,16 @@ describe('external verification on the app side', () => {
     expect(await readVerification(dir, 'p2')).toBeNull();
     expect(await readVerification(dir, 'missing')).toBeNull();
     await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('verifier verdicts among the fits (audit 2026-11-12, row A1)', () => {
+  it('reports how many fits are confirmed, refuted and waiting, apart from the other tiers', () => {
+    const out = applyVerification(table, record);
+    const fits = out.kept.filter((r: { plan: { tier: string } }) => r.plan.tier === 'fits');
+    const of = (verdict: string) => fits.filter((r: { verified: { verdict: string } }) => r.verified.verdict === verdict).length;
+    expect(out.verification).toMatchObject({ fitsConfirmed: of('confirmed'), fitsRefuted: of('refuted'), fitsOpen: of('unconfirmed') + of('pending') });
+    expect(out.verification.fitsConfirmed).toBe(out.keptCount);
+    expect(of('refuted') + of('unconfirmed') + of('pending')).toBeGreaterThan(0);
   });
 });

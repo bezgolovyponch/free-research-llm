@@ -34,5 +34,7 @@ export function applyVerification(candidates, record) {
   });
   const verdicts = (verdict) => kept.filter((r) => r.verified?.verdict === verdict).length;
   const confirmed = verdicts('confirmed');
-  return { ...candidates, kept, keptCount: kept.filter((r) => r.plan?.tier === 'fits' && r.verified?.verdict === 'confirmed').length, verification: { at: record?.at ?? null, fits: kept.filter((r) => r.plan?.tier === 'fits').length, checked: kept.filter(verifiable).length, confirmed, refuted: verdicts('refuted'), unconfirmed: verdicts('unconfirmed'), pending: verdicts('pending') } };
+  const fits = kept.filter((r) => r.plan?.tier === 'fits');
+  const fitsWith = (verdict) => fits.filter((r) => r.verified?.verdict === verdict).length;
+  return { ...candidates, kept, keptCount: fitsWith('confirmed'), verification: { at: record?.at ?? null, fits: fits.length, checked: kept.filter(verifiable).length, confirmed, refuted: verdicts('refuted'), unconfirmed: verdicts('unconfirmed'), pending: verdicts('pending'), fitsConfirmed: fitsWith('confirmed'), fitsRefuted: fitsWith('refuted'), fitsOpen: fitsWith('unconfirmed') + fitsWith('pending') } };
 }

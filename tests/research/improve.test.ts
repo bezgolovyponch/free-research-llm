@@ -386,9 +386,44 @@ describe('ProjectImprover handoffs', () => {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
 
+  it('a loop stopped between runs leaves no stop flag behind, so the next action on the research is not blocked', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-stopflag-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }) });
+    const project = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
+    const improver = new ProjectImprover({ engine, now: () => 0, sleep: async () => {} });
+    let entered = () => {};
+    let release = () => {};
+    const inPass = new Promise<void>((r) => { entered = r; });
+    const gate = new Promise<void>((r) => { release = r; });
+    improver.pass = async () => {
+      entered();
+      await gate;
+      return false;
+    };
+    improver.start(project.id, { hours: 4 });
+    await inPass;
+    expect(engine.running.has(project.id)).toBe(false);
+    expect(improver.stop(project.id)).toEqual({ ok: true });
+    expect(engine.cancelled.has(project.id)).toBe(true);
+    release();
+    for (let i = 0; i < 500 && improver.isActive(project.id); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(engine.cancelled.has(project.id)).toBe(false);
+    await expect(engine.recheckSupport(project.id)).resolves.toMatchObject({ ok: true });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 3 });
+  });
+
   it('reverts a change that breaks a regression check that used to pass, and runs only on the selected pieces', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-scope-'));
-    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      search: async (queries: string[]) => [
+        { kind: 'web', title: 'One', url: 'https://one.example/a', domain: 'one.example', snippet: 's', text: `about ${queries[0]}` },
+        { kind: 'web', title: 'Two', url: 'https://two.example/b', domain: 'two.example', snippet: 's', text: `more evidence from a second independent source about ${queries[0]}` },
+      ],
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
     const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }) });
     const created = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
     const done = await engine.run(created.id);

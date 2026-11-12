@@ -109,6 +109,18 @@ describe('ModelRouter', () => {
     await expect(router.complete({ messages: [], avoid: 'a' })).resolves.toMatchObject({ provider: 'b' });
   });
 
+  it('avoids every provider in a list, so a second reviewer is neither the author nor the first reviewer', async () => {
+    const make = (id: string, model: string) => ({ ...provider(id, ['{}', '{}']), describe: () => ({ id, fast: model, deep: model }) });
+    const gemini = make('gemini', 'gemini-3.1-flash-lite');
+    const pollinations = make('pollinations', 'openai-fast');
+    const groq = make('groq', 'openai/gpt-oss-20b');
+    const router = new ModelRouter({ providers: [gemini, pollinations, groq], routeOrder: { fast: ['gemini', 'pollinations', 'groq'], deep: ['gemini', 'pollinations', 'groq'] } });
+    expect(router.available({ tier: 'fast', purpose: 'support-second', avoid: 'pollinations' })[0].id).toBe('gemini');
+    expect(router.available({ tier: 'fast', purpose: 'support-second', avoid: ['gemini', 'pollinations'] }).map((p: { id: string }) => p.id)).toEqual(['groq', 'gemini', 'pollinations']);
+    await expect(router.complete({ messages: [], purpose: 'support-second', avoid: ['gemini', 'pollinations'] })).resolves.toMatchObject({ provider: 'groq' });
+    expect(router.available({ tier: 'fast', avoid: [undefined, undefined] }).map((p: { id: string }) => p.id)).toEqual(['gemini', 'pollinations', 'groq']);
+  });
+
   it('waits out a short cooldown instead of failing when every provider is rate-limited', async () => {
     let now = 0;
     const waits: number[] = [];

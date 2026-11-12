@@ -50,3 +50,10 @@ describe('normalizeTree', () => {
     expect(researchOrder(cyclic.nodes)).toHaveLength(2);
   });
 });
+
+describe('progress with pieces covered by code (audit 2026-11-12, supplier research b2f5b7 D3.1)', () => {
+  it('counts a covered piece as finished, not as verified by research', () => {
+    const nodes = [{ id: 'D3', parentId: 'Q', status: 'supported' }, { id: 'D3.1', parentId: 'D3', status: 'covered', coveredBy: 'candidate-table' }, { id: 'D3.2', parentId: 'D3', status: 'pending' }];
+    expect(progress(nodes)).toEqual({ total: 3, finished: 2, verified: 1 });
+  });
+});

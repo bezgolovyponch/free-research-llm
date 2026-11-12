@@ -72,8 +72,12 @@ export function conceptAudit(project, { now = Date.now() } = {}) {
 
   const max = p.brief?.valueRange?.[1];
   if (typeof max === 'number' && kept) {
-    const bad = fits.filter((r) => typeof r?.value === 'number' && (!r.unit || !p.brief?.unit || r.unit === p.brief.unit) && r.value > max * 1.02);
-    add('C5', 'Fits respect the price limit', 'error', !bad.length, bad.length ? `${bad.length} fit(s) are above ${max} EUR: ${urlsOf(bad)}` : `All ${fits.length} fit(s) are within ${max} EUR.`);
+    const planned = kept.some((r) => r?.plan);
+    const priced = planned ? fits : kept.filter((r) => countsTowardResult(r, c));
+    const what = planned ? 'fit(s)' : 'counted row(s)';
+    const unit = p.brief?.unit || 'EUR';
+    const bad = priced.filter((r) => typeof r?.value === 'number' && (!r.unit || !p.brief?.unit || r.unit === p.brief.unit) && r.value > max * 1.02);
+    add('C5', planned ? 'Fits respect the price limit' : 'Rows that count respect the price limit', 'error', !bad.length, bad.length ? `${bad.length} ${what} are above ${max} ${unit}: ${urlsOf(bad)}` : `All ${priced.length} ${what} are within ${max} ${unit}.`);
   }
 
   const verification = c?.verification;
