@@ -61,6 +61,13 @@ const seedRange = (portal, { min, max }, unit, convert) => {
   return { min: low === null ? null : Math.floor(low), max: high === null ? null : Math.ceil(high), unit: portal.currency };
 };
 
+const withinCap = (portal, max, unit, convert) => {
+  if (portal.maxPrice === null || max === null) return true;
+  if (!unit || !portal.currency || unit === portal.currency) return portal.maxPrice >= max;
+  const asked = typeof convert === 'function' ? convertedBound(max, unit, portal.currency, convert) : null;
+  return asked === null || portal.maxPrice >= Math.round(asked);
+};
+
 export function listedKind(kind) {
   return Boolean(kind) && SEED_PORTALS.some((p) => speaksOf(p, kind));
 }
@@ -69,7 +76,7 @@ export function seedPortals(brief, convert = null) {
   if (!brief?.kind || !brief.regions?.length) return [];
   const [min = null, max = null] = brief.valueRange ?? [];
   const unit = currencyOf(brief.unit);
-  return SEED_PORTALS.filter((p) => speaksOf(p, brief.kind) && brief.regions.includes(p.country) && (!brief.coastal || p.coastal) && (p.maxPrice === null || max === null || p.maxPrice >= max)).map((p) => {
+  return SEED_PORTALS.filter((p) => speaksOf(p, brief.kind) && brief.regions.includes(p.country) && (!brief.coastal || p.coastal) && withinCap(p, max, unit, convert)).map((p) => {
     const url = typeof p.url === 'function' ? p.url(seedRange(p, { min, max }, unit, convert)) : p.url;
     return { url, country: p.country, sample: p.sample, count: 1, seed: true };
   });

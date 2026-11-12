@@ -109,6 +109,28 @@ describe('listing price on the page', () => {
     expect(inRange([], spec, null)).toBe(false);
   });
 
+  it('inRange converts the item value when the page shows no amount', () => {
+    const rates: Record<string, number> = { EUR: 1, CZK: 24.3, TRY: 55.9 };
+    const convert = (value: number, from: string, to: string) => (rates[from] && rates[to] ? (value / rates[from]) * rates[to] : null);
+    const cars = { valueRange: [0, 65000], unit: 'CZK' } as never;
+    const plots = { valueRange: [0, 20000], unit: 'EUR' } as never;
+    expect(inRange([], cars, 23990, convert, 'EUR')).toBe(false);
+    expect(inRange([], cars, 1700, convert, 'EUR')).toBe(true);
+    expect(inRange([], cars, 25000, convert, 'CZK')).toBe(true);
+    expect(inRange([], plots, 290000, convert, 'TRY')).toBe(true);
+    expect(inRange([], plots, 1455000, convert, 'TRY')).toBe(false);
+    expect(inRange([], plots, 15000, convert)).toBe(true);
+    expect(inRange([], plots, 8200000000, convert, 'VND')).toBe(false);
+  });
+
+  it('reads the unit of a delivered row when its page shows no amount', async () => {
+    const url = 'https://www.autobazar.eu/detail/skoda-kodiaq-20-tdi-scr-rs-dsg-4x4/AmOs2PRdaeH/';
+    const convert = (value: number, from: string, to: string) => (from === 'EUR' && to === 'CZK' ? value * 24.3 : null);
+    const checker = new AcceptanceChecker({ readPage: async () => ({ text: 'Škoda Kodiaq 2.0 TDI SCR RS DSG 4x4, 2020, Automat, Diesel, 180 500 km, 176 kW, SUV, 4x4. '.repeat(4), status: 200 }), convert });
+    const result = await checker.evaluate(normalizeAcceptance({ expected: '1 car', itemCount: 1, valueRange: [0, 65000], unit: 'CZK' }), [{ title: 'Škoda Kodiaq 2.0 TDI SCR RS DSG 4x4', url, value: 23990, unit: 'EUR' }], { located: true });
+    expect(result!.items[0]).toMatchObject({ live: true, inRange: false });
+  });
+
   it('never treats chat, social, API or image links as listings, nor keyword searches like /q-20000/', () => {
     for (const url of ['https://wa.me/905312732069?text=hi', 'https://api.goswap.org/listing/123456', 'https://s3.vietnam-real.estate/p/x/3zg64igysq45/6ad6708821e4.jpg', 'https://www.olx.pt/imoveis/terrenos-quintas/aveiro/q-20000/', 'https://web.archive.org/web/20250101/https://x.example/ad/123456']) expect(looksLikeListing(url), url).toBe(false);
     expect(looksLikeListing('https://www.imovirtual.com/pt/anuncio/terreno-535-m-quinta-do-anjo-ID1iA1X')).toBe(true);

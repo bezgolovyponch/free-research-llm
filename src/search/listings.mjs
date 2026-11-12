@@ -400,11 +400,13 @@ export function fromCards(source, base, { isHtml = true, template = '' } = {}) {
 }
 
 const LISTING_ID = /(?:ID[A-Za-z0-9]{4,}|[a-z]?\d{4,})/g;
+const ID_SEGMENT = /^\d{6,}$/;
 
 export function listingKey(url) {
   try {
     const u = new URL(url);
-    const ids = `${u.pathname}${u.search}`.match(LISTING_ID);
+    const segment = u.pathname.split('/').filter((part) => ID_SEGMENT.test(part)).pop();
+    const ids = segment ? [segment] : `${u.pathname}${u.search}`.match(LISTING_ID);
     return `${u.hostname.replace(/^www\./, '')}#${ids ? ids[ids.length - 1].toLowerCase() : u.pathname.replace(/\/+$/, '').toLowerCase()}`;
   } catch {
     return String(url ?? '');
@@ -421,7 +423,12 @@ function merge(lists, onPage) {
       continue;
     }
     if (!onPage.has(known.url) && onPage.has(item.url)) known.url = item.url;
-    for (const key of ['value', 'unit', 'area', 'areaUnit', 'place', 'card']) if ((known[key] === null || known[key] === '' || known[key] === undefined) && item[key] !== undefined) known[key] = item[key];
+    const blank = (value) => value === null || value === '' || value === undefined;
+    for (const key of ['value', 'unit', 'place', 'card']) if (blank(known[key]) && item[key] !== undefined) known[key] = item[key];
+    if (blank(known.area) && item.area !== undefined) {
+      known.area = item.area;
+      if (!blank(item.area)) known.areaUnit = item.areaUnit ?? '';
+    }
     if (known.title === known.url && item.title !== item.url) known.title = item.title;
     if (!known.via.includes(method)) known.via.push(method);
   }

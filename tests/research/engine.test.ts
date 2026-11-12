@@ -397,9 +397,87 @@ describe('ResearchEngine', () => {
     expect(project.decisionModel.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa'], variants: [], source: 'model proposal, matched to listing titles by code' });
     expect(project.decisionModel.calibrated).toBeTruthy();
     expect(project.brief.subtype).toEqual(project.decisionModel.subtype);
+    expect(project.brief.kind.not).toEqual(['parts', 'kola', 'svetlo', 'pneumatiky']);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && /^kind calibrated on 10 titles: not parts, kola, svetlo, pneumatiky; hatchback: 2 models$/.test(l.message))).toBe(true);
     await engine.collectCandidates(project as never, { sweep: true });
     expect(calls).toHaveLength(3);
+  });
+
+  it('briefOf keeps the kind\'s calibrated words', () => {
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }) });
+    const project: Record<string, any> = {
+      id: 'find-accurate-and-verified-car-l-0c750f',
+      question: 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, price up to 65000CZK or equivalent',
+      templateId: 'generic',
+      acceptance: { itemCount: 20, valueRange: [0, 65000], unit: 'CZK' },
+      decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], condition: ['na dily'], upgrades: ['nova stk'], verified: { titles: 3277, matched: 8, share: 0 }, dropped: [] }, criteria: [] },
+    };
+    expect(engine.briefOf(project as never).kind).toEqual({ label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], condition: ['na dily'], upgrades: ['nova stk'] });
+    project.decisionModel.kind = { label: 'used car', terms: ['hatchback'], verified: null };
+    expect(engine.briefOf(project as never).kind).toEqual({ label: 'used car', terms: ['hatchback'] });
+  });
+
+  it('briefOf describes a list of a kind no portal lists as entities, not as listing pages for sale', () => {
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }) });
+    const terms = ['wholesale used clothing', 'second hand clothes', 'used clothing wholesale'];
+    const project: Record<string, any> = {
+      id: 'find-the-wholesale-branded-secon-b2f5b7',
+      question: 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic',
+      templateId: 'generic',
+      acceptance: { itemCount: 20 },
+      decisionModel: { kind: { label: 'wholesale clothing provider', terms, not: ['retail', 'maloobchod', 'donation', 'consignment'], verified: null, hubs: ['czech republic'], validated: { pages: 10, terms, at: '2026-11-05T02:04:03.161Z' } }, criteria: [] },
+    };
+    const brief = engine.briefOf(project as never);
+    expect(brief.located).toBe(false);
+    expect(brief.text).toContain('Deliver: 20 results of the kind "wholesale clothing provider", each with its own website\nUsed in: Czechia (sources may be anywhere)');
+    expect(brief.text).not.toContain('listing pages for sale');
+    expect(brief.text).not.toContain('offered for rent');
+  });
+
+  it('drops an exclusion word that full-price listings of an asked model carry, so a car sold with spare wheels stays a car', async () => {
+    const rows: Array<[string, string, number]> = [
+      ['Honda Civic 2,2 CTDi"103kW"+ Al kola 17 l', '226020175/honda-civic-22-ctdi103kw-al-kola-17-l.php', 45000],
+      ['Kia Rio, 1.1 CRDI 55KW klima,2x kola', '226235794/kia-rio-11-crdi-55kw-klima2x-kola.php', 59000],
+      ['ŠKODA FABIA II COMFORT 2009 1,2 HTP KLIMA, EL.OKNA', '225652792/skoda-fabia-ii-comfort-2009-12-htp-klima-elokna.php', 49999],
+      ['Škoda Fabia VELKÝ SERVIS', '226256383/skoda-fabia-velky-servis.php', 64900],
+      ['Prodám Škoda Fabia 1.4 16V 74 KW', '226246786/prodam-skoda-fabia-14-16v-74-kw.php', 35000],
+      ['Škoda fabia', '226208092/skoda-fabia.php', 27000],
+      ['Pěkná Škoda Fabia 1.2 MPi, málo najeto, velmi dobrý stav', '226126886/pekna-skoda-fabia-12-mpi-malo-najeto-velmi-dobry-stav.php', 35000],
+      ['ŠKODA FABIA 2 1.2 HTP', '225962420/skoda-fabia-2-12-htp.php', 55000],
+      ['ŠKODA FABIA II 1.2 HTP', '225859354/skoda-fabia-ii-12-htp.php', 55000],
+      ['Škoda Fabia 2, LPG', '225810909/skoda-fabia-2-lpg.php', 46000],
+      ['škoda fabia 1.2', '226084281/skoda-fabia-12.php', 24000],
+      ['Škoda Fabia 1 1.2 MPI 40kW', '226050045/skoda-fabia-1-12-mpi-40kw.php', 26000],
+      ['Škoda Fabia 1.2 tsi 77kw', '226204633/skoda-fabia-12-tsi-77kw.php', 55000],
+      ['Škoda Felicia 1.9D GLX', '225957221/skoda-felicia-19d-glx.php', 28000],
+      ['Škoda Fabia II 1.2 HTP', '225884698/skoda-fabia-ii-12-htp.php', 37000],
+      ['NOVA STK Škoda Fabia 1.2 HTP 2004', '225780289/skoda-fabia-12-htp-2004.php', 19500],
+      ['Škoda Fabia 1.4-55kw,AUTOMAT ,klima,2007', '226315746/skoda-fabia-14-55kwautomat-klima2007.php', 59999],
+      ['Škoda Fabia II 1.2 HTP', '226299305/skoda-fabia-ii-12-htp.php', 25000],
+      ['Škoda Fabia 2 1.2htp', '223755133/skoda-fabia-2-12htp.php', 40000],
+      ['Alu kola 16" Škoda Karoq', '226253219/alu-kola-16-skoda-karoq.php', 12000],
+      ['Letni kola + disky škoda oct 1', '226145989/letni-kola-disky-skoda-oct-1.php', 3000],
+      ['Škoda Octavia I kola R15 5x100 ET38', '224466858/skoda-octavia-i-kola-r15-5x100-et38.php', 2500],
+      ['Prodám alu kola DEZENT 5x112r17', '226106581/prodam-alu-kola-dezent-5x112r17.php', 8000],
+      ['Originální alu kola Škoda R17, 7J×17 ET45 – sada 4 ks', '225662126/originalni-alu-kola-skoda-r17-7j17-et45-sada-4-ks.php', 3500],
+      ['Alu kola Škoda', '226208253/alu-kola-skoda.php', 5000],
+    ];
+    const listings = rows.map(([title, slug, value]) => ({ title, url: `https://auto.bazos.cz/inzerat/${slug}`, value, unit: 'CZK' }));
+    const router = { complete: async () => ({ provider: 'groq', data: { not: ['kola', 'disky'], subtype: { label: 'hatchback', models: ['kia rio', 'honda civic', 'skoda fabia', 'skoda felicia'], variants: [] } } }) };
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) } as never);
+    const project: Record<string, any> = {
+      id: 'find-accurate-and-verified-car-l-0c750f',
+      question: 'Find accurate and verified car listings within 300km from prague, hatchback, price up to 65000CZK or equivalent',
+      log: [],
+      sweep: { pages: [{ id: 'P1', url: 'https://auto.bazos.cz/skoda/40/?hledat=&hlokalita=&humkreis=&cenaod=0&cenado=65000&order=', listings }] },
+      decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], verified: { titles: 25, matched: 0, share: 0 } } },
+    };
+    expect(await (engine as unknown as { calibrateKind: (p: unknown) => Promise<boolean> }).calibrateKind(project)).toBe(true);
+    expect(project.decisionModel.kind.not).toEqual(['parts', 'accessories']);
+    expect(project.decisionModel.subtype.models).toEqual(['kia rio', 'honda civic', 'skoda fabia', 'skoda felicia']);
+    const few: Record<string, any> = { ...project, log: [], sweep: { pages: [{ id: 'P1', url: project.sweep.pages[0].url, listings: listings.slice(0, 6) }] }, decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], verified: { titles: 6, matched: 0, share: 0 } } } };
+    await (engine as unknown as { calibrateKind: (p: unknown) => Promise<boolean> }).calibrateKind(few);
+    expect(few.decisionModel.kind.not).toEqual(['parts', 'accessories', 'kola']);
   });
 
   it('turns the place and radius a question names into the countries the brief uses as regions', async () => {

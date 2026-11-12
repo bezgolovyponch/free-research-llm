@@ -281,3 +281,99 @@ describe('condition words from real titles', () => {
     expect(applyCalibration({ label: 'used car', terms: [] }, merged, titles).kind.condition.sort()).toEqual(['havarovana', 'na dojezdeni']);
   });
 });
+
+describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
+  const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
+  const carModels = ['kia rio', 'citroen c3', 'honda civic', 'peugeot 207', 'hyundai i10', 'kia picanto', 'ford fiesta', 'prodam citroen c1', 'prodam citroen', 'honda jazz', 'dacia sandero', 'toyota yaris', 'seat ibiza', 'skoda fabia ii', 'skoda fabia', 'skoda felicia'];
+  const storedCar = () => ({
+    concept: 'Verified hatchback cars near Prague',
+    kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], verified: { titles: 3277, matched: 8, share: 0 }, dropped: [] },
+    criteria: [],
+    noLimit: [],
+    missing: [],
+    agreement: { samples: 3, majority: 2, proposed: 1, kept: 0 },
+    version: 2,
+    question: carQuestion,
+    guidance: '',
+    subtype: { label: 'hatchback', models: [...carModels], variants: [], source: 'model proposal, matched to listing titles by code' },
+    calibrated: '2026-11-03T13:21:54.199Z',
+  });
+  const proposal = { concept: 'Verified hatchback cars near Prague', purpose: '', value: '', needs: [], kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories'] }, criteria: [], unmodelled: [] };
+  const router = { complete: async () => ({ provider: 'groq', data: proposal }) };
+
+  it('a rebuild after a hint keeps the calibrated sub-type', async () => {
+    const project: Record<string, any> = { id: 'find-accurate-and-verified-car-l-0c750f', question: carQuestion, guidance: 'prefer petrol engines', acceptance: { itemCount: 20 }, decisionModel: storedCar() };
+    const modeler = new DecisionModeler({ router } as never);
+    expect(modeler.fresh(project)).toBe(false);
+    await modeler.build(project);
+    expect(project.decisionModel.guidance).toBe('prefer petrol engines');
+    expect(project.decisionModel.subtype.models).toHaveLength(16);
+    expect(project.decisionModel.calibrated).toBe('2026-11-03T13:21:54.199Z');
+    expect(project.decisionModel.kind.not).toEqual(['parts', 'accessories', 'kola']);
+    expect(project.decisionModel.kind.verified).toEqual({ titles: 3277, matched: 8, share: 0 });
+  });
+
+  it('a rebuild after a hint keeps the kind validated on pages, and drops it all when the kind changes', async () => {
+    const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
+    const validated = { pages: 10, terms: ['wholesale used clothing', 'second hand clothes', 'used clothing wholesale'], at: '2026-11-05T02:04:03.161Z' };
+    const kind = { label: 'wholesale clothing provider', terms: [...validated.terms], not: ['retail', 'maloobchod', 'donation', 'consignment'], verified: null, hubs: ['czech republic'], validated };
+    const reply = { provider: 'groq', data: { ...proposal, concept: 'Wholesale branded second‑hand clothing providers for a Czech retail shop', kind: { label: 'wholesale clothing provider', terms: ['second hand clothes'], not: ['retail'] } } };
+    const project: Record<string, any> = { id: 'find-the-wholesale-branded-secon-b2f5b7', question: supplierQuestion, guidance: 'NL, DE, UK, IT, PL, LT', acceptance: { itemCount: 20 }, decisionModel: { version: 2, question: supplierQuestion, guidance: '', agreement: { samples: 3 }, kind } };
+    await new DecisionModeler({ router: { complete: async () => reply } } as never).build(project);
+    expect(project.decisionModel.kind.validated).toEqual(validated);
+    expect(project.decisionModel.kind.hubs).toEqual(['czech republic']);
+    expect(project.decisionModel.kind.terms).toEqual(expect.arrayContaining(validated.terms));
+    const other: Record<string, any> = { id: 'find-accurate-and-verified-car-l-0c750f', question: carQuestion, guidance: 'prefer petrol engines', acceptance: { itemCount: 20 }, decisionModel: storedCar() };
+    await new DecisionModeler({ router: { complete: async () => ({ provider: 'groq', data: { ...proposal, kind: { label: 'car wheel', terms: ['kola'], not: [] } } }) } } as never).build(other);
+    expect(other.decisionModel.subtype).toBeUndefined();
+    expect(other.decisionModel.calibrated).toBeUndefined();
+    expect(other.decisionModel.kind.not).toBeUndefined();
+  });
+
+  it('a limit is never taken from an unapproved case or another question', () => {
+    const plots = {
+      id: 'find-appropriate-plots-to-buy-fo-b7772e',
+      question: 'Find appropriate plots to buy for glamping business, but also with the strong price increase trend, very low enterance investments, 20000EUR max, 10 month a year, mild climate to have Glampings so no air condition, nearby sea or the ocean accessible by ebike',
+      approved: false,
+      criteria: [{ id: 'priceEur', measure: 'priceEur', op: '<=', value: 20000, source: 'question', quote: '20000EUR max', clause: '20000EUR max', votes: 3 }],
+    };
+    const price = { clause: 'price up to 65000CZK or equivalent', measure: 'priceEur', op: '<=', value: null, quote: '' };
+    const samples = [normalizeSample({ ...proposal, criteria: [price] }), normalizeSample({ ...proposal, criteria: [price] }), normalizeSample({ ...proposal, criteria: [price] })];
+    const model = aggregate(samples, { question: carQuestion, cases: [plots] });
+    expect(model.criteria).toEqual([]);
+    expect(model.noLimit[0].measure).toBe('priceEur');
+    expect(aggregate(samples, { question: carQuestion, cases: [{ ...plots, approved: true }] }).criteria).toEqual([]);
+    expect(aggregate(samples, { question: carQuestion, cases: [REFERENCE_CASE] }).criteria).toEqual([]);
+    const own = { id: 'find-accurate-and-verified-car-l-0c750f', question: carQuestion, approved: true, criteria: [{ id: 'priceEur', measure: 'priceEur', op: '<=', value: 2700, source: 'eurostat' }] };
+    expect(aggregate(samples, { question: carQuestion, cases: [own], id: own.id }).criteria).toEqual([]);
+    expect(aggregate(samples, { question: carQuestion, cases: [own], id: 'which-trendy-used-cars-priced-20-b4f648' }).criteria[0]).toMatchObject({ value: 2700, source: 'case find-accurate-and-verified-car-l-0c750f (eurostat)' });
+  });
+
+  it('a research is never its own example', async () => {
+    const own = { id: 'find-accurate-and-verified-car-l-0c750f', question: carQuestion, criteria: [], utility: 0.5 };
+    expect(rankCases(carQuestion, [own, REFERENCE_CASE], 2, own.id).map((c: { id: string }) => c.id)).not.toContain(own.id);
+    expect(rankCases(carQuestion, [own], 2).map((c: { id: string }) => c.id)).toEqual([own.id]);
+    const bank = new CaseBank();
+    bank.cases = [own];
+    const project: Record<string, any> = { id: own.id, question: carQuestion, guidance: '', acceptance: { itemCount: 20 } };
+    await new DecisionModeler({ router, cases: bank } as never).build(project);
+    expect(project.decisionModel.caseIds).not.toContain(own.id);
+  });
+
+  it('a title prefix is not a model', () => {
+    const titles = ['Prodám Citroen Saxo 1,4 VTS', 'Prodám Citroen C4 1,4 + LPG', 'Prodam citroen c3', 'Prodám Citroen C1', 'Škoda Fabia 2, LPG', 'ŠKODA FABIA II COMFORT 2008', 'Škoda Felicia 1.3'];
+    const out = applyCalibration({ label: 'used car', terms: ['hatchback'] }, { data: { not: [], subtype: { label: 'hatchback', models: ['citroen c3', 'prodam citroen c1', 'skoda fabia ii', 'skoda felicia'], variants: [] } } }, titles);
+    expect(out.subtype?.models).not.toContain('prodam citroen');
+    expect(out.subtype?.models).toEqual(['citroen c3', 'prodam citroen c1', 'skoda fabia ii', 'skoda fabia', 'skoda felicia']);
+  });
+
+  it('a word that titles of the asked model use is not an exclusion', () => {
+    const cars = ['Kia Rio, 1.1 CRDI 55KW klima,2x kola', 'Honda Civic 2,2 CTDi"103kW"+ Al kola 17 l'];
+    const wheels = ['Alu kola 16" Škoda Karoq', 'Letni kola + disky škoda oct 1', 'Prodám alu kola DEZENT 5x112r17', 'Alu kola XTREME 20'];
+    const reply = { data: { not: ['kola', 'disky'], subtype: { label: 'hatchback', models: ['kia rio', 'honda civic'], variants: [] } } };
+    const kind = { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'] };
+    expect(applyCalibration(kind, reply, [...cars, ...wheels]).kind.not).toEqual(['parts', 'accessories', 'kola']);
+    expect(applyCalibration(kind, reply, [...cars, ...wheels], { itemTitles: cars }).kind.not).toEqual(['parts', 'accessories']);
+    expect(applyCalibration(kind, reply, [...cars, ...wheels], { itemTitles: wheels }).kind.not).toEqual(['parts', 'accessories', 'kola']);
+  });
+});

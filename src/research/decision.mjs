@@ -87,15 +87,18 @@ const median = (values) => {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
-function fromCases(measure, op, cases) {
+const NOT_A_CASE_LIMIT = new Set(['assumption', 'question', 'guidance']);
+
+function fromCases(measure, op, cases, id = '') {
   for (const c of cases) {
-    const hit = (c.criteria ?? []).find((k) => k.measure === measure && k.op === op && k.value !== null && k.source !== 'assumption');
+    if (c.approved !== true || (id && c.id === id)) continue;
+    const hit = (c.criteria ?? []).find((k) => k.measure === measure && k.op === op && k.value !== null && !NOT_A_CASE_LIMIT.has(k.source));
     if (hit) return { value: hit.value, source: `case ${c.id}${hit.source ? ` (${hit.source})` : ''}` };
   }
   return null;
 }
 
-export function aggregate(samples, { question = '', guidance = '', cases = [] } = {}) {
+export function aggregate(samples, { question = '', guidance = '', cases = [], id = '' } = {}) {
   const n = samples.length;
   const majority = Math.floor(n / 2) + 1;
   const said = `${question}\n${guidance}`;
@@ -123,7 +126,7 @@ export function aggregate(samples, { question = '', guidance = '', cases = [] } 
       criteria.push({ id: measure, measure, op, value, source: quoteFound(question, quote) ? 'question' : 'guidance', quote, clause, votes: votes.length });
       continue;
     }
-    const cased = fromCases(measure, op, cases);
+    const cased = fromCases(measure, op, cases, id);
     if (cased) criteria.push({ id: measure, measure, op, value: cased.value, source: cased.source, quote: '', clause, votes: votes.length });
     else noLimit.push({ measure, op, clause, votes: votes.length });
   }
@@ -203,18 +206,22 @@ export function mergeCalibrations(replies) {
   return { data: { not: voted((d) => d.not), condition: voted((d) => d.condition), upgrades: voted((d) => d.upgrades), subtype: { label, models: voted((d) => d.subtype?.models), variants: voted((d) => d.subtype?.variants) } }, samples: datas.length };
 }
 
-export function applyCalibration(kind, reply, titles) {
+export function applyCalibration(kind, reply, titles, { itemTitles = [] } = {}) {
   const data = reply?.data && typeof reply.data === 'object' ? reply.data : reply ?? {};
   const texts = (titles ?? []).map((title) => String(title ?? ''));
+  const proposed = (Array.isArray(data.subtype?.models) ? data.subtype.models : []).map((model) => plain(String(model)).trim().split(/\s+/).filter(Boolean));
+  const leads = (word, parts) => proposed.some((other) => other !== parts && other[0] === word);
   const not = [...new Set((Array.isArray(data.not) ? data.not : []).map((word) => plain(String(word)).trim()).filter((word) => word.length >= MIN_EXCLUSION_LETTERS && texts.filter((text) => wordHit(text, word)).length >= 2))];
   const variants = [...new Set((Array.isArray(data.subtype?.variants) ? data.subtype.variants : []).map((word) => plain(String(word)).trim()).filter((word) => word.length >= 2 && texts.some((text) => wordHit(text, word))))];
   const upgrades = [...new Set((Array.isArray(data.upgrades) ? data.upgrades : []).map((word) => plain(String(word)).trim()).filter((word) => word.length >= 3 && texts.some((text) => wordHit(text, word))))];
   const condition = [...new Set((Array.isArray(data.condition) ? data.condition : []).map((word) => plain(String(word)).trim()).filter((word) => word.length >= MIN_EXCLUSION_LETTERS && texts.some((text) => wordHit(text, word))))];
   const label = String(data.subtype?.label ?? '').trim();
-  const forms = (model) => { const parts = plain(String(model)).trim().split(/\s+/).filter(Boolean); return parts.length > 2 ? [parts.join(' '), parts.slice(0, 2).join(' ')] : [parts.join(' ')]; };
-  const models = [...new Set((Array.isArray(data.subtype?.models) ? data.subtype.models : []).flatMap(forms).filter((model) => model && texts.some((text) => wordHit(text, model))))];
+  const forms = (parts) => (parts.length > 2 && !(leads(parts[1], parts) && !leads(parts[0], parts)) ? [parts.join(' '), parts.slice(0, 2).join(' ')] : [parts.join(' ')]);
+  const models = [...new Set(proposed.flatMap(forms).filter((model) => model && texts.some((text) => wordHit(text, model))))];
+  const items = (itemTitles ?? []).map((title) => String(title ?? '')).filter((title) => models.some((model) => wordHit(title, model)));
+  const onItems = (word) => items.some((title) => wordHit(title, word));
   return {
-    kind: { ...kind, not: [...new Set([...(kind?.not ?? []), ...not])], condition: [...new Set([...(kind?.condition ?? []), ...condition])], upgrades: [...new Set([...(kind?.upgrades ?? []), ...upgrades])] },
+    kind: { ...kind, not: [...new Set([...(kind?.not ?? []), ...not])].filter((word) => !onItems(word)), condition: [...new Set([...(kind?.condition ?? []), ...condition])], upgrades: [...new Set([...(kind?.upgrades ?? []), ...upgrades])] },
     subtype: models.length ? { label, models, variants, source: 'model proposal, matched to listing titles by code' } : null,
   };
 }
@@ -300,8 +307,8 @@ export const REFERENCE_CASE = {
   uses: 0,
 };
 
-export function rankCases(question, cases, k = CASES_RETRIEVED) {
-  const pool = cases.filter((c) => c.question);
+export function rankCases(question, cases, k = CASES_RETRIEVED, exclude = '') {
+  const pool = cases.filter((c) => c.question && !(exclude && c.id === exclude));
   if (!pool.length) return [];
   const sims = bm25(pool.map((c) => c.question), question);
   const top = Math.max(...sims);
@@ -338,9 +345,9 @@ export class CaseBank {
     return [REFERENCE_CASE, ...this.cases.filter((c) => c.id !== REFERENCE_CASE.id)];
   }
 
-  async retrieve(question, k = CASES_RETRIEVED) {
+  async retrieve(question, k = CASES_RETRIEVED, exclude = '') {
     await this.load();
-    return rankCases(question, this.all(), k);
+    return rankCases(question, this.all(), k, exclude);
   }
 
   async record(projectId, question, model) {
@@ -368,6 +375,18 @@ export class CaseBank {
   }
 }
 
+const MODEL_STATE = ['subtype', 'calibrated', 'calibratedOn'];
+const KIND_STATE = ['condition', 'upgrades', 'verified', 'dropped', 'validated', 'hubs'];
+const defined = (source, keys) => Object.fromEntries(keys.filter((key) => source?.[key] !== undefined && source[key] !== null).map((key) => [key, source[key]]));
+
+function carried(before, model) {
+  const was = before?.kind;
+  if (!was || !model.kind || plain(was.label).trim() !== plain(model.kind.label).trim()) return model;
+  const not = [...new Set([...(model.kind.not ?? []), ...(was.not ?? [])])];
+  const terms = [...new Set([...(was.validated?.terms ?? []), ...model.kind.terms])];
+  return { ...model, ...defined(before, MODEL_STATE), kind: { ...model.kind, terms, ...(not.length ? { not } : {}), ...defined(was, KIND_STATE) } };
+}
+
 export class DecisionModeler {
   constructor({ router, cases = null, samples = SAMPLES } = {}) {
     this.router = router;
@@ -384,13 +403,13 @@ export class DecisionModeler {
     if (this.fresh(project) && !force) return project.decisionModel;
     const question = project.question;
     const guidance = String(project.guidance ?? '');
-    const examples = this.cases ? await this.cases.retrieve(question) : [];
+    const examples = this.cases ? await this.cases.retrieve(question, CASES_RETRIEVED, project.id) : [];
     const messages = decisionPrompt({ question, guidance, expected: project.acceptance?.expected ?? '', examples });
     const replies = await Promise.all(Array.from({ length: this.samples }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
     const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));
     if (samples.length < 2) return project.decisionModel ?? null;
-    const model = aggregate(samples, { question, guidance, cases: examples });
-    project.decisionModel = { ...model, version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString() };
+    const model = aggregate(samples, { question, guidance, cases: examples, id: project.id });
+    project.decisionModel = { ...carried(project.decisionModel, model), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString() };
     if (this.cases) await this.cases.record(project.id, question, model);
     return project.decisionModel;
   }
