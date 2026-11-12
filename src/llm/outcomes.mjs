@@ -60,8 +60,8 @@ export class OutcomeBook {
     return this;
   }
 
-  key(provider, purposeClass) {
-    return `${provider}|${purposeClass}`;
+  key(provider, purposeClass, model = null) {
+    return model ? `${provider}|${model}|${purposeClass}` : `${provider}|${purposeClass}`;
   }
 
   current(key) {
@@ -71,9 +71,9 @@ export class OutcomeBook {
     return { pass: decayed(c.pass, age, this.halfLifeMs), fail: decayed(c.fail, age, this.halfLifeMs) };
   }
 
-  record({ provider, purposeClass, passed }) {
+  record({ provider, purposeClass, passed, model = null }) {
     if (!provider || !purposeClass) return;
-    const key = this.key(provider, purposeClass);
+    const key = this.key(provider, purposeClass, model);
     const { pass, fail } = this.current(key);
     this.counts[key] = { pass: pass + (passed ? 1 : 0), fail: fail + (passed ? 0 : 1), at: this.now() };
     const keys = Object.keys(this.counts);
@@ -81,16 +81,16 @@ export class OutcomeBook {
     if (this.file) this.writing = this.writing.then(() => fs.writeFile(this.file, JSON.stringify({ counts: this.counts }))).catch(() => {});
   }
 
-  posterior(provider, purposeClass, capability) {
+  posterior(provider, purposeClass, capability, model = null) {
     const prior = priorOf(capability);
-    const { pass, fail } = this.current(this.key(provider, purposeClass));
+    const { pass, fail } = this.current(this.key(provider, purposeClass, model));
     const a = prior.a + pass;
     const b = prior.b + fail;
     return { a, b, mean: a / (a + b), observed: pass + fail, pass, fail };
   }
 
-  sample(provider, purposeClass, capability, rng = Math.random) {
-    const { a, b } = this.posterior(provider, purposeClass, capability);
+  sample(provider, purposeClass, capability, rng = Math.random, model = null) {
+    const { a, b } = this.posterior(provider, purposeClass, capability, model);
     return betaSample(a, b, rng);
   }
 }

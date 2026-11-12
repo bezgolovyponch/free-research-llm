@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { OutcomeBook } from '../../src/llm/outcomes.mjs';
 import { ProviderError } from '../../src/llm/provider.mjs';
-import { DEAD_WINDOW_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, estimateTokens, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -457,7 +458,9 @@ describe('ModelRouter compute errors', () => {
     now += 60001;
     await expect(router.complete({ messages: [] })).rejects.toThrow();
     expect(router.computeErrorStreak.get('llamacpp')).toBe(2);
-    now += 60001;
+    expect(router.cooldownUntil.get('llamacpp')).toBe(now + COMPUTE_ERROR_COOLDOWN_MS);
+    expect(router.cooldownReason.get('llamacpp')).toMatch(/trial call after a rest failed \(HTTP 500\)/);
+    now += COMPUTE_ERROR_COOLDOWN_MS + 1;
     await expect(router.complete({ messages: [] })).rejects.toThrow();
     expect(router.computeErrorStreak.get('llamacpp')).toBe(3);
     expect(router.cooldownUntil.get('llamacpp')).toBeGreaterThan(now + COMPUTE_ERROR_COOLDOWN_MS - 1000);
@@ -618,6 +621,216 @@ describe('router outcomes', () => {
     expect(outcomes.posterior('groq', 'research', 4)).toMatchObject({ pass: 1, fail: 0 });
     expect(outcomes.posterior('groq', 'top', 4)).toMatchObject({ pass: 0, fail: 1 });
     expect(() => new ModelRouter({ providers: [] }).recordOutcome({ provider: 'x', purpose: 'research', passed: true })).not.toThrow();
+  });
+
+  it('records a graded answer under the model that wrote it, so a new model starts from its prior', () => {
+    const outcomes = new OutcomeBook({ now: () => 1000 });
+    const router = new ModelRouter({ providers: [], outcomes });
+    for (let i = 0; i < 5; i++) router.recordOutcome({ provider: 'groq', model: 'openai/gpt-oss-20b', purpose: 'research', passed: false });
+    expect(outcomes.posterior('groq', 'research', 4, 'openai/gpt-oss-20b')).toMatchObject({ pass: 0, fail: 5 });
+    expect(outcomes.posterior('groq', 'research', 4, 'openai/gpt-oss-120b')).toMatchObject({ observed: 0, mean: 0.8 });
+  });
+});
+
+const CLOUDFLARE_410 = 'cloudflare HTTP 410: {"errors":[{"message":"AiError: Model has been deprecated: @cf/meta/infire-llama-3.1-8b-instruct was deprecated on 2026-05-30. See the model catalog for alternatives: https://deve';
+const CLOUDFLARE_410_BODY = CLOUDFLARE_410.slice('cloudflare HTTP 410: '.length);
+const GROQ_429 = 'groq HTTP 429 [quota window: per minute]: {"error":{"message":"Rate limit reached for model `openai/gpt-oss-20b`';
+const COHERE_500 = 'cohere HTTP 500: {"id":"cddb413c-d9eb-4993-b6e4-7af1930dbef5","message":"internal server error, this has been reported to our developers. id d9ae694e81ceeffa254ec7ff5e94c7e4"}';
+const CEREBRAS_400 = 'cerebras HTTP 400: {"message":": Invalid JSON: unexpected end of hex escape at line 1 column 15189","type":"invalid_request_error","param":"validation_error","code":"wrong_api_format"}';
+const NVIDIA_TIMEOUT = 'nvidia unreachable: timed out';
+
+describe('ModelRouter deprecated models', () => {
+  it('modelGone reads the real cloudflare 410, a 404 for a withdrawn model, and leaves limits and server errors alone', () => {
+    expect(modelGone(new ProviderError(CLOUDFLARE_410, { status: 410 }))).toBe(true);
+    expect(modelGone(new ProviderError(CLOUDFLARE_410, { status: 400 }))).toBe(true);
+    expect(modelGone(new ProviderError('gone', { status: 410 }))).toBe(true);
+    expect(modelGone(new ProviderError('nvidia HTTP 404: {"status":404,"title":"Not Found"', { status: 404 }))).toBe(true);
+    expect(modelGone(new ProviderError(GROQ_429, { status: 429 }))).toBe(false);
+    expect(modelGone(new ProviderError(COHERE_500, { status: 500 }))).toBe(false);
+    expect(modelGone(new ProviderError(CEREBRAS_400, { status: 400 }))).toBe(false);
+    expect(modelGone(new ProviderError(NVIDIA_TIMEOUT, { status: 0 }))).toBe(false);
+  });
+
+  it('the real cloudflare 410 deprecated error benches a provider whose model cannot switch, for 24 h, naming the model and the env var', async () => {
+    let now = Date.parse('2026-11-02T12:26:22Z');
+    const model = '@cf/meta/infire-llama-3.1-8b-instruct';
+    const cloudflare = { ...provider('cloudflare', Array.from({ length: 38 }, () => new ProviderError(CLOUDFLARE_410, { status: 410 }))), selected: { fast: model, deep: 'other-deep' } };
+    const b = provider('b', []);
+    const router = new ModelRouter({ providers: [cloudflare, b], now: () => now });
+    for (let i = 0; i < 5; i++) await expect(router.complete({ purpose: 'critique', messages: [] })).resolves.toMatchObject({ provider: 'b' });
+    expect(cloudflare.calls).toHaveLength(1);
+    expect(router.cooldownUntil.get('cloudflare')).toBe(now + MODEL_GONE_REST_MS);
+    expect(MODEL_GONE_REST_MS).toBe(24 * 3600 * 1000);
+    const reason = router.cooldownReason.get('cloudflare');
+    expect(reason).toContain(model);
+    expect(reason).toContain('FRL_CLOUDFLARE_FAST_MODEL');
+    expect(reason).not.toContain('FRL_CLOUDFLARE_DEEP_MODEL');
+    expect(router.ledger.filter((r) => r.purpose === 'router')).toEqual([expect.objectContaining({ provider: 'cloudflare', model, ok: false, error: reason })]);
+    expect(router.status().find((s) => s.id === 'cloudflare')).toMatchObject({ coolingDownMs: MODEL_GONE_REST_MS, coolingReason: reason });
+    now += MODEL_GONE_REST_MS - 1000;
+    expect(router.available().map((p) => p.id)).toEqual(['b']);
+  });
+
+  it('benches a provider whose deprecated model is pinned by an env override, and retires and switches the model when the provider can', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const dead = '@cf/meta/infire-llama-3.1-8b-instruct';
+    const live = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+    const preset = { id: 'cloudflare', label: 'c', baseURL: 'https://c.example/v1', keyEnv: 'K', prefer: { fast: [dead, live], deep: [live] } };
+    const asked: string[] = [];
+    const fetchImpl = async (url: string, init: { body?: string }) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: dead }, { id: live }] }));
+      const model = JSON.parse(init.body ?? '{}').model;
+      asked.push(model);
+      if (model === dead) return new Response(CLOUDFLARE_410_BODY, { status: 410 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], model }));
+    };
+    const free = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: fetchImpl as never }).discover();
+    expect(free.selected.fast).toBe(dead);
+    const switching = new ModelRouter({ providers: [free], sleep: async () => {} });
+    await expect(switching.complete({ purpose: 'critique', messages: [{ role: 'user', content: 'x' }] })).resolves.toMatchObject({ model: live });
+    expect(asked).toEqual([dead, live]);
+    expect(free.selected.fast).toBe(live);
+    expect(free.retired.get(dead)).toBe(Infinity);
+    expect(switching.cooldownUntil.has('cloudflare')).toBe(false);
+    expect(switching.ledger.find((r) => r.purpose === 'router')?.error).toBe(`${dead} is no longer available; switched to ${live} / ${live}`);
+    asked.length = 0;
+    const pinned = await new OpenAICompatibleProvider({ preset, apiKey: 'k', modelOverrides: { fast: dead }, fetchImpl: fetchImpl as never }).discover();
+    const benching = new ModelRouter({ providers: [pinned], sleep: async () => {}, maxWaitMs: 0 });
+    await expect(benching.complete({ purpose: 'critique', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow(/Model has been deprecated/);
+    await expect(benching.complete({ purpose: 'critique', messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow(NoModelAvailableError);
+    expect(asked).toEqual([dead]);
+    expect(pinned.selected.fast).toBe(dead);
+    expect(benching.cooldownReason.get('cloudflare')).toMatch(/infire-llama-3\.1-8b-instruct is gone \(HTTP 410\).*rests 24 h, set FRL_CLOUDFLARE_FAST_MODEL /);
+  });
+});
+
+function gated(id: string) {
+  const waiting: Array<(value: string | Error) => void> = [];
+  const state = { started: 0 };
+  return {
+    id,
+    ready: true,
+    waiting,
+    state,
+    async chat() {
+      state.started++;
+      const next = await new Promise<string | Error>((resolve) => waiting.push(resolve));
+      if (next instanceof Error) throw next;
+      return { content: next, model: `${id}-m`, provider: id, usage: {} };
+    },
+    describe: () => ({ id }),
+  };
+}
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const settle = async () => {
+  for (let i = 0; i < 6; i++) await tick();
+};
+
+describe('ModelRouter half-open after a bench', () => {
+  it('half-open admits one trial call after a bench lapses and closes on success', async () => {
+    let now = 1000;
+    const groq = gated('groq');
+    const b = provider('b', []);
+    const router = new ModelRouter({ providers: [groq, b], now: () => now, cooldownMs: 60000 });
+    const first = router.complete({ messages: [] });
+    await tick();
+    groq.waiting.shift()?.(new ProviderError(GROQ_429, { status: 429 }));
+    await expect(first).resolves.toMatchObject({ provider: 'b' });
+    expect(router.available().map((p) => p.id)).toEqual(['b']);
+    now += 60001;
+    expect(router.halfOpen('groq')).toBe(true);
+    expect(router.available().map((p) => p.id)).toEqual(['groq', 'b']);
+    const stale = router.available();
+    const trial = router.complete({ messages: [] });
+    await tick();
+    expect(groq.state.started).toBe(2);
+    expect(router.available().map((p) => p.id)).toEqual(['b']);
+    await expect(router.complete({ messages: [] })).resolves.toMatchObject({ provider: 'b' });
+    await expect(router.tryProviders(stale, { messages: [], tier: 'fast', json: true, purpose: 'chat' }, [])).resolves.toMatchObject({ provider: 'b' });
+    expect(groq.state.started).toBe(2);
+    groq.waiting.shift()?.('{"x":1}');
+    await expect(trial).resolves.toMatchObject({ provider: 'groq', data: { x: 1 } });
+    expect(router.halfOpen('groq')).toBe(false);
+    expect(router.cooldownUntil.has('groq')).toBe(false);
+    expect(router.cooldownReason.has('groq')).toBe(false);
+    const both = [router.complete({ messages: [] }), router.complete({ messages: [] })];
+    await tick();
+    expect(groq.state.started).toBe(4);
+    groq.waiting.splice(0).forEach((resolve) => resolve('{}'));
+    await Promise.all(both);
+  });
+
+  it('half-open re-opens on a failed trial: 10 min after one compute error or one timeout, the normal cooldown otherwise', async () => {
+    let now = 1000;
+    const cohere = provider('cohere', [new ProviderError(GROQ_429, { status: 429 }), new ProviderError(COHERE_500, { status: 500 }), new ProviderError(NVIDIA_TIMEOUT, { status: 0 }), new ProviderError(CEREBRAS_400, { status: 400 }), '{"back":true}']);
+    const b = provider('b', []);
+    const router = new ModelRouter({ providers: [cohere, b], now: () => now, cooldownMs: 60000 });
+    await expect(router.complete({ messages: [] })).resolves.toMatchObject({ provider: 'b' });
+    expect(router.cooldownUntil.get('cohere')).toBe(now + 60000);
+    now += 60001;
+    await expect(router.complete({ messages: [] })).resolves.toMatchObject({ provider: 'b' });
+    expect(router.cooldownUntil.get('cohere')).toBe(now + COMPUTE_ERROR_COOLDOWN_MS);
+    expect(router.cooldownReason.get('cohere')).toMatch(/trial call after a rest failed \(HTTP 500\); rests 10 min more/);
+    now += COMPUTE_ERROR_COOLDOWN_MS + 1;
+    await expect(router.complete({ messages: [] })).resolves.toMatchObject({ provider: 'b' });
+    expect(router.cooldownUntil.get('cohere')).toBe(now + TIMEOUT_BENCH_MS);
+    expect(router.cooldownReason.get('cohere')).toMatch(/trial call after a rest failed \(timed out\)/);
+    now += TIMEOUT_BENCH_MS + 1;
+    await expect(router.complete({ messages: [] })).resolves.toMatchObject({ provider: 'b' });
+    expect(router.cooldownUntil.get('cohere')).toBe(now + 60000);
+    expect(router.available().map((p) => p.id)).toEqual(['b']);
+    now += 60001;
+    await expect(router.complete({ messages: [] })).resolves.toMatchObject({ provider: 'cohere', data: { back: true } });
+    expect(router.cooldownUntil.has('cohere')).toBe(false);
+    expect(cohere.calls).toHaveLength(5);
+  });
+
+  it('a second call waits for the trial instead of failing when every provider is cooling, and gives up after the wait limit', async () => {
+    let now = 1000;
+    const groq = gated('groq');
+    const sleeps: number[] = [];
+    let release = true;
+    const router = new ModelRouter({ providers: [groq], now: () => now, cooldownMs: 60000, maxWaitMs: 65000, sleep: async (ms: number) => {
+      sleeps.push(ms);
+      now += ms;
+      if (ms === TRIAL_POLL_MS && release) groq.waiting.shift()?.('{"trial":true}');
+      await tick();
+    } });
+    const first = router.complete({ messages: [] });
+    await tick();
+    groq.waiting.shift()?.(new ProviderError(GROQ_429, { status: 429 }));
+    await settle();
+    expect(sleeps).toEqual([60000]);
+    expect(groq.state.started).toBe(2);
+    expect(router.available()).toEqual([]);
+    expect(router.shortestCooldownMs()).toBe(TRIAL_POLL_MS);
+    const second = router.complete({ messages: [] });
+    await settle();
+    expect(sleeps).toEqual([60000, TRIAL_POLL_MS]);
+    await expect(first).resolves.toMatchObject({ provider: 'groq', data: { trial: true } });
+    expect(groq.state.started).toBe(3);
+    groq.waiting.shift()?.('{"second":true}');
+    await expect(second).resolves.toMatchObject({ provider: 'groq', data: { second: true } });
+    expect(router.shortestCooldownMs()).toBe(0);
+    release = false;
+    router.cooldownUntil.set('groq', now - 1);
+    const stuck = router.complete({ messages: [] });
+    await settle();
+    await expect(router.complete({ messages: [] })).rejects.toThrow(NoModelAvailableError);
+    expect(sleeps.slice(2)).toEqual(Array.from({ length: 65 }, () => TRIAL_POLL_MS));
+    groq.waiting.shift()?.('{}');
+    await stuck;
+  });
+
+  it('an all-network outage during the trial leaves the provider half-open instead of re-opening the bench', async () => {
+    let now = 1000;
+    const a = provider('a', [new ProviderError(GROQ_429, { status: 429 }), new ProviderError('a unreachable: fetch failed', { status: 0 }), '{"ok":true}']);
+    const router = new ModelRouter({ providers: [a], now: () => now, cooldownMs: 60000, sleep: async (ms: number) => {
+      now += ms;
+    }, offlineBackoff: [10] });
+    await expect(router.complete({ messages: [] })).resolves.toMatchObject({ provider: 'a' });
+    expect(a.calls).toHaveLength(3);
+    expect(router.cooldownUntil.has('a')).toBe(false);
   });
 });
 

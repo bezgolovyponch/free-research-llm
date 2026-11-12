@@ -39,6 +39,20 @@ describe('outcome book: did the answer pass the gates', () => {
     expect(draws.every((x) => x > 0 && x < 1)).toBe(true);
   });
 
+  it('two models of one provider keep separate posteriors, and the legacy key still works without a model', () => {
+    const book = new OutcomeBook({ now: () => 1000 });
+    for (let i = 0; i < 6; i++) book.record({ provider: 'groq', model: 'openai/gpt-oss-20b', purposeClass: 'research', passed: false });
+    for (let i = 0; i < 5; i++) book.record({ provider: 'groq', model: 'openai/gpt-oss-120b', purposeClass: 'research', passed: true });
+    book.record({ provider: 'groq', purposeClass: 'research', passed: true });
+    expect(book.posterior('groq', 'research', 4, 'openai/gpt-oss-20b')).toMatchObject({ pass: 0, fail: 6, observed: 6 });
+    expect(book.posterior('groq', 'research', 4, 'openai/gpt-oss-120b')).toMatchObject({ pass: 5, fail: 0, observed: 5 });
+    expect(book.posterior('groq', 'research', 4)).toMatchObject({ pass: 1, fail: 0, observed: 1 });
+    expect(book.posterior('groq', 'research', 4, 'llama-3.3-70b-versatile')).toMatchObject({ observed: 0, mean: 0.8 });
+    expect(book.key('groq', 'research')).toBe('groq|research');
+    expect(book.key('groq', 'research', 'openai/gpt-oss-20b')).toBe('groq|openai/gpt-oss-20b|research');
+    expect(book.sample('groq', 'research', 4, seeded(9), 'openai/gpt-oss-120b')).toBeGreaterThan(book.sample('groq', 'research', 4, seeded(9), 'openai/gpt-oss-20b'));
+  });
+
   it('keeps its counts on disk', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-outcomes-'));
     const file = path.join(dir, 'outcomes.json');
@@ -62,8 +76,8 @@ describe('routing by gate outcomes', () => {
     const book = new OutcomeBook({ now: () => 1000 });
     const before = purposePlan({ providers, stats, enabled: ['gemini', 'pollinations'], outcomes: book, rng: seeded(3) });
     expect(before.reserved).toBe('gemini');
-    for (let i = 0; i < 30; i++) book.record({ provider: 'gemini', purposeClass: 'top', passed: false });
-    for (let i = 0; i < 30; i++) book.record({ provider: 'pollinations', purposeClass: 'top', passed: true });
+    for (let i = 0; i < 30; i++) book.record({ provider: 'gemini', model: 'g', purposeClass: 'top', passed: false });
+    for (let i = 0; i < 30; i++) book.record({ provider: 'pollinations', model: 'p', purposeClass: 'top', passed: true });
     const after = purposePlan({ providers, stats, enabled: ['gemini', 'pollinations'], outcomes: book, rng: seeded(3) });
     expect(after.reserved).toBe('pollinations');
     expect(after.byPurpose.synthesize[0]).toBe('pollinations');
@@ -71,7 +85,7 @@ describe('routing by gate outcomes', () => {
 
   it('explains each place by the gate pass rate it has measured', () => {
     const book = new OutcomeBook({ now: () => 1000 });
-    for (let i = 0; i < 4; i++) book.record({ provider: 'gemini', purposeClass: 'research', passed: i < 3 });
+    for (let i = 0; i < 4; i++) book.record({ provider: 'gemini', model: 'g', purposeClass: 'research', passed: i < 3 });
     const rows = rankRole({ role: 'deep', strategy: 'balanced', providers, stats, outcomes: book, rng: seeded(5) });
     expect(rows.find((r: { id: string }) => r.id === 'gemini').why).toContain('answers passed the gates');
     expect(rows.find((r: { id: string }) => r.id === 'pollinations').why).toContain('no graded answers yet: prior 2/5');
