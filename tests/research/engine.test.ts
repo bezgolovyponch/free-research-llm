@@ -939,6 +939,31 @@ describe('ResearchEngine', () => {
     expect(leafAfter.finding.answer).not.toBe('OLD WEAK ANSWER for D1.1');
   });
 
+  it('leaves a weak leaf alone on a trial run that reuses results', async () => {
+    const scripted = new ScriptedProvider();
+    const researchCalls: string[] = [];
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        if (prompt.includes(TASK_MARKERS.research)) researchCalls.push(/SUB-QUESTION (\S+):/.exec(prompt)?.[1] ?? '');
+        return scripted.chat(args as never);
+      },
+    };
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Should I open a bakery in Brno next year?' });
+    const done = await engine.run(project.id);
+    const leaf = done.nodes.find((n: { id: string }) => n.id === 'D1.1');
+    leaf.status = 'weak';
+    await engine.store.save(done);
+    const before = researchCalls.length;
+    const rerun = await engine.run(project.id, { memo: false, pieces: ['D1.1'], reuse: true });
+    expect(researchCalls.slice(before)).not.toContain('D1.1');
+    expect(rerun.nodes.find((n: { id: string }) => n.id === 'D1.1').status).toBe('weak');
+  });
+
   it('keeps the previous finding of a weak leaf when the re-attempt on a second run grades lower', async () => {
     const scripted = new ScriptedProvider();
     const provider = {

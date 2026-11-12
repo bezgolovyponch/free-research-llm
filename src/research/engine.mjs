@@ -1514,7 +1514,7 @@ export class ResearchEngine {
       const rerunWanted = pieces ? new Set(pieces) : null;
       const rerunPieces = new Map();
       for (const node of project.nodes) {
-        if (!isLeaf(project.nodes, node) || (node.status !== 'weak' && node.status !== 'unsupported')) continue;
+        if (reuse || !isLeaf(project.nodes, node) || (node.status !== 'weak' && node.status !== 'unsupported')) continue;
         if (rerunWanted && !rerunWanted.has(node.id)) continue;
         rerunPieces.set(node.id, { finding: node.finding, status: node.status, verification: node.verification, critique: node.critique });
         node.status = 'pending';
