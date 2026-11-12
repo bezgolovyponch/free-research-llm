@@ -166,5 +166,16 @@
     "signal": "brief.regions is set and brief.located is false, every source passes the pre-model screen, and neither the research log nor the delivered rows say that the suppliers are outside the asked country (b2f5b7: 54 of 54 sources admitted, 3 of 3 delivered rows NL/FR/PL for a CZ ask, no region word anywhere)",
     "cause": "onConcept returns true before reading any country when located is false (deliberate: for an entity list the asked place is where the result is used), and the relaxed rule removed the measurement together with the drop",
     "prevention": "when a gate is relaxed on purpose, keep the measurement: regionVerdict labels each source in, ships to, names or outside the asked regions, engine.onConceptOnly logs the count of sources kept from outside, and each entity deliverable carries its region label; tests/research/brief.test.ts \"region verdict for an entity list\", tests/research/engine.test.ts \"counts and names the sources kept from outside the asked country\" and tests/research/acceptance.test.ts \"marks each delivered supplier with its region verdict for an entity list and delivers the same rows\""
+  },
+  {
+    "id": "F13",
+    "title": "table limits set aside rows that pass every hard criterion",
+    "touches": [
+      "src/research/candidates.mjs",
+      "tests/research/candidates.test.ts"
+    ],
+    "signal": "18 live imovirtual.com plots of b7772e (500-18,000 EUR, Portugal, sea <= 20 km, 10-12 camping months, all pages active) pass every hard criterion of the research, yet none is in candidates.kept: 7 at 500-3,800 EUR fell under the implausiblyLow MAD cut (4,439 EUR) and 11 at 17,000-18,000 EUR fell past kept.slice(0, MAX_KEPT) of the 1,453 rows that passed the screen (docs/audits/recover-b7772e.md section B)",
+    "cause": "buildCandidates moved every implausiblyLow-flagged kept row to toCheck and sliced kept at MAX_KEPT without asking whether the row passed every hard criterion of the research (clean screen verdict, asked country, not gone, coast <= 20 km and >= 10 camping months when recorded on the row)",
+    "prevention": "passesEveryHardCriterion exempts such a row from both table limits: implausiblyLow only flags it (the lowCut stays visible on the kept row) and the MAX_KEPT cut applies only to rows that fail a hard criterion; tests/research/candidates.test.ts \"rows that pass every hard criterion are never set aside or capped (recover-b7772e)\" builds real rows from the URLs and prices in docs/audits/recover-b7772e-urls.txt"
   }
 ]

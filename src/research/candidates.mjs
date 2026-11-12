@@ -209,6 +209,23 @@ function publicRow(row, verdict, unit) {
 export const MIN_PRICE_SAMPLE = 20;
 const MAD_SCALE = 1.4826;
 const LOW_PRICE_MADS = 2.5;
+export const HARD_SEA_KM = 20;
+export const HARD_CAMPING_MONTHS = 10;
+
+function firstFinite(...values) {
+  return values.find((v) => Number.isFinite(v)) ?? null;
+}
+
+export function passesEveryHardCriterion(row, verdict, brief) {
+  if (verdict?.reasons?.length || verdict?.missing?.length) return false;
+  if (!brief?.regions?.length || !brief.regions.includes(verdict.country?.code ?? '')) return false;
+  if (row?.gone || row?.goneStatus) return false;
+  const coastKm = firstFinite(row?.site?.coastKm, row?.coastKm, row?.distanceKm);
+  if (coastKm !== null && coastKm > HARD_SEA_KM) return false;
+  const months = firstFinite(row?.site?.climate?.workable, row?.workableMonths, row?.campingMonths);
+  if (months !== null && months < HARD_CAMPING_MONTHS) return false;
+  return true;
+}
 
 export function implausiblyLow(rows) {
   const priced = rows.filter((r) => Number.isFinite(r.value) && r.value > 0);
@@ -239,6 +256,7 @@ export function buildCandidates(nodes, brief, options = {}) {
   const market = [];
   let found = 0;
   const unique = new Map();
+  const hardPass = new Set();
   for (const row of rowsFrom(nodes)) {
     if (!row.url) continue;
     const key = listingKey(row.url);
@@ -259,9 +277,11 @@ export function buildCandidates(nodes, brief, options = {}) {
       if (verdict.reasons.every((r) => OUTSIDE_REASON.test(r)) && !verdict.missing.length) outside.push(publicRow(row, verdict, unit));
       continue;
     }
+    if (!verdict.missing.length && passesEveryHardCriterion(row, verdict, brief)) hardPass.add(row.url);
     (verdict.missing.length ? toCheck : kept).push(publicRow(row, verdict, unit));
   }
   for (const row of implausiblyLow(kept)) {
+    if (hardPass.has(row.url)) continue;
     kept.splice(kept.indexOf(row), 1);
     const { lowCut, ...rest } = row;
     toCheck.push({ ...rest, toCheck: [rest.toCheck, `price far below what most listings of this kind cost (under ${lowCut} ${unit}): likely a part, a deposit or an instalment`].filter(Boolean).join('; ') });
@@ -276,9 +296,11 @@ export function buildCandidates(nodes, brief, options = {}) {
   else if (kept.some((row) => row.valueIndex !== null && row.valueIndex !== undefined)) kept.sort((a, b) => (a.valueIndex ?? Infinity) - (b.valueIndex ?? Infinity) || (a.km ?? Infinity) - (b.km ?? Infinity) || (a.value ?? Infinity) - (b.value ?? Infinity));
   else kept.sort((a, b) => Number(b.coast) - Number(a.coast) || (a.value ?? Infinity) - (b.value ?? Infinity));
   if (nodes.some((n) => n.id === 'sweep' && (n.sources ?? []).some((s) => (s.listings ?? []).length > 0))) kept = roundRobin(kept, (row) => hostOf(row.url));
+  let capped = 0;
+  kept = kept.filter((row) => hardPass.has(row.url) || capped++ < MAX_KEPT);
   return {
     found,
-    kept: kept.slice(0, MAX_KEPT),
+    kept,
     keptCount: kept.length,
     toCheck: toCheck.slice(0, MAX_TO_CHECK),
     outside: outside.sort((a, b) => (a.value ?? Infinity) - (b.value ?? Infinity)).slice(0, MAX_OUTSIDE),
