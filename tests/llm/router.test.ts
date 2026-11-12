@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
-import { DEAD_WINDOW_MS, ModelRouter, NoModelAvailableError, OVERLOAD_REST_MS, PAYMENT_REST_MS, estimateTokens, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { DEAD_WINDOW_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, estimateTokens, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -780,5 +780,66 @@ describe('ModelRouter dead providers recover', () => {
     expect(router.demoteDead([fcc, gemini]).map((p: { id: string }) => p.id)).toEqual(['gemini', 'fcc']);
     time += DEAD_WINDOW_MS + 1000;
     expect(router.demoteDead([fcc, gemini]).map((p: { id: string }) => p.id)).toEqual(['fcc', 'gemini']);
+  });
+});
+
+function netProvider(id: string, networkFailures: number, okReply = '{"ok":true}') {
+  let n = 0;
+  return {
+    id,
+    ready: true,
+    calls: [],
+    async chat() {
+      this.calls.push(1);
+      n++;
+      if (n <= networkFailures) throw new ProviderError(`${id} unreachable: fetch failed`, { status: 0, provider: id });
+      return { content: okReply, model: `${id}-m`, provider: id, usage: {} };
+    },
+    describe: () => ({ id }),
+  };
+}
+
+describe('ModelRouter network outages', () => {
+  it('treats an all-network outage as offline: waits with backoff, does not bench providers, and succeeds when one recovers', async () => {
+    const waits: number[] = [];
+    let now = 1000000;
+    const a = netProvider('a', 2);
+    const b = netProvider('b', 2);
+    const router = new ModelRouter({ providers: [a, b], now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; } });
+    const reply = await router.complete({ messages: [] });
+    expect(reply).toMatchObject({ provider: 'a' });
+    expect(waits).toEqual([15000, 30000]);
+    expect(router.cooldownUntil.get('a')).toBeFalsy();
+    expect(router.cooldownUntil.get('b')).toBeFalsy();
+    expect(router.failureStreak.get('a')).toBeFalsy();
+    expect(router.failureStreak.get('b')).toBeFalsy();
+    expect(router.timeoutStreak.get('a')).toBeFalsy();
+    expect(router.timeoutStreak.get('b')).toBeFalsy();
+    expect(router.computeErrorStreak.get('a')).toBeFalsy();
+    expect(router.computeErrorStreak.get('b')).toBeFalsy();
+  });
+
+  it('throws OfflineError after the offline wait limit is exhausted, without benching providers', async () => {
+    const waits: number[] = [];
+    let now = 1000000;
+    const a = netProvider('a', Number.POSITIVE_INFINITY);
+    const router = new ModelRouter({ providers: [a], now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; } });
+    await expect(router.complete({ messages: [] })).rejects.toBeInstanceOf(OfflineError);
+    await expect(router.complete({ messages: [] })).rejects.toThrow(/^offline:/);
+    const total = waits.reduce((s, w) => s + w, 0);
+    expect(total).toBeGreaterThanOrEqual(20 * 60 * 1000 - 60000);
+    expect(router.cooldownUntil.get('a')).toBeFalsy();
+    expect(router.failureStreak.get('a')).toBeFalsy();
+  });
+
+  it('keeps today behaviour when a mix of network and HTTP errors happens', async () => {
+    const waits: number[] = [];
+    let now = 1000000;
+    const a = netProvider('a', Number.POSITIVE_INFINITY);
+    const b = { id: 'b', ready: true, calls: [], async chat() { this.calls.push(1); throw new ProviderError('b HTTP 429: rate limited', { status: 429, retryAfterMs: 1000, provider: 'b' }); }, describe: () => ({ id }) };
+    const router = new ModelRouter({ providers: [a, b], now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; }, maxWaitMs: 0 });
+    await expect(router.complete({ messages: [] })).rejects.toBeInstanceOf(NoModelAvailableError);
+    await expect(router.complete({ messages: [] })).rejects.toBeInstanceOf(NoModelAvailableError);
+    expect(waits).toEqual([]);
   });
 });

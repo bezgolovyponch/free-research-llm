@@ -62,36 +62,50 @@ export function alike(a, b, threshold = SIMILAR) {
 const textOf = (n) => `${String(n.title ?? '').replace(ID_PREFIX, '')} ${n.question ?? ''}`;
 
 const LISTING_ACTION = /\b(?:list|find|identify|search|scrape|collect|calculate|compute|convert|verify|check|confirm|assess)\b/i;
-const LISTING_TARGET = /\b(?:listings?|urls?|links?|ads?|items?|each|every|priced|distances?|body\s*types?)\b/i;
-const NOT_LISTING_KNOWLEDGE = /\b(?:reliab|fault|defect|problem|issue|cost|norm|rule|law|legal|tax|insurance|trend|depreciat|review|reput|communit|forum|empirical|statistic|typical|engine|motor|gearbox|transmission|durab|longevity|owner|experience|maintenance|repair|recall|safety|consumption|resale)\w*|\bmarket(?!place)\w*/i;
+const LISTING_TARGET = /\b(?:listings?|urls?|links?|ads?|items?|priced|distances?)\b/i;
+const LISTING_SALE = /\b(?:listed\s+for\s+sale|for\s+sale|are\s+listed|on\s+the\s+market)\b/i;
+const NOT_LISTING_KNOWLEDGE = /\b(?:reliab|fault|defect|problem|issue|cost|norm|rule|law|legal|tax|insurance|trend|depreciat|review|reput|communit|forum|empirical|statistic|typical|durab|longevity|owner|experience|maintenance|repair|safety|resale)\w*|\bmarket(?!place)\w*/i;
 
 const YES_NO_CHECK = /^\s*(?:is|are|do|does|has|have)\b/i;
-const CHECKED_BY_CODE = /\b(?:ads?|listings?|listed price|price ceiling|prices?|body\s*(?:style|type)|confirmed|distance|within|km\b)|[≤≥<>]/i;
+const CHECKED_BY_CODE = /\b(?:ads?|listings?|listed price|price ceiling|prices?|confirmed|distance|radius|within|km\b)|[≤≥<>]/i;
 
-export function listingWork(question) {
-  const text = String(question ?? '');
-  if (!text.trim() || NOT_LISTING_KNOWLEDGE.test(text)) return false;
-  if (YES_NO_CHECK.test(text) && CHECKED_BY_CODE.test(text)) return true;
-  return LISTING_ACTION.test(text) || LISTING_TARGET.test(text);
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+export function kindWordsOf(kind) {
+  const words = [...(kind?.not ?? []), ...(kind?.condition ?? []), ...(kind?.upgrades ?? []), ...(kind?.subtype?.variants ?? [])];
+  return [...new Set(words.map((w) => String(w ?? '').trim()).filter(Boolean))];
 }
 
-export function dropListingWork(nodes) {
+export function listingWork(question, kindWords = []) {
+  const text = String(question ?? '');
+  if (!text.trim() || NOT_LISTING_KNOWLEDGE.test(text)) return false;
+  const kindHit = kindWords.length ? new RegExp(`\\b(?:${kindWords.map(escapeRe).join('|')})`, 'i').test(text) : false;
+  if (YES_NO_CHECK.test(text) && (CHECKED_BY_CODE.test(text) || kindHit)) return true;
+  return LISTING_ACTION.test(text) || LISTING_TARGET.test(text) || LISTING_SALE.test(text);
+}
+
+export function markListingWork(nodes, kindWords = []) {
   const hadChildren = new Set(nodes.filter((n) => nodes.some((m) => m.parentId === n.id)).map((n) => n.id));
-  const removed = new Set();
+  const covered = new Set();
   for (const n of nodes) {
     if (n.id === ROOT_ID || hadChildren.has(n.id)) continue;
-    if (listingWork(n.question) || listingWork(textOf(n))) removed.add(n.id);
+    if (listingWork(n.question, kindWords) || listingWork(textOf(n), kindWords)) covered.add(n.id);
   }
   for (let changed = true; changed;) {
     changed = false;
     for (const n of nodes) {
-      if (n.id === ROOT_ID || removed.has(n.id) || !hadChildren.has(n.id)) continue;
-      if (nodes.some((m) => m.parentId === n.id && !removed.has(m.id))) continue;
-      removed.add(n.id);
+      if (n.id === ROOT_ID || covered.has(n.id) || !hadChildren.has(n.id)) continue;
+      if (nodes.some((m) => m.parentId === n.id && !covered.has(m.id))) continue;
+      covered.add(n.id);
       changed = true;
     }
   }
-  return { nodes: nodes.filter((n) => !removed.has(n.id)), dropped: nodes.filter((n) => removed.has(n.id)).map((n) => n.id) };
+  for (const n of nodes) {
+    if (!covered.has(n.id)) continue;
+    n.status = 'covered';
+    n.coveredBy = 'candidate-table';
+  }
+  return { covered: nodes.filter((n) => covered.has(n.id)).map((n) => n.id) };
 }
 
 export function cleanTitle(title) {
@@ -177,8 +191,6 @@ export function groupCandidateDrivers(nodes) {
   Object.assign(host, { title: CANDIDATES_TITLE, status: 'pending', finding: null, verification: null, critique: null, error: null });
   return [{ code: 'grouped-candidates', nodeId: host.id, detail: `${moving.map((d) => d.id).join(', ')} search for listings; moved under ${host.id} "${CANDIDATES_TITLE}" (funnel: identify → screen → include)` }];
 }
-
-const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function namesFor(code) {
   const c = countryByCode(code);

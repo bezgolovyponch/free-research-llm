@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { isEvidenceGap } from './verify.mjs';
 import { ROOT_ID } from './tree.mjs';
 
-export const GRADE_PROBABILITY = { verified: 0.9, supported: 0.75, weak: 0.4, unsupported: 0.15 };
+export const GRADE_PROBABILITY = { verified: 0.9, supported: 0.75, covered: 0.75, weak: 0.4, unsupported: 0.15 };
 export const EXTREMIZE = 1.5;
 const NO_INFO = 0.5;
 const CLAMP = 0.02;

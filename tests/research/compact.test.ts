@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CLIENT_TEXT_CHARS, STORED_LINKS, STORED_LISTINGS, STORED_TEXT_CHARS, clientNodes, clientSweep, compactProject, compactSources } from '../../src/research/compact.mjs';
+import { CLIENT_TEXT_CHARS, STORED_LINKS, STORED_TEXT_CHARS, clientNodes, clientSweep, compactProject, compactSources } from '../../src/research/compact.mjs';
 
 const source = (n: number, links: number) => ({ id: 'S1', url: 'https://a.example', title: 't', text: 'x'.repeat(n), links: Array.from({ length: links }, (_, i) => ({ url: `https://a.example/${i}` })) });
 
@@ -24,11 +24,12 @@ describe('source compaction', () => {
     expect(clientNodes([{ id: 'D2' }])[0]).toEqual({ id: 'D2' });
   });
 
-  it('caps stored listings per page and sends only their count to the browser', () => {
+  it('keeps every stored listing (the candidate table reads them) and sends only their count to the browser', () => {
     const listings = Array.from({ length: 90 }, (_, i) => ({ url: `https://a.example/ad/${i}` }));
-    const { sources } = compactSources([{ ...source(10, 1), listings }]);
-    expect(sources[0].listings).toHaveLength(STORED_LISTINGS);
-    expect(clientNodes([{ id: 'D1', sources }])[0].sources[0]).toMatchObject({ listingCount: STORED_LISTINGS });
+    const { sources, trimmed } = compactSources([{ ...source(10, 1), listings }]);
+    expect(trimmed).toBe(0);
+    expect(sources[0].listings).toHaveLength(90);
+    expect(clientNodes([{ id: 'D1', sources }])[0].sources[0]).toMatchObject({ listingCount: 90 });
     expect('listings' in clientNodes([{ id: 'D1', sources }])[0].sources[0]).toBe(false);
     expect(clientSweep({ pagesRead: 1, pages: [{ id: 'P1', url: 'https://a.example/l', from: 'next page link', status: 200, listings, text: 'x' }] })).toEqual({ pagesRead: 1, pages: [{ id: 'P1', url: 'https://a.example/l', from: 'next page link', status: 200, listingCount: 90 }] });
   });

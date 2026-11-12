@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
-import { ModelRouter } from '../../src/llm/router.mjs';
+import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
@@ -464,7 +464,7 @@ describe('ResearchEngine', () => {
     expect(project.brief.text).not.toContain('Deliver: a decision memo');
   });
 
-  it('drops tree pieces that do per-listing work when the project lists items, since code does that work on the candidate table', async () => {
+  it('marks tree pieces that do per-listing work as covered when the project lists items, since code does that work on the candidate table', async () => {
     const question = 'Find hatchback car listings within 300km from Prague up to 65000 CZK';
     const piece = (id: string, parentId: string, question: string) => ({ id, parentId, title: question, question, method: 'lookup', searchQueries: [] });
     const tree = {
@@ -497,8 +497,11 @@ describe('ResearchEngine', () => {
     const project = await engine.createProject({ question, templateId: 'generic', expected: '10 live hatchback listings within 300km of Prague up to 65000 CZK' });
     await engine.decompose(project);
     expect(project.acceptance.itemCount).toBe(10);
-    expect(project.nodes.map((n: { id: string }) => n.id)).toEqual(['D4', 'D4.1', 'D4.2', 'D5', 'D5.2']);
-    expect(project.nodes.every((n: { question: string }) => !/\b(?:List|Verify|Convert|Calculate)\b/.test(n.question))).toBe(true);
+    expect(project.nodes).toHaveLength(16);
+    expect(project.nodes.filter((n: { status?: string }) => n.status === 'covered').map((n: { id: string }) => n.id)).toEqual(['D1', 'D1.1', 'D1.2', 'D1.3', 'D2', 'D2.1', 'D2.2', 'D3', 'D3.1', 'D3.2', 'D5.1']);
+    for (const n of project.nodes.filter((x: { status?: string }) => x.status === 'covered')) expect(n).toMatchObject({ status: 'covered', coveredBy: 'candidate-table' });
+    expect(project.nodes.filter((n: { status?: string }) => n.status !== 'covered').map((n: { id: string }) => n.id)).toEqual(['D4', 'D4.1', 'D4.2', 'D5', 'D5.2']);
+    expect(project.nodes.every((n: { question: string; status?: string }) => n.status === 'covered' || !/\b(?:List|Verify|Convert|Calculate)\b/.test(n.question))).toBe(true);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'tree' && l.message === 'pieces covered by code on the candidate table, not researched: D1, D1.1, D1.2, D1.3, D2, D2.1, D2.2, D3, D3.1, D3.2, D5.1')).toBe(true);
   });
 
@@ -1283,7 +1286,36 @@ describe('distance from the asked place', () => {
     expect(out.kept.map((r) => r.title)).toEqual(['berlin', 'munich', 'no place']);
     expect(out.toCheck[0]).toMatchObject({ title: 'hamburg', toCheck: expect.stringMatching(/^farther than 300 km from prague \(\d+ km\)$/) });
     expect(out.keptCount).toBe(3);
-    expect(events.some((m) => /distance from prague: 3 listing\(s\) measured, 1 farther than 300 km, 1 without a stated place/.test(m))).toBe(true);
+    expect((out.kept.find((r) => r.title === 'no place') as { unmeasured?: boolean }).unmeasured).toBe(true);
+    expect(events.some((m) => /distance from prague: 3 listing\(s\) measured, 1 farther than 300 km, 1 not measurable/.test(m))).toBe(true);
+  });
+
+  it('measures every row, not only the first 60, and geocodes each distinct place once', async () => {
+    const events: string[] = [];
+    const calls: string[] = [];
+    const engine = new ResearchEngine({ router: null, search: null, store: { cache: new Map(), save: async (p: unknown) => p }, sites: { geocode: async (place: string) => { calls.push(place); return { lat: 50.0875 + (calls.length % 7) * 0.01, lon: 14.4213 }; } }, onEvent: (_id: string, e: { message: string }) => events.push(e.message) } as never);
+    const rows = Array.from({ length: 100 }, (_, i) => ({ title: `car ${i}`, url: `https://auto.bazos.cz/inzerat/226${String(i).padStart(6, '0')}/x.php`, value: 30000, unit: 'CZK', place: i < 30 ? 'Praha' : `place ${i}` }));
+    const table = { kept: rows, toCheck: [], keptCount: 100, toCheckCount: 0 };
+    const project = { id: 'p', area: { point: { lat: 50.0875, lon: 14.4213 }, km: 300, place: 'prague' }, log: [] };
+    const out = await (engine as unknown as { measureDistances: (p: unknown, t: unknown) => Promise<typeof table> }).measureDistances(project, table);
+    expect(out.kept.filter((r) => Number.isFinite((r as { distanceKm?: number }).distanceKm))).toHaveLength(100);
+    expect(calls.filter((c) => c === 'Praha')).toHaveLength(1);
+    expect(calls).toHaveLength(71);
+    expect(events.some((m) => /distance from prague: 100 listing\(s\) measured, 0 farther than 300 km, 0 not measurable/.test(m))).toBe(true);
+  });
+
+  it('marks rows whose place cannot be geocoded as unmeasured instead of silently within range', async () => {
+    const events: string[] = [];
+    const engine = new ResearchEngine({ router: null, search: null, store: { cache: new Map(), save: async (p: unknown) => p }, sites: { geocode: async () => null }, onEvent: (_id: string, e: { message: string }) => events.push(e.message) } as never);
+    const table = { kept: [
+      { title: 'geocode fails', url: 'https://auto.bazos.cz/inzerat/226000001/x.php', value: 30000, unit: 'CZK', place: 'Nowhere', countryCode: 'CZ' },
+      { title: 'no place at all', url: 'https://auto.bazos.cz/inzerat/226000002/x.php', value: 30000, unit: 'CZK' },
+    ], toCheck: [], keptCount: 2, toCheckCount: 0 };
+    const project = { id: 'p', area: { point: { lat: 50.0875, lon: 14.4213 }, km: 300, place: 'prague' }, log: [] };
+    const out = await (engine as unknown as { measureDistances: (p: unknown, t: unknown) => Promise<typeof table> }).measureDistances(project, table);
+    expect(out.kept.every((r) => (r as { unmeasured?: boolean }).unmeasured === true)).toBe(true);
+    expect(out.kept.every((r) => !Number.isFinite((r as { distanceKm?: number }).distanceKm))).toBe(true);
+    expect(events.some((m) => /distance from prague: 0 listing\(s\) measured, 0 farther than 300 km, 2 not measurable/.test(m))).toBe(true);
   });
 });
 
@@ -1623,5 +1655,51 @@ describe('hub search', () => {
     expect(router.calls).toHaveLength(0);
     expect(asked).toHaveLength(0);
   });
+
+  it('pauses the project instead of erroring when the network is down', async () => {
+    const provider = netProvider('a');
+    const router = new ModelRouter({ providers: [provider], offlineBackoff: [1], offlineWaitMs: 1 });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Should I open a bakery in Brno next year?' });
+    await expect(engine.run(project.id)).rejects.toBeInstanceOf(OfflineError);
+    const saved = await engine.store.get(project.id);
+    expect(saved.phase).toBe('paused');
+    expect(saved.error).toBeNull();
+    expect(saved.chats.Q.some((m: { role: string; content: string }) => m.role === 'app' && /network was down/i.test(m.content))).toBe(true);
+    expect(saved.log.some((l: { type: string; message: string }) => l.type === 'error')).toBe(true);
+  });
+
+  it('keeps blog, guide and supplier-directory pages out of report.deliverables', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with highest price/value ratio for a retail second hand shop business in Czech Republic' });
+    project.report = { ...(project.report ?? {}) } as never;
+    project.acceptance = { ...(project.acceptance ?? {}), itemCount: 20, urlsLive: true, valueRange: null, mustMention: [] } as never;
+    project.candidates = {
+      kept: [
+        { title: 'Germany Wholesaler Used Clothes: Top Suppliers & Bulk Deals', url: 'https://accio.com/', price: null, currency: '', nodeId: 'D1' },
+        { title: 'Wholesale Used Clothing', url: 'https://apparelsearch.com/wholesale_clothing/wholesale_used_clothing.htm', price: null, currency: '', nodeId: 'D1' },
+        { title: 'Where to Buy Vintage Clothing Wholesale in Europe (2026 Guide)', url: 'https://www.usfripe.com/blogs/news/where-to-buy-vintage-clothing-wholesale-in-europe-2026-guide', price: null, currency: '', nodeId: 'D2' },
+        { title: 'Groothandel gebruikte kleding in balen - Zagumi', url: 'https://zagumi.com/nl/used-clothing/', price: null, currency: '', nodeId: 'D3' },
+      ],
+    } as never;
+    await engine.checkAcceptance(project);
+    expect(project.report.deliverables.map((d: { url: string }) => d.url)).toEqual(['https://zagumi.com/nl/used-clothing/']);
+  });
 });
+
+function netProvider(id: string, networkFailures = Number.POSITIVE_INFINITY) {
+  let n = 0;
+  return {
+    id,
+    ready: true,
+    calls: [],
+    async chat() {
+      this.calls.push(1);
+      n++;
+      if (n <= networkFailures) throw new ProviderError(`${id} unreachable: fetch failed`, { status: 0, provider: id });
+      return { content: '{"ok":true}', model: `${id}-m`, provider: id, usage: {} };
+    },
+    describe: () => ({ id }),
+  };
+}
 

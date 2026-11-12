@@ -4,11 +4,12 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, entityDeliverables, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding, withMeaning } from './verify.mjs';
+import { OfflineError } from '../llm/router.mjs';
 import { claimsToCheck, contextOf, isStale, normalizeVote, resolveFromSources, supportAudit, supportPrompt, supportRecord, termCheck, toConfirm } from './support.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
@@ -34,14 +35,14 @@ import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCov
 import { compactProject, compactSources } from './compact.mjs';
 import { plain, screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
-import { BLOCKING, auditFeedback, auditTree, cleanTitle, dropListingWork, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
+import { BLOCKING, auditFeedback, auditTree, cleanTitle, kindWordsOf, markListingWork, duplicateAmong, duplicateOf, modelOf, repairTree } from './treeaudit.mjs';
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { captureBaseline, championChallenger, lineageFor, recordChampionGap, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
-const DONE = new Set(['verified', 'supported', 'weak', 'unsupported']);
-const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0 };
+const DONE = new Set(['verified', 'supported', 'weak', 'unsupported', 'covered']);
+const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, covered: 2 };
 const LOG_LIMIT = 300;
 const MAX_ATTEMPTS = 3;
 const MAX_ATTACHMENTS = 6;
@@ -54,7 +55,7 @@ export const CALIBRATION_TITLES = 60;
 export const CALIBRATION_SAMPLES = 3;
 export const RECALIBRATE_GROWTH = 3;
 export const QUERY_PLAN_GROUPS = 6;
-export const MAX_DISTANCE_LOOKUPS = 60;
+export const GEOCODE_BATCH = 12;
 
 export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
@@ -403,9 +404,8 @@ export class ResearchEngine {
       await this.ensureDecisionModel(project);
       const brief = this.briefOf(project);
       if (brief.located) {
-        const pruned = dropListingWork(project.nodes);
-        project.nodes = pruned.nodes;
-        if (pruned.dropped.length) this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${pruned.dropped.join(', ')}`);
+        const marked = markListingWork(project.nodes, kindWordsOf(brief.kind ?? project.decisionModel?.kind));
+        if (marked.covered.length) this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${marked.covered.join(', ')}`);
       } else this.emit(project, 'tree', `no listing portal is known for "${brief.kind?.label ?? 'this item'}": the pieces that find the items are researched, and ${brief.regions.join(', ') || 'the asked place'} is where the result is used, not a filter on sources`);
     }
     const model = project.decisionModel;
@@ -472,34 +472,50 @@ export class ResearchEngine {
     const rows = [...(table.kept ?? []), ...(table.toCheck ?? [])];
     const keptRows = new Set(table.kept ?? []);
     const moved = [];
-    let lookups = 0;
+    const cache = new Map();
+    const geocode = (stated, countryCode) => {
+      const key = `${String(countryCode ?? '').toLowerCase()}|${stated.toLowerCase()}`;
+      if (!cache.has(key)) {
+        cache.set(key, Promise.resolve().then(() => this.sites.geocode(stated, String(countryCode ?? ''))).catch(() => null));
+      }
+      return cache.get(key);
+    };
+    const pending = [];
+    for (const row of rows) {
+      if (Number.isFinite(row.lat) && Number.isFinite(row.lon)) continue;
+      const attrs = row.attrs ?? {};
+      const stated = String(row.place ?? '').trim() || [attrs['location.city'], attrs['location.zip']].filter((v) => typeof v === 'string' && v.trim()).join(', ');
+      if (!stated) continue;
+      pending.push({ row, stated, countryCode: row.countryCode || attrs['location.countryCode'] || '' });
+    }
+    for (let i = 0; i < pending.length && !this.cancelled?.has?.(project.id); i += GEOCODE_BATCH) {
+      await Promise.all(pending.slice(i, i + GEOCODE_BATCH).map(async (entry) => {
+        entry.point = await geocode(entry.stated, entry.countryCode);
+      }));
+    }
     let measured = 0;
     let far = 0;
-    let unplaced = 0;
-    for (const row of rows) {
-      let point = Number.isFinite(row.lat) && Number.isFinite(row.lon) ? { lat: row.lat, lon: row.lon } : null;
-      if (!point) {
-        const attrs = row.attrs ?? {};
-        const stated = String(row.place ?? '').trim() || [attrs['location.city'], attrs['location.zip']].filter((v) => typeof v === 'string' && v.trim()).join(', ');
-        if (!stated) {
-          unplaced++;
-          continue;
-        }
-        if (lookups >= MAX_DISTANCE_LOOKUPS) continue;
-        lookups++;
-        try {
-          point = await this.sites.geocode(stated, row.countryCode || attrs['location.countryCode'] || '');
-        } catch {
-          point = null;
-        }
-        if (!point) continue;
-      }
+    let unmeasured = 0;
+    const measure = (row, point) => {
       const distanceKm = Math.round(haversineKm(origin.lat, origin.lon, point.lat, point.lon));
       row.distanceKm = distanceKm;
       measured++;
-      if (!(distanceKm > limit)) continue;
-      far++;
-      if (keptRows.has(row)) moved.push(row);
+      if (distanceKm > limit) {
+        far++;
+        if (keptRows.has(row)) moved.push(row);
+      }
+    };
+    for (const row of rows) {
+      if (Number.isFinite(row.lat) && Number.isFinite(row.lon)) measure(row, { lat: row.lat, lon: row.lon });
+    }
+    for (const entry of pending) {
+      if (entry.point) measure(entry.row, entry.point);
+    }
+    for (const row of rows) {
+      if (!Number.isFinite(row.distanceKm)) {
+        row.unmeasured = true;
+        unmeasured++;
+      }
     }
     if (moved.length) {
       table.kept = (table.kept ?? []).filter((row) => !keptRows.has(row) || !moved.includes(row));
@@ -507,7 +523,7 @@ export class ResearchEngine {
       table.keptCount = (table.keptCount ?? 0) - moved.length;
       table.toCheckCount = (table.toCheckCount ?? 0) + moved.length;
     }
-    this.emit(project, 'candidates', `distance from ${place}: ${measured} listing(s) measured, ${far} farther than ${limit} km, ${unplaced} without a stated place`);
+    this.emit(project, 'candidates', `distance from ${place}: ${measured} listing(s) measured, ${far} farther than ${limit} km, ${unmeasured} not measurable (marked unmeasured)`);
     return table;
   }
 
@@ -1428,9 +1444,9 @@ export class ResearchEngine {
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
-    const deliverables = brief.located === false
+    const deliverables = (brief.located === false
       ? entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label })
-      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]);
+      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))])).filter((d) => !isExcludedSurfaceUrl(d.url));
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage: this.cachedPageReader(pages), convert });
@@ -1496,13 +1512,6 @@ export class ResearchEngine {
       const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
       if (fixes.length) this.emit(project, 'tree', `tree repaired: ${fixes.map((f) => `${f.nodeId} ${f.code}`).join(', ')}`);
       for (const fix of fixes.filter((f) => f.code === 'scope')) this.emit(project, 'tree', fix.detail);
-      if (project.acceptance?.itemCount && (project.brief ?? this.briefOf(project)).located) {
-        const pruned = dropListingWork(project.nodes);
-        if (pruned.dropped.length) {
-          project.nodes = pruned.nodes;
-          this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${pruned.dropped.join(', ')}`);
-        }
-      }
       this.regrade(project);
       this.monitorPass(project);
       const listingsFirst = Boolean(project.acceptance?.itemCount && this.search?.readPage && !this.demo);
@@ -1570,10 +1579,11 @@ export class ResearchEngine {
       return await this.store.save(project);
     } catch (error) {
       if (project) {
-        project.phase = 'error';
-        project.error = error.message;
-        appendAppMessage(project, `Research stopped with an error: ${error.message}. Press Run to resume; finished nodes are kept.`);
-        if (!this.quiet.has(id)) await this.onStop(project, { reason: `error: ${error.message}` }).catch(() => {});
+        const offline = error instanceof OfflineError;
+        project.phase = offline ? 'paused' : 'error';
+        project.error = offline ? null : error.message;
+        appendAppMessage(project, offline ? `The network was down and every model provider was unreachable. Press Run to resume; finished nodes are kept.` : `Research stopped with an error: ${error.message}. Press Run to resume; finished nodes are kept.`);
+        if (!this.quiet.has(id)) await this.onStop(project, { reason: offline ? 'offline: network down' : `error: ${error.message}` }).catch(() => {});
         this.emit(project, 'error', error.message);
         await this.store.save(project);
       }
