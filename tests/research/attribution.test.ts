@@ -34,6 +34,15 @@ describe('claim attribution (verified quotes, as in GopherCite and ALCE)', () =>
     expect(attributionSummary(bad).numericMissing).toHaveLength(1);
   });
 
+  it('does not pass a finding whose every claim is an assumption (supplier research b2f5b7 D4.2)', () => {
+    const assumed = attributeClaims([
+      { text: 'Supplier A carries 120 distinct Ralph Lauren SKUs', value: 120, unit: 'SKUs', sourceIds: [], quote: '', assumption: true },
+      { text: 'Supplier B carries 50 distinct Barbour SKUs', value: 50, unit: 'SKUs', sourceIds: [], quote: '', assumption: true },
+    ], []);
+    expect(attributionSummary(assumed)).toMatchObject({ factual: 0, attributed: 0, share: 0, passed: false });
+    expect(attributionSummary([])).toMatchObject({ factual: 0, share: 0, passed: false });
+  });
+
   it('flags numbers in the answer that no claim, calculation or the question supports', () => {
     const finding = { answer: 'One plot at 20,000 EUR, 6 km from the beach; about 45 plots exist.', claims: [{ text: 'The plot costs 20,000 EUR, 6 km from the beach' }], calculation: null };
     expect(ungroundedNumbers(finding, { question: 'Plots under 20,000 EUR?' })).toEqual(['45']);

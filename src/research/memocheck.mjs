@@ -1,3 +1,5 @@
+import { countsTowardResult } from './candidates.mjs';
+
 const GROUPED = (sep) => new RegExp(`^\\d{1,3}(?:\\${sep}\\d{3})+$`);
 
 export function localNumber(text) {
@@ -54,27 +56,33 @@ export function memoClaims(report) {
 }
 
 function counted(candidates) {
-  return (candidates?.kept ?? []).filter((r) => r.plan?.tier === 'fits' && (!candidates.verification || r.verified?.verdict === 'confirmed'));
+  return (candidates?.kept ?? []).filter((r) => countsTowardResult(r, candidates));
 }
 
 const finite = (values) => values.map(Number).filter((v) => Number.isFinite(v));
+const ASKED_TRADE_OFFS = /(\d+)\s+(?:[a-z]+\s+){0,2}trade[\s‐‑-]?offs?\b/gi;
 
-export function verifiedFacts(candidates, { valueRange = null, rules = null, itemCount = null } = {}) {
+export function askedCounts(text) {
+  return [...String(text ?? '').matchAll(ASKED_TRADE_OFFS)].map((m) => Number(m[1]));
+}
+
+export function verifiedFacts(candidates, { valueRange = null, rules = null, itemCount = null, asked = '' } = {}) {
   const rows = counted(candidates);
   const t = candidates?.tiers ?? {};
   const v = candidates?.verification ?? null;
-  const prices = finite(rows.map((r) => r.value));
+  const tableCounts = candidates?.tiers ? [] : [candidates?.keptCount, candidates?.toCheckCount, candidates?.screenedCount];
+  const prices = finite(rows.filter((r) => !r.unit || r.unit === 'EUR').map((r) => r.value));
   const entries = finite(rows.map((r) => r.plan?.entry?.total));
   const trends = candidates?.sites?.trends ?? {};
   const codes = new Set(rows.map((r) => r.countryCode));
   const ruleValues = (ids) => finite(ids.map((id) => rules?.[id]?.value));
   return {
-    count: finite([rows.length, v?.confirmed, t.fits, t['trade-off'], t.unverified, t.weak, t.blocked, candidates?.found, itemCount]),
+    count: finite([rows.length, ...tableCounts, v?.confirmed, t.fits, t['trade-off'], t.unverified, t.weak, t.blocked, candidates?.found, itemCount, ...askedCounts(asked)]),
     eur: [...prices, ...entries, ...finite([valueRange?.[1]])],
     km: [...finite(rows.flatMap((r) => [r.site?.coastKm, r.site?.beachKm])), ...ruleValues(['ebikeKm'])],
     months: [...finite(rows.flatMap((r) => [r.site?.climate?.workable, r.site?.climate?.comfortable])), ...ruleValues(['minWorkableMonths'])],
     pct: finite([...Object.entries(trends).filter(([code]) => codes.has(code) || code === 'EU27_2020').flatMap(([, x]) => [x?.real, x?.change, x?.realCagr]), candidates?.sites?.euHpi]),
-    rows: rows.length,
+    rows: candidates?.tiers ? rows.length : candidates?.keptCount ?? rows.length,
   };
 }
 
@@ -99,7 +107,7 @@ export function checkMemoClaims(report, candidates, context = {}) {
     results.push({ ...claim, status });
   }
   const by = (s) => results.filter((r) => r.status === s);
-  return { at: new Date().toISOString(), checked: results.length, supported: by('supported').length, contradicted: by('contradicted'), unverifiable: by('unverifiable'), claims: results, basis: `${facts.rows} listing(s) that fit every check${candidates.verification ? ' and were confirmed by the external verifier' : ''}` };
+  return { at: new Date().toISOString(), checked: results.length, supported: by('supported').length, contradicted: by('contradicted'), unverifiable: by('unverifiable'), claims: results, basis: candidates.tiers ? `${facts.rows} listing(s) that fit every check${candidates.verification ? ' and were confirmed by the external verifier' : ''}` : `${facts.rows} listing(s) the table keeps` };
 }
 
 export function claimNote(check) {

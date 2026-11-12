@@ -73,8 +73,9 @@ export function needsSchema(page) {
 }
 
 export class CandidateSweeper {
-  constructor({ search, recipes = null, budget = PAGE_BUDGET, perSite = PAGES_PER_SITE, seeds = seedPortals, arms = null, rng = Math.random, learnSchema = null }) {
+  constructor({ search, recipes = null, budget = PAGE_BUDGET, perSite = PAGES_PER_SITE, seeds = seedPortals, arms = null, rng = Math.random, learnSchema = null, shouldStop = () => false }) {
     this.search = search;
+    this.shouldStop = shouldStop;
     this.learnSchema = learnSchema;
     this.schemaTried = new Set();
     this.arms = arms;
@@ -99,7 +100,7 @@ export class CandidateSweeper {
     let left = this.budget;
     const keptNow = () => buildCandidates([...project.nodes, { id: 'sweep', sources: pages }], brief, options).keptCount;
     const visit = async (url, from, arm, country = '', seed = false) => {
-      if (!url || read.has(url) || left <= 0) return null;
+      if (!url || read.has(url) || left <= 0 || this.shouldStop()) return null;
       read.add(url);
       left--;
       let page = await this.search.readPage(url);
@@ -121,7 +122,7 @@ export class CandidateSweeper {
     };
     const skipped = (start) => !start.seed && keptNow() >= target && visited.has(start.country);
     for (const [index, start] of starts.entries()) {
-      if (left <= 0) break;
+      if (left <= 0 || this.shouldStop()) break;
       if (skipped(start)) continue;
       visited.add(start.country);
       const reserved = starts.slice(index + 1).filter((s) => s.seed || !visited.has(s.country)).length;

@@ -141,14 +141,14 @@ export class ModelRouter {
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
     const ranked = this.demoteDead(this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose));
     const usable = this.demotePaid([...ranked, ...this.lastResortLocals(tier, purpose, tokens, time)]);
-    if (!avoid) return usable;
-    const author = this.providers.find((p) => p.id === avoid);
+    const avoided = new Set((Array.isArray(avoid) ? avoid : [avoid]).filter(Boolean));
+    if (!avoided.size) return usable;
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
-    const authorFamily = author ? family(author) : null;
-    const other = usable.filter((p) => p.id !== avoid && family(p) !== authorFamily);
-    const sameFamily = usable.filter((p) => p.id !== avoid && family(p) === authorFamily);
+    const avoidedFamilies = new Set(this.providers.filter((p) => avoided.has(p.id)).map(family));
+    const other = usable.filter((p) => !avoided.has(p.id) && !avoidedFamilies.has(family(p)));
+    const sameFamily = usable.filter((p) => !avoided.has(p.id) && avoidedFamilies.has(family(p)));
     const preferred = [...this.demoteSlow(other, tier), ...this.demoteSlow(sameFamily, tier)];
-    return preferred.length ? this.demotePaid([...preferred, ...usable.filter((p) => p.id === avoid)]) : usable;
+    return preferred.length ? this.demotePaid([...preferred, ...usable.filter((p) => avoided.has(p.id))]) : usable;
   }
 
   isPaid(provider) {

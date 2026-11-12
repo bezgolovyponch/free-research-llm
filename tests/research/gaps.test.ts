@@ -49,3 +49,16 @@ describe('action plan for an insufficient result', () => {
     expect(provisionalVerdict('PROVISIONAL — GO', done)).toBe('GO');
   });
 });
+
+describe('pieces covered by code on the candidate table (audit 2026-11-12, supplier research b2f5b7 D3.1)', () => {
+  const covered = { id: 'D3.1', parentId: 'D3', title: 'Grading system', question: 'Do suppliers use A/cream grading for items?', status: 'covered', coveredBy: 'candidate-table', impact: 4, uncertainty: 2, sources: [] };
+
+  it('a covered piece needs no action', () => {
+    expect(nodeAction(covered)).toBeNull();
+  });
+
+  it('a covered piece counts as settled, so the result is not provisional because of it', () => {
+    const status = resultStatus({ report: { verdict: 'GO' }, nodes: [{ id: 'D3', parentId: 'Q', title: 'Quality screening', status: 'supported' }, covered] });
+    expect(status).toMatchObject({ provisional: false, coverage: 1, confidence: 'high', counts: { fix: 0, research: 0, clarify: 0 } });
+  });
+});

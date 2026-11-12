@@ -10,7 +10,7 @@ import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding, withMeaning } from './verify.mjs';
 import { OfflineError } from '../llm/router.mjs';
-import { claimsToCheck, contextOf, isStale, normalizeVote, resolveFromSources, supportAudit, supportPrompt, supportRecord, termCheck, toConfirm } from './support.mjs';
+import { claimsToCheck, contextOf, needsRecheck, normalizeVote, resolveFromSources, supportAudit, supportPrompt, supportRecord, termCheck, toConfirm } from './support.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
@@ -825,7 +825,7 @@ export class ResearchEngine {
       this.emit(project, 'candidates', `strategy "${strategy.label}": ${confirmed} of ${quoted.length} sources re-read online with their quotes found (${project.strategyCheck.at})`);
     }
     if (sweep && this.search?.readPage) {
-      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null, arms: this.arms, learnSchema: this.router && !this.demo && this.search.fetchHtml ? (args) => this.learnSiteSchema(project, args) : null });
+      const sweeper = new CandidateSweeper({ search: this.search, recipes: this.search.recipes ?? null, arms: this.arms, learnSchema: this.router && !this.demo && this.search.fetchHtml ? (args) => this.learnSiteSchema(project, args) : null, shouldStop: () => this.cancelled.has(project.id) });
       const result = await sweeper.sweep(project, brief, options);
       if (result) {
         const fresh = new Set(result.pages.map((page) => page.url));
@@ -1121,7 +1121,7 @@ export class ResearchEngine {
     this.throwIfCancelled(project);
     const first = await this.supportVote('support', 'deep', author, claim.text, shown);
     this.throwIfCancelled(project);
-    const second = await this.supportVote('support-second', 'fast', first?.provider ?? author, claim.text, shown);
+    const second = await this.supportVote('support-second', 'fast', [author, first?.provider].filter(Boolean), claim.text, shown);
     return supportRecord({ votes: [first, second].filter(Boolean), term: termCheck(claim.text, shown) });
   }
 
@@ -1281,7 +1281,7 @@ export class ResearchEngine {
     const status = resultStatus(project);
     const table = tableVerdict(project.candidates, project.acceptance?.itemCount ?? null);
     const said = project.report.modelVerdict ?? project.report.verdict;
-    project.report.claimCheck = checkMemoClaims(project.report, project.candidates, { valueRange: project.acceptance?.valueRange ?? null, rules: project.candidates?.strategy?.rules ?? null, itemCount: project.acceptance?.itemCount ?? null });
+    project.report.claimCheck = checkMemoClaims(project.report, project.candidates, { valueRange: project.acceptance?.valueRange ?? null, rules: project.candidates?.strategy?.rules ?? null, itemCount: project.acceptance?.itemCount ?? null, asked: `${project.question ?? ''} ${project.acceptance?.expected ?? ''}` });
     const note = claimNote(project.report.claimCheck);
     project.report.verdict = `${provisionalVerdict(table ? `${table} — model memo: ${said}` : said, status).slice(0, 600 - note.length)}${note}`;
     project.report.status = { provisional: status.provisional, coverage: status.coverage, confidence: status.confidence, blocking: status.blocking, counts: status.counts };
@@ -1469,6 +1469,7 @@ export class ResearchEngine {
 
   async stopIfCancelled(project, id, release) {
     if (!this.cancelled.has(id)) return null;
+    this.cancelled.delete(id);
     project.phase = 'cancelled';
     release();
     this.emit(project, 'phase', 'stopped by user');
@@ -1510,7 +1511,11 @@ export class ResearchEngine {
       }
       project.phase = 'researching';
       project.error = null;
-      for (const node of project.nodes) if (node.status === 'failed' || node.status === 'researching') node.status = 'pending';
+      for (const node of project.nodes) {
+        if (node.status !== 'failed' && node.status !== 'researching') continue;
+        node.status = 'pending';
+        this.resetAncestors(project, node);
+      }
       const rerunWanted = pieces ? new Set(pieces) : null;
       const rerunPieces = new Map();
       for (const node of project.nodes) {
@@ -1532,6 +1537,8 @@ export class ResearchEngine {
       if (listingsFirst && !reuse) {
         this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
         await this.collectCandidates(project, { sweep: true });
+        const stoppedInSweep = await this.stopIfCancelled(project, id, release);
+        if (stoppedInSweep) return stoppedInSweep;
         await this.planKnowledgeQueries(project);
         const knew = await this.gatherGroupKnowledge(project);
         const readFacts = await this.readListingFacts(project);
@@ -1610,6 +1617,7 @@ export class ResearchEngine {
       throw error;
     } finally {
       if (!released) release();
+      if (!this.quiet.has(id)) this.cancelled.delete(id);
     }
   }
 
@@ -1672,7 +1680,14 @@ export class ResearchEngine {
   }
 
   cancel(id) {
+    if (!this.running.has(id) && !this.quiet.has(id)) return false;
     this.cancelled.add(id);
+    return true;
+  }
+
+  resetAncestors(project, node) {
+    const byId = new Map(project.nodes.map((n) => [n.id, n]));
+    for (let up = byId.get(node.parentId); up; up = byId.get(up.parentId)) Object.assign(up, { status: 'pending', finding: null, verification: null, critique: null, error: null });
   }
 
   resetWithAncestors(project, nodeId) {
@@ -1713,6 +1728,7 @@ export class ResearchEngine {
       isSettled: (n) => SETTLED.has(n.status),
       downgradeTo: 'pending',
     });
+    for (const change of changed) this.resetAncestors(project, project.nodes.find((n) => n.id === change.nodeId));
     if (changed.length) this.emit(project, 'edit', `drift detected, re-researching: ${changed.map((c) => `${c.nodeId} (${c.drift})`).join(', ')}`);
     project.supportAudit = supportAudit(project.nodes);
     if (project.supportAudit.disagree) this.emit(project, 'edit', `audit: ${project.supportAudit.disagree} claim(s) where the checking models disagree come first to confirm: ${[...new Set(project.supportAudit.queue.slice(0, 3).map((q) => q.nodeId))].join(', ')}`);
@@ -1724,17 +1740,29 @@ export class ResearchEngine {
     const project = await this.load(id);
     let pieces = 0;
     let claims = 0;
+    let unanswered = 0;
     for (const node of project.nodes) {
-      if (!(node.finding?.claims ?? []).some((c) => isStale(c, node.finding, node))) continue;
+      if (!(node.finding?.claims ?? []).some((c) => needsRecheck(c, node.finding, node))) continue;
       const author = String(node.model ?? '').split('/')[0] || undefined;
-      claims += (await this.checkSupport(project, node, node.finding, author)).checked;
+      const before = new Map(claimsToCheck(node.finding, node).map((c) => [c, c.support]));
+      const checked = (await this.checkSupport(project, node, node.finding, author)).checked;
+      let silent = 0;
+      for (const [claim, earlier] of before) {
+        if ((claim.support?.votes ?? []).length) continue;
+        silent += 1;
+        if (earlier) claim.support = earlier;
+        else delete claim.support;
+      }
+      unanswered += silent;
+      if (silent === checked) continue;
+      claims += checked - silent;
       node.verification = withMeaning(node.verification, node.finding);
       if (node.verification) node.status = node.verification.grade;
       pieces += 1;
     }
     project.supportAudit = supportAudit(project.nodes);
     await this.store.save(project, { reason: 'claims rechecked for meaning' });
-    return { ok: true, message: `rechecked ${pieces} piece(s), ${claims} claim(s): ${project.supportAudit.toConfirm} to confirm` };
+    return { ok: true, message: `rechecked ${pieces} piece(s), ${claims} claim(s): ${project.supportAudit.toConfirm} to confirm${unanswered ? `; no model answered for ${unanswered} claim(s), they stay due for a recheck` : ''}` };
   }
 
   async resetResearch(id, { tree = false } = {}) {

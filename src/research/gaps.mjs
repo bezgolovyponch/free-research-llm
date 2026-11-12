@@ -1,6 +1,6 @@
 import { ROOT_ID } from './tree.mjs';
 
-export const SETTLED = new Set(['verified', 'supported']);
+export const SETTLED = new Set(['verified', 'supported', 'covered']);
 const OPEN = new Set(['pending', 'researching']);
 const GRADE_GAP = { verified: 0, supported: 0.25, weak: 0.6, unsupported: 0.85, failed: 1, pending: 1, researching: 1 };
 const FIX_CHECKS = new Set(['answer', 'citations', 'calculation']);

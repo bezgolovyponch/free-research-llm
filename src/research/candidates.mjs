@@ -359,12 +359,16 @@ export function tableVerdict(candidates, itemCount = null) {
     return `Table (computed by code): ${kept} result${kept === 1 ? '' : 's'} kept${met}; ${candidates.toCheckCount ?? 0} to check; ${candidates.screenedCount ?? 0} screened out of ${candidates.found ?? 0} found`;
   }
   const target = itemCount ? ` of the ${itemCount} asked` : '';
-  const v = candidates.verification;
-  const verified = v ? ` (externally verified: ${v.confirmed} confirmed, ${v.refuted} refuted, ${v.unconfirmed + v.pending} not yet confirmed; a result counts only when it fits every check and is confirmed)` : '';
   const fits = t.fits ?? 0;
   const tradeOff = t['trade-off'] ?? 0;
   const unverified = t.unverified ?? 0;
   const weak = t.weak ?? 0;
   const blocked = t.blocked ?? 0;
-  return `Decision model: ${fits} result${fits === 1 ? '' : 's'}${target} fit every check${verified}; ${tradeOff} trade-off${tradeOff === 1 ? '' : 's'} with their potential; ${unverified} to confirm; ${weak} weak; ${blocked} blocked by law`;
+  const rest = `${tradeOff} trade-off${tradeOff === 1 ? '' : 's'} with their potential; ${unverified} to confirm; ${weak} weak; ${blocked} blocked by law`;
+  if (!candidates.verification) return `Decision model: ${fits} result${fits === 1 ? '' : 's'}${target} fit every check; ${rest}`;
+  const among = (candidates.kept ?? []).filter((r) => r.plan?.tier === 'fits');
+  const of = (verdict) => among.filter((r) => r.verified?.verdict === verdict).length;
+  const counted = of('confirmed');
+  const refuted = of('refuted');
+  return `Decision model: ${counted} result${counted === 1 ? '' : 's'}${target} fit every check and ${counted === 1 ? 'is' : 'are'} confirmed by the external verifier (${fits} fit: ${counted} confirmed, ${refuted} refuted, ${Math.max(0, fits - counted - refuted)} not yet confirmed; only confirmed fits count); ${rest}`;
 }
