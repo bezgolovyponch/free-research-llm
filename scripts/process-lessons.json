@@ -138,5 +138,16 @@
     "signal": "a research file with fewer pieces or kept rows than the day before and no snapshot, journal line or log error that names the removal; a \"tree\" or \"edit\" log line that removes pieces with findings; a user asking where their plots went",
     "cause": "ProjectStore.save overwrote data/projects/<id>.json in place on every save with no record of what it replaced, data/handoff kept only the latest state and the research log held messages only, so the start-of-run repair that dropped 69 researched pieces of b7772e on 2026-11-11 (328 -> 201 kept plots) left nothing to restore from",
     "prevention": "every save appends one line to data/journal/<id>.jsonl with its reason and the full content of every piece and kept row it removes or replaces; a save that lowers the piece count or drops kept rows without a sweep first copies the stored file to data/projects/snapshots/<id>-<stamp>.json (newest 5 kept); a save that removes a researched piece is refused with an error in the research log unless the caller passes userAction delete, re-decompose, restore or loop; node src/frl.mjs restore <id> [snapshot | --before <ISO>] brings a snapshot or the journal state back while the research is not running. Covered by tests/store.test.ts (a removing save writes one snapshot and journals the removed content; an automatic removal of a researched piece is refused; a user-reason removal passes; the 6th snapshot drops the oldest; restore brings back the node and row counts; journal replay restores a removed node's findings) and tests/journal.test.ts (diff, undo and replay on the real node and row shapes). Because the store refuses, a start-of-run repair may never drop a researched piece: narrowRegions marks an off-scope researched leaf covered (coveredBy off-scope, findings kept) and removes only unresearched ones, using the same researched() predicate as the store (tests/research/treeaudit.test.ts, and the engine test that starts a run over such a leaf without a refusal)"
+  },
+  {
+    "id": "F11",
+    "title": "an excluded word matched inside a longer word and dropped the suppliers asked for",
+    "touches": [
+      "src/research/acceptance.mjs",
+      "tests/research/acceptance.test.ts"
+    ],
+    "signal": "a genuine supplier of the asked kind is missing from report.deliverables while its page passes every kind, anchor and wholesale check; the brief's not list holds a short word (retail, part) that is the start of a longer common word (retailers, partners)",
+    "cause": "entityDeliverables dropped a page when plain(pageText).includes(phrase), so the excluded word retail hit retailers, the customers a wholesaler names; b2f5b7 lost brasco.nl and vintage-clothing-wholesale.com",
+    "prevention": "excluded phrases go through the shared whole-word helper wordMatch (Unicode letter boundaries, whitespace runs inside phrases); tests/research/acceptance.test.ts \"a wholesaler page naming retailers as customers is not dropped by the not phrase retail\" uses the real brasco.nl row and the real dustfactoryvintage retail paragraph"
   }
 ]

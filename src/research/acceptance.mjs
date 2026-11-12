@@ -191,8 +191,8 @@ export function purposeChecks(project) {
 function wordMatch(text, words) {
   const value = plain(text);
   return (words ?? []).some((word) => {
-    const key = plain(word).trim();
-    return Boolean(key) && new RegExp(`(?:^|[^a-z0-9])${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`).test(value);
+    const key = plain(word).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+    return Boolean(key) && new RegExp(`(?:^|[^\\p{L}\\p{N}])${key}(?![\\p{L}\\p{N}])`, 'u').test(value);
   });
 }
 
@@ -371,7 +371,7 @@ export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = ''
     const { matched, ok } = matchedTerms(page.pageText, wanted);
     if (!ok) continue;
     if (!anchoredTerm(matched, anchors)) continue;
-    if (banned.some((phrase) => plain(page.pageText).includes(phrase))) continue;
+    if (wordMatch(page.pageText, banned)) continue;
     const hits = matched.length;
     const current = hosts.get(page.host);
     if (current && current.hits >= hits) continue;

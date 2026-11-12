@@ -265,6 +265,33 @@ describe('listing price on the page', () => {
     expect(deliverables).toHaveLength(1);
     expect(deliverables.map((d: { url: string }) => d.url)).toEqual(['https://supplier-one.com/']);
   });
+
+  it('a wholesaler page naming retailers as customers is not dropped by the not phrase retail', () => {
+    const terms = ['branded vintage clothing wholesale', 'graded A', 'cream', 'suppliers in NL', 'wholesale used clothing', 'second hand clothes', 'used clothing wholesale'];
+    const not = ['retail', 'maloobchod', 'donation', 'consignment'];
+    const kindLabel = 'wholesale clothing provider';
+    const brasco = [{
+      id: 'hubs',
+      sources: [{
+        url: 'https://brasco.nl/',
+        title: 'Brasco Wholesale Vintage Clothing | Footwear | Accessories',
+        text: 'Brasco Wholesale Vintage Clothing | Footwear | Accessories \n New from Brasco \n New: BrascoBox \n Meet BrascoBox — vintage wholesale in smaller quantities \n Vintage wholesale in smaller quantities \n Discover BrascoBox \n high quality collections\n worldwide delivery\n realtime stock\n Slide 1_3 Clothing Accessories footwear Get Inspired\n Slide 1_3 Clothing Accessories footwear Get Inspired\n check out our assortment\n Hand-inspected clothing, delivered in bulk for unbeatable value\n Accessories (69) \n Clothing (489) \n Footwear (50) \n your vintage adventure starts here\n Bulk up your stock with our carefully sourced European and American clothing.\n Our story of wholesale vintage clothing\n Welcome to our online vintage clothing wholesale company! Brasco is your go-to distributor for wholesale vintage, second-hand and used clothing. \n We are passionate about vintage wholesale fashion and offer a shop-ready product for retailers and wholesalers who share our enthusiasm for used items.',
+      }],
+    }];
+    expect(entityDeliverables(brasco as never, { terms, not, kindLabel })).toEqual([
+      { title: 'Brasco Wholesale Vintage Clothing | Footwear | Accessories', url: 'https://brasco.nl/', value: null, unit: '', nodeId: 'hubs', evidence: 'https://brasco.nl/' },
+    ]);
+    const dustFactory = [{
+      id: 'hubs',
+      sources: [{
+        url: 'https://dustfactoryvintage.com/vintage-clothing-wholesale/',
+        title: 'Wholesale Vintage Clothing 101',
+        text: 'Vintage Clothing Wholesalers and Suppliers work hand in hand with the rag houses that process vintage clothing, teaching their workers and buyers what is valuable for resale as Vintage. These mixes are then processed and sold to the Vintage Wholesaler so that they can begin processing the mixes for retail buyers.\n\nAt Dust Factory we then process the clothing even more breaking down each grade into a specific style and quality. The graders in the Dust Factory processing plants are more advanced when it comes to Vintage Clothing retail, then the graders at the Rag Houses. This is because each grader has had a minimum of three years experience working Vintage Retail before they can start grading for Dust Factory. We have found over the years that this ensures a quality mix for our buyers. What is damaged or stained is then sold to vintage refurbished companies so that the items can be re-constructed into a new garment. What is considered modern or undesirable for vintage buyers is donated to local charities or disaster relief organizations.\n\nThe clothing that is used for our mixes is then broken down into size and style runs. This gives our buyers the opportunity to get the same high quality mixes each time. Because we are a bulk wholesaler we do not pull out rare or desirable items for buyers with a limited market, but instead leave these items in our mixes to ensure the quality of our mixes for our bulk buyers. Over the years we have found that it is better not to let buyers hand pick mixes from our grades, this is so that we can keep the quality of our grades up.',
+      }],
+    }];
+    expect(entityDeliverables(dustFactory as never, { terms, kindLabel }).map((d: { url: string }) => d.url)).toEqual(['https://dustfactoryvintage.com/']);
+    expect(entityDeliverables(dustFactory as never, { terms, not, kindLabel })).toEqual([]);
+  });
 });
 
 describe('prices in more currencies and scales', () => {
