@@ -105,5 +105,18 @@
     "signal": "the Results tab of a plot research shows improve-loop tweaks of a clothing-supplier research (e.g. brand-filtered category pages on Vinted), and the improve prompt of one research carries another research's mixed or harmful verdicts",
     "cause": "lessons were grouped only by piece type (sub-question|lookup|fact etc.) with no item kind, and every principle verdict (helps, mixed, does not help) was rendered as an instruction to the proposer",
     "prevention": "every lesson stores the research's item kind (brief/decision-model kind label) and LessonBook.forType only returns lessons of the same type AND same kind (kindless lessons are never shared); only verdict 'helps' principles enter the playbook (helpsOnly in propose); the cross-research principles card moved from the Results tab to the Loop tab and calls /api/principles?project=<id>, filtered to the project's kind — covered by tests/research/lessons.test.ts (same-kind sharing, mixed not passed, helps passed) and tests/server.test.ts (?project= kind filter)"
+  },
+  {
+    "id": "F9",
+    "title": "listing-work rule marks analysis pieces as covered",
+    "touches": [
+      "src/research/treeaudit.mjs",
+      "src/research/engine.mjs",
+      "src/research/conceptaudit.mjs",
+      "tests/research/treeaudit.test.ts"
+    ],
+    "signal": "a \"pieces covered by code on the candidate table, not researched\" tree line that names climate, zoning, district or data-source pieces (plot research b7772e lost 68 pieces on 2026-11-11, most of them analysis), or concept check C18 counting such pieces as per-listing work",
+    "cause": "listingWork returned true for any action verb (find, identify, check, assess, calculate ...) or any target word (items, distances) on its own, so \"Assess climate suitability for glamping without AC\", \"Identify Portuguese coastal districts\" and \"Assess e bike accessibility to the sea\" counted as listing work and were never researched",
+    "prevention": "listingWork needs an action on listings: a for-sale phrase, a word that names listings (listings, ads, URLs, links) or an order starting with \"List\" counts on its own; any other action verb needs a listing detail beside it (items, priced, distances, a <=/>= bound) or a brief kind word; a verb alone or a detail word alone stays research. Covered by tests/research/treeaudit.test.ts, describe \"listing work needs an action on listings, not any verb\": the b7772e titles the 2026-11-11 removal line names stay research, the listed-for-sale survivors and the car research 0c750f listing pieces stay covered, and the D8.2.1.1 branch keeps its district and sea-access leaves"
   }
 ]

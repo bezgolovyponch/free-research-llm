@@ -300,3 +300,67 @@ describe('listing-for-sale phrasings from research b7772e (coastal land in Portu
   });
 });
 
+describe('listing work needs an action on listings, not any verb (plot research b7772e, pieces removed on 2026-11-11)', () => {
+  const analysisTitles = [
+    'Assess climate suitability for glamping without AC',
+    'Average summer temperature Assess climate suitability for glamping without AC',
+    'Identify Portuguese coastal districts',
+    'Number of districts identified Identify Portuguese coastal districts',
+    'Identify data sources for rustic land parcels',
+    'Assess e bike accessibility to the sea',
+    'Assess proximity to coast within',
+    'Mild climate suitability',
+    'Months per year with average temperature between 10 C and 30 C',
+    'Count of parcels meeting access and suitability criteria Turkish parcels suitab',
+  ];
+  const listingTexts = [
+    "What specific rural land parcels are listed for sale in Portugal's coastal districts for ≤20 000 EUR?",
+    'Which rural land parcels in Turkey’s Aegean and Mediterranean coastal provinces are listed for sale ≤20 000 EUR (≈ 450 000 TRY) and lie ≤20 km from the sea?',
+    'Identify publicly listed land parcels in Portugal and Spain, Vietnam, and Turkey priced ≤20 000 EUR, located within 5 km of the sea (e‑bike reachable), in regions with a mild climate allowing a 10‑month glamping season, and requiring minimal entrance investment',
+    'Price filter on public land listings',
+    'List affordable coastal parcels',
+    'Check e bike distance to coast',
+    'Czech Marketplace Listings',
+    'Count of CZ listings Czech Marketplace Listings',
+    'German Marketplace Listings',
+    'Live link count Verify URLs',
+  ];
+
+  it('leaves the removed analysis pieces to research: climate, districts, data sources and sea access (b7772e D8.2.2.1.bx, D8.2.1.1.a, D8.2.2.1.a, D8.2.1.1.d, D8.2.2.1.c, D7.1.1.cx, D7.1.1.b, D8.3.b, titles as the log recorded them)', async () => {
+    const { listingWork } = await import('../../src/research/treeaudit.mjs');
+    expect(analysisTitles.filter((text) => listingWork(text))).toEqual([]);
+  });
+
+  it('still marks the pieces that gather or check individual listings (b7772e D8.2.1.1.b.1, D8.2.1.2, D7.1.1, D7.1.1.ax, D7.1.1.a, D8.2.2.1.ax; car research 0c750f D1.1, D1.2, D6.2)', async () => {
+    const { listingWork } = await import('../../src/research/treeaudit.mjs');
+    expect(listingTexts.filter((text) => !listingWork(text))).toEqual([]);
+  });
+
+  it('a verb alone or a listing detail alone is not listing work (car research 0c750f D5.2 "Calculate ratio", the sea-distance metrics of b7772e, the surviving car piece D3)', async () => {
+    const { listingWork } = await import('../../src/research/treeaudit.mjs');
+    expect(listingWork('Price value ratio Calculate ratio')).toBe(false);
+    expect(listingWork('Calculate ratio')).toBe(false);
+    expect(listingWork('Distance to coast')).toBe(false);
+    expect(listingWork('Road distance to nearest shoreline')).toBe(false);
+    expect(listingWork('Which hatchbacks offer highest price/value within price cap?')).toBe(false);
+  });
+
+  it('covers only the listed-for-sale leaves of the b7772e branch D8.2.1.1 and keeps the district, sea-access and filter pieces with their parent', async () => {
+    const { markListingWork } = await import('../../src/research/treeaudit.mjs');
+    const nodes = [
+      { id: 'Q', parentId: null, title: 'Q', question: 'Find appropriate plots to buy for glamping business, but also with the strong price increase trend, very low enterance investments, 20000EUR max, 10 month a year, mild climate to have Glampings so no air condition, nearby sea or the ocean accessible by ebike' },
+      { id: 'D8.2.1.1', parentId: 'Q', title: 'Portugal coastal cheap plots', question: 'Which rural land parcels in Portuguese coastal districts are listed for sale at ≤20 000 EUR and lie ≤20 km from the Atlantic coastline?' },
+      { id: 'D8.2.1.1.a', parentId: 'D8.2.1.1', title: 'Identify Portuguese coastal districts' },
+      { id: 'D8.2.1.1.b', parentId: 'D8.2.1.1', title: 'Find rural parcels ≤20 000 EUR in coastal districts', question: 'What rural land parcels are listed for sale at ≤20 000 EUR in the coastal districts identified in D8.2.1.1.a?' },
+      { id: 'D8.2.1.1.b.1', parentId: 'D8.2.1.1.b', title: 'Portugal coastal rural land under 20 000 EUR', question: "What specific rural land parcels are listed for sale in Portugal's coastal districts for ≤20 000 EUR?" },
+      { id: 'D8.2.1.1.b.3', parentId: 'D8.2.1.1.b', title: 'Turkey coastal rural land under 20 000 EUR', question: "What specific rural land parcels are listed for sale in Turkey's coastal districts (e.g., Aydın, Muğla, İzmir, Antalya) for 20,000 EUR or less on sahibinden.com and hepsiemlak.com?" },
+      { id: 'D8.2.1.1.c', parentId: 'D8.2.1.1', title: 'Filter parcels within 20 km of the Atlantic', question: 'Which of the parcels from D8.2.1.1.b are located ≤20 km from the Atlantic coastline?' },
+      { id: 'D8.2.1.1.d', parentId: 'D8.2.1.1', title: 'Assess e bike accessibility to the sea' },
+    ];
+    const { covered } = markListingWork(nodes);
+    expect([...covered].sort()).toEqual(['D8.2.1.1.b', 'D8.2.1.1.b.1', 'D8.2.1.1.b.3']);
+    expect(nodes.filter((n) => n.status === 'covered').map((n) => n.id).sort()).toEqual(['D8.2.1.1.b', 'D8.2.1.1.b.1', 'D8.2.1.1.b.3']);
+    for (const id of ['D8.2.1.1', 'D8.2.1.1.a', 'D8.2.1.1.c', 'D8.2.1.1.d']) expect(nodes.find((n) => n.id === id)?.status).toBeUndefined();
+  });
+});
+

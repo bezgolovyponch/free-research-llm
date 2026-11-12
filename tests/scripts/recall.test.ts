@@ -12,8 +12,8 @@ function runCli(args: string[]): string {
 }
 
 describe('process lessons store', () => {
-  it('holds one entry per failure class F1 to F8', () => {
-    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8']);
+  it('holds one entry per failure class F1 to F9', () => {
+    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9']);
     for (const lesson of lessons) {
       expect(typeof lesson.title).toBe('string');
       expect(lesson.title.length).toBeGreaterThan(0);
