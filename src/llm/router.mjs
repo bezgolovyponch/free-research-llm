@@ -44,6 +44,15 @@ export const DEAD_AFTER_CALLS = 20;
 export const DEAD_WINDOW_MS = 30 * 60 * 1000;
 export const STREAK_BENCH_MS = 30 * 60 * 1000;
 export const STREAK_BENCH_MAX_MS = 6 * 60 * 60 * 1000;
+export const MODEL_GONE_REST_MS = 24 * 3600 * 1000;
+export const TRIAL_POLL_MS = 1000;
+const MODEL_NOT_FOUND = /no longer available|not found|does not exist|unknown model/i;
+const MODEL_RETIRED = /model\b[^\n]{0,120}\b(?:deprecated|decommissioned|retired)\b|\b(?:deprecated|decommissioned|retired)\b[^\n]{0,40}\bmodel\b/i;
+
+export function modelGone(error) {
+  const message = String(error?.message ?? '');
+  return (error?.status === 404 && MODEL_NOT_FOUND.test(message)) || error?.status === 410 || MODEL_RETIRED.test(message);
+}
 
 export function nextUtcMidnight(now) {
   const d = new Date(now);
@@ -126,7 +135,7 @@ export class ModelRouter {
   available({ avoid, tier = 'fast', purpose, tokens = 0 } = {}) {
     const time = this.now();
     this.restPaidProviders(time);
-    const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
+    const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.trialBusy(p.id, time));
     const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
@@ -185,7 +194,42 @@ export class ModelRouter {
 
   lastResortLocals(tier, purpose, tokens, time) {
     if (tier === 'vision') return [];
-    return this.ordered(tier, purpose).filter((p) => p.preset?.local && p.state === 'too-slow' && Boolean(p.selected?.fast || p.selected?.deep) && (!p.maxPromptTokens || tokens <= p.maxPromptTokens) && (this.cooldownUntil.get(p.id) ?? 0) <= time);
+    return this.ordered(tier, purpose).filter((p) => p.preset?.local && p.state === 'too-slow' && Boolean(p.selected?.fast || p.selected?.deep) && (!p.maxPromptTokens || tokens <= p.maxPromptTokens) && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.trialBusy(p.id, time));
+  }
+
+  halfOpen(providerId, time = this.now()) {
+    return this.cooldownUntil.has(providerId) && this.cooldownUntil.get(providerId) <= time;
+  }
+
+  trialBusy(providerId, time = this.now()) {
+    return this.halfOpen(providerId, time) && (this.inflight.get(providerId) ?? 0) > 0;
+  }
+
+  trialPending(time = this.now()) {
+    return this.providers.some((p) => p.ready && this.trialBusy(p.id, time));
+  }
+
+  closeBreaker(providerId) {
+    if (!this.halfOpen(providerId)) return;
+    this.cooldownUntil.delete(providerId);
+    this.cooldownReason.delete(providerId);
+  }
+
+  reopenBreaker(provider, error) {
+    const timedOut = TIMED_OUT.test(error.message);
+    const until = timedOut ? this.now() + TIMEOUT_BENCH_MS : error.status >= 500 ? this.now() + COMPUTE_ERROR_COOLDOWN_MS : this.cooldownFor(provider, error).until;
+    if ((this.cooldownUntil.get(provider.id) ?? 0) >= until) return;
+    this.cooldownUntil.set(provider.id, until);
+    this.cooldownReason.set(provider.id, `the trial call after a rest failed (${timedOut ? 'timed out' : `HTTP ${error.status}`}); rests ${Math.ceil((until - this.now()) / 60000)} min more`);
+  }
+
+  benchGoneModel(provider, model, error) {
+    const tiers = ['fast', 'deep'].filter((t) => provider.selected?.[t] === model);
+    const vars = (tiers.length ? tiers : ['fast']).map((t) => `FRL_${String(provider.id).toUpperCase()}_${t.toUpperCase()}_MODEL`).join(' / ');
+    const reason = `${model ?? 'the model'} is gone (${error.status ? `HTTP ${error.status}` : 'deprecated'}) and cannot be switched; rests 24 h, set ${vars} to a model this provider still serves`;
+    this.cooldownUntil.set(provider.id, Math.max(this.cooldownUntil.get(provider.id) ?? 0, this.now() + MODEL_GONE_REST_MS));
+    this.cooldownReason.set(provider.id, reason);
+    this.record({ purpose: 'router', tier: '', provider: provider.id, ...(model ? { model } : {}), ok: false, ms: 0, error: reason });
   }
 
   benchSlow(provider, error) {
@@ -241,9 +285,9 @@ export class ModelRouter {
     return [...providers.filter((p) => !dead(p)), ...providers.filter(dead)];
   }
 
-  recordOutcome({ provider, purpose, passed }) {
+  recordOutcome({ provider, purpose, passed, model = null }) {
     const purposeClass = PURPOSE_CLASS[purpose] ?? purpose;
-    this.outcomes?.record({ provider, purposeClass, passed: Boolean(passed) });
+    this.outcomes?.record({ provider, purposeClass, model, passed: Boolean(passed) });
   }
 
   record(entry) {
@@ -263,7 +307,7 @@ export class ModelRouter {
 
   switchModel(provider, model, error) {
     if (!provider.retireModel || !model) return false;
-    const gone = error.status === 404 && /no longer available|not found|does not exist|unknown model/i.test(error.message);
+    const gone = modelGone(error);
     const usedUp = PER_MODEL_DAY.test(error.message);
     const busy = !gone && !usedUp && overloaded(error);
     if (!gone && !usedUp && !busy) return false;
@@ -389,7 +433,7 @@ export class ModelRouter {
 
   shortestCooldownMs() {
     const time = this.now();
-    const waits = this.providers.filter((p) => p.ready).map((p) => (this.cooldownUntil.get(p.id) ?? 0) - time);
+    const waits = this.providers.filter((p) => p.ready).map((p) => (this.trialBusy(p.id, time) ? TRIAL_POLL_MS : (this.cooldownUntil.get(p.id) ?? 0) - time));
     return waits.length ? Math.max(0, Math.min(...waits)) : Infinity;
   }
 
@@ -430,11 +474,18 @@ export class ModelRouter {
   }
 
   async waitForCooldown({ avoid, tier, purpose, tokens }) {
-    const wait = this.shortestCooldownMs();
-    if (wait > this.maxWaitMs) return [];
-    this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
-    await this.sleep(wait);
-    return this.available({ avoid, tier, purpose, tokens });
+    let waited = 0;
+    let first = true;
+    for (;;) {
+      const wait = first ? this.shortestCooldownMs() : Math.max(this.shortestCooldownMs(), TRIAL_POLL_MS);
+      if (waited + wait > this.maxWaitMs) return [];
+      if (first) this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
+      await this.sleep(wait);
+      waited += wait;
+      first = false;
+      const candidates = this.available({ avoid, tier, purpose, tokens });
+      if (candidates.length || !this.trialPending()) return candidates;
+    }
   }
 
   async tryProviders(candidates, { messages, tier, json, purpose, temperature }, errors) {
@@ -443,8 +494,9 @@ export class ModelRouter {
       let repairs = 0;
       let switches = 0;
       while (repairs < 2) {
-        if ((this.cooldownUntil.get(provider.id) ?? 0) > this.now()) break;
+        if ((this.cooldownUntil.get(provider.id) ?? 0) > this.now() || this.trialBusy(provider.id)) break;
         const started = this.now();
+        const trial = this.halfOpen(provider.id, started);
         const model = provider.selected?.[tier] ?? provider.selected?.fast;
         this.inflight.set(provider.id, (this.inflight.get(provider.id) ?? 0) + 1);
         try {
@@ -458,6 +510,7 @@ export class ModelRouter {
           this.computeErrorStreak.delete(provider.id);
           this.failureStreak.delete(provider.id);
           this.streakBenches.delete(provider.id);
+          this.closeBreaker(provider.id);
           return { ...reply, data };
         } catch (error) {
           this.record({ purpose, tier, provider: provider.id, ok: false, ms: this.now() - started, error: error.message.slice(0, 200) });
@@ -471,6 +524,8 @@ export class ModelRouter {
                 retry = true;
                 stop = false;
               }
+            } else if (modelGone(error)) {
+              this.benchGoneModel(provider, model, error);
             } else if (!this.benchSlow(provider, error) && !this.benchComputeError(provider, error) && (error.retryable || [401, 402, 403].includes(error.status))) {
               this.coolDown(provider, error);
             }
@@ -480,6 +535,7 @@ export class ModelRouter {
             stop = false;
           }
           this.countFailure(provider);
+          if (trial && !retry && error instanceof ProviderError) this.reopenBreaker(provider, error);
           if (retry) continue;
           if (stop) break;
         } finally {

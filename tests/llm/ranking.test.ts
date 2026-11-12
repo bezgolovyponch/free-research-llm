@@ -15,7 +15,7 @@ const providers = [
 
 const ledger = [
   ...calls('gemini', 'deep', 2, 5000),
-  ...calls('gemini', 'deep', 8, 300, false, 'gemini HTTP 429: quota'),
+  ...calls('gemini', 'deep', 8, 300, false, 'gemini unreachable: timed out'),
   ...calls('cerebras', 'deep', 10, 1000),
   ...calls('cerebras', 'fast', 10, 800),
   ...calls('pollinations', 'fast', 10, 25000),
@@ -25,9 +25,74 @@ const ledger = [
 describe('router ranking', () => {
   it('measures reliability and median speed per provider over the last 24 h, counting rate limits', () => {
     const s = providerStats(ledger, { now });
-    expect(s.gemini).toMatchObject({ calls: 10, ok: 2, failed: 8, rateLimited: 8, reliability: 0.25, medianMs: { deep: 5000 } });
+    expect(s.gemini).toMatchObject({ calls: 10, ok: 2, failed: 8, rateLimited: 0, reliability: 0.25, medianMs: { deep: 5000 } });
     expect(s.cerebras).toMatchObject({ calls: 20, ok: 20, medianMs: { deep: 1000, fast: 800 } });
     expect(s.pollinations.medianMs.deep).toBe(25000);
+  });
+
+  it('providerStats does not lower reliability for 429/413 and does not count "generate" as a rate limit', () => {
+    const groq429 = 'groq HTTP 429 [quota window: per minute]: {"error":{"message":"Rate limit reached for model `openai/gpt-oss-20b`';
+    const groq413 = 'groq HTTP 413 [quota window: per minute]: {"error":{"message":"Request too large for model `openai/gpt-oss-20b`';
+    const cerebras429 = 'cerebras HTTP 429 [quota window: per minute]: {"message":"Tokens per minute limit exceeded - too many tokens processed.","type":"too_many_tokens_error","param":"quota","code":"token_quota_exceeded"}';
+    const cohere422 = 'cohere HTTP 422: {"error":{"message":"No valid response generated. Try updating messages","type":"Unprocessable Entity","param":null,"code":422},"error_type":"NO_VALID_RESPONSE_GENERATED"';
+    const cohere500 = 'cohere HTTP 500: {"id":"cddb413c-d9eb-4993-b6e4-7af1930dbef5","message":"internal server error, this has been reported to our developers. id d9ae694e81ceeffa254ec7ff5e94c7e4"}';
+    const s = providerStats([
+      ...calls('groq', 'fast', 75, 600),
+      ...calls('groq', 'fast', 28, 120, false, groq429),
+      ...calls('groq', 'fast', 8, 100, false, groq413),
+      ...calls('cerebras', 'fast', 10, 800),
+      ...calls('cerebras', 'fast', 27, 220, false, cerebras429),
+      ...calls('cohere', 'deep', 4, 3000),
+      ...calls('cohere', 'deep', 2, 1800, false, cohere422),
+      ...calls('cohere', 'deep', 2, 30000, false, cohere500),
+    ], { now });
+    expect(s.groq).toMatchObject({ calls: 111, ok: 75, failed: 36, rateLimited: 36 });
+    expect(s.groq.reliability).toBeCloseTo(76 / 77, 6);
+    expect(s.cerebras).toMatchObject({ calls: 37, ok: 10, rateLimited: 27 });
+    expect(s.cerebras.reliability).toBeCloseTo(11 / 12, 6);
+    expect(s.cohere).toMatchObject({ calls: 8, ok: 4, failed: 4, rateLimited: 0 });
+    expect(s.cohere.reliability).toBeCloseTo(5 / 10, 6);
+  });
+
+  it('rankRole uses p[modelRole] for the posterior and the shown model', () => {
+    const ps = [{ id: 'groq', label: 'Groq', state: 'ready', deep: 'openai/gpt-oss-120b', fast: 'openai/gpt-oss-20b', coolingDownMs: 0 }];
+    const seen: Array<string | null> = [];
+    const outcomes = {
+      posterior: (_id: string, _cls: string, capability: number, model: string | null = null) => {
+        seen.push(model);
+        return { mean: model === 'openai/gpt-oss-20b' ? 0.9 : 0.1, observed: 10, pass: 9, fail: 1, a: capability, b: 1 };
+      },
+      sample: (_id: string, _cls: string, _capability: number, _rng: () => number, model: string | null = null) => (model === 'openai/gpt-oss-20b' ? 0.9 : 0.1),
+    };
+    const own = rankRole({ role: 'deep', strategy: 'balanced', providers: ps, stats: {}, outcomes, purposeClass: 'research' })[0];
+    expect(own).toMatchObject({ model: 'openai/gpt-oss-120b', quality: 0.1 });
+    const fastArm = rankRole({ role: 'deep', modelRole: 'fast', strategy: 'balanced', providers: ps, stats: {}, outcomes, purposeClass: 'research' })[0];
+    expect(fastArm).toMatchObject({ model: 'openai/gpt-oss-20b', quality: 0.9 });
+    expect(seen).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b']);
+  });
+
+  it('purposePlan research order uses the fast model\'s posterior, since first research attempts run on the fast tier', async () => {
+    const { OutcomeBook } = await import('../../src/llm/outcomes.mjs');
+    const ps = [
+      { id: 'alpha', label: 'Alpha', state: 'ready', deep: 'alpha-deep', fast: 'alpha-fast', coolingDownMs: 0 },
+      { id: 'beta', label: 'Beta', state: 'ready', deep: 'beta-deep', fast: 'beta-fast', coolingDownMs: 0 },
+    ];
+    const book = new OutcomeBook({ now: () => 1000 });
+    for (let i = 0; i < 40; i++) {
+      book.record({ provider: 'alpha', model: 'alpha-fast', purposeClass: 'research', passed: false });
+      book.record({ provider: 'alpha', model: 'alpha-deep', purposeClass: 'research', passed: true });
+      book.record({ provider: 'beta', model: 'beta-fast', purposeClass: 'research', passed: true });
+      book.record({ provider: 'beta', model: 'beta-deep', purposeClass: 'research', passed: false });
+    }
+    for (const seed of [1, 2, 3, 4, 5]) {
+      let s = seed;
+      const rng = () => {
+        s = (s * 16807) % 2147483647;
+        return (s - 1) / 2147483646;
+      };
+      const plan = purposePlan({ providers: ps, stats: {}, enabled: ['alpha', 'beta'], outcomes: book, rng });
+      expect(plan.byPurpose.research).toEqual(['beta', 'alpha']);
+    }
   });
 
   it('counts the time lost on failed calls too, so speed means time per useful answer', () => {
