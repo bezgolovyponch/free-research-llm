@@ -13,4 +13,4 @@ if curl -s -m 2 "http://127.0.0.1:${PORT}/api/status" >/dev/null 2>&1; then
   exit 0
 fi
 (sleep 1.5 && open "http://127.0.0.1:${PORT}") &
-exec node src/server.mjs
+exec node --max-old-space-size=4096 src/server.mjs

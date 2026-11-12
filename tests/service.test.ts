@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SERVICE_LABEL, WINDOWS_TASK, accessLinks, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from '../src/service.mjs';
+import { NODE_HEAP_FLAG, SERVICE_LABEL, WINDOWS_TASK, accessLinks, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from '../src/service.mjs';
 
 describe('service', () => {
   it('writes a login service that starts the app with remote access and holds no secrets', () => {
@@ -32,6 +32,22 @@ describe('service', () => {
     expect(unit).toContain('LoadCredentialEncrypted=GROQ_API_KEY:/etc/credstore.encrypted/GROQ_API_KEY');
     expect(unit).toContain('Restart=always');
     expect(unit).not.toMatch(/gsk_|=sk-/);
+  });
+
+  it('gives node a 4 GB heap before server.mjs in every service definition', () => {
+    const plist = launchAgentPlist({ nodePath: '/opt/node', root: '/srv/frl', port: 4600, pathEnv: '/usr/bin' });
+    const plistFlag = plist.indexOf(`<string>${NODE_HEAP_FLAG}</string>`);
+    expect(plistFlag).toBeGreaterThan(-1);
+    expect(plistFlag).toBeLessThan(plist.indexOf('/srv/frl/src/server.mjs'));
+
+    const script = windowsServiceScript({ nodePath: 'C:\\node.exe', root: 'C:\\frl', port: 4600 });
+    const scriptFlag = script.indexOf(NODE_HEAP_FLAG);
+    expect(scriptFlag).toBeGreaterThan(-1);
+    expect(scriptFlag).toBeLessThan(script.indexOf("src\\server.mjs"));
+
+    const unit = systemdUnit({ nodePath: '/usr/bin/node', root: '/srv/frl', user: 'me' });
+    const execLine = unit.split('\n').find((l) => l.startsWith('ExecStart='));
+    expect(execLine).toBe(`ExecStart=/usr/bin/node ${NODE_HEAP_FLAG} /srv/frl/src/server.mjs`);
   });
 
   it('lists LAN addresses and builds token links for Wi-Fi and Tailscale', () => {

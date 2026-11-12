@@ -19,7 +19,7 @@ import { shareLinks } from './share.mjs';
 import { pcSetupCommand } from './local/pcsetup.mjs';
 import { probePeer } from './local/peer.mjs';
 import { rememberServe } from './local/autostart.mjs';
-import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, stableNodePath, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
+import { NODE_HEAP_FLAG, SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, stableNodePath, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
 import { ProjectStore, storePaths } from './store.mjs';
 import { EventLog } from './logs.mjs';
 import { InstanceLock } from './instancelock.mjs';
@@ -294,6 +294,10 @@ function run(command, args, opts = {}) {
   });
 }
 
+export function serverSpawnArgs() {
+  return [NODE_HEAP_FLAG, path.join(ROOT, 'src', 'server.mjs')];
+}
+
 const commands = {
   async start(args) {
     const remote = args.includes('--remote');
@@ -303,7 +307,7 @@ const commands = {
       await local('/api/status');
       return console.log(`The app is already running → http://127.0.0.1:${PORT}`);
     } catch {
-      spawn(process.execPath, [path.join(ROOT, 'src', 'server.mjs')], { stdio: 'inherit', env, cwd: ROOT });
+      spawn(process.execPath, serverSpawnArgs(), { stdio: 'inherit', env, cwd: ROOT });
     }
   },
 
