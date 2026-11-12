@@ -125,7 +125,7 @@ describe('items of a kind no listing portal sells', () => {
 });
 
 describe('item gate: body variants of a swept portal page are refused like any other row', () => {
-  const carKind = { label: 'used car', terms: ['used car', 'auto', 'gebrauchtwagen'], not: ['parts', 'kola'] };
+  const carKind = { label: 'used car', terms: ['used car', 'auto', 'gebrauchtwagen'], not: ['parts', 'kola'], subtype: { label: 'hatchback', models: ['fabia', 'civic', 'ibiza', 'golf', 'octavia', 'picanto'], variants: ['combi', 'sedan', 'cabrio'] } };
   const carOptions = { valueRange: [0, 65000], unit: 'CZK', kind: carKind, kindKnown: true };
 
   it('refuses combi, sedan, cabrio, coupe and kabriolet ads from bazos.cz and autoscout24.de', () => {
@@ -146,7 +146,7 @@ describe('item gate: body variants of a swept portal page are refused like any o
   });
 
   it('still accepts a body variant when the asked kind itself is that body type', () => {
-    const wagon = { valueRange: [0, 65000], unit: 'CZK', kind: { label: 'station wagon', terms: ['station wagon', 'kombi'] }, kindKnown: false };
+    const wagon = { valueRange: [0, 65000], unit: 'CZK', kind: { label: 'station wagon', terms: ['station wagon', 'kombi'], subtype: { label: 'station wagon', models: ['golf'] } }, kindKnown: false };
     expect(screenItem({ title: 'VW Golf kombi 1.6 TDI', url: 'https://www.autoscout24.de/angebote/vw-golf-kombi-16-tdi-d0b6741d-3dd5-47ce-804b-718ffdbb7507', value: 8900, unit: 'EUR' }, wagon).ok).toBe(true);
   });
 });
@@ -168,5 +168,27 @@ describe('item gate: instalment, leasing and deposit ads are refused', () => {
 
   it('keeps a plain for-sale ad whose title has none of those words', () => {
     expect(screenItem({ title: 'Dacia Sandero 1.2i LPG', url: 'https://auto.bazos.cz/inzerat/226135083/dacia-sandero-12i-lpg.php', value: 25000, unit: 'CZK' }, carOptions)).toMatchObject({ ok: true, priced: true });
+  });
+});
+
+describe('item gate: car-only screens only apply to kinds that ask for a sub-type', () => {
+  const plotKind = { label: 'plot of land', terms: ['plot', 'terreno'] };
+  const plotOptions = { valueRange: [0, 20000], unit: 'EUR', kind: plotKind };
+
+  it('keeps a plot listing whose title says "real estate" when the kind has no sub-type', () => {
+    const listing = { title: 'Terreno rústico 5000 m2 - real estate Algarve', url: 'https://www.idealista.pt/imovel/33912345/', value: 18000, unit: 'EUR' };
+    expect(screenItem(listing, plotOptions)).toMatchObject({ ok: true, priced: true });
+    expect(screenItem(listing, { ...plotOptions, kind: { ...plotKind, subtype: { label: '', models: [] } } })).toMatchObject({ ok: true });
+  });
+
+  it('still screens a body variant when the car kind asks for a sub-type', () => {
+    const carKind = { label: 'used car', terms: ['car', 'auto'], subtype: { label: 'hatchback', models: ['fabia'], variants: ['combi'] } };
+    expect(screenItem({ title: 'Skoda Fabia Combi 1.2', url: 'https://auto.bazos.cz/inzerat/180123456/skoda-fabia-combi.php', value: 45000, unit: 'CZK' }, { valueRange: [0, 65000], unit: 'CZK', kind: carKind, kindKnown: true }).reasons).toContain('a body variant (combi, sedan, cabrio, convertible, ...), not the asked body type');
+  });
+
+  it('does not read the plain word "rate" as an instalment', () => {
+    const verdict = screenItem({ title: 'Plot with high growth rate area', url: 'https://www.idealista.pt/imovel/33912346/', value: 12000, unit: 'EUR' }, plotOptions);
+    expect(verdict.reasons).not.toContain('an instalment, leasing or deposit ad, not a sale at the full price');
+    expect(verdict.ok).toBe(true);
   });
 });
