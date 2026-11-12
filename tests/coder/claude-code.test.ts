@@ -57,6 +57,7 @@ async function setup({ gates = [true], output = JSON.stringify({ result: 'done',
   const sandbox = fakeSandbox({ gates, changed });
   const coder = new ClaudeCodeCoder({
     root: dir,
+    platform: 'linux',
     workDir: path.join(dir, 'work'),
     changes,
     note: (m: string) => notes.push(m),

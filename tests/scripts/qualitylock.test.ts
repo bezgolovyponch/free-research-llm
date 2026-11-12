@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { acquireQualityLock, lockPid, qualityLockPath, releaseQualityLock, staleLock } from '../../scripts/quality-lock.mjs';
 
@@ -38,7 +39,7 @@ const LOCK = '/tmp/frl-quality.lock';
 
 describe('quality lock file', () => {
   it('lives in the temp dir under a fixed name', () => {
-    expect(qualityLockPath('/tmp')).toBe('/tmp/frl-quality.lock');
+    expect(qualityLockPath('/tmp')).toBe(path.join('/tmp', 'frl-quality.lock'));
   });
 
   it('reads the pid out of the lock file', () => {

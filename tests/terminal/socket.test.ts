@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 import { AccessGate } from '../../src/auth.mjs';
 import { TerminalHub } from '../../src/terminal/hub.mjs';
 import { attachTerminalSockets, sameOrigin } from '../../src/terminal/socket.mjs';
+import { pipedShell, waitFor } from '../helpers/shell';
 
 function open(url: string, headers: Record<string, string>) {
   return new Promise<{ ws?: WebSocket; status?: number }>((resolve) => {
@@ -16,7 +17,7 @@ function open(url: string, headers: Record<string, string>) {
 
 describe('terminal socket', () => {
   it('streams a shared shell to a same-origin browser and refuses cross-site pages and strangers', async () => {
-    const hub = new TerminalHub({ cwd: process.cwd(), env: { ...process.env, FRL_SHELL: '/bin/sh' }, platform: 'linux', loadPty: async () => { throw new Error('none'); } });
+    const hub = new TerminalHub({ cwd: process.cwd(), env: { ...process.env, FRL_SHELL: pipedShell.file }, platform: pipedShell.platform, loadPty: async () => { throw new Error('none'); } });
     const server = http.createServer();
     attachTerminalSockets(server, { hub, gate: new AccessGate({ token: 't0ken', shares: { match: (t: string) => (t === 'tok' ? 'p1' : null) } }) });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
@@ -30,8 +31,8 @@ describe('terminal socket', () => {
     const { ws } = await open(base, { origin: `http://127.0.0.1:${port}` });
     const seen: string[] = [];
     ws!.on('message', (m) => seen.push(String(m)));
-    ws!.send(JSON.stringify({ type: 'input', data: 'echo SOCK_$((2*21))\r' }));
-    for (let i = 0; i < 60 && !seen.join('').includes('SOCK_42'); i++) await new Promise((r) => setTimeout(r, 25));
+    ws!.send(JSON.stringify({ type: 'input', data: pipedShell.product('SOCK', 2, 21) }));
+    await waitFor(() => seen.join('').includes('SOCK_42'));
     expect(seen.join('')).toContain('SOCK_42');
     ws!.close();
     hub.closeAll();

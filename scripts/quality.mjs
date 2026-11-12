@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SECRET_PATTERNS } from '../src/secrets.mjs';
 import { acquireQualityLock, releaseQualityLock, LOCK_WAIT_MS } from './quality-lock.mjs';
+import { binEntry } from './tool-entry.mjs';
 
 import { parse as parseYaml } from 'yaml';
 
@@ -19,7 +20,12 @@ function failingLines(output, pattern) {
 }
 
 function run(command, args) {
-  return spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return { ...result, stdout: result.stdout ?? '', stderr: `${result.stderr ?? ''}${result.error ? `${command} did not start: ${result.error.message}` : ''}` };
+}
+
+function runTool(pkg, name, args) {
+  return run(process.execPath, [binEntry(pkg, name, ROOT), ...args]);
 }
 
 function repoFiles() {
@@ -120,7 +126,7 @@ const gates = {
       return { passed: false, detail: `another quality gate holds ${lock.file} (pid ${lock.holder}); waited ${Math.round(LOCK_WAIT_MS / 60000)} min for it` };
     }
     try {
-      const result = run('npx', ['playwright', 'test', '--reporter=line']);
+      const result = runTool('@playwright/test', 'playwright', ['test', '--reporter=line']);
       const summary = `${result.stdout}${result.stderr}`.match(/(\d+ passed[^\n]*|\d+ failed[^\n]*)/g);
       const failing = result.status === 0 ? [] : failingLines(`${result.stdout}${result.stderr}`, /^\s*(?:✘|\d+\)\s|Error:|Test timeout)/);
       return { passed: result.status === 0, detail: `${summary ? summary.join(', ') : `${result.stdout}${result.stderr}`.slice(-300)}${failing.length ? `\n      ${failing.join('\n      ')}` : ''}` };
@@ -138,13 +144,13 @@ const gates = {
     ])].filter((f) => /^tests\/.+\.test\.ts$/.test(f) && fs.existsSync(path.join(ROOT, f)));
     if (!changed.length) return { passed: true, detail: 'no new or changed test files' };
     for (let round = 1; round <= FLAKE_ROUNDS; round++) {
-      const result = run('npx', ['vitest', 'run', ...changed]);
+      const result = runTool('vitest', 'vitest', ['run', ...changed]);
       if (result.status !== 0) return { passed: false, detail: `round ${round} of ${FLAKE_ROUNDS} failed for ${changed.join(', ')}\n      ${failingLines(`${result.stdout}${result.stderr}`, /^\s*(?:×|FAIL\s|AssertionError|Error:)/).join('\n      ')}` };
     }
     return { passed: true, detail: `${changed.length} new or changed test file(s) passed ${FLAKE_ROUNDS} times in a row` };
   },
   tests() {
-    const result = run('npx', ['vitest', 'run']);
+    const result = runTool('vitest', 'vitest', ['run']);
     const output = `${result.stdout}${result.stderr}`;
     const summary = output.match(/Tests\s+([^\n]+)/);
     const failing = result.status === 0 ? [] : failingLines(output, /^\s*(?:×|FAIL\s|AssertionError|Error:)/);

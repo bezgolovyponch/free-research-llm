@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TerminalHub, shellEnv, shellFor } from '../../src/terminal/hub.mjs';
+import { pipedShell, waitFor } from '../helpers/shell';
 
 function fakePty() {
   const spawned: Array<{ file: string; args: string[]; opts: Record<string, unknown> }> = [];
@@ -43,13 +44,13 @@ describe('TerminalHub', () => {
   });
 
   it('falls back to a basic piped shell when node-pty is missing, and can be turned off', async () => {
-    const hub = new TerminalHub({ cwd: process.cwd(), env: { ...process.env, FRL_SHELL: '/bin/sh' }, platform: 'linux', loadPty: async () => { throw new Error('no pty'); } });
+    const hub = new TerminalHub({ cwd: process.cwd(), env: { ...process.env, FRL_SHELL: pipedShell.file }, platform: pipedShell.platform, loadPty: async () => { throw new Error('no pty'); } });
     expect(await hub.mode()).toBe('basic');
     const session = await hub.create();
     const seen: string[] = [];
     hub.attach(session.id, { send: (m: { type: string; data?: string }) => { if (m.data) seen.push(m.data); } });
-    session.input('echo FRL_$((6*7))\r');
-    for (let i = 0; i < 50 && !seen.join('').includes('FRL_42'); i++) await new Promise((r) => setTimeout(r, 20));
+    session.input(pipedShell.product('FRL', 6, 7));
+    await waitFor(() => seen.join('').includes('FRL_42'));
     expect(seen.join('')).toContain('FRL_42');
     hub.closeAll();
     const off = new TerminalHub({ cwd: '/', enabled: false });
