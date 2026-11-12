@@ -220,5 +220,22 @@
     "signal": "find-appropriate-plots-to-buy-fo-b7772e started the improve loop with ~24 h, ended at 2026-11-12T20:57Z with \"plateau: 12 trials in a row...\", resumed after restart 22:15Z with 22.8 h left and ended again 22:44Z on a plateau; the 22:25Z stall message named \"At least 50 valid items\" at 100% as the weakest check while the score was 0.807 and only 14 of 30 pieces passed",
     "cause": "commit 0edee7a made ProjectImprover.loop break on PLATEAU_TRIALS=12 non-kept trials, overriding the user's deadline, and stallCheck picked the weakest acceptance check by raw value even at 100%, so steering aimed at a check that cannot gain while the real deficit (pieces not passing) was ignored",
     "prevention": "a plateau only switches steering (the recorded stall flips to stalled, as the stall path does) and the loop runs until the deadline, the user stops it, or nothingLeftToGain says every acceptance check is at 100% and every piece passes (that stop reason says exactly that); stallCheck targets the lowest check below 100%, else names the failing pieces, never a check already at 100%; tests/research/improve.test.ts \"keeps looping through a plateau while time is left\", \"never steers at a check already at 100%\" and \"nothing left to gain\" cover it"
+  },
+  {
+    "id": "F17",
+    "title": "the router learned per provider, kept calling a deprecated model, re-admitted a benched provider at full load and read rate limits as unreliability",
+    "touches": [
+      "src/llm/outcomes.mjs",
+      "src/llm/ranking.mjs",
+      "src/llm/router.mjs",
+      "src/research/engine.mjs",
+      "tests/llm/outcomes.test.ts",
+      "tests/llm/ranking.test.ts",
+      "tests/llm/router.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "data/logs/model-calls.jsonl (1,351 calls, 2026-11-02..04): 38 calls answered cloudflare HTTP 410 Model has been deprecated over three days and 0 cloudflare calls worked; groq shows 36 of 111 calls failed, every one HTTP 429 or 413; a cohere HTTP 500 whose request id holds 413 and a cohere 422 saying generated are counted as rate limits; a provider's pass rate does not move when FRL_<ID>_FAST_MODEL changes its model",
+    "cause": "OutcomeBook keyed on provider|purposeClass, so a new model inherited the old model's record, and purposePlan ranked first research attempts (fast tier) with the deep model; switchModel knew only 404 as gone and a 410 is not retryable, so a model that could not be switched got no cooldown; a lapsed cooldown re-admitted the provider for every waiting call at once; providerStats divided by all calls and matched the bare substrings rate, limit, 429 and 413",
+    "prevention": "each model is its own arm (key provider|model|purposeClass, rankRole modelRole); modelGone covers 410 and deprecated wording, and a gone model that cannot switch benches the provider 24 h with the env var to change; a lapsed cooldown is half-open and admits one trial call; reliability leaves capacity limits out; tests/llm/outcomes.test.ts \"two models of one provider keep separate posteriors, and the legacy key still works without a model\", tests/llm/ranking.test.ts \"rankRole uses p[modelRole] for the posterior and the shown model\", \"purposePlan research order uses the fast model's posterior, since first research attempts run on the fast tier\" and \"providerStats does not lower reliability for 429/413 and does not count \\\"generate\\\" as a rate limit\", tests/llm/router.test.ts \"the real cloudflare 410 deprecated error benches a provider whose model cannot switch, for 24 h, naming the model and the env var\", \"benches a provider whose deprecated model is pinned by an env override, and retires and switches the model when the provider can\", \"half-open admits one trial call after a bench lapses and closes on success\", \"half-open re-opens on a failed trial: 10 min after one compute error or one timeout, the normal cooldown otherwise\" and \"a second call waits for the trial instead of failing when every provider is cooling, and gives up after the wait limit\""
   }
 ]

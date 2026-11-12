@@ -1076,7 +1076,8 @@ describe('graded research answers feed routing', () => {
     router.outcomes = outcomes;
     const project = await engine.createProject({ question: 'Is it profitable to resell used vans from Germany in Czechia?', autoRun: false });
     await engine.run(project.id);
-    const seen = outcomes.posterior(provider.id, 'research', 3);
+    const seen = outcomes.posterior(provider.id, 'research', 3, provider.selected.fast);
+    expect(outcomes.posterior(provider.id, 'research', 3).observed).toBe(0);
     expect(seen.observed).toBeGreaterThan(0);
   });
 

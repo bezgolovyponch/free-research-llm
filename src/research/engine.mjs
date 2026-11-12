@@ -395,7 +395,7 @@ export class ResearchEngine {
     for (const fix of (fixes ?? []).filter((f) => f.code === 'scope')) this.emit(project, 'tree', fix.detail);
     if (tree.nodes.length < 2) throw new Error('the model returned an empty issue tree; try again or use a stronger model');
     const passed = !issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced');
-    this.router.recordOutcome?.({ provider: reply.provider, purpose: 'decompose', passed });
+    this.router.recordOutcome?.({ provider: reply.provider, model: reply.model, purpose: 'decompose', passed });
     const proposed = project.acceptance?.locked ? { spec: project.acceptance, dropped: [] } : groundAcceptance(normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected), { expected: project.acceptance?.expected, question: project.question, constraints: project.constraints });
     const acceptance = proposed.spec;
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
@@ -1100,7 +1100,7 @@ export class ResearchEngine {
       const reply = await this.router.complete({ purpose: 'critique', tier: 'fast', avoid, messages: critiquePrompt({ node, finding, sources }) });
       const critique = normalizeCritique(reply.data);
       const passed = critique !== null;
-      this.router.recordOutcome?.({ provider: reply.provider, purpose: 'critique', passed });
+      this.router.recordOutcome?.({ provider: reply.provider, model: reply.model, purpose: 'critique', passed });
       return critique;
     } catch {
       return null;
@@ -1202,7 +1202,7 @@ export class ResearchEngine {
       if (SETTLED.has(verification.grade)) {
         this.monitorSettle(project, node);
       }
-      this.router.recordOutcome?.({ provider: reply.provider, purpose: 'research', passed: verification.grade === 'verified' || verification.grade === 'supported' });
+      this.router.recordOutcome?.({ provider: reply.provider, model: reply.model, purpose: 'research', passed: verification.grade === 'verified' || verification.grade === 'supported' });
       this.emit(project, 'node', `${node.id}: ${verification.grade} (attempt ${attempt}, ${tier} tier, ${reply.provider})`, { nodeId: node.id });
       if (!needsEscalation(verification)) return;
       failures = [...verification.failures, ...(critique?.issues ?? [])];
@@ -1226,7 +1226,7 @@ export class ResearchEngine {
     node.sources = children.map((c) => ({ id: c.id, kind: 'node', title: c.title, url: '', domain: `node:${c.id}`, text: c.finding?.answer ?? '' }));
     const verification = verifyFinding({ finding, sources: node.sources, node: { method: 'rollup' } });
     const passed = verification.grade === 'verified' || verification.grade === 'supported';
-    this.router.recordOutcome?.({ provider: reply.provider, purpose: 'rollup', passed });
+    this.router.recordOutcome?.({ provider: reply.provider, model: reply.model, purpose: 'rollup', passed });
     const weakest = Math.min(...children.map((c) => GRADE_RANK[c.status] ?? 0));
     const fromChildren = ['unsupported', 'weak', 'supported', 'verified'][weakest];
     const ownChecksPassed = verification.grade === 'verified' || verification.grade === 'supported';
@@ -1270,7 +1270,7 @@ export class ResearchEngine {
     this.planActions(project);
     if (project.report.claimCheck) {
       const passed = project.report.claimCheck.contradicted.length === 0;
-      this.router.recordOutcome?.({ provider: reply.provider, purpose: 'synthesize', passed });
+      this.router.recordOutcome?.({ provider: reply.provider, model: reply.model, purpose: 'synthesize', passed });
     }
     await this.checkAcceptance(project, pages);
     this.emit(project, 'report', `decision memo ready: ${project.report.verdict}`);
