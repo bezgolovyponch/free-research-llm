@@ -18,6 +18,13 @@ describe('scoreProject', () => {
     expect(scoreProject({ ...project, report: { verdict: 'INSUFFICIENT DATA — prices' } }).score).toBe(0.563);
     expect(scoreProject({ ...project, report: null }).score).toBe(0.563);
   });
+
+  it('counts covered pieces as covered, not as weak or missing', () => {
+    const s = scoreProject({ nodes: [{ id: 'D1', status: 'verified' }, { id: 'D2', status: 'covered', coveredBy: 'candidate-table' }, { id: 'D3', status: 'weak', question: 'VAT?' }], report: null });
+    expect(s.counts).toMatchObject({ verified: 1, covered: 1, weak: 1, pending: 0 });
+    expect(s.issues.map((i: { nodeId: string }) => i.nodeId)).toEqual(['D3']);
+    expect(s.score).toBe(Math.round(((1 + 0.75 + 0.25) / 3) * 0.9 * 1000) / 1000);
+  });
 });
 
 describe('gradeAverage', () => {

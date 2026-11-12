@@ -1,17 +1,15 @@
 export const STORED_TEXT_CHARS = 4000;
 export const STORED_LINKS = 40;
-export const STORED_LISTINGS = 60;
 export const CLIENT_TEXT_CHARS = 300;
 
-export function compactSources(sources = [], { text = STORED_TEXT_CHARS, links = STORED_LINKS, listings = STORED_LISTINGS } = {}) {
+export function compactSources(sources = [], { text = STORED_TEXT_CHARS, links = STORED_LINKS } = {}) {
   let trimmed = 0;
   const out = sources.map((s) => {
     const longText = typeof s.text === 'string' && s.text.length > text;
     const manyLinks = Array.isArray(s.links) && s.links.length > links;
-    const manyListings = Array.isArray(s.listings) && s.listings.length > listings;
-    if (!longText && !manyLinks && !manyListings) return s;
+    if (!longText && !manyLinks) return s;
     trimmed += 1;
-    return { ...s, ...(longText ? { text: s.text.slice(0, text) } : {}), ...(manyLinks ? { links: s.links.slice(0, links) } : {}), ...(manyListings ? { listings: s.listings.slice(0, listings) } : {}) };
+    return { ...s, ...(longText ? { text: s.text.slice(0, text) } : {}), ...(manyLinks ? { links: s.links.slice(0, links) } : {}) };
   });
   return { sources: out, trimmed };
 }

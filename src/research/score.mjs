@@ -1,4 +1,4 @@
-const WEIGHT = { verified: 1, supported: 0.75, weak: 0.25, unsupported: 0, failed: 0, pending: 0, researching: 0 };
+const WEIGHT = { verified: 1, supported: 0.75, covered: 0.75, weak: 0.25, unsupported: 0, failed: 0, pending: 0, researching: 0 };
 
 export function gradeAverage(nodes, pieces = []) {
   const present = new Map(nodes.map((n) => [n.id, n]));
@@ -8,12 +8,12 @@ export function gradeAverage(nodes, pieces = []) {
 
 export function scoreProject(project, pieces = []) {
   const nodes = project?.nodes ?? [];
-  const counts = { verified: 0, supported: 0, weak: 0, unsupported: 0, failed: 0, pending: 0 };
+  const counts = { verified: 0, supported: 0, covered: 0, weak: 0, unsupported: 0, failed: 0, pending: 0 };
   for (const n of nodes) counts[n.status in counts ? n.status : 'pending']++;
   const base = gradeAverage(nodes, pieces);
   const verdict = String(project?.report?.verdict ?? '');
   const issues = nodes
-    .filter((n) => !['verified', 'supported'].includes(n.status))
+    .filter((n) => !['verified', 'supported', 'covered'].includes(n.status))
     .map((n) => ({ nodeId: n.id, title: n.title, question: n.question, grade: n.status, failures: n.verification?.failures ?? (n.error ? [n.error] : []), sources: (n.sources ?? []).length }));
   return { score: Math.round(base * 0.9 * 1000) / 1000, counts, total: nodes.length, verdict, issues };
 }

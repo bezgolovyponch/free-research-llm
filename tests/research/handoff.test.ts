@@ -46,4 +46,11 @@ describe('handoff', () => {
     expect(await writer.read('missing')).toBeNull();
     await fs.rm(dir, { recursive: true, force: true });
   });
+
+  it('does not list covered pieces as weak or unresearched', () => {
+    const r = handoffRecord({ ...project, nodes: [...project.nodes, { id: 'D4', title: 'Listed plots', status: 'covered', coveredBy: 'candidate-table' }] }, { reason: 'loop ended' });
+    expect(r.progress).toEqual({ total: 4, passing: 1, pending: 1 });
+    expect(r.weak.map((w: { id: string }) => w.id)).toEqual(['D2.1', 'D3']);
+    expect(r.nextSteps).toContain('Press Run (or start the loop): some pieces are not researched yet');
+  });
 });

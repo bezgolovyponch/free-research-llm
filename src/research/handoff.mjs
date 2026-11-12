@@ -11,7 +11,7 @@ function pct(value) {
 export function handoffRecord(project, { reason, resume = {} } = {}) {
   const nodes = project.nodes ?? [];
   const trials = project.improve?.trials ?? [];
-  const weak = nodes.filter((n) => !GOOD.has(n.status)).map((n) => ({
+  const weak = nodes.filter((n) => !GOOD.has(n.status) && n.status !== 'covered').map((n) => ({
     id: n.id,
     title: n.title,
     status: n.status,

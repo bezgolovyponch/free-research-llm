@@ -464,7 +464,7 @@ describe('ResearchEngine', () => {
     expect(project.brief.text).not.toContain('Deliver: a decision memo');
   });
 
-  it('drops tree pieces that do per-listing work when the project lists items, since code does that work on the candidate table', async () => {
+  it('marks tree pieces that do per-listing work as covered when the project lists items, since code does that work on the candidate table', async () => {
     const question = 'Find hatchback car listings within 300km from Prague up to 65000 CZK';
     const piece = (id: string, parentId: string, question: string) => ({ id, parentId, title: question, question, method: 'lookup', searchQueries: [] });
     const tree = {
@@ -497,8 +497,11 @@ describe('ResearchEngine', () => {
     const project = await engine.createProject({ question, templateId: 'generic', expected: '10 live hatchback listings within 300km of Prague up to 65000 CZK' });
     await engine.decompose(project);
     expect(project.acceptance.itemCount).toBe(10);
-    expect(project.nodes.map((n: { id: string }) => n.id)).toEqual(['D4', 'D4.1', 'D4.2', 'D5', 'D5.2']);
-    expect(project.nodes.every((n: { question: string }) => !/\b(?:List|Verify|Convert|Calculate)\b/.test(n.question))).toBe(true);
+    expect(project.nodes).toHaveLength(16);
+    expect(project.nodes.filter((n: { status?: string }) => n.status === 'covered').map((n: { id: string }) => n.id)).toEqual(['D1', 'D1.1', 'D1.2', 'D1.3', 'D2', 'D2.1', 'D2.2', 'D3', 'D3.1', 'D3.2', 'D5.1']);
+    for (const n of project.nodes.filter((x: { status?: string }) => x.status === 'covered')) expect(n).toMatchObject({ status: 'covered', coveredBy: 'candidate-table' });
+    expect(project.nodes.filter((n: { status?: string }) => n.status !== 'covered').map((n: { id: string }) => n.id)).toEqual(['D4', 'D4.1', 'D4.2', 'D5', 'D5.2']);
+    expect(project.nodes.every((n: { question: string; status?: string }) => n.status === 'covered' || !/\b(?:List|Verify|Convert|Calculate)\b/.test(n.question))).toBe(true);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'tree' && l.message === 'pieces covered by code on the candidate table, not researched: D1, D1.1, D1.2, D1.3, D2, D2.1, D2.2, D3, D3.1, D3.2, D5.1')).toBe(true);
   });
 
