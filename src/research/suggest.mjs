@@ -53,7 +53,7 @@ export class SubIssueSuggester {
     if (node) fresh.nodes.find((n) => n.id === nodeId).suggestions = result;
     else fresh.rootSuggestions = result;
     this.engine.emit(fresh, 'suggest', `${nodeId}: ${items.length} researched sub-issue suggestion(s), ${items.filter((s) => s.grounded !== 'ungrounded').length} grounded in sources`, { nodeId });
-    await this.engine.store.save(fresh);
+    await this.engine.store.save(fresh, { reason: `${nodeId}: sub-issue suggestions stored` });
     return result;
   }
 }

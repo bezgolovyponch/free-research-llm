@@ -9,6 +9,7 @@ import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '.
 import { ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
+import { researchedNode } from '../helpers/research-shapes';
 
 const fakeSearch = {
   enabled: true,
@@ -685,6 +686,25 @@ describe('ResearchEngine', () => {
     expect(fixed.log.some((l: { message: string }) => /stored checks not enforced/.test(l.message))).toBe(true);
     await engine.updateProject(project.id, { acceptance: { itemCount: 50, mustMention: ['glamping'] } });
     expect((await engine.regroundAndRescore(project.id)).acceptance.mustMention).toEqual(['glamping']);
+  });
+
+  it('starts a run whose tree repair meets a researched off-scope leaf: the leaf is kept as covered and the save is not refused', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const errors: string[] = [];
+    engine.store.onEvent = (_id: string, event: { type: string; message: string }) => { if (event.type === 'error') errors.push(event.message); };
+    const project = await engine.createProject({ question: 'Find plots for a glamping business in Portugal, 20000EUR max', expected: '50 plots feasible for glamping' });
+    const done = await engine.run(project.id);
+    expect(done.brief.regions).toEqual(['PT']);
+    done.acceptance = { ...done.acceptance, itemCount: 50 };
+    const italy = { ...researchedNode('D9', 'Q'), title: 'Italy – coastal raw land', question: 'Find Italian coastal raw land parcels' };
+    done.nodes.push(italy);
+    await engine.store.save(done, { reason: 'test: an off-scope researched leaf joins the tree' });
+    const again = await engine.run(project.id);
+    const kept = again.nodes.find((n: { id: string }) => n.id === 'D9');
+    expect(kept).toMatchObject({ status: 'covered', coveredBy: 'off-scope', finding: italy.finding, sources: italy.sources });
+    expect(again.log.some((l: { message: string }) => /tree repaired: D9 covered-off-scope/.test(l.message))).toBe(true);
+    expect(errors).toEqual([]);
+    expect((await engine.store.readFile(project.id)).nodes.some((n: { id: string }) => n.id === 'D9')).toBe(true);
   });
 
   it('sends the research hints to every research step as soft guidance and lets the user change them while it runs', async () => {

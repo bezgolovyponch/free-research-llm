@@ -161,7 +161,7 @@ export class NodeChat {
     const userMessage = { role: 'user', content: text, at, ...(want ? { desired: want } : {}), ...(spec ? { specId: spec.id } : {}), ...(read.length ? { files: read.map((f) => ({ ...f, text: f.text.slice(0, FILE_TEXT_IN_THREAD) })) } : {}) };
     fresh.chats = { ...(fresh.chats ?? {}), [key]: [...thread, userMessage, { role: 'assistant', content: verdict.text, at, model: `${reply.provider}/${reply.model}`, actions: results, ...(proposals.length ? { proposals } : {}), audit: { passed: verdict.passed, issues: verdict.issues, revised } }].slice(-MAX_THREAD) };
     this.engine.emit(fresh, 'chat', `${key}: chat — ${results.length ? results.map((r) => `${r.type}${r.ok ? '' : ' (failed)'}`).join(', ') : 'no changes'}`, { nodeId: key });
-    await this.engine.store.save(fresh);
+    await this.engine.store.save(fresh, { reason: `${key}: chat reply stored` });
     return { reply: verdict.text, actions: results, proposals, thread: fresh.chats[key] };
   }
 
@@ -184,7 +184,7 @@ export class NodeChat {
     stored.state = !accept ? 'dismissed' : error ? 'failed' : 'done';
     if (error) stored.result = { message: error };
     this.engine.emit(fresh, 'chat', `${key}: proposal ${proposal.type} ${proposal.nodeId} ${stored.state}`, { nodeId: proposal.nodeId });
-    await this.engine.store.save(fresh);
+    await this.engine.store.save(fresh, { reason: `${key}: proposal ${proposal.type} ${proposal.nodeId} ${stored.state}` });
     return { proposal: stored, thread: fresh.chats[key], error };
   }
 }

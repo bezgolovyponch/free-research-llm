@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { App } from '../src/app.mjs';
 import { ScriptedProvider } from '../src/llm/scripted-provider.mjs';
 import { startServer, withResults } from '../src/server.mjs';
+import { plotResearch } from './helpers/research-shapes';
 
 let base: string;
 let close: () => void;
@@ -211,6 +212,30 @@ describe('HTTP server', () => {
     expect(Array.isArray(done.results.treeAudit)).toBe(true);
     const rewritten = (await call('POST', `/api/projects/${created.id}/synthesize`)).body;
     expect(rewritten.report.basis).toBeTruthy();
+  });
+
+  it('lists the snapshots and journal of a research and restores it through the API, but not while it runs', async () => {
+    const project = plotResearch();
+    project.id = 'plots-restore-through-api-1';
+    await app.store.save(project, { reason: 'research created' });
+    expect((await call('DELETE', `/api/projects/${project.id}/nodes/D1.1`)).status).toBe(200);
+    const view = (await call('GET', `/api/projects/${project.id}/snapshots`)).body;
+    expect(view.snapshots).toHaveLength(1);
+    expect(view.snapshots[0]).toMatchObject({ nodes: 3, rows: 3, phase: 'done' });
+    expect(view.journal).toMatchObject({ entries: 2, removals: [{ userAction: 'delete', nodes: ['D1.1'], rows: 0 }] });
+    expect((await call('GET', `/api/projects/${project.id}`)).body.nodes.map((n: { id: string }) => n.id)).toEqual(['D1', 'D2']);
+    app.engine.running.add(project.id);
+    expect((await call('POST', `/api/projects/${project.id}/restore`, { snapshot: view.snapshots[0].file })).status).toBe(409);
+    app.engine.running.delete(project.id);
+    expect((await call('POST', `/api/projects/${project.id}/restore`, {})).status).toBe(400);
+    const restored = (await call('POST', `/api/projects/${project.id}/restore`, { snapshot: view.snapshots[0].file }));
+    expect(restored.status).toBe(200);
+    expect(restored.body).toMatchObject({ ok: true, from: 'snapshot', nodes: { before: 2, after: 3 } });
+    expect((await call('GET', `/api/projects/${project.id}`)).body.nodes.map((n: { id: string }) => n.id)).toEqual(['D1', 'D1.1', 'D2']);
+    await app.logs.queue;
+    const log = (await call('GET', `/api/projects/${project.id}/logs`)).body;
+    expect(log.some((e: { type: string; message: string }) => e.type === 'restore' && /pieces 2 → 3/.test(e.message))).toBe(true);
+    expect((await call('GET', `/api/projects/no-such-research-00/snapshots`)).status).toBe(404);
   });
 });
 

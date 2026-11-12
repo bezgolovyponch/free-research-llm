@@ -33,7 +33,7 @@ const SLOW_RECHECK_MS = 10 * 60 * 1000;
 import { AppChat } from './appchat.mjs';
 import { HandoffWriter } from './research/handoff.mjs';
 import { appendAppMessage } from './research/notify.mjs';
-import { ProjectStore } from './store.mjs';
+import { ProjectStore, storePaths } from './store.mjs';
 import { spawn } from 'node:child_process';
 import { DocsIndex } from './chat/docs.mjs';
 import { MediaReader } from './chat/media.mjs';
@@ -124,7 +124,7 @@ export function buildSearch({ env, fetchImpl, recipes = null, browser = null }) 
   return new SearchService({ backends, fetchImpl, fetchPages: env.FRL_FETCH_PAGES !== '0', jinaReader: env.FRL_JINA_READER !== '0', jinaKey: env.JINA_API_KEY || '', recipes, browser });
 }
 
-const HISTORY_EVENT = /^(created|report|acceptance|improve-state|error):|^phase:(done|stopped|tree ready)/;
+const HISTORY_EVENT = /^(created|report|acceptance|improve-state|error|restore):|^phase:(done|stopped|tree ready)/;
 const INTERRUPTIBLE_PHASES = new Set(['decomposing', 'researching', 'synthesizing', 'building-tree']);
 const PLATFORM_NAMES = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
 
@@ -135,6 +135,7 @@ export function appNoteFor(event, project) {
   if (event.type === 'improve-state' && /loop (started|ended)/.test(event.message)) return `${event.message[0].toUpperCase()}${event.message.slice(1)} — ${q}`;
   if (event.type === 'phase' && event.message === 'done') return `Research finished — ${q}${tail}`;
   if (event.type === 'error') return `Research error — ${q}: ${String(event.message).slice(0, 200)}`;
+  if (event.type === 'restore') return `Research restored — ${q}: ${String(event.message).slice(0, 200)}`;
   return null;
 }
 
@@ -168,7 +169,8 @@ export class App {
     this.router = new ModelRouter({ providers: providers ?? [], routeOrder: routeOrderFrom(env), onLedger: (row) => this.logs.append('model-calls', row), outcomes: this.outcomes });
     this.recipes = new SiteRecipes({ file: path.join(this.dataDir, 'recipes.json') });
     this.search = search ?? buildSearch({ env, fetchImpl, recipes: this.recipes, browser: this.browser });
-    this.store = new ProjectStore({ dir: dataDir ?? path.join(ROOT_DIR, 'data', 'projects'), isBusy: (id) => Boolean(this.engine?.running.has(id) || this.improver?.isActive(id)) });
+    const paths = storePaths({ root: ROOT_DIR, dataDir: dataDir ?? null });
+    this.store = new ProjectStore({ dir: paths.projects, journalDir: paths.journal, snapshotDir: paths.snapshots, isBusy: (id) => Boolean(this.engine?.running.has(id) || this.improver?.isActive(id)), onEvent: (projectId, event) => this.recordEvent(projectId, event) });
     this.handoffs = new HandoffWriter({ dir: path.join(dataDir ?? path.join(ROOT_DIR, 'data'), 'handoff') });
     const rates = new ExchangeRates({ fetchImpl });
     this.sites = new SiteAssessor({ file: path.join(this.dataDir, 'sites.json') });
@@ -425,7 +427,7 @@ export class App {
         const project = await this.engine.load(id);
         if (stoppedByUser) project.phase = 'cancelled';
         await this.saveHandoff(project, stoppedByUser ? { reason: 'stopped by user' } : { reason: 'app stopped', resume: { wasRunning: true } });
-        await this.store.save(project);
+        await this.store.save(project, { reason: stoppedByUser ? 'stopped by user at shutdown' : 'app stopped while the research ran' });
       } catch {
         continue;
       }
@@ -518,7 +520,7 @@ export class App {
         const project = await this.engine.load(p.id);
         project.phase = 'cancelled';
         this.engine.emit(project, 'phase', 'cancelled (the app stopped while it ran; press Run to continue)');
-        await this.store.save(project);
+        await this.store.save(project, { reason: 'stale run settled at start' });
         settled.push(p.id);
       } catch {
         continue;
@@ -530,6 +532,13 @@ export class App {
   async history() {
     const [sessions, projects] = await Promise.all([this.logs.read('history', 1000), this.store.list()]);
     return { events: sessions.reverse(), projects };
+  }
+
+  async restoreProject(id, { snapshot = '', before = '' } = {}) {
+    const project = await this.engine.load(id);
+    const result = await this.store.restore(id, { snapshot: String(snapshot ?? ''), before: String(before ?? '') });
+    this.noteApp(`Research restored (${String(project.question).slice(0, 110)}): ${result.message}`);
+    return result;
   }
 
   async refreshProviders() {

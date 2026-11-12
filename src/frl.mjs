@@ -20,6 +20,9 @@ import { pcSetupCommand } from './local/pcsetup.mjs';
 import { probePeer } from './local/peer.mjs';
 import { rememberServe } from './local/autostart.mjs';
 import { SERVICE_LABEL, SYSTEMD_UNIT, WINDOWS_TASK, accessLinks, stableNodePath, lanAddresses, launchAgentPlist, systemdUnit, windowsServiceScript, windowsTaskArgs } from './service.mjs';
+import { ProjectStore, storePaths } from './store.mjs';
+import { EventLog } from './logs.mjs';
+import { InstanceLock } from './instancelock.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 4600);
@@ -263,6 +266,26 @@ const keyCommands = {
   },
 };
 
+const RESTORE_USAGE = 'usage: node src/frl.mjs restore <research id> [<snapshot file> | --before <ISO time>]   (with the id alone: list the snapshots and the journal)';
+
+function printRestorable(id, view) {
+  console.log(`Research ${id}`);
+  console.log(view.snapshots.length ? `Snapshots (newest first; data/projects/snapshots/):` : 'Snapshots: none yet (one is written before a save that removes pieces or drops kept rows).');
+  for (const s of view.snapshots) console.log(`  ${s.file}  taken ${s.at}  phase ${s.phase ?? '?'} · ${s.nodes ?? '?'} pieces · ${s.rows ?? '?'} kept rows`);
+  const j = view.journal;
+  console.log(j.entries ? `Journal: ${j.entries} save(s) from ${j.first} to ${j.last} (data/journal/${id}.jsonl)` : 'Journal: empty (every save appends one line from now on).');
+  if (j.removals.length) console.log('  Saves that removed data:');
+  for (const r of j.removals.slice(-20)) console.log(`    ${r.ts}  ${r.userAction ? `[${r.userAction}] ` : ''}${r.reason}  pieces ${r.nodes.join(', ') || '-'} · rows ${r.rows}`);
+  console.log(`\nRestore one:  node src/frl.mjs restore ${id} <snapshot file>\nUndo saves:   node src/frl.mjs restore ${id} --before <ISO time>   (rebuilds pieces and kept rows from the journal)`);
+}
+
+function restoreArgs(rest) {
+  const beforeAt = rest.indexOf('--before');
+  const before = beforeAt >= 0 ? rest[beforeAt + 1] ?? '' : '';
+  const snapshot = rest.find((arg, i) => !arg.startsWith('--') && (beforeAt < 0 || i !== beforeAt + 1)) ?? '';
+  return { before, snapshot, valid: beforeAt < 0 || Boolean(before) };
+}
+
 function run(command, args, opts = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: 'inherit', cwd: ROOT, shell: process.platform === 'win32', ...opts });
@@ -495,6 +518,35 @@ const commands = {
     const text = await fs.readFile(path.join(ROOT, 'data', 'logs', 'server.out'), 'utf8').catch(() => 'no log yet');
     console.log(text.split('\n').slice(-40).join('\n'));
   },
+
+  async restore([id, ...rest]) {
+    if (!id) return console.log(RESTORE_USAGE);
+    const { before, snapshot, valid } = restoreArgs(rest);
+    if (!valid) return console.log(RESTORE_USAGE);
+    const encoded = encodeURIComponent(id);
+    const running = await local('/api/status').then(() => true, () => false);
+    if (running) {
+      if (!snapshot && !before) {
+        const view = await local(`/api/projects/${encoded}/snapshots`);
+        return view.error ? console.log(view.error) : printRestorable(id, view);
+      }
+      const result = await local(`/api/projects/${encoded}/restore`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ snapshot, before }) });
+      return console.log(result.message ?? result.error);
+    }
+    const paths = storePaths({ root: ROOT, dataDir: process.env.FRL_DATA_DIR || null });
+    const holder = await new InstanceLock({ file: path.join(paths.base, 'server.lock') }).owner();
+    if (holder) return console.log(`The app is running (pid ${holder.pid}, since ${holder.startedAt}) but did not answer on port ${PORT}: run this with its PORT, or stop it first, so the restore is not overwritten by the running app.`);
+    const logs = new EventLog({ dir: paths.logs });
+    const store = new ProjectStore({ dir: paths.projects, journalDir: paths.journal, snapshotDir: paths.snapshots, onEvent: (projectId, event) => {
+      void logs.append(`project-${projectId}`, event);
+      if (event.type === 'restore') void logs.append('history', { projectId, type: 'restore', message: event.message });
+    } });
+    if (!(await store.get(id))) return console.log(`No research ${id} in ${paths.projects}.`);
+    if (!snapshot && !before) return printRestorable(id, await store.restorable(id));
+    const result = await store.restore(id, { snapshot, before });
+    await logs.queue;
+    console.log(`${result.message}\nLogged in data/logs/project-${id}.jsonl and History. The app is not running: start it to see the research.`);
+  },
 };
 
 const [command = 'help', ...args] = process.argv.slice(2);
@@ -520,7 +572,8 @@ if (!commands[command]) {
   node src/frl.mjs searxng           start the free, unlimited SearXNG search engine in Docker and save its address
   node src/frl.mjs local ...         run a model on this PC's GPU (llama.cpp), optionally with helper devices: install | models | start | helper | status | bench
   node src/frl.mjs local pc ADDRESS  find Ollama / llama.cpp on another PC in your network and use them
-  node src/frl.mjs logs               last lines of the app log`);
+  node src/frl.mjs logs               last lines of the app log
+  node src/frl.mjs restore ID [FILE | --before TIME]  bring a research back from a snapshot (data/projects/snapshots) or rebuild its pieces and kept rows from the journal, while it is not running; ID alone lists both`);
 } else {
   try {
     await commands[command](args);

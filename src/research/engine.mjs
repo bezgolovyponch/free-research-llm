@@ -325,7 +325,7 @@ export class ResearchEngine {
       project.data = { id: 'D1', kind: 'data', title: csvName || 'uploaded data', url: '', domain: 'user-data', text: describeProfile(profile, csvName || 'uploaded data'), profile };
     }
     this.emit(project, 'created', `project created (template: ${templateById(project.templateId).label})`);
-    return this.store.save(project);
+    return this.store.save(project, { reason: 'research created' });
   }
 
   dataSources(project, node = null) {
@@ -350,7 +350,7 @@ export class ResearchEngine {
     node.attachments.push({ id: `U${n}`, name: fileName, size: raw.length, kind: readBy ? 'read' : isTable ? 'table' : 'text', ...(readBy ? { readBy } : {}), text: body.slice(0, ATTACHMENT_TEXT_LIMIT), truncated: body.length > ATTACHMENT_TEXT_LIMIT, addedAt: new Date().toISOString() });
     this.resetWithAncestors(project, nodeId);
     this.emit(project, 'edit', `${nodeId}: file "${fileName}" attached as source U${n}`, { nodeId });
-    return this.store.save(project);
+    return this.store.save(project, { reason: `${nodeId}: file attached` });
   }
 
   async removeAttachment(id, nodeId, attachmentId) {
@@ -363,13 +363,13 @@ export class ResearchEngine {
     if (node.attachments.length === before) throw new NotFoundError(`file ${attachmentId} not found`);
     this.resetWithAncestors(project, nodeId);
     this.emit(project, 'edit', `${nodeId}: file ${attachmentId} removed`, { nodeId });
-    return this.store.save(project);
+    return this.store.save(project, { reason: `${nodeId}: file ${attachmentId} removed by the user` });
   }
 
   async decompose(project, phase = 'decomposing') {
     project.phase = phase;
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
-    await this.store.save(project);
+    await this.store.save(project, { reason: 'decomposing the question' });
     const template = templateById(project.templateId);
     if (!project.acceptance?.locked && !project.acceptance?.itemCount) {
       const asked = itemCountFromWords(project.acceptance?.expected, project.question);
@@ -414,7 +414,7 @@ export class ResearchEngine {
       if (model.value) this.emit(project, 'decision', `value: ${model.value}`);
     }
     this.emit(project, 'tree', `issue tree ready: ${tree.nodes.length} nodes (${reply.provider}/${reply.model})`);
-    await this.store.save(project);
+    await this.store.save(project, { reason: 'issue tree decomposed' });
   }
 
   async buildTree(id) {
@@ -425,7 +425,7 @@ export class ResearchEngine {
       if (!project.nodes.length) await this.decompose(project, 'building-tree');
       project.phase = 'tree-ready';
       this.emit(project, 'phase', 'tree ready — review it, then press Run or start the self-improving loop');
-      return await this.store.save(project);
+      return await this.store.save(project, { reason: 'tree built' });
     } finally {
       this.running.delete(id);
     }
@@ -1025,7 +1025,7 @@ export class ResearchEngine {
     this.emit(project, 'candidates', state.verified ? 'external verifier finished; table rebuilt: only plots it confirmed count toward the result' : `site fit in the background: ${state.measured} listing(s) measured${state.pending ? `, ${state.pending} still queued` : ''}; table rebuilt from the measurements`);
     await this.collectCandidates(project);
     await this.checkAcceptance(project);
-    await this.store.save(project);
+    await this.store.save(project, { reason: 'table rebuilt from background site measurements' });
     return project;
   }
 
@@ -1234,7 +1234,7 @@ export class ResearchEngine {
   async synthesize(project, pages = null) {
     project.phase = 'synthesizing';
     this.emit(project, 'phase', 'writing the decision memo');
-    await this.store.save(project);
+    await this.store.save(project, { reason: 'memo started' });
     const template = templateById(project.templateId);
     const reply = await this.router.complete({
       purpose: 'synthesize',
@@ -1412,17 +1412,17 @@ export class ResearchEngine {
     await this.collectCandidates(project, { sweep });
     const regraded = this.regrade(project);
     if (fixes.some((f) => ['merged-duplicate', 'grouped-candidates'].includes(f.code)) || regraded.length) {
-      await this.store.save(project);
+      await this.store.save(project, { reason: 'start-of-loop repairs before a re-run' });
       return this.run(id, { pages });
     }
     if (project.report) await this.checkAcceptance(project, pages);
-    return this.store.save(project);
+    return this.store.save(project, { reason: 'start-of-loop repairs and re-score' });
   }
 
   async remeasure(id, { pages = null } = {}) {
     const project = await this.load(id);
     if (project.report) await this.checkAcceptance(project, pages);
-    return this.store.save(project);
+    return this.store.save(project, { reason: 'expected result re-measured' });
   }
 
   cachedPageReader(pages) {
@@ -1469,7 +1469,7 @@ export class ResearchEngine {
     release();
     this.emit(project, 'phase', 'stopped by user');
     if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
-    return await this.store.save(project);
+    return await this.store.save(project, { reason: 'run stopped by the user' });
   }
 
   async run(id, { hints = {}, memo = true, sweep = null, pieces = null, reuse = false, pages = null } = {}) {
@@ -1487,7 +1487,7 @@ export class ResearchEngine {
       project = await this.load(id);
       if (!this.quiet.has(id)) this.rejoinTeam(id);
       if (!(await this.studyDomain(project))) {
-        await this.store.save(project);
+        await this.store.save(project, { reason: 'run paused: the question needs understanding first' });
         return project;
       }
       if (project.phase === 'needs-understanding') {
@@ -1497,11 +1497,11 @@ export class ResearchEngine {
       if (!project.nodes.length) await this.decompose(project);
       this.reground(project);
       if (!await this.ensurePurpose(project)) {
-        await this.store.save(project);
+        await this.store.save(project, { reason: 'run paused: the purpose is not stated' });
         return project;
       }
       if (!await this.validateConcept(project)) {
-        await this.store.save(project);
+        await this.store.save(project, { reason: 'run paused: the concept did not validate' });
         return project;
       }
       project.phase = 'researching';
@@ -1523,12 +1523,12 @@ export class ResearchEngine {
         const readFacts = await this.readListingFacts(project);
         const calibratedFacts = await this.calibrateValueFacts(project);
         if (readFacts || calibratedFacts || knew) await this.collectCandidates(project, { sweep: false });
-        await this.store.save(project);
+        await this.store.save(project, { reason: 'listings collected by code before the pieces' });
         const stoppedAfterListings = await this.stopIfCancelled(project, id, release);
         if (stoppedAfterListings) return stoppedAfterListings;
       }
       this.emit(project, 'phase', 'researching sub-questions in dependency order');
-      await this.store.save(project);
+      await this.store.save(project, { reason: 'run started: start-of-run repairs applied' });
       const byId = new Map(project.nodes.map((n) => [n.id, n]));
       const finished = (nodeId) => DONE.has(byId.get(nodeId)?.status) || byId.get(nodeId)?.status === 'failed';
       const wanted = pieces ? new Set(pieces) : null;
@@ -1556,7 +1556,7 @@ export class ResearchEngine {
               if (/no model provider|cooling down/.test(error.message)) throw error;
             }
           }
-          await this.store.save(project);
+          await this.store.save(project, { reason: `${nodeId}: ${node.status}` });
         },
       });
       const stoppedAfterPieces = await this.stopIfCancelled(project, id, release);
@@ -1576,7 +1576,7 @@ export class ResearchEngine {
       this.emit(project, 'phase', 'done');
       appendAppMessage(project, runSummary(project));
       if (!this.quiet.has(id)) await this.onStop(project, { reason: 'research finished' });
-      return await this.store.save(project);
+      return await this.store.save(project, { reason: 'research finished' });
     } catch (error) {
       if (project) {
         const offline = error instanceof OfflineError;
@@ -1585,7 +1585,7 @@ export class ResearchEngine {
         appendAppMessage(project, offline ? `The network was down and every model provider was unreachable. Press Run to resume; finished nodes are kept.` : `Research stopped with an error: ${error.message}. Press Run to resume; finished nodes are kept.`);
         if (!this.quiet.has(id)) await this.onStop(project, { reason: offline ? 'offline: network down' : `error: ${error.message}` }).catch(() => {});
         this.emit(project, 'error', error.message);
-        await this.store.save(project);
+        await this.store.save(project, { reason: `run ended with an error: ${String(error.message).slice(0, 120)}` });
       }
       throw error;
     } finally {
@@ -1713,7 +1713,7 @@ export class ResearchEngine {
       pieces += 1;
     }
     project.supportAudit = supportAudit(project.nodes);
-    await this.store.save(project);
+    await this.store.save(project, { reason: 'claims rechecked for meaning' });
     return { ok: true, message: `rechecked ${pieces} piece(s), ${claims} claim(s): ${project.supportAudit.toConfirm} to confirm` };
   }
 
@@ -1724,7 +1724,7 @@ export class ResearchEngine {
     for (const node of project.nodes) Object.assign(node, { status: 'pending', finding: null, verification: null, critique: null, error: null, sources: [], attempts: 0 });
     Object.assign(project, { report: null, acceptanceResult: null, phase: tree ? 'created' : 'tree-ready', error: null });
     this.emit(project, 'edit', tree ? 'tree and findings cleared: the question will be decomposed again' : 'all findings cleared: the tree will be researched again from scratch');
-    return this.store.save(project);
+    return this.store.save(project, tree ? { reason: 're-decompose: the user cleared the tree and its findings', userAction: 're-decompose' } : { reason: 'reset: the user cleared all findings, the tree stays' });
   }
 
   async updateProject(id, { expected, acceptance, guidance } = {}) {
@@ -1739,7 +1739,7 @@ export class ResearchEngine {
     project.acceptance = { ...normalizeAcceptance(acceptance ?? project.acceptance ?? {}, nextExpected), locked: Boolean(acceptance) || Boolean(project.acceptance?.locked) };
     project.acceptanceResult = null;
     this.emit(project, 'edit', `expected result updated: ${project.acceptance.expected || 'none'}`);
-    return this.store.save(project);
+    return this.store.save(project, { reason: 'expected result edited by the user' });
   }
 
   async setGuidance(id, guidance) {
@@ -1747,7 +1747,7 @@ export class ResearchEngine {
     project.guidance = String(guidance).trim().slice(0, GUIDANCE_LIMIT);
     delete project.hubSources;
     this.emit(project, 'edit', project.guidance ? `hints updated: ${project.guidance.slice(0, 160)}` : 'hints cleared');
-    return this.store.save(project);
+    return this.store.save(project, { reason: 'hints edited by the user' });
   }
 
   async editNode(id, nodeId, changes = {}) {
@@ -1761,7 +1761,7 @@ export class ResearchEngine {
     if (typeof changes.instructions === 'string') node.instructions = changes.instructions.slice(0, 2000);
     this.resetWithAncestors(project, nodeId);
     this.emit(project, 'edit', `${nodeId}: edited, will be re-researched`, { nodeId });
-    return this.store.save(project);
+    return this.store.save(project, { reason: `${nodeId}: edited by the user` });
   }
 
   async addNode(id, parentId, fields = {}) {
@@ -1782,7 +1782,7 @@ export class ResearchEngine {
     if (parent) this.resetWithAncestors(project, parent.id);
     project.report = null;
     this.emit(project, 'edit', `${node.id}: added under ${parentId}`, { nodeId: node.id });
-    return this.store.save(project);
+    return this.store.save(project, { reason: `${node.id}: added by the user under ${parentId}` });
   }
 
   async removeNode(id, nodeId) {
@@ -1801,7 +1801,7 @@ export class ResearchEngine {
     for (const n of project.nodes) n.dependsOn = n.dependsOn.filter((d) => !doomed.has(d));
     project.report = null;
     this.emit(project, 'edit', `${nodeId}: removed with ${doomed.size - 1} sub-node(s)`);
-    return this.store.save(project);
+    return this.store.save(project, { reason: `delete: ${nodeId} removed by the user with ${doomed.size - 1} sub-node(s)`, userAction: 'delete' });
   }
 
   async resynthesize(id, { pages = null } = {}) {
@@ -1813,7 +1813,7 @@ export class ResearchEngine {
       this.checkSpecs(project);
       project.phase = project.nodes.every((n) => DONE.has(n.status)) ? 'done' : project.phase;
       this.emit(project, 'phase', 'memo rewritten from the current pieces');
-      return await this.store.save(project);
+      return await this.store.save(project, { reason: 'memo rewritten on request' });
     } finally {
       this.running.delete(id);
     }
@@ -1824,7 +1824,7 @@ export class ResearchEngine {
     if (!project.nodes.some((n) => n.id === nodeId)) throw new NotFoundError(`node ${nodeId} not found`);
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.resetWithAncestors(project, nodeId);
-    await this.store.save(project);
+    await this.store.save(project, { reason: `${nodeId}: re-research requested by the user` });
     this.start(id, { hints: hint ? { [nodeId]: hint } : {} });
     return project;
   }
@@ -1848,6 +1848,6 @@ export class ResearchEngine {
     });
     this.resetWithAncestors(project, node.id);
     this.emit(project, 'tree', `${node.id}: broken into ${kept.length} sub-questions${kept.length < fresh.length ? ` (${fresh.length - kept.length} duplicate(s) dropped)` : ''}`, { nodeId: node.id });
-    return this.store.save(project);
+    return this.store.save(project, { reason: `${node.id}: split into sub-questions on request` });
   }
 }

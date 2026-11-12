@@ -1,5 +1,6 @@
 import { ROOT_ID } from './tree.mjs';
 import { asksForItems } from './deliverable.mjs';
+import { researched } from '../journal.mjs';
 import { countryByCode, countryPhrases, namedCountries, regionsIn } from './brief.mjs';
 import { criteriaOfText, strategyFor } from './strategy.mjs';
 
@@ -234,8 +235,14 @@ export function narrowRegions(nodes, regions = []) {
     if (!outside.length) continue;
     const leaf = !nodes.some((m) => m.parentId === n.id) && !nodes.some((m) => (m.dependsOn ?? []).includes(n.id));
     if (leaf && !named.some((c) => regions.includes(c)) && !/\b(?:EU|European Union)\b/.test(textOf(n))) {
+      if (n.status === 'covered' && n.coveredBy === 'off-scope') continue;
+      if (researched(n)) {
+        Object.assign(n, { status: 'covered', coveredBy: 'off-scope' });
+        fixes.push({ code: 'covered-off-scope', nodeId: n.id, detail: `${n.id} researched only ${outside.join(', ')}, outside the asked regions; kept with its findings and marked covered` });
+        continue;
+      }
       nodes.splice(nodes.indexOf(n), 1);
-      fixes.push({ code: 'removed-off-scope', nodeId: n.id, detail: `${n.id} researched only ${outside.join(', ')}, outside the asked regions; removed` });
+      fixes.push({ code: 'removed-off-scope', nodeId: n.id, detail: `${n.id} researched only ${outside.join(', ')}, outside the asked regions; removed (it had no findings)` });
       continue;
     }
     const question = narrowText(n.question, regions);
