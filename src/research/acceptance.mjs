@@ -1,4 +1,5 @@
 import { plain } from './itemgate.mjs';
+import { regionVerdict } from './brief.mjs';
 const CURRENCIES = {
   EUR: ['€', 'eur', 'euro'],
   PLN: ['zł', 'zl', 'pln'],
@@ -315,7 +316,13 @@ function productPath(parsed) {
   return segments.every((segment) => GENERIC_SEGMENTS.has(segment)) ? '' : path;
 }
 
-export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '' } = {}) {
+function entityDeliverable(page, regions) {
+  const deliverable = { title: text(page.source.title, 200) || page.host, url: `${page.parsed.protocol}//${page.host}/`, value: null, unit: '', nodeId: page.node.id, evidence: page.url };
+  const region = regions.length ? regionVerdict(page.source, regions) : null;
+  return region ? { ...deliverable, region: region.text } : deliverable;
+}
+
+export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '', regions = [] } = {}) {
   const wanted = (terms ?? []).filter(Boolean);
   const banned = (not ?? []).map((phrase) => plain(phrase).trim()).filter(Boolean);
   const anchors = anchorWords(kindLabel);
@@ -375,7 +382,7 @@ export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = ''
     const hits = matched.length;
     const current = hosts.get(page.host);
     if (current && current.hits >= hits) continue;
-    hosts.set(page.host, { hits, deliverable: { title: text(page.source.title, 200) || page.host, url: `${page.parsed.protocol}//${page.host}/`, value: null, unit: '', nodeId: page.node.id, evidence: page.url } });
+    hosts.set(page.host, { hits, deliverable: entityDeliverable(page, regions) });
   }
   return [...hosts.values()].sort((a, b) => b.hits - a.hits).map((entry) => entry.deliverable);
 }

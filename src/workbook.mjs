@@ -250,7 +250,7 @@ export function claimRows(project) {
 
 export function itemRows(project) {
   const items = project.acceptanceResult?.items ?? project.report?.deliverables ?? [];
-  return [['title', 'value', 'currency', 'url', 'piece', 'link live', 'in range'], ...items.map((i) => [i.title ?? '', num(i.value), i.currency ?? '', i.url ?? '', i.nodeId ?? '', i.live ?? i.alive ?? '', i.inRange ?? ''])];
+  return [['title', 'value', 'currency', 'url', 'piece', 'link live', 'in range', 'region'], ...items.map((i) => [i.title ?? '', num(i.value), i.currency ?? '', i.url ?? '', i.nodeId ?? '', i.live ?? i.alive ?? '', i.inRange ?? '', i.region ?? ''])];
 }
 
 function roleOf(project, node) {

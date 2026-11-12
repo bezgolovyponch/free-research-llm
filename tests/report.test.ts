@@ -47,7 +47,7 @@ describe('results export', () => {
     expect(pieces[1]).toBe("D1,Prices,driver,verified,'=SUM(A1),Done,,,,,1,https://m.de/1");
     expect(pieces[2]).toContain('D2,Transport,driver,weak,about 400,Research further');
     expect(pieces[2]).toContain('Search for: carrier quotes');
-    expect(itemsCsv(p).split('\r\n')[1]).toBe('"Golf, ""2012""",2400,EUR,https://m.de/1,D1,,');
+    expect(itemsCsv(p).split('\r\n')[1]).toBe('"Golf, ""2012""",2400,EUR,https://m.de/1,D1,,,');
     expect(csvField('-cmd')).toBe("'-cmd");
     const withTable = { ...p, brief: { asksSea: true }, candidates: { kept: [{ title: 'Terreno Aljezur', url: 'https://imo.example/a', price: 450000000, currency: 'VND', value: 15000, unit: 'EUR', area: 300, areaUnit: 'm²', place: 'Aljezur', country: 'Portugal', coast: true, sourceUrl: 'https://imo.example/r', via: ['json-ld', 'cards'], site: { coastKm: 2.5, beachKm: 3, beaches: 10, viewpoints: 12, attractions: 8, reserves: 2, protectedAreas: 4, hikingRoutes: 6, campsites: 3, lodging: 120, climate: { workable: 9, comfortable: 6, hottest: 27.5, coldest: 7 } }, fit: { score: 0.71, zoning: 'agricultural', pitches: 4 } }], toCheck: [{ title: 'No price', url: 'https://imo.example/b', price: null, currency: '', value: null, unit: 'EUR', area: null, areaUnit: '', place: '', country: '', coast: false, sourceUrl: '', via: [], toCheck: 'price not shown' }] } };
     const [header, kept, toCheck] = candidatesCsv(withTable).split('\r\n').map((line: string) => line.split(','));

@@ -292,6 +292,31 @@ describe('listing price on the page', () => {
     expect(entityDeliverables(dustFactory as never, { terms, kindLabel }).map((d: { url: string }) => d.url)).toEqual(['https://dustfactoryvintage.com/']);
     expect(entityDeliverables(dustFactory as never, { terms, not, kindLabel })).toEqual([]);
   });
+
+  it('marks each delivered supplier with its region verdict for an entity list and delivers the same rows', () => {
+    const nodes = [
+      {
+        id: 'D6.2',
+        sources: [
+          { kind: 'web', title: 'US Fripe Wholesale: Wholesale Vintage Clothing | France & Europe ...', url: 'https://www.usfripe.com/', domain: 'usfripe.com', locale: 'en', snippet: 'US Fripe sources wholesale vintage and second-hand branded clothing from France, shipped fast across Europe. Grade A stock, built for resale.', text: 'Wholesale Vintage Clothing | France & Europe Supplier\n &ndash; US Fripe Wholesale \n Skip to content\n FREE SHIPPING ON ORDERS 2000€ | NEXT DAY DISPATCH \nItem added to your cart\n View cart \n Check out\n Continue shopping \n BRANDED VINTAGE, READY TO RESELL WORLDWIDE\n Discover Premium Vintage Clothing \n Explore Our Products \n FRESH FINDS. BIG DEALS. EVERY TIME.\n Discover fresh arrivals, trusted brands and great wholesale value.' },
+        ],
+      },
+      {
+        id: 'hubs',
+        sources: [
+          { kind: 'web', title: 'Groothandel gebruikte kleding in balen - Zagumi', url: 'https://www.zagumi.com/nl/used-clothing/', domain: 'zagumi.com', locale: 'en_US', snippet: 'Zagumi levert gebruikte kleding van topkwaliteit voor uw tweedehandskledingbedrijf. Neem contact met ons op voor meer informatie over de import en export ...', text: 'Groothandel gebruikte kleding in balen - Zagumi Facebook YouTube Home \n Leverancier van gebruikte kledingbalen \n Crème kwaliteit\n Kleding van crèmekwaliteit, geschikt voor de hogere markt.\n Room + Extra Mix\n Gemengde Cream grade en Extra grade, wat resulteert in nog betere kwaliteit tweedehands balen. ["title"]=> string(21) "Top 2nd Hand Clothing" ["title"]=> string(16) "Top Supply Chain" ["style_normal_color"]=> string(27) "globals/colors?id=secondary"' },
+          { kind: 'web', title: 'Second-Hand Clothing Importer - Wiltex Wholesale', url: 'https://wiltex.eu/second-hand-clothing/', domain: 'wiltex.eu', locale: '', snippet: 'The reason for this is that the clothes offered are sorted and carefully selected. Cream (Class A) is the highest possible quality, among which there are brand- ...', text: 'The reason for this is that the clothes offered are sorted and carefully selected. Cream (Class A) is the highest possible quality, among which there are brand- ...' },
+        ],
+      },
+    ];
+    const asked = { terms: ['branded vintage clothing wholesale', 'graded A', 'cream', 'suppliers in NL', 'wholesale used clothing', 'second hand clothes', 'used clothing wholesale'], not: ['retail', 'maloobchod', 'donation', 'consignment'], kindLabel: 'wholesale clothing provider' };
+    const unmarked = entityDeliverables(nodes as never, asked);
+    expect(unmarked.map((d: { url: string }) => d.url).sort()).toEqual(['https://usfripe.com/', 'https://wiltex.eu/', 'https://zagumi.com/']);
+    expect(unmarked.every((d: Record<string, unknown>) => !('region' in d))).toBe(true);
+    const marked = entityDeliverables(nodes as never, { ...asked, regions: ['CZ'] });
+    expect(marked.map((d: { url: string }) => d.url)).toEqual(unmarked.map((d: { url: string }) => d.url));
+    expect(marked.map((d: { region: string }) => d.region)).toEqual(['outside CZ', 'outside CZ', 'outside CZ']);
+  });
 });
 
 describe('prices in more currencies and scales', () => {

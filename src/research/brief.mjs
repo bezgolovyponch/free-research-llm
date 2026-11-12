@@ -81,6 +81,9 @@ export const SEA_WORDS = /\b(?:sea|ocean|coast(?:al)?|beach|seaside|shore|seafro
 const COAST_ON_PAGE = /\b(?:sea|ocean|coast|coastal|beach|seaside|seafront|sea view|praia|playa|plage|spiaggia|mar|deniz|denize|sahil|plaj|bai bien|gan bien|thalassa|paralia|strand|kust|mora|uvala|uvale|pogled na more|plaza|plazi|bord de mer|vista mare|frente mar|denize sifir)\b/;
 const NEWS_PATH = /\/(?:news|noticias|noticia|blog|tin-tuc|tin-thi-truong|haber|actualite|articles?|magazine|guide|guides|deco)(?:\/|$|-)/i;
 const MIN_TEXT_MENTIONS = 2;
+const SHIPPING_WORDS = /(?:^|[^a-z])(?:ship(?:s|ped|ping|ments?)?|deliver(?:s|ed|y|ies|ing)?|dispatch(?:es|ed|ing)?|export(?:s|ed|ing)?|freight|verzend\w*|bezorg\w*|lever(?:en|ing|t|baar)|versand\w*|liefer\w*|wysy[lł]\w*|dostaw\w*|dostarcz\w*|livraison|livr(?:ons|e|er|ees?)|exp[eé]di\w*|spedi\w*|consegn\w*|doprav\w*|doruc\w*|dodav\w*|dodani\w*|zasil\w*|rozvoz\w*|pristat\w*|siunc\w*)(?![a-z])/;
+const SHIPPING_WINDOW = 150;
+const REGION_LABEL_CODES = 3;
 
 function escape(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -281,8 +284,43 @@ export function hostCountries(url) {
   return COUNTRIES.filter(([code]) => namesOf(code).some((w) => /^[a-z]{5,}$/.test(plain(w)) && host.includes(plain(w)))).map(([code]) => code);
 }
 
+function sitedIn(source, regions) {
+  return [tldCountry(source.url), localeCountry(source.locale), ...hostCountries(source.url)].find((code) => code && regions.includes(code)) ?? '';
+}
+
+function namedIn(source, regions) {
+  const named = textCountries(`${source.title ?? ''} ${source.snippet ?? ''} ${(source.text ?? '').slice(0, 3000)} ${decodedUrl(source.url)}`);
+  return named.find((code) => regions.includes(code)) ?? '';
+}
+
+function shipsTo(source, regions) {
+  const t = plain(`${source.title ?? ''} ${source.snippet ?? ''} ${source.text ?? ''}`);
+  for (const code of regions) {
+    for (const word of namesOf(code)) {
+      for (const hit of t.matchAll(new RegExp(`(?:^|[^a-z])${escape(plain(word))}(?![a-z])`, 'g'))) {
+        if (SHIPPING_WORDS.test(t.slice(Math.max(0, hit.index - SHIPPING_WINDOW), hit.index + hit[0].length + SHIPPING_WINDOW))) return code;
+      }
+    }
+  }
+  return '';
+}
+
+export function regionLabel(regions) {
+  return regions.length <= REGION_LABEL_CODES ? regions.join('/') : `the ${regions.length} asked countries`;
+}
+
+export function regionVerdict(source, regions) {
+  if (!regions?.length || source?.kind === 'data' || !source?.url) return null;
+  const sited = sitedIn(source, regions);
+  if (sited) return { status: 'in', code: sited, text: `in ${sited}` };
+  const shipped = shipsTo(source, regions);
+  if (shipped) return { status: 'ships', code: shipped, text: `ships to ${shipped}` };
+  const named = namedIn(source, regions);
+  if (named) return { status: 'names', code: named, text: `names ${named}` };
+  return { status: 'outside', code: '', text: `outside ${regionLabel(regions)}` };
+}
+
 export function onConcept(source, brief) {
   if (!brief?.kind || brief.located === false || !brief?.regions?.length || source?.kind === 'data' || !source?.url) return true;
-  const named = textCountries(`${source.title ?? ''} ${source.snippet ?? ''} ${(source.text ?? '').slice(0, 3000)} ${decodedUrl(source.url)}`);
-  return [tldCountry(source.url), localeCountry(source.locale), ...hostCountries(source.url), ...named].some((code) => code && brief.regions.includes(code));
+  return Boolean(sitedIn(source, brief.regions) || namedIn(source, brief.regions));
 }
