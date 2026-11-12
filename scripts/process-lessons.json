@@ -177,5 +177,19 @@
     "signal": "18 live imovirtual.com plots of b7772e (500-18,000 EUR, Portugal, sea <= 20 km, 10-12 camping months, all pages active) pass every hard criterion of the research, yet none is in candidates.kept: 7 at 500-3,800 EUR fell under the implausiblyLow MAD cut (4,439 EUR) and 11 at 17,000-18,000 EUR fell past kept.slice(0, MAX_KEPT) of the 1,453 rows that passed the screen (docs/audits/recover-b7772e.md section B)",
     "cause": "buildCandidates moved every implausiblyLow-flagged kept row to toCheck and sliced kept at MAX_KEPT without asking whether the row passed every hard criterion of the research (clean screen verdict, asked country, not gone, coast <= 20 km and >= 10 camping months when recorded on the row)",
     "prevention": "passesEveryHardCriterion exempts such a row from both table limits: implausiblyLow only flags it (the lowCut stays visible on the kept row) and the MAX_KEPT cut applies only to rows that fail a hard criterion; tests/research/candidates.test.ts \"rows that pass every hard criterion are never set aside or capped (recover-b7772e)\" builds real rows from the URLs and prices in docs/audits/recover-b7772e-urls.txt"
+  },
+  {
+    "id": "F14",
+    "title": "server started without a heap limit and crashed on Node's default ~2 GB heap",
+    "touches": [
+      "src/frl.mjs",
+      "src/service.mjs",
+      "start.command",
+      "tests/frl.test.ts",
+      "tests/service.test.ts"
+    ],
+    "signal": "heap OOM (JavaScript heap out of memory / FATAL ERROR: Reached heap limit) in data/logs/server.out while the server was loading research data, on a machine with plenty of free RAM",
+    "cause": "every launch path (frl start spawn, launchd plist, Windows logon task, systemd unit, start.command) started node with the default max-old-space-size (~2 GB on 64-bit), so a large research exhausted the old space and the process died",
+    "prevention": "every launch path passes --max-old-space-size=4096 to node before src/server.mjs, defined once as NODE_HEAP_FLAG in src/service.mjs and reused by src/frl.mjs and the three service definitions; tests/frl.test.ts and tests/service.test.ts assert the flag precedes server.mjs in the frl start spawn args, each service definition and start.command. Note: an already installed launchd plist only picks this up after node src/frl.mjs install is rerun"
   }
 ]
