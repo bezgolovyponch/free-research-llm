@@ -149,5 +149,22 @@
     "signal": "a genuine supplier of the asked kind is missing from report.deliverables while its page passes every kind, anchor and wholesale check; the brief's not list holds a short word (retail, part) that is the start of a longer common word (retailers, partners)",
     "cause": "entityDeliverables dropped a page when plain(pageText).includes(phrase), so the excluded word retail hit retailers, the customers a wholesaler names; b2f5b7 lost brasco.nl and vintage-clothing-wholesale.com",
     "prevention": "excluded phrases go through the shared whole-word helper wordMatch (Unicode letter boundaries, whitespace runs inside phrases); tests/research/acceptance.test.ts \"a wholesaler page naming retailers as customers is not dropped by the not phrase retail\" uses the real brasco.nl row and the real dustfactoryvintage retail paragraph"
+  },
+  {
+    "id": "F12",
+    "title": "an entity-list region rule that let every source through and said nothing",
+    "touches": [
+      "src/research/brief.mjs",
+      "src/research/engine.mjs",
+      "src/research/acceptance.mjs",
+      "src/workbook.mjs",
+      "public/index.html",
+      "tests/research/brief.test.ts",
+      "tests/research/engine.test.ts",
+      "tests/research/acceptance.test.ts"
+    ],
+    "signal": "brief.regions is set and brief.located is false, every source passes the pre-model screen, and neither the research log nor the delivered rows say that the suppliers are outside the asked country (b2f5b7: 54 of 54 sources admitted, 3 of 3 delivered rows NL/FR/PL for a CZ ask, no region word anywhere)",
+    "cause": "onConcept returns true before reading any country when located is false (deliberate: for an entity list the asked place is where the result is used), and the relaxed rule removed the measurement together with the drop",
+    "prevention": "when a gate is relaxed on purpose, keep the measurement: regionVerdict labels each source in, ships to, names or outside the asked regions, engine.onConceptOnly logs the count of sources kept from outside, and each entity deliverable carries its region label; tests/research/brief.test.ts \"region verdict for an entity list\", tests/research/engine.test.ts \"counts and names the sources kept from outside the asked country\" and tests/research/acceptance.test.ts \"marks each delivered supplier with its region verdict for an entity list and delivers the same rows\""
   }
 ]
