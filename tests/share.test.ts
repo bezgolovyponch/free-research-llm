@@ -61,7 +61,7 @@ describe('shareAllows', () => {
   });
 
   it('keeps other researches, owner actions and the rest of the app closed', () => {
-    for (const [m, p] of [['DELETE', '/api/projects/p1'], ['GET', '/api/projects/p1/share'], ['POST', '/api/projects/p1/share'], ['GET', '/api/projects/p2'], ['POST', '/api/projects/p10/run'], ['POST', '/api/projects'], ['GET', '/api/chat'], ['POST', '/api/chat'], ['GET', '/api/terminal'], ['GET', '/api/router'], ['POST', '/api/keys'], ['GET', '/api/access'], ['GET', '/api/history'], ['GET', '/api/logs/model-calls'], ['POST', '/api/app/restart'], ['POST', '/api/improve-all'], ['GET', '/api/changes'], ['POST', '/api/status']]) expect(allows(m, p), `${m} ${p}`).toBe(false);
+    for (const [m, p] of [['DELETE', '/api/projects/p1'], ['GET', '/api/projects/p1/share'], ['POST', '/api/projects/p1/share'], ['GET', '/api/projects/p1/snapshots'], ['POST', '/api/projects/p1/restore'], ['GET', '/api/projects/p2'], ['POST', '/api/projects/p10/run'], ['POST', '/api/projects'], ['GET', '/api/chat'], ['POST', '/api/chat'], ['GET', '/api/terminal'], ['GET', '/api/router'], ['POST', '/api/keys'], ['GET', '/api/access'], ['GET', '/api/history'], ['GET', '/api/logs/model-calls'], ['POST', '/api/app/restart'], ['POST', '/api/improve-all'], ['GET', '/api/changes'], ['POST', '/api/status']]) expect(allows(m, p), `${m} ${p}`).toBe(false);
   });
 });
 

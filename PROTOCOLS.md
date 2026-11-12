@@ -242,6 +242,10 @@ A model may propose expected-result checks (`mustMention`, item count, value ran
 | Record | Where |
 |---|---|
 | Every project event (search, grade, retry, chat, loop trial) | `data/logs/project-<id>.jsonl` and `GET /api/projects/<id>/logs` |
+| Every save of a research: its reason, the user action behind it (delete, re-decompose, restore, loop, or none), the full previous content of every piece and kept row it removes or replaces, added ones by id (`ProjectStore.save`, `src/journal.mjs`; append-only, never rewritten) | `data/journal/<id>.jsonl` |
+| The stored copy before a save that lowers the piece count, or drops kept rows that no sweep page or piece still holds without a portal sweep in the same save; the newest 5 per research are kept | `data/projects/snapshots/<id>-<stamp>.json`, `GET /api/projects/<id>/snapshots` |
+| A save that would remove a researched piece (a finding, sources, listings or the user's files) with no user action behind it is refused: the stored copy stays, the cache is dropped, and the research log gets an `error` line. A kept row leaves the table only as a move (its listing stays on a sweep page or a piece) or with a sweep that no longer lists it; both are journaled | `RemovalRefusedError`, `tests/store.test.ts` |
+| Restore while the research is not running: a snapshot, or the journal replayed backwards to a time (`node src/frl.mjs restore <id> [<snapshot file> \| --before <ISO time>]`, `POST /api/projects/<id>/restore`); the restore is itself journaled and logged (`restore` event, History) | `ProjectStore.restore`, `tests/store.test.ts`, `tests/journal.test.ts` |
 | Every model call (provider, model, purpose, ok/error, ms) | `data/logs/model-calls.jsonl`, `GET /api/logs/model-calls` |
 | Sessions, runs, verdicts, expected-result scores, loop start/end | `data/logs/history.jsonl`, **History** tab, `GET /api/history` |
 | Knowledge record: facts (verified), claims (supported), hypotheses (weak) with re-checkable evidence | `GET /api/projects/<id>/knowledge` |
@@ -259,7 +263,7 @@ The app clears its own temp files on start and then every 6 hours (`TempSweeper`
 | Any `data/logs/*.jsonl` over 5 MB | trimmed to its newest 20,000 lines |
 | `data/logs/server.out` over 1 MB | trimmed to its newest 2,000 lines |
 
-Never swept: `data/projects/`, `data/handoff/`, `data/changes/`, `data/chat/`, `data/llama/`, logs of existing research. `FRL_SWEEP_HOURS` sets the interval; `0` turns the sweep off. Tests: `tests/housekeeping.test.ts`, `tests/logs.test.ts`.
+Never swept: `data/projects/` (snapshots included), `data/journal/`, `data/handoff/`, `data/changes/`, `data/chat/`, `data/llama/`, logs of existing research. `FRL_SWEEP_HOURS` sets the interval; `0` turns the sweep off. Tests: `tests/housekeeping.test.ts`, `tests/logs.test.ts`.
 
 Agents working on this repo put their own scratch files in their session scratchpad, never in the repo or `data/`, and delete them when the task ends. `test-results/` is Playwright output and may be deleted at any time. Vitest removes every `frl-*` temp folder its run created (`tests/helpers/temp-cleanup.ts`); Playwright removes the e2e data folders of earlier runs before it starts (`e2e/setup.mjs`), so at most one is left.
 

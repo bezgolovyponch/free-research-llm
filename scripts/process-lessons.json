@@ -118,5 +118,23 @@
     "signal": "a \"pieces covered by code on the candidate table, not researched\" tree line that names climate, zoning, district or data-source pieces (plot research b7772e lost 68 pieces on 2026-11-11, most of them analysis), or concept check C18 counting such pieces as per-listing work",
     "cause": "listingWork returned true for any action verb (find, identify, check, assess, calculate ...) or any target word (items, distances) on its own, so \"Assess climate suitability for glamping without AC\", \"Identify Portuguese coastal districts\" and \"Assess e bike accessibility to the sea\" counted as listing work and were never researched",
     "prevention": "listingWork needs an action on listings: a for-sale phrase, a word that names listings (listings, ads, URLs, links) or an order starting with \"List\" counts on its own; any other action verb needs a listing detail beside it (items, priced, distances, a <=/>= bound) or a brief kind word; a verb alone or a detail word alone stays research. Covered by tests/research/treeaudit.test.ts, describe \"listing work needs an action on listings, not any verb\": the b7772e titles the 2026-11-11 removal line names stay research, the listed-for-sale survivors and the car research 0c750f listing pieces stay covered, and the D8.2.1.1 branch keeps its district and sea-access leaves"
+  },
+  {
+    "id": "F10",
+    "title": "research data overwritten in place with no copy to go back to",
+    "touches": [
+      "src/store.mjs",
+      "src/journal.mjs",
+      "src/research/engine.mjs",
+      "src/research/improve.mjs",
+      "src/app.mjs",
+      "src/server.mjs",
+      "src/frl.mjs",
+      "tests/store.test.ts",
+      "tests/journal.test.ts"
+    ],
+    "signal": "a research file with fewer pieces or kept rows than the day before and no snapshot, journal line or log error that names the removal; a \"tree\" or \"edit\" log line that removes pieces with findings; a user asking where their plots went",
+    "cause": "ProjectStore.save overwrote data/projects/<id>.json in place on every save with no record of what it replaced, data/handoff kept only the latest state and the research log held messages only, so the start-of-run repair that dropped 69 researched pieces of b7772e on 2026-11-11 (328 -> 201 kept plots) left nothing to restore from",
+    "prevention": "every save appends one line to data/journal/<id>.jsonl with its reason and the full content of every piece and kept row it removes or replaces; a save that lowers the piece count or drops kept rows without a sweep first copies the stored file to data/projects/snapshots/<id>-<stamp>.json (newest 5 kept); a save that removes a researched piece is refused with an error in the research log unless the caller passes userAction delete, re-decompose, restore or loop; node src/frl.mjs restore <id> [snapshot | --before <ISO>] brings a snapshot or the journal state back while the research is not running. Covered by tests/store.test.ts (a removing save writes one snapshot and journals the removed content; an automatic removal of a researched piece is refused; a user-reason removal passes; the 6th snapshot drops the oldest; restore brings back the node and row counts; journal replay restores a removed node's findings) and tests/journal.test.ts (diff, undo and replay on the real node and row shapes)"
   }
 ]

@@ -8,6 +8,7 @@ import { App, ROOT_DIR } from './app.mjs';
 import { KeychainSecrets } from './secrets.mjs';
 import { AccessGate, newAccessToken } from './auth.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
+import { RemovalRefusedError, StoreBusyError } from './store.mjs';
 import { TEMPLATES } from './research/templates.mjs';
 import { candidatesCsv, itemsCsv, piecesCsv, resultsJson, sheetsCsvZip, toMarkdown } from './report.mjs';
 import { resultsSheets, resultsWorkbook } from './workbook.mjs';
@@ -87,7 +88,7 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
 function statusFor(error) {
   if (error instanceof HttpError) return error.status;
   if (error instanceof NotFoundError) return 404;
-  if (error instanceof ProjectBusyError || error instanceof ProposalError) return 409;
+  if (error instanceof ProjectBusyError || error instanceof ProposalError || error instanceof StoreBusyError || error instanceof RemovalRefusedError) return 409;
   if (error instanceof UnsupportedFileError) return 415;
   return 400;
 }
@@ -230,6 +231,14 @@ export function createServer(app, gate = new AccessGate()) {
       return app.engine.resetResearch(id, await readJson(req));
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/tree$/, async (req, [id]) => app.engine.buildTree(id)],
+    ['GET', /^\/api\/projects\/([\w-]+)\/snapshots$/, async (req, [id]) => {
+      await app.engine.load(id);
+      return app.store.restorable(id);
+    }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/restore$/, async (req, [id]) => {
+      if (app.engine.running.has(id) || app.improver.isActive(id)) throw new ProjectBusyError('stop it first: the research is running');
+      return app.restoreProject(id, await readJson(req));
+    }],
     ['POST', /^\/api\/projects\/([\w-]+)\/recheck-support$/, async (req, [id]) => {
       if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
       return app.engine.recheckSupport(id);

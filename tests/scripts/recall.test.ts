@@ -12,8 +12,8 @@ function runCli(args: string[]): string {
 }
 
 describe('process lessons store', () => {
-  it('holds one entry per failure class F1 to F9', () => {
-    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9']);
+  it('holds one entry per failure class F1 to F10', () => {
+    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10']);
     for (const lesson of lessons) {
       expect(typeof lesson.title).toBe('string');
       expect(lesson.title.length).toBeGreaterThan(0);
@@ -83,7 +83,7 @@ describe('recall command', () => {
     const out = runCli(['scripts/quality.mjs']);
     const lines = out.split('\n').filter(Boolean);
     expect(lines.length).toBeGreaterThan(0);
-    for (const line of lines) expect(line).toMatch(/^F\d \| .+ \| signal: .+ \| prevention: .+$/);
+    for (const line of lines) expect(line).toMatch(/^F\d+ \| .+ \| signal: .+ \| prevention: .+$/);
     expect(lines.some((line) => line.startsWith('F5 | '))).toBe(true);
   });
 
@@ -93,6 +93,6 @@ describe('recall command', () => {
 
   it('prints the lessons of the changed files for --changed', () => {
     const out = runCli(['--changed']);
-    for (const line of out.split('\n').filter(Boolean)) expect(line).toMatch(/^F\d \| .+ \| signal: .+ \| prevention: .+$/);
+    for (const line of out.split('\n').filter(Boolean)) expect(line).toMatch(/^F\d+ \| .+ \| signal: .+ \| prevention: .+$/);
   });
 });

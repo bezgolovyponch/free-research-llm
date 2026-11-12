@@ -358,7 +358,7 @@ export class ProjectImprover {
     try {
       const project = await this.engine.load(id);
       await this.engine.onStop(project, { reason, resume });
-      await this.engine.store.save(project);
+      await this.engine.store.save(project, { reason: `loop handoff: ${reason}` });
     } catch {
       return;
     }
@@ -375,7 +375,7 @@ export class ProjectImprover {
 
   async restore(id, before) {
     const current = await this.engine.load(id);
-    await this.engine.store.save({ ...before, chats: current.chats, log: current.log, improve: current.improve, guidance: current.guidance });
+    await this.engine.store.save({ ...before, chats: current.chats, log: current.log, improve: current.improve, guidance: current.guidance }, { reason: 'loop: trial reverted to the research as it was before it', userAction: 'loop' });
   }
 
   stopped(state) {
@@ -389,7 +389,7 @@ export class ProjectImprover {
       const can = loopCanImprove(cached);
       if (!can.ok) {
         this.engine.emit(cached, 'improve-state', `loop not started: ${can.reason}`);
-        void this.engine.store.save(cached).catch(() => {});
+        void this.engine.store.save(cached, { reason: 'loop not started' }).catch(() => {});
         return { ok: false, reason: can.reason };
       }
     }
@@ -491,7 +491,7 @@ export class ProjectImprover {
     if (trial?.outcome === 'kept') appendAppMessage(project, `Kept a change on ${trial.nodeId}: ${trial.change}. Score ${trial.before} → ${trial.score}.`);
     if ('active' in patch) this.engine.emit(project, 'improve-state', patch.active ? `self-improving loop started for ${Math.round(improve.hours * 10) / 10} h` : `self-improving loop ended: ${patch.stopReason ?? patch.error ?? 'stopped'} · baseline ${improve.baseline} → best ${improve.best}`);
     if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}${trial.diagnosis ? ` · diagnosis: ${trial.diagnosis}` : ''}${trial.guided ? ' · guided by kept changes or verified pieces of its type' : ''}`, { nodeId: trial.nodeId });
-    await this.engine.store.save(project);
+    await this.engine.store.save(project, { reason: trial ? `loop: trial ${trial.outcome} on ${trial.nodeId}` : 'loop: state recorded' });
     return improve;
   }
 
@@ -504,7 +504,7 @@ export class ProjectImprover {
     const can = loopCanImprove(project);
     if (!can.ok) {
       this.engine.emit(project, 'improve-state', `loop not started: ${can.reason}`);
-      await this.engine.store.save(project);
+      await this.engine.store.save(project, { reason: 'loop not started' });
       return;
     }
     this.engine.rejoinTeam(id, (clientId) => this.join(id, clientId));
@@ -720,7 +720,7 @@ export class ProjectImprover {
       for (const t of touched) if (merged.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(merged, t);
       if (researched) merged.nodes[merged.nodes.findIndex((n) => n.id === nodeId)] = structuredClone(project.nodes.find((n) => n.id === nodeId));
       const pieces = [...new Set([...touched, ...merged.nodes.filter((n) => n.status === 'pending' && !beforePending.has(n.id)).map((n) => n.id)])];
-      await this.engine.store.save({ ...merged, chats: current.chats, log: current.log, improve: current.improve });
+      await this.engine.store.save({ ...merged, chats: current.chats, log: current.log, improve: current.improve }, { reason: `loop: trial applied on ${nodeId}: ${String(change).slice(0, 160)}`, userAction: removed.length ? 'loop' : null });
       const after = await this.engine.run(id, { memo: false, pieces, reuse: true, pages });
       if (this.stopped(state) || after.phase === 'cancelled') return await reject('reverted-stopped');
       const outage = after.nodes.find((n) => n.status === 'failed' && QUOTA_ERROR.test(n.error ?? ''));
