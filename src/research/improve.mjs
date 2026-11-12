@@ -7,9 +7,13 @@ import { passingSpecs, regressions, specHolders } from './specs.mjs';
 import { Mutex } from './lanes.mjs';
 import { mergeTrial, trialConflict } from './trialmerge.mjs';
 import { gateTrace, pieceType, playbookText, refusedByLedger, similarChange, typeStats } from './playbook.mjs';
-import { lessonsFromTrials, principlesFrom } from './lessons.mjs';
+import { kindOf, lessonsFromTrials, principlesFrom } from './lessons.mjs';
 
 export { similarChange };
+
+export function helpsOnly(principles = []) {
+  return principles.filter((p) => p.verdict === 'helps');
+}
 
 const GRADE_RANK = { verified: 3, supported: 2, weak: 1, unsupported: 0, failed: 0, pending: 0, researching: 0 };
 const MAX_HOURS = 72;
@@ -477,7 +481,7 @@ export class ProjectImprover {
     if (trial) trial = { ...trial, scoreDelta: round(trial.score - trial.before) };
     if (trial) improve.trials = [...improve.trials, trial].slice(-MAX_TRIALS_KEPT);
     if (trial) improve.byType = typeStats(improve.trials, project.nodes);
-    if (trial && this.lessons) await this.lessons.add(lessonsFromTrials([trial], { researchId: id, type: trial.type }));
+    if (trial && this.lessons) await this.lessons.add(lessonsFromTrials([trial], { researchId: id, type: trial.type, kind: kindOf(project) }));
     project.improve = improve;
     if ('active' in patch) appendAppMessage(project, loopSummary(improve, !patch.active));
     if (patch.stall?.stalled && !wasStalled) {
@@ -618,8 +622,8 @@ export class ProjectImprover {
   async propose(project, nodeId, best) {
     const node = nodeId === ROOT_ID ? { id: ROOT_ID } : project.nodes.find((n) => n.id === nodeId);
     const trials = (project.improve?.trials ?? []).filter((t) => t.nodeId === nodeId);
-    const others = this.lessons ? await this.lessons.forType(pieceType(node), { excludeResearch: project.id }) : [];
-    const playbook = playbookText(project, node, { principles: principlesFrom(others, pieceType(node)) });
+    const others = this.lessons ? await this.lessons.forType(pieceType(node), { excludeResearch: project.id, kind: kindOf(project) }) : [];
+    const playbook = playbookText(project, node, { principles: helpsOnly(principlesFrom(others, pieceType(node))) });
     const reply = await this.engine.router.complete({ purpose: 'improve', tier: 'deep', messages: withGuidance(variantPrompt({ project, node, score: best, trials, stall: stallCheck(project, this.now()), playbook: playbook.text, trace: nodeId === ROOT_ID ? [] : gateTrace(node) }), project.guidance) });
     return { ...(reply.data ?? {}), guided: playbook.lessons + playbook.demos > 0, type: pieceType(node) };
   }

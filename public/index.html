@@ -487,7 +487,7 @@ tr.under td{background:color-mix(in srgb,var(--ok,#1a7f37) 12%,transparent)}tr.u
           <div class="pane" id="pane-report"><div class="pane-inner" id="reportBody"></div></div>
           <div class="pane split" id="pane-sources"><div class="treegrid"><div class="treecol" id="srcTree"></div><div class="piececol" id="sourceList"></div></div></div>
           <div class="pane" id="pane-gates"><div class="pane-inner" id="gatesBody"></div></div>
-          <div class="pane" id="pane-loop"><div class="pane-inner" id="loopPane"><div class="loopstatus" id="loopStatus" role="status" aria-live="polite"></div><div class="loopbox" id="loopBox"></div></div></div>
+          <div class="pane" id="pane-loop"><div class="pane-inner" id="loopPane"><div class="loopstatus" id="loopStatus" role="status" aria-live="polite"></div><div class="loopbox" id="loopBox"></div><div class="card" id="crossResearchPrinciples"><div class="small faint">Cross-research principles</div><div class="small muted">Loading…</div></div></div></div>
           <div class="pane" id="pane-chat"></div>
         </div>
         <aside id="pip" aria-label="Result details"></aside>
@@ -930,6 +930,15 @@ function renderLoopBox(){
   box.innerHTML='<div class="row"><b>Self-improving loop</b><span class="small muted">tries changes on several pieces at once and keeps one only if its piece does not get worse, no check breaks and the score rises</span><span class="spacer"></span>'+(looping?'<span class="pill"><i class="pulse" style="background:var(--bl)"></i>until '+esc((i.deadline||"").slice(11,16))+" · "+kept+" kept</span>":'<label class="small muted">Hours</label><input id="impHours" value="'+esc(typed||i.hours||2)+'" style="width:64px"><button class="btn primary sm" id="impStart">Start</button>')+"</div>"+scopeLine+(i.trials&&i.trials.length?'<div class="loglist" style="margin-top:8px">'+i.trials.slice(-12).reverse().map(t=>'<div title="'+esc(t.change+(t.detail?" — "+t.detail:""))+'"><span class="mono">'+esc(t.nodeId)+'</span> <b style="color:'+(t.outcome==="kept"?"var(--gr)":t.outcome==="reverted-regression"?"var(--rd)":"var(--faint)")+'">'+esc(t.outcome)+"</b> "+esc(t.score)+" · "+esc(t.change)+"</div>").join("")+"</div>":"");
   box.querySelectorAll('input[name="lscope"]').forEach(r=>r.addEventListener("change",()=>{STATE.loopScope=r.value;}));
   const st=$("impStart");if(st)st.addEventListener("click",async()=>{const s=(box.querySelector('input[name="lscope"]:checked')||{}).value;try{await api("/api/projects/"+p.id+"/improve",{method:"POST",body:{clientId:CLIENT_ID,hours:Number($("impHours").value)||2,nodes:s==="sel"?[...STATE.checked]:[],exclude:s==="sel"?[...STATE.excluded]:[]}});toast(s==="sel"?"loop started on "+STATE.checked.size+" selected piece(s)":"loop started on the whole research");await loadStatus();renderHead();}catch(e){toast(e.message);}});
+  loadCrossPrinciples(p);
+}
+async function loadCrossPrinciples(p){
+  const box=$("crossResearchPrinciples");if(!box||!p)return;
+  try{
+    const data=await api("/api/principles?project="+encodeURIComponent(p.id));let html="";
+    for(const [type,principles] of Object.entries(data)){if(!principles.length)continue;html+='<div style="margin-top:8px"><b>'+esc(type)+"</b>";for(const pr of principles){html+='<div class="small" style="margin-top:4px">'+esc(pr.statement)+"</div>";}html+="</div>";}
+    box.innerHTML='<div class="small faint">Cross-research principles (same kind of item as this research)</div>'+(html||'<div class="small muted">No principles recorded yet for researches of this kind.</div>');
+  }catch(e){box.innerHTML='<div class="small faint">Cross-research principles</div><div class="small" style="color:var(--rd)">Failed to load: '+esc(e.message)+"</div>";}
 }
 $("projTitle").addEventListener("click",()=>$("projTitle").classList.toggle("open"));
 $("btnLoop").addEventListener("click",e=>{e.stopPropagation();$("loopSel").disabled=!STATE.checked.size;$("loopSel").textContent=STATE.checked.size?"Selected pieces ("+STATE.checked.size+")…":"Selected pieces (select them on the map)";$("loopPop").classList.toggle("on");});
@@ -1626,7 +1635,6 @@ function renderResults(){
   if(ar)h+='<div style="margin-top:6px">'+ar.checks.map(c=>'<div class="check"><span class="'+(c.passed?"y":"n")+'">'+(c.passed?"✓":"✗")+"</span><span>"+esc(c.label)+" <b>"+Math.round(c.value*100)+"%</b></span></div>").join("")+"</div>";
   if(ar&&r&&ar.score>=0.99&&!/^\s*GO\b/i.test(r.verdict))h+='<div class="notice" style="margin:10px 0 0">The expected-result checks pass, but they only test the count, the links and the price range. The memo verdict is <b>'+esc(trunc(r.verdict,80))+"</b>, so the question itself is not settled yet. Ask the Results chat what is missing.</div>";
   h+='<p class="small faint" style="margin-top:8px">'+good.length+"/"+p.nodes.length+" pieces pass the checks · ask about these results in the chat → <b>Results</b></p></div>";
-  h+='<div class="card" id="crossResearchPrinciples"><div class="small faint">Cross-research principles</div><div class="small muted">Loading…</div></div>';
   h+=proposalsHtml(p);
   h+=candidatesHtml(p);
   const items=ar?ar.items:[];
@@ -1638,7 +1646,6 @@ function renderResults(){
   if(!ar&&!r&&!good.length)h+='<div class="card"><b>No results yet.</b><p class="small muted" style="margin-top:4px">Press ▶ Run. Results appear here as pieces pass the checks.</p></div>';
   box.innerHTML=h;
   renderPip();
-  (async()=>{try{const box=$("crossResearchPrinciples");if(!box)return;const data=await api("/api/principles");let html="";for(const [type,principles] of Object.entries(data)){if(!principles.length)continue;html+='<div style="margin-top:8px"><b>'+esc(type)+"</b>";for(const pr of principles){html+='<div class="small" style="margin-top:4px">'+esc(pr.statement)+"</div>";}html+="</div>";}box.innerHTML=html||'<div class="small muted">No cross-research principles recorded yet.</div>';}catch(e){$("crossResearchPrinciples").innerHTML='<div class="small" style="color:var(--rd)">Failed to load: '+esc(e.message)+"</div>";}})();
   box.querySelectorAll("a[data-node]").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();select(a.dataset.node,"details",true);}));
   const rw=$("resRewrite");if(rw)rw.addEventListener("click",async()=>{rw.disabled=true;rw.textContent="writing…";try{STATE.project=await api("/api/projects/"+p.id+"/synthesize",{method:"POST"});STATE.project=await api("/api/projects/"+p.id);renderAll();toast("memo rewritten from the current pieces");}catch(e){toast(e.message);rw.disabled=false;}});
   const pr=$("resPrint");if(pr)pr.addEventListener("click",()=>{setPane("report");setTimeout(()=>window.print(),300);});

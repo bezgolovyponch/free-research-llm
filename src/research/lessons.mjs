@@ -7,13 +7,18 @@ export const PRINCIPLE_KEEP_RATE = 0.5;
 export const PRINCIPLE_SIMILARITY = 0.5;
 const TESTED = new Set(['kept', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-gain', 'reverted-noise']);
 
-export function lessonsFromTrials(trials = [], { researchId, type = '' } = {}) {
+export function kindOf(project) {
+  return String(project?.brief?.kind?.label ?? project?.decisionModel?.kind?.label ?? '').trim();
+}
+
+export function lessonsFromTrials(trials = [], { researchId, type = '', kind = '' } = {}) {
   return trials
     .filter((t) => TESTED.has(t.outcome) && t.change)
     .map((t) => ({
       researchId,
       nodeId: t.nodeId,
       type: t.type || type,
+      kind: String(kind ?? '').trim(),
       change: String(t.change).slice(0, 300),
       outcome: t.outcome,
       gain: Math.round((Number(t.score) - Number(t.before)) * 1000) / 1000 || 0,
@@ -80,9 +85,12 @@ export class LessonBook {
     return fresh.length;
   }
 
-  async forType(type, { excludeResearch = null } = {}) {
+  async forType(type, { excludeResearch = null, kind = '' } = {}) {
     await this.load();
-    return this.lessons.filter((l) => l.type === type && l.researchId !== excludeResearch);
+    return this.lessons.filter((l) => l.type === type
+      && l.researchId !== excludeResearch
+      && l.kind === String(kind ?? '').trim()
+      && (!excludeResearch || Boolean(String(kind ?? '').trim())));
   }
 
   save() {

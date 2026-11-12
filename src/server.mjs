@@ -36,6 +36,7 @@ import { resultsNature } from './research/blockers.mjs';
 import { horizonFromText, leaseOptions } from './research/lease.mjs';
 import { leaseCountries, strategyById } from './research/strategy.mjs';
 import { countryByCode } from './research/brief.mjs';
+import { kindOf } from './research/lessons.mjs';
 
 const MAX_BODY = 32 * 1024 * 1024;
 const VENDOR = {
@@ -185,7 +186,14 @@ export function createServer(app, gate = new AccessGate()) {
     ['GET', /^\/api\/principles$/, async (req) => {
       const url = new URL(req.url, 'http://x');
       const type = url.searchParams.get('type') || null;
-      return app.getPrinciples(type);
+      const projectId = url.searchParams.get('project') || null;
+      let kind = null;
+      if (projectId) {
+        const project = await app.store.get(projectId).catch(() => null);
+        if (!project) throw new HttpError(404, 'no such research');
+        kind = kindOf(project);
+      }
+      return app.getPrinciples(type, { kind });
     }],
     ['GET', /^\/api\/projects$/, async (req) => (await app.store.list()).filter((p) => !req.access.share || p.id === req.access.share)],
     ['POST', /^\/api\/projects$/, async (req) => {
