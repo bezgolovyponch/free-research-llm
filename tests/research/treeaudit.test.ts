@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { auditTree, cleanTitle, duplicateAmong, duplicateOf, repairTree, similarity } from '../../src/research/treeaudit.mjs';
+import { researchedNode } from '../helpers/research-shapes';
 
 const n = (id: string, parentId: string, title: string, question: string, dependsOn: string[] = []) => ({ id, parentId, title, question, dependsOn });
 const Q = 'Find appropriate plots to buy for a glamping business on the coast, max 20000 EUR, mild climate 10 months a year, near the sea and e-bike routes';
@@ -244,6 +245,27 @@ describe('narrowing pieces to the asked countries', () => {
     const fixes = narrowRegions(nodes, regions);
     expect(fixes.map((f: { code: string; nodeId: string }) => `${f.code}:${f.nodeId}`)).toEqual(['removed-off-scope:D1.1', 'removed-off-scope:D1.2']);
     expect(nodes.map((n) => n.id)).toEqual(['Q', 'D1', 'D2', 'D2.1']);
+  });
+
+  it('keeps an off-scope leaf that was researched, marks it covered with its findings, and still removes an unresearched one', async () => {
+    const { narrowRegions, repairTree } = await import('../../src/research/treeaudit.mjs');
+    const italy = { ...researchedNode('D1.1', 'D1'), title: 'Italy – coastal raw land', question: 'Find Italian coastal raw land parcels' };
+    const nodes = [
+      { id: 'Q', parentId: null, title: 'Q', question: 'q' },
+      { id: 'D1', parentId: 'Q', status: 'supported', finding: { answer: 'y' }, title: 'Coastal plots', question: 'Find coastal plots in Spain' },
+      italy,
+      { id: 'D1.2', parentId: 'D1', status: 'supported', title: 'Greece', question: 'Find Greek land', dependsOn: [] },
+    ];
+    const fixes = narrowRegions(nodes, regions);
+    expect(fixes).toEqual([
+      { code: 'covered-off-scope', nodeId: 'D1.1', detail: 'D1.1 researched only IT, outside the asked regions; kept with its findings and marked covered' },
+      { code: 'removed-off-scope', nodeId: 'D1.2', detail: 'D1.2 researched only GR, outside the asked regions; removed (it had no findings)' },
+    ]);
+    expect(nodes.map((n) => n.id)).toEqual(['Q', 'D1', 'D1.1']);
+    expect(nodes[2]).toMatchObject({ status: 'covered', coveredBy: 'off-scope', finding: researchedNode().finding, sources: researchedNode().sources });
+    expect(narrowRegions(nodes, regions)).toEqual([]);
+    expect(repairTree(nodes, 'q', { regions }).filter((f: { code: string }) => /off-scope/.test(f.code))).toEqual([]);
+    expect(nodes.map((n) => n.id)).toEqual(['Q', 'D1', 'D1.1']);
   });
 });
 
