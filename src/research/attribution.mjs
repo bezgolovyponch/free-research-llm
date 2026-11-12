@@ -37,8 +37,8 @@ export function attributionSummary(claims = []) {
   const attributed = factual.filter((c) => c.attributed);
   const numeric = factual.filter((c) => numbersIn(c.text).length);
   const numericMissing = numeric.filter((c) => !c.attributed);
-  const share = factual.length ? attributed.length / factual.length : 1;
-  return { factual: factual.length, attributed: attributed.length, share, numericMissing, passed: share >= MIN_ATTRIBUTED_SHARE && numericMissing.length === 0 };
+  const share = factual.length ? attributed.length / factual.length : 0;
+  return { factual: factual.length, attributed: attributed.length, share, numericMissing, passed: factual.length > 0 && share >= MIN_ATTRIBUTED_SHARE && numericMissing.length === 0 };
 }
 
 function stripDatesAndOrdinals(text) {

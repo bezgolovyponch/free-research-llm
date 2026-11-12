@@ -388,7 +388,10 @@ describe('ProjectImprover handoffs', () => {
 
   it('reverts a change that breaks a regression check that used to pass, and runs only on the selected pieces', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-improve-scope-'));
-    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({}) };
+    const search = { enabled: true, lastErrors: [], search: async () => [
+      { kind: 'web', title: 'Top 5 Vintage Clothes Suppliers in Europe', url: 'https://vintagesupplier.com/top-5-vintage-clothes-suppliers-in-europe', domain: 'vintagesupplier.com', snippet: 's', text: 'Choosing among vintage clothing suppliers in Europe starts with a practical question about buying format' },
+      { kind: 'web', title: 'Zagumi used clothing wholesale', url: 'https://www.zagumi.com/nl/used-clothing/', domain: 'zagumi.com', snippet: 's', text: 'Groothandel gebruikte kleding in balen with merkkleding and Cream quality grade' },
+    ], describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }) };
     const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search, store: new ProjectStore({ dir }) });
     const created = await engine.createProject({ question: 'Where should I open a coffee kiosk in Brno?' });
     const done = await engine.run(created.id);

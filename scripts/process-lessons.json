@@ -193,6 +193,22 @@
     "prevention": "every launch path passes --max-old-space-size=4096 to node before src/server.mjs, defined once as NODE_HEAP_FLAG in src/service.mjs and reused by src/frl.mjs and the three service definitions; tests/frl.test.ts and tests/service.test.ts assert the flag precedes server.mjs in the frl start spawn args, each service definition and start.command. Note: an already installed launchd plist only picks this up after node src/frl.mjs install is rerun"
   },
   {
+    "id": "F15",
+    "title": "a supported grade with no sourced fact behind it, and weak pieces never re-researched",
+    "touches": [
+      "src/research/attribution.mjs",
+      "src/research/verify.mjs",
+      "src/research/engine.mjs",
+      "tests/research/attribution.test.ts",
+      "tests/research/verify.test.ts",
+      "tests/research/engine.test.ts",
+      "tests/research/improve.test.ts"
+    ],
+    "signal": "pieces graded supported whose claims are all assumptions: b2f5b7 D4.1 (\"0 brands present\") and D4.2 (six assumed SKU counts) stored as supported with attribution detail \"0 of 0 claim(s) carry a quote found in the cited source\"; a re-run of the same research never re-attempted its weak or unsupported leaves",
+    "cause": "attributionSummary scored a claim set with zero factual claims as share 1 and passed, so the attribution check passed with nothing sourced and the grade ladder could reach supported; and engine.run reset only failed/researching pieces to pending, so weak and unsupported leaves were left as they were on every later run",
+    "prevention": "attributionSummary passes only when at least one factual (non-assumption) claim exists and every numeric claim is attributed (share 0 and passed false when factual is 0), so verifyFinding can no longer grade such findings supported; engine.run resets weak/unsupported leaves to pending and re-researches them, keeping the previous finding and status and restoring them when the re-attempt grades lower by GRADE_RANK. Covered by tests/research/verify.test.ts (the verbatim b2f5b7 D4.1 and D4.2 findings grade weak, not supported) and tests/research/engine.test.ts (a second run re-attempts a weak leaf; a worse re-attempt keeps the old finding); proof counts over the stored b2f5b7 findings: old grading weak 6 / supported 5 / unsupported 1, new grading weak 8 / supported 3 / unsupported 1"
+  },
+  {
     "id": "F16",
     "title": "the self-improving loop stopped on a plateau instead of running for the hours the user chose, and steered at a check already at 100%",
     "touches": [
