@@ -235,5 +235,18 @@
     "signal": "find-appropriate-plots-to-buy-fo-b7772e (brief regions PT ES TR VN, price cap 20000 EUR): of the last 200 improve trials 82 were provider-outage and the reverted ones (32 reverted-piece, 31 reverted-whole, 19 reverted-structure, 1 reverted-noise, 2 reverted-stopped, 13 no-gain, 1 no-new-evidence) threw away every listing the trial found; 18 of the 19 reverted-structure trials failed only on outside-regions after mixing Italy/Greece/Croatia/Bulgaria into pieces that also targeted TR/VN portals (sahibinden, hepsiemlak, batdongsan, chotot); no-gain pieces were retried with the same queries",
     "cause": "a trial was kept only on a score gain above the noise floor, so reverted-whole/reverted-noise discarded new candidate rows; the structural gate reverted any proposal naming an out-of-region country instead of trimming it to brief.regions; and nothing recorded which queries a piece had already used, so repeats were re-researched",
     "prevention": "proposals are trimmed to the allowed regions before the structural gate (trimProposalRegions), new candidate rows that pass every hard criterion are merged into the research and recorded as kept-data even when the text change is reverted or the score sits inside the noise floor (dataGain/mergeDataRows, counted as a gain by plateauCheck/stallCheck/restEnds), and per-piece used queries are recorded and refused on repeat (usedQueries/sameQueriesAgain) while the proposer is told the purpose, the allowed regions, the price cap and the countries native languages; tests/research/improve.test.ts and tests/research/prompts.test.ts cover it"
+  },
+  {
+    "id": "F18",
+    "title": "the loop kept a contact page as a new listing",
+    "touches": [
+      "src/research/improve.mjs",
+      "src/research/acceptance.mjs",
+      "tests/research/improve.test.ts",
+      "tests/research/acceptance.test.ts"
+    ],
+    "signal": "b7772e loop trial 2026-11-13 01:29 recorded kept-data with https://terrenos.es/en/contactar/propietario/422967 (an owner contact form) as a plot that passes every hard criterion",
+    "cause": "passingHardRows screened rows by price and region only and never asked whether the URL is a single listing page; looksLikeListing accepted /contactar/ paths with a numeric id",
+    "prevention": "passingHardRows requires looksLikeListing; NOT_A_LISTING rejects contact paths in the asked languages (contact, contacto, contactar, contato, contatti, kontakt, iletisim, lien-he)"
   }
 ]
