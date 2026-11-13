@@ -1480,11 +1480,11 @@ export class ResearchEngine {
       if (checklist) {
         project.checklist = checklist;
         const fingerprint = checklistFingerprint(checklist);
-        project.checkCache = project.checkCache ?? new Map();
+        project.checkCache = project.checkCache ?? {};
         const itemsToJudge = project.acceptanceResult.items.slice(0, 30);
         for (const item of itemsToJudge) {
           const cacheKey = `${item.url}::${fingerprint}`;
-          const cached = project.checkCache.get(cacheKey);
+          const cached = project.checkCache[cacheKey];
           if (cached) {
             item.checks = cached.checks;
             item.checklist = cached.summary;
@@ -1495,7 +1495,11 @@ export class ResearchEngine {
           if (pageText) {
             item.checks = await this.checklistJudge.judge(item, pageText, checklist);
             item.checklist = checklistSummary([item])[0];
-            project.checkCache.set(cacheKey, { checks: item.checks, summary: item.checklist });
+            project.checkCache[cacheKey] = { checks: item.checks, summary: item.checklist };
+            const keys = Object.keys(project.checkCache);
+            if (keys.length > 500) {
+              delete project.checkCache[keys[0]];
+            }
           }
         }
       }

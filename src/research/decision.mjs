@@ -289,7 +289,7 @@ export function modelText(model) {
   if (model.noLimit?.length) lines.push(`Asked but no limit stated, so not checked: ${model.noLimit.map((c) => MEASURES[c.measure].label).join('; ')}`);
   if (model.missing?.length) lines.push(`Not modelled yet (no code check): ${model.missing.join('; ')}`);
   if (model.checklist?.length) {
-    lines.push(`Checklist (each item judged per supplier/page):`);
+    lines.push(`Checklist (each item judged on its own page):`);
     for (const cluster of model.checklist) {
       for (const item of cluster.items) {
         const hard = item.hard ? ' [hard]' : '';

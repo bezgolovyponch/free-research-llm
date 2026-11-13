@@ -238,7 +238,6 @@ export class ChecklistJudge {
     }
 
     const checks = [];
-    const askedIds = new Set();
 
     for (const { cluster, item: ci } of numericItems) {
       const m = MEASURES[ci.numeric.measure];
@@ -254,7 +253,6 @@ export class ChecklistJudge {
         quote = `${ci.numeric.measure}: ${val} ${ci.numeric.unit}`;
       }
       const id = cluster.clause + '|' + ci.question;
-      askedIds.add(id);
       checks.push({ id, answer, quote, hard: ci.hard, clause: cluster.clause });
     }
 
@@ -264,9 +262,8 @@ export class ChecklistJudge {
         id: cluster.clause + '|' + ci.question,
         question: ci.question,
         hard: ci.hard,
+        clause: cluster.clause,
       }));
-
-      for (const q of questions) askedIds.add(q.id);
 
       const prompt = judgePrompt({ questions, pageText: pageTextCut });
       let reply = null;
@@ -284,19 +281,14 @@ export class ChecklistJudge {
       const replies = reply?.data ?? [];
       const validated = applyQuoteCheck(replies, pageTextCut);
 
-      const repliedIds = new Set(validated.map((r) => r.id).filter(Boolean));
       for (const q of questions) {
         const reply = validated.find((r) => r.id === q.id);
         if (reply) {
           const answer = ['yes', 'no', 'unknown'].includes(reply.answer) ? reply.answer : 'unknown';
-          checks.push({ id: q.id, answer, quote: reply.quote ?? '', hard: q.hard, clause: q.id.split('|')[0] });
+          checks.push({ id: q.id, answer, quote: reply.quote ?? '', hard: q.hard, clause: q.clause });
         } else {
-          checks.push({ id: q.id, answer: 'unknown', quote: '', hard: q.hard, clause: q.id.split('|')[0] });
+          checks.push({ id: q.id, answer: 'unknown', quote: '', hard: q.hard, clause: q.clause });
         }
-      }
-
-      for (const r of validated) {
-        if (!askedIds.has(r.id)) continue;
       }
     }
 
