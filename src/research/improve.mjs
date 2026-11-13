@@ -2,12 +2,14 @@ import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt, withGuidance } from './prompts.mjs';
 import { METHODS, ROOT_ID, blankNode, isLeaf, nextNodeId, urlList } from './tree.mjs';
-import { BLOCKING, MAX_DRIVERS, auditTree, cleanTitle, duplicateAmong, duplicateOf, modelOf } from './treeaudit.mjs';
+import { BLOCKING, DEMONYMS, MAX_DRIVERS, auditTree, cleanTitle, countriesIn, duplicateAmong, duplicateOf, modelOf, narrowText } from './treeaudit.mjs';
 import { passingSpecs, regressions, specHolders } from './specs.mjs';
 import { Mutex } from './lanes.mjs';
 import { mergeTrial, trialConflict } from './trialmerge.mjs';
 import { gateTrace, pieceType, playbookText, refusedByLedger, similarChange, typeStats } from './playbook.mjs';
 import { kindOf, lessonsFromTrials, principlesFrom } from './lessons.mjs';
+import { countryByCode, hostCountries, tldCountry } from './brief.mjs';
+import { passesEveryHardCriterion, screenCandidate } from './candidates.mjs';
 
 export { similarChange };
 
@@ -144,6 +146,7 @@ export function acceptsTrial(before, after, removed = [], samples = []) {
 }
 
 const FUTILE = new Set(['repeat', 'reverted-noise', 'reverted-whole', 'reverted-piece', 'reverted-regression', 'no-change', 'no-gain', 'no-new-evidence', 'reverted-structure']);
+export const GAIN_OUTCOMES = new Set(['kept', 'kept-data']);
 export const REST_AFTER_FUTILE = 3;
 export const ROOT_EVERY = 3;
 
@@ -160,9 +163,9 @@ export function restEnds(trials = []) {
   const streak = new Map();
   const lastAt = new Map();
   for (const t of trials) {
-    if (t.outcome === 'kept') streak.set(t.nodeId, 0);
+    if (GAIN_OUTCOMES.has(t.outcome)) streak.set(t.nodeId, 0);
     else if (FUTILE.has(t.outcome)) streak.set(t.nodeId, (streak.get(t.nodeId) ?? 0) + 1);
-    if (FUTILE.has(t.outcome) || t.outcome === 'kept') lastAt.set(t.nodeId, Date.parse(t.at));
+    if (FUTILE.has(t.outcome) || GAIN_OUTCOMES.has(t.outcome)) lastAt.set(t.nodeId, Date.parse(t.at));
   }
   return new Map([...streak].filter(([, n]) => n >= REST_AFTER_FUTILE).map(([id]) => [id, (lastAt.get(id) ?? 0) + REST_HOURS * 3600000]));
 }
@@ -198,7 +201,8 @@ export function nothingLeftToGain(project) {
 
 export function stallCheck(project, now = Date.now()) {
   const trials = project.improve?.trials ?? [];
-  const lastKept = trials.map((t) => t.outcome).lastIndexOf('kept');
+  const outcomes = trials.map((t) => t.outcome);
+  const lastKept = Math.max(outcomes.lastIndexOf('kept'), outcomes.lastIndexOf('kept-data'));
   const since = trials.slice(lastKept + 1).filter((t) => t.outcome !== 'provider-outage');
   const firstSeen = Math.min(...[since[0]?.at, project.improve?.startedAt].filter(Boolean).map(Date.parse), now);
   const from = lastKept >= 0 ? Date.parse(trials[lastKept].at) : firstSeen;
@@ -232,7 +236,7 @@ export function plateauCheck(trials = [], startedAt = null) {
   const start = startedAt ? Date.parse(startedAt) : -Infinity;
   for (const t of trials) {
     if (t.at && Date.parse(t.at) < start) continue;
-    if (t.outcome === 'kept') sinceKept.length = 0;
+    if (GAIN_OUTCOMES.has(t.outcome)) sinceKept.length = 0;
     else if (NOT_A_MEASURED_TRIAL.has(t.outcome)) continue;
     else sinceKept.push(t);
   }
@@ -262,6 +266,165 @@ export function citedUrls(project) {
 export function newEvidence(before, after) {
   const known = citedUrls(before);
   return [...citedUrls(after)].filter((url) => !known.has(url));
+}
+
+function hostOf(url) {
+  try {
+    return new URL(String(url ?? '')).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+export function trimProposalRegions(variant, regions = []) {
+  if (!variant || !Array.isArray(regions) || !regions.length) return { variant, trimmed: [] };
+  const trimmed = new Set();
+  const allowedNamed = regions.map((c) => countryByCode(c)?.name).filter(Boolean);
+  const escapeRe = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const noteOutside = (text) => {
+    const outside = countriesIn(text).filter((c) => !regions.includes(c));
+    for (const c of outside) trimmed.add(countryByCode(c)?.name ?? c);
+    return outside;
+  };
+  const cleanUp = (out) => out.replace(/\s{2,}/g, ' ').replace(/\s+([,.;:!?])/g, '$1').replace(/,\s*,/g, ',').replace(/,\s*(?:and\s*)?$/g, '').replace(/\(\s*\)/g, '').trim();
+  const fixText = (text) => {
+    const value = String(text ?? '');
+    if (!value || !noteOutside(value).length) return value;
+    let out = narrowText(value, regions);
+    for (const code of countriesIn(value).filter((c) => !regions.includes(c))) {
+      for (const [word, wordCode] of Object.entries(DEMONYMS)) {
+        if (wordCode !== code) continue;
+        out = out.replace(new RegExp(`\\b${word}\\b`, 'gi'), '');
+      }
+    }
+    return cleanUp(out);
+  };
+  const fixShort = (text) => {
+    const value = String(text ?? '');
+    const outside = noteOutside(value);
+    if (!value || !outside.length) return value;
+    let out = value;
+    for (const code of outside) {
+      const country = countryByCode(code);
+      for (const name of country ? [country.name, ...country.aliases] : []) {
+        const n = escapeRe(name);
+        out = out.replace(new RegExp(`\\s*,\\s*(?:and\\s+)?${n}\\b`, 'gi'), '').replace(new RegExp(`\\b${n}\\s*(?:,\\s*|\\s+and\\s+)`, 'gi'), '').replace(new RegExp(`\\s+and\\s+${n}\\b`, 'gi'), '').replace(new RegExp(`\\b${n}\\b`, 'gi'), '');
+      }
+      for (const [word, wordCode] of Object.entries(DEMONYMS)) {
+        if (wordCode !== code) continue;
+        out = out.replace(new RegExp(`\\b${word}\\b`, 'gi'), '');
+      }
+    }
+    out = cleanUp(out).replace(/\s+(?:in|from|of|at|near|across|within|for|to|and|or)\s*$/i, '');
+    if (allowedNamed.length && !countriesIn(out).some((c) => regions.includes(c))) out = `${out ? `${out} ` : ''}in ${allowedNamed.join(' and ')}`.trim();
+    return out || allowedNamed.join(' and ');
+  };
+  const fixUrls = (urls) => (Array.isArray(urls) ? urls : []).filter((u) => {
+    const url = String(u ?? '');
+    const byTld = tldCountry(url);
+    const outside = [...new Set([...hostCountries(url), ...(byTld ? [byTld] : [])])].filter((c) => !regions.includes(c));
+    if (!outside.length) return true;
+    for (const c of outside) trimmed.add(countryByCode(c)?.name ?? c);
+    return false;
+  });
+  const fixEntry = (entry) => (entry && typeof entry === 'object'
+    ? {
+        ...entry,
+        title: fixShort(entry.title),
+        question: fixText(entry.question),
+        searchQueries: Array.isArray(entry.searchQueries) ? entry.searchQueries.map(fixShort) : entry.searchQueries,
+        sourceUrls: fixUrls(entry.sourceUrls),
+      }
+    : entry);
+  const proposal = {
+    ...variant,
+    change: fixText(variant.change),
+    question: typeof variant.question === 'string' ? fixText(variant.question) : variant.question,
+    instructions: typeof variant.instructions === 'string' ? fixText(variant.instructions) : variant.instructions,
+    searchQueries: Array.isArray(variant.searchQueries) ? variant.searchQueries.map(fixShort) : variant.searchQueries,
+    sourceUrls: fixUrls(variant.sourceUrls),
+    split: Array.isArray(variant.split) ? variant.split.map(fixEntry) : variant.split,
+    add: Array.isArray(variant.add) ? variant.add.map(fixEntry) : variant.add,
+  };
+  return { variant: proposal, trimmed: [...trimmed] };
+}
+
+function listingRowsOf(project) {
+  const rows = [];
+  for (const node of project?.nodes ?? []) {
+    for (const source of node.sources ?? []) {
+      for (const listing of source.listings ?? []) rows.push({ ...listing, source, nodeId: node.id });
+    }
+    for (const item of node.finding?.items ?? []) {
+      rows.push({ ...item, source: (node.sources ?? []).find((s) => s.id === item.sourceId) ?? null, nodeId: node.id });
+    }
+  }
+  return rows;
+}
+
+export function newListingRows(before, after) {
+  const known = citedUrls(before);
+  const seen = new Set();
+  const rows = [];
+  for (const row of listingRowsOf(after)) {
+    if (!row?.url || known.has(row.url) || seen.has(row.url)) continue;
+    seen.add(row.url);
+    rows.push(row);
+  }
+  return rows;
+}
+
+export function passingHardRows(rows, brief) {
+  if (!brief?.kind || !brief?.regions?.length) return [];
+  const out = [];
+  for (const row of rows ?? []) {
+    const verdict = screenCandidate(row, brief, {});
+    if (passesEveryHardCriterion(row, verdict, brief)) out.push(row);
+  }
+  return out;
+}
+
+export function dataGain(before, after, brief) {
+  const fresh = newListingRows(before, after);
+  const passing = passingHardRows(fresh, brief);
+  const hosts = [...new Set(fresh.map((r) => hostOf(r.url)).filter(Boolean))].sort();
+  return {
+    found: fresh.length,
+    passing,
+    detail: `+${fresh.length} listings from ${hosts.join(', ') || 'new sources'}, ${passing.length} pass every hard criterion`,
+  };
+}
+
+export function mergeDataRows(project, rows, fallbackNodeId) {
+  const merged = [];
+  for (const row of rows ?? []) {
+    if (!row?.url) continue;
+    const node = project.nodes.find((n) => n.id === row.nodeId) ?? (fallbackNodeId ? project.nodes.find((n) => n.id === fallbackNodeId) : null);
+    if (!node) continue;
+    node.finding ??= { answer: '', items: [] };
+    node.finding.items ??= [];
+    if (node.finding.items.some((i) => i.url === row.url)) continue;
+    node.finding.items.push({ title: String(row.title ?? row.url).slice(0, 160), url: row.url, value: row.value ?? null, unit: row.unit ?? '', sourceId: row.sourceId ?? row.source?.id ?? '', harvested: true });
+    merged.push(row.url);
+  }
+  return merged;
+}
+
+export function usedQueries(trials = [], nodeId) {
+  const used = [];
+  for (const t of trials ?? []) {
+    if (t.nodeId !== nodeId) continue;
+    for (const q of t.queries ?? []) if (typeof q === 'string' && !used.includes(q)) used.push(q);
+  }
+  return used;
+}
+
+export function sameQueriesAgain(variant, node, trials = [], nodeId) {
+  const proposed = strings(variant?.searchQueries, 3);
+  if (!proposed.length) return false;
+  const known = [...usedQueries(trials, nodeId), ...(node?.searchQueries ?? []).map(String)];
+  const freshUrls = (Array.isArray(variant?.sourceUrls) ? variant.sourceUrls : []).filter((u) => !(node?.sourceUrls ?? []).includes(u));
+  return proposed.every((q) => known.includes(q)) && !freshUrls.length;
 }
 
 export function structuralIssues(project) {
@@ -510,8 +673,9 @@ export class ProjectImprover {
       this.engine.emit(project, 'improve-state', stallMessage(patch.stall));
     }
     if (trial?.outcome === 'kept') appendAppMessage(project, `Kept a change on ${trial.nodeId}: ${trial.change}. Score ${trial.before} → ${trial.score}.`);
+    if (trial?.outcome === 'kept-data') appendAppMessage(project, `Kept new data on ${trial.nodeId}: ${trial.detail}. The text change itself was reverted; the score stayed ${trial.score}.`);
     if ('active' in patch) this.engine.emit(project, 'improve-state', patch.active ? `self-improving loop started for ${Math.round(improve.hours * 10) / 10} h` : `self-improving loop ended: ${patch.stopReason ?? patch.error ?? 'stopped'} · baseline ${improve.baseline} → best ${improve.best}`);
-    if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}${trial.diagnosis ? ` · diagnosis: ${trial.diagnosis}` : ''}${trial.guided ? ' · guided by kept changes or verified pieces of its type' : ''}`, { nodeId: trial.nodeId });
+    if (trial) this.engine.emit(project, 'improve', `${trial.nodeId}: ${trial.outcome} (${trial.score}) — ${trial.change}${trial.detail ? ` · ${trial.detail}` : ''}${trial.diagnosis ? ` · diagnosis: ${trial.diagnosis}` : ''}${trial.guided ? ' · guided by kept changes or verified pieces of its type' : ''}`, { nodeId: trial.nodeId });
     await this.engine.store.save(project, { reason: trial ? `loop: trial ${trial.outcome} on ${trial.nodeId}` : 'loop: state recorded' });
     return improve;
   }
@@ -657,9 +821,12 @@ export class ProjectImprover {
     const base = { at: new Date(this.now()).toISOString(), nodeId, before: state.best.score };
     const note = (trial) => state.lock.run(() => this.record(id, {}, trial));
     try {
-      const variant = await this.propose(snapshot, nodeId, state.best);
+      const raw = await this.propose(snapshot, nodeId, state.best);
+      const regions = modelOf(snapshot).regions;
+      const { variant, trimmed } = trimProposalRegions(raw, regions);
       const change = String(variant.change ?? 'variant').slice(0, 240);
-      Object.assign(base, { type: variant.type, guided: variant.guided, ...(variant.diagnosis ? { diagnosis: String(variant.diagnosis).slice(0, 240) } : {}) });
+      const queries = strings(variant.searchQueries, 3);
+      Object.assign(base, { type: variant.type, guided: variant.guided, ...(variant.diagnosis ? { diagnosis: String(variant.diagnosis).slice(0, 240) } : {}), ...(trimmed.length ? { trimmedRegions: trimmed } : {}), ...(queries.length ? { queries } : {}) });
       const project = structuredClone(snapshot);
       if (this.stopped(state)) return { kept: false };
       const touched = applyVariant(project, nodeId, variant);
@@ -675,6 +842,11 @@ export class ProjectImprover {
         await note({ ...base, change, outcome: 'repeat', score: state.best.score, detail: `like a change tested ${failing.harmful} times on ${failing.pieces.length} pieces of this type (${failing.pieces.slice(0, 4).join(', ')}) and never kept; not re-researched` });
         return { kept: false };
       }
+      const oldNode = snapshot.nodes.find((n) => n.id === nodeId);
+      if (sameQueriesAgain(variant, oldNode, snapshot.improve?.trials, nodeId)) {
+        await note({ ...base, change, outcome: 'repeat', score: state.best.score, detail: `the same queries were already used on ${nodeId} (${queries.join(' | ')}); different sources or queries are required, never the same queries again` });
+        return { kept: false };
+      }
       if (!touched.length) {
         await note({ ...base, change, outcome: 'no-change', score: state.best.score });
         return { kept: false };
@@ -685,7 +857,6 @@ export class ProjectImprover {
         await note({ ...base, change, outcome: 'reverted-structure', score: state.best.score, detail: `would add tree problems: ${added.join(', ')}` });
         return { kept: false };
       }
-      const oldNode = snapshot.nodes.find((n) => n.id === nodeId);
       for (const t of touched) if (project.nodes.some((n) => n.id === t)) this.engine.resetWithAncestors(project, t);
       const researched = nodeId !== ROOT_ID && oldNode && isLeaf(project.nodes, project.nodes.find((n) => n.id === nodeId));
       if (researched) {
@@ -696,6 +867,8 @@ export class ProjectImprover {
           return { kept: false };
         }
         if ((GRADE_RANK[node.status] ?? 0) < (GRADE_RANK[oldNode.status] ?? 0)) {
+          const gain = dataGain(snapshot, project, snapshot.brief);
+          if (gain.passing.length) return await this.keepData(id, base, change, snapshot, project, gain, state);
           await note({ ...base, change, outcome: 'reverted-piece', score: state.best.score, detail: `${nodeId} fell from ${oldNode.status} to ${node.status}` });
           return { kept: false };
         }
@@ -705,6 +878,8 @@ export class ProjectImprover {
           return { kept: false };
         }
         if (touched.length === 1 && !removed.length && cannotGain(oldNode, node)) {
+          const gain = dataGain(snapshot, project, snapshot.brief);
+          if (gain.passing.length) return await this.keepData(id, base, change, snapshot, project, gain, state);
           await note({ ...base, change, outcome: 'no-gain', score: state.best.score, detail: `${nodeId} kept its grade (${node.status}) and found nothing new, so the score could not rise; the whole research was not re-rolled` });
           return { kept: false };
         }
@@ -718,11 +893,27 @@ export class ProjectImprover {
     }
   }
 
+  async keepData(id, base, change, before, after, gain, state) {
+    const current = await this.engine.load(id);
+    const target = structuredClone(current);
+    const keptRows = mergeDataRows(target, gain.passing, base.nodeId);
+    await this.engine.store.save({ ...target, chats: current.chats, log: current.log, improve: current.improve }, { reason: `loop: trial on ${base.nodeId} kept ${gain.passing.length} new listing(s) that pass every hard criterion`, userAction: 'loop' });
+    await this.record(id, {}, { ...base, before: state.best.score, change, outcome: 'kept-data', score: state.best.score, detail: gain.detail, keptRows });
+    return { kept: true, data: true };
+  }
+
   async commit(id, { snapshot, project, touched, removed, researched, nodeId, base, change }, state) {
     const best = state.best;
     const current = await this.engine.load(id);
     const before = structuredClone(current);
-    const reject = async (outcome, detail, score = best.score) => {
+    const reject = async (outcome, detail, score = best.score, data = null) => {
+      if (data?.passing?.length) {
+        const restored = structuredClone(before);
+        const keptRows = mergeDataRows(restored, data.passing, nodeId);
+        await this.engine.store.save({ ...restored, chats: current.chats, log: current.log, improve: current.improve }, { reason: `loop: trial reverted on ${nodeId} but kept ${data.passing.length} new listing(s) that pass every hard criterion`, userAction: 'loop' });
+        await this.record(id, {}, { ...base, before: best.score, change, outcome: 'kept-data', score, detail: data.detail, keptRows });
+        return { kept: true, data: true };
+      }
       await this.restore(id, before);
       await this.record(id, {}, { ...base, before: best.score, change, outcome, score, ...(detail ? { detail } : {}) });
       return { kept: false };
@@ -754,8 +945,9 @@ export class ProjectImprover {
         return result;
       }
       const broken = regressions(before, after);
-      if (broken.length) return await reject('reverted-regression', `breaks passing check(s): ${broken.join(', ')}`);
-      if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`);
+      const gain = dataGain(before, after, before.brief ?? current.brief);
+      if (broken.length) return await reject('reverted-regression', `breaks passing check(s): ${broken.join(', ')}`, best.score, gain);
+      if (removed.length && !allChecksPass(before, after)) return await reject('reverted-regression', `removing ${base.removedPieceId} needs every regression check to pass`, best.score, gain);
       if (!removed.length && !newEvidence(before, after).length) return await reject('no-new-evidence', 'the trial cites no source URL the tree did not already have; a kept change has to bring new evidence');
       const measure = state.measure ?? projectScore;
       const score = measure(after);
@@ -767,7 +959,7 @@ export class ProjectImprover {
         const remeasureNoise = [...(current.improve?.remeasureNoise ?? []), round(again.score - score.score)].slice(-NOISE_SAMPLES);
         await this.record(id, { remeasureNoise });
         const verdict = trialVerdict(best.score, Math.min(score.score, again.score), removed, remeasureNoise);
-        if (!verdict.ok) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} from the cached pages; ${verdict.reason}`, Math.min(score.score, again.score));
+        if (!verdict.ok) return await reject('reverted-noise', `measured ${score.score}, re-measured ${again.score} from the cached pages; ${verdict.reason}`, Math.min(score.score, again.score), gain);
         const kept = again;
         for (const piece of scoredPieces(after, state.scope ?? [], state.exclude ?? [])) state.pieces?.add(piece);
         state.best = kept;
@@ -775,7 +967,7 @@ export class ProjectImprover {
         await this.engine.resynthesize(id, { pages });
         return { kept: true, score: kept };
       }
-      return await reject('reverted-whole', '', score.score);
+      return await reject('reverted-whole', '', score.score, gain);
     } catch (error) {
       return await reject('error', error.message.slice(0, 200));
     } finally {
