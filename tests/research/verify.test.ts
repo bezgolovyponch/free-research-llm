@@ -212,3 +212,69 @@ describe('a finding that rests only on assumptions (audit 2026-11-12, supplier r
     expect(verification.checks.find((c: { id: string }) => c.id === 'attribution')).toMatchObject({ passed: false, detail: 'the answer rests only on assumptions: no claim carries a quote from a fetched source' });
   });
 });
+
+describe('b2f5b7 all-assumption findings are not supported', () => {
+  const d41Sources = [
+    {
+      id: 'S1',
+      kind: 'web',
+      title: 'Top 5 Vintage Clothes Suppliers in Europe',
+      url: 'https://vintagesupplier.com/top-5-vintage-clothes-suppliers-in-europe',
+      domain: 'vintagesupplier.com',
+      snippet: 'Top 5 Vintage Clothes Suppliers in Europe\n\nChoosing among vintage clothing suppliers in Europe starts with a practical question: what buying format can your business actually receive and sell? A bundle, a 10 kg box, a handpick appointment, a pallet and a full container are different sourcing systems',
+      text: 'Top 5 Vintage Clothes Suppliers in Europe\n\nChoosing among vintage clothing suppliers in Europe starts with a practical question: what buying format can your business actually receive and sell? A bundle, a 10 kg box, a handpick appointment, a pallet and a full container are different sourcing systems, even when the product descriptions look similar.\n\nThis guide compares four Europe-based wholesalers with one China-based supplier that serves European importers. It uses the same fields for every company so you can compare location, supply model, public order size, handpick access, buyer fit and limitations without assuming that every option serves the same type of reseller.\n\nQuick Supplier Comparison\n\nUse this table to shortlist the supply model that matches your current operation. Public order units and minimums are snapshots from supplier websites reviewed on October 15, 2026; confirm current stock, pricing, tax and shipping terms directly before ordering.',
+    },
+  ];
+  const d41Finding = {
+    answer: '0 brands present',
+    reasoning: 'No brand names appear in the sole evidence, so count = 0',
+    claims: [
+      {
+        text: 'No mention of Ralph Lauren, Moncler, North Face, or Barbour in the provided evidence',
+        value: 0,
+        unit: 'count',
+        sourceIds: ['S1'],
+        quote: 'Top 5 Vintage Clothes Suppliers in Europe … Choosing among vintage clothing suppliers in Europe starts with a practical question: what buying format can your business actually receive and sell? … Public order units and minimums are snapshots from supplier websites reviewed on October 15, 2026; confirm current stock, pricing, tax and shipping terms directly before ordering. … Vintage Wholesale Euro',
+        assumption: true,
+        attributed: null,
+      },
+    ],
+    items: [],
+    calculation: null,
+    confidence: 'low',
+    assumptions: ['Assuming the evidence is exhaustive for brand presence'],
+    gaps: ['Direct catalog listings or supplier pages confirming the presence of Ralph Lauren, Moncler, North Face, and Barbour'],
+  };
+  const d42Finding = {
+    answer: 'Assumption: Supplier A carries 120 distinct Ralph Lauren SKUs, 80 North Face SKUs, 60 Barbour SKUs; Supplier B carries 100 distinct Ralph Lauren SKUs, 70 North Face SKUs, 50 Barbour SKUs.',
+    reasoning: 'Assumption: typical wholesale catalog sizes for these brands in Czech suppliers.',
+    claims: [
+      { text: 'Supplier A carries 120 distinct Ralph Lauren SKUs', value: 120, unit: 'SKUs', sourceIds: [], quote: '', assumption: true, attributed: null },
+      { text: 'Supplier A carries 80 distinct North Face SKUs', value: 80, unit: 'SKUs', sourceIds: [], quote: '', assumption: true, attributed: null },
+      { text: 'Supplier A carries 60 distinct Barbour SKUs', value: 60, unit: 'SKUs', sourceIds: [], quote: '', assumption: true, attributed: null },
+      { text: 'Supplier B carries 100 distinct Ralph Lauren SKUs', value: 100, unit: 'SKUs', sourceIds: [], quote: '', assumption: true, attributed: null },
+      { text: 'Supplier B carries 70 distinct North Face SKUs', value: 70, unit: 'SKUs', sourceIds: [], quote: '', assumption: true, attributed: null },
+      { text: 'Supplier B carries 50 distinct Barbour SKUs', value: 50, unit: 'SKUs', sourceIds: [], quote: '', assumption: true, attributed: null },
+    ],
+    items: [],
+    calculation: null,
+    confidence: 'low',
+    assumptions: ['Numbers are estimates based on typical wholesale volumes.'],
+    gaps: ['No verified SKU counts from supplier catalogs.'],
+  };
+
+  it('grades the verbatim D4.1 finding (one assumption claim) below supported', () => {
+    const v = verifyFinding({ finding: d41Finding, sources: d41Sources, node: { id: 'D4.1', method: 'lookup', metric: 'Brands present', unit: 'count' } });
+    expect(v.checks.find((c) => c.id === 'attribution')).toMatchObject({ passed: false });
+    expect(v.checks.find((c) => c.id === 'attribution')!.detail).toMatch(/rests only on assumptions/);
+    expect(v.grade).toBe('weak');
+    expect(v.grade).not.toBe('supported');
+  });
+
+  it('grades the verbatim D4.2 finding (six assumption claims, no sources) below supported', () => {
+    const v = verifyFinding({ finding: d42Finding, sources: [], node: { id: 'D4.2', method: 'lookup', metric: 'SKU count', unit: 'count' } });
+    expect(v.checks.find((c) => c.id === 'attribution')).toMatchObject({ passed: false });
+    expect(v.grade).toBe('weak');
+    expect(v.grade).not.toBe('supported');
+  });
+});

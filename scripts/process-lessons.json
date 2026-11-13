@@ -169,6 +169,100 @@
   },
   {
     "id": "F13",
+    "title": "table limits set aside rows that pass every hard criterion",
+    "touches": [
+      "src/research/candidates.mjs",
+      "tests/research/candidates.test.ts"
+    ],
+    "signal": "18 live imovirtual.com plots of b7772e (500-18,000 EUR, Portugal, sea <= 20 km, 10-12 camping months, all pages active) pass every hard criterion of the research, yet none is in candidates.kept: 7 at 500-3,800 EUR fell under the implausiblyLow MAD cut (4,439 EUR) and 11 at 17,000-18,000 EUR fell past kept.slice(0, MAX_KEPT) of the 1,453 rows that passed the screen (docs/audits/recover-b7772e.md section B)",
+    "cause": "buildCandidates moved every implausiblyLow-flagged kept row to toCheck and sliced kept at MAX_KEPT without asking whether the row passed every hard criterion of the research (clean screen verdict, asked country, not gone, coast <= 20 km and >= 10 camping months when recorded on the row)",
+    "prevention": "passesEveryHardCriterion exempts such a row from both table limits: implausiblyLow only flags it (the lowCut stays visible on the kept row) and the MAX_KEPT cut applies only to rows that fail a hard criterion; tests/research/candidates.test.ts \"rows that pass every hard criterion are never set aside or capped (recover-b7772e)\" builds real rows from the URLs and prices in docs/audits/recover-b7772e-urls.txt"
+  },
+  {
+    "id": "F14",
+    "title": "server started without a heap limit and crashed on Node's default ~2 GB heap",
+    "touches": [
+      "src/frl.mjs",
+      "src/service.mjs",
+      "start.command",
+      "tests/frl.test.ts",
+      "tests/service.test.ts"
+    ],
+    "signal": "heap OOM (JavaScript heap out of memory / FATAL ERROR: Reached heap limit) in data/logs/server.out while the server was loading research data, on a machine with plenty of free RAM",
+    "cause": "every launch path (frl start spawn, launchd plist, Windows logon task, systemd unit, start.command) started node with the default max-old-space-size (~2 GB on 64-bit), so a large research exhausted the old space and the process died",
+    "prevention": "every launch path passes --max-old-space-size=4096 to node before src/server.mjs, defined once as NODE_HEAP_FLAG in src/service.mjs and reused by src/frl.mjs and the three service definitions; tests/frl.test.ts and tests/service.test.ts assert the flag precedes server.mjs in the frl start spawn args, each service definition and start.command. Note: an already installed launchd plist only picks this up after node src/frl.mjs install is rerun"
+  },
+  {
+    "id": "F15",
+    "title": "a supported grade with no sourced fact behind it, and weak pieces never re-researched",
+    "touches": [
+      "src/research/attribution.mjs",
+      "src/research/verify.mjs",
+      "src/research/engine.mjs",
+      "tests/research/attribution.test.ts",
+      "tests/research/verify.test.ts",
+      "tests/research/engine.test.ts",
+      "tests/research/improve.test.ts"
+    ],
+    "signal": "pieces graded supported whose claims are all assumptions: b2f5b7 D4.1 (\"0 brands present\") and D4.2 (six assumed SKU counts) stored as supported with attribution detail \"0 of 0 claim(s) carry a quote found in the cited source\"; a re-run of the same research never re-attempted its weak or unsupported leaves",
+    "cause": "attributionSummary scored a claim set with zero factual claims as share 1 and passed, so the attribution check passed with nothing sourced and the grade ladder could reach supported; and engine.run reset only failed/researching pieces to pending, so weak and unsupported leaves were left as they were on every later run",
+    "prevention": "attributionSummary passes only when at least one factual (non-assumption) claim exists and every numeric claim is attributed (share 0 and passed false when factual is 0), so verifyFinding can no longer grade such findings supported; engine.run resets weak/unsupported leaves to pending and re-researches them, keeping the previous finding and status and restoring them when the re-attempt grades lower by GRADE_RANK. Covered by tests/research/verify.test.ts (the verbatim b2f5b7 D4.1 and D4.2 findings grade weak, not supported) and tests/research/engine.test.ts (a second run re-attempts a weak leaf; a worse re-attempt keeps the old finding); proof counts over the stored b2f5b7 findings: old grading weak 6 / supported 5 / unsupported 1, new grading weak 8 / supported 3 / unsupported 1"
+  },
+  {
+    "id": "F16",
+    "title": "the self-improving loop stopped on a plateau instead of running for the hours the user chose, and steered at a check already at 100%",
+    "touches": [
+      "src/research/improve.mjs",
+      "src/research/prompts.mjs",
+      "tests/research/improve.test.ts",
+      "tests/research/prompts.test.ts"
+    ],
+    "signal": "find-appropriate-plots-to-buy-fo-b7772e started the improve loop with ~24 h, ended at 2026-11-12T20:57Z with \"plateau: 12 trials in a row...\", resumed after restart 22:15Z with 22.8 h left and ended again 22:44Z on a plateau; the 22:25Z stall message named \"At least 50 valid items\" at 100% as the weakest check while the score was 0.807 and only 14 of 30 pieces passed",
+    "cause": "commit 0edee7a made ProjectImprover.loop break on PLATEAU_TRIALS=12 non-kept trials, overriding the user's deadline, and stallCheck picked the weakest acceptance check by raw value even at 100%, so steering aimed at a check that cannot gain while the real deficit (pieces not passing) was ignored",
+    "prevention": "a plateau only switches steering (the recorded stall flips to stalled, as the stall path does) and the loop runs until the deadline, the user stops it, or nothingLeftToGain says every acceptance check is at 100% and every piece passes (that stop reason says exactly that); stallCheck targets the lowest check below 100%, else names the failing pieces, never a check already at 100%; tests/research/improve.test.ts \"keeps looping through a plateau while time is left\", \"never steers at a check already at 100%\" and \"nothing left to gain\" cover it"
+  },
+  {
+    "id": "F17",
+    "title": "the improve loop discarded data that served the purpose and reverted whole proposals for naming regions outside the brief",
+    "touches": [
+      "src/research/improve.mjs",
+      "src/research/prompts.mjs",
+      "src/research/treeaudit.mjs",
+      "src/research/brief.mjs",
+      "tests/research/improve.test.ts",
+      "tests/research/prompts.test.ts"
+    ],
+    "signal": "find-appropriate-plots-to-buy-fo-b7772e (brief regions PT ES TR VN, price cap 20000 EUR): of the last 200 improve trials 82 were provider-outage and the reverted ones (32 reverted-piece, 31 reverted-whole, 19 reverted-structure, 1 reverted-noise, 2 reverted-stopped, 13 no-gain, 1 no-new-evidence) threw away every listing the trial found; 18 of the 19 reverted-structure trials failed only on outside-regions after mixing Italy/Greece/Croatia/Bulgaria into pieces that also targeted TR/VN portals (sahibinden, hepsiemlak, batdongsan, chotot); no-gain pieces were retried with the same queries",
+    "cause": "a trial was kept only on a score gain above the noise floor, so reverted-whole/reverted-noise discarded new candidate rows; the structural gate reverted any proposal naming an out-of-region country instead of trimming it to brief.regions; and nothing recorded which queries a piece had already used, so repeats were re-researched",
+    "prevention": "proposals are trimmed to the allowed regions before the structural gate (trimProposalRegions), new candidate rows that pass every hard criterion are merged into the research and recorded as kept-data even when the text change is reverted or the score sits inside the noise floor (dataGain/mergeDataRows, counted as a gain by plateauCheck/stallCheck/restEnds), and per-piece used queries are recorded and refused on repeat (usedQueries/sameQueriesAgain) while the proposer is told the purpose, the allowed regions, the price cap and the countries native languages; tests/research/improve.test.ts and tests/research/prompts.test.ts cover it"
+  },
+  {
+    "id": "F18",
+    "title": "the loop kept a contact page as a new listing",
+    "touches": [
+      "src/research/improve.mjs",
+      "src/research/acceptance.mjs",
+      "tests/research/improve.test.ts",
+      "tests/research/acceptance.test.ts"
+    ],
+    "signal": "b7772e loop trial 2026-11-13 01:29 recorded kept-data with https://terrenos.es/en/contactar/propietario/422967 (an owner contact form) as a plot that passes every hard criterion",
+    "cause": "passingHardRows screened rows by price and region only and never asked whether the URL is a single listing page; looksLikeListing accepted /contactar/ paths with a numeric id",
+    "prevention": "passingHardRows requires looksLikeListing; NOT_A_LISTING rejects contact paths in the asked languages (contact, contacto, contactar, contato, contatti, kontakt, iletisim, lien-he)"
+  },
+  {
+    "id": "F19",
+    "title": "an exclusion word was ignored when the page kind was unknown, so a furniture ad passed as a plot",
+    "touches": [
+      "src/research/itemgate.mjs",
+      "src/research/templates.mjs",
+      "tests/research/itemgate.test.ts"
+    ],
+    "signal": "b7772e loop trial 2026-11-13 02:28 kept https://www.olx.pt/d/anuncio/contador-consola-aparador-movel-armario-oriental-olmo-rustico-IDFQRgo.html (a cabinet) as a plot that passes every hard criterion",
+    "cause": "screenItem checked kind.not only when the source page kind was known; otherwise one shared word (rustico) made isKind true; the plot template had no furniture words in kind.not",
+    "prevention": "kind.not exclusions apply on every path; the plot template excludes furniture words (movel, moveis, mueble(s), armario, aparador, consola, mobilya, furniture)"
+  },
+  {
+    "id": "F20",
     "title": "the router learned per provider, kept calling a deprecated model, re-admitted a benched provider at full load and read rate limits as unreliability",
     "touches": [
       "src/llm/outcomes.mjs",
@@ -185,7 +279,7 @@
     "prevention": "each model is its own arm (key provider|model|purposeClass, rankRole modelRole); modelGone covers 410 and deprecated wording, and a gone model that cannot switch benches the provider 24 h with the env var to change; a lapsed cooldown is half-open and admits one trial call; reliability leaves capacity limits out; tests/llm/outcomes.test.ts \"two models of one provider keep separate posteriors, and the legacy key still works without a model\", tests/llm/ranking.test.ts \"rankRole uses p[modelRole] for the posterior and the shown model\", \"purposePlan research order uses the fast model's posterior, since first research attempts run on the fast tier\" and \"providerStats does not lower reliability for 429/413 and does not count \\\"generate\\\" as a rate limit\", tests/llm/router.test.ts \"the real cloudflare 410 deprecated error benches a provider whose model cannot switch, for 24 h, naming the model and the env var\", \"benches a provider whose deprecated model is pinned by an env override, and retires and switches the model when the provider can\", \"half-open admits one trial call after a bench lapses and closes on success\", \"half-open re-opens on a failed trial: 10 min after one compute error or one timeout, the normal cooldown otherwise\" and \"a second call waits for the trial instead of failing when every provider is cooling, and gives up after the wait limit\""
   },
   {
-    "id": "F14",
+    "id": "F21",
     "title": "a whole-engine audit found the same failure in four layers: the headline counted fits the verifier had not confirmed",
     "touches": [
       "src/research/candidates.mjs",

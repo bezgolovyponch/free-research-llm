@@ -292,3 +292,62 @@ describe('the verdict counts what counts (audit 2026-11-12, row A1)', () => {
     expect(tableVerdict(unverified, 50)).toBe('Decision model: 9 results of the 50 asked fit every check; 2 trade-offs with their potential; 2 to confirm; 1 weak; 0 blocked by law');
   });
 });
+
+describe('rows that pass every hard criterion are never set aside or capped (recover-b7772e)', () => {
+  const realPlots: Array<[string, string, number]> = [
+    ['Terreno com contentor', 'https://www.imovirtual.com/pt/anuncio/terreno-com-contentor-ID1iYk0', 500],
+    ['Terreno rústico a venda, ideal para pedido de isenção IMT', 'https://www.imovirtual.com/pt/anuncio/terreno-rustico-a-venda-ideal-para-pedido-de-isencao-imt-ID1fHtV', 875],
+    ['Terreno florestal em Belinho de 220m2 não construtivo', 'https://www.imovirtual.com/pt/anuncio/terreno-florestal-em-belinho-de-220m2-nao-construtivo-ID1cv3a', 1500],
+    ['Terreno para venda', 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8', 1500],
+    ['Terreno para venda', 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1iysv', 2100],
+    ['Terreno de eucaliptos na Maceira', 'https://www.imovirtual.com/pt/anuncio/terreno-de-eucaliptos-na-maceira-ID18neF', 3500],
+    ['Terreno para venda', 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1gLbN', 3800],
+    ['Terreno para venda', 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1hlbM', 17000],
+    ['Terreno para venda', 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1inYr', 17000],
+    ['Terrenos rústicos Gândara de Cima, Febres, Cantanhede', 'https://www.imovirtual.com/pt/anuncio/terrenos-rusticos-gndara-de-cima-febres-cantanhede-leila-ID1hZPp', 17025.02],
+    ['Terreno com 1125m2 na Estrada do Vale Cancela, Ericeira', 'https://www.imovirtual.com/pt/anuncio/terreno-com-1125m2-na-estrada-do-vale-cancela-ericeira-ID19dsX', 17500],
+    ['Terreno para venda', 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1iWce', 17500],
+    ['Terreno rústico de 10.200 m² na Portela, Bombarral', 'https://www.imovirtual.com/pt/anuncio/terreno-rustico-de-10-200-m-a-venda-na-portela-bombarral-ideal-par-ID1fu4n', 17500],
+    ['Vendo terreno rústico', 'https://www.imovirtual.com/pt/anuncio/vendo-terreno-rustico-ID1fgNS', 17500],
+    ['Excelente terreno rústico no lugar da Formiga com 4120m2', 'https://www.imovirtual.com/pt/anuncio/excelente-terreno-rustico-no-lugar-da-formiga-com-4120m2-ID1bhS1', 18000],
+    ['Terreno de 2.880 m² no Arneiro, oportunidade no coração do Oeste', 'https://www.imovirtual.com/pt/anuncio/terreno-de-2-880-m-no-arneiro-oportunidade-no-coracao-do-oeste-ID1iD3d', 18000],
+    ['Terreno frente de rio em Gemeses, Esposende', 'https://www.imovirtual.com/pt/anuncio/terreno-frente-de-rio-em-gemeses-esposende-ID1iZEn', 18000],
+    ['Terreno para venda', 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1iSKG', 18000],
+  ];
+  const filler = (i: number, value: number) => ({ title: 'Terreno para venda', url: `https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1z${String(i).padStart(4, '0')}`, value, unit: 'EUR', area: 1000 });
+  const sweepNodes = (listings: object[]) => [{ id: 'sweep', sources: [{ id: 'P1', url: 'https://www.imovirtual.com/pt/resultados/comprar/terreno/lisboa?priceMax=20000', locale: 'pt', kindPage: true, listings }] }];
+  const plotRow = ([title, url, value]: [string, string, number], extra: object = {}) => ({ title, url, value, unit: 'EUR', area: 1000, place: 'Sintra, Lisboa', ...extra });
+
+  it('keeps a 500-3,800 EUR row that passes every hard criterion, with its low-price flag still on the row', () => {
+    const listings = [...realPlots.map((r) => plotRow(r)), filler(1, 17000), filler(2, 17500), filler(3, 18000), filler(4, 17000), filler(5, 17500), filler(6, 18000)];
+    const table = buildCandidates(sweepNodes(listings), brief, { convert });
+    const cheap = realPlots.slice(0, 7).map(([, url]) => url);
+    for (const url of cheap) {
+      const row = table.kept.find((r: { url: string }) => r.url === url);
+      expect(row, url).toBeTruthy();
+      expect(row?.lowCut).toBeGreaterThan(row?.value ?? 0);
+      expect(row?.valueNotes?.some((n: string) => n.startsWith('price far below'))).toBe(true);
+      expect(table.toCheck.some((r: { url: string }) => r.url === url)).toBe(false);
+    }
+    const cheapest = table.kept.find((r: { url: string }) => r.url === realPlots[0][1]);
+    expect(cheapest).toMatchObject({ value: 500, countryCode: 'PT', lowCut: expect.any(Number) });
+  });
+
+  it('keeps every row that passes every hard criterion even with more than MAX_KEPT rows', async () => {
+    const { MAX_KEPT } = await import('../../src/research/candidates.mjs');
+    const prices = realPlots.map(([, , value]) => value);
+    const listings = [...realPlots.map((r) => plotRow(r)), ...Array.from({ length: MAX_KEPT + 5 - realPlots.length }, (_, i) => filler(100 + i, prices[i % prices.length]))];
+    const table = buildCandidates(sweepNodes(listings), brief, { convert });
+    expect(table.kept.length).toBeGreaterThan(MAX_KEPT);
+    for (const [, url] of realPlots) expect(table.kept.some((r: { url: string }) => r.url === url)).toBe(true);
+  });
+
+  it('still sets aside a cheap row that fails a hard criterion', () => {
+    const listings = [...realPlots.map((r) => plotRow(r)), filler(1, 17000), filler(2, 17500), filler(3, 18000), filler(4, 17000), filler(5, 17500), filler(6, 18000)];
+    listings[0] = plotRow(realPlots[0], { site: { coastKm: 25.4 } });
+    const table = buildCandidates(sweepNodes(listings), brief, { convert });
+    const url = realPlots[0][1];
+    expect(table.kept.some((r: { url: string }) => r.url === url)).toBe(false);
+    expect(table.toCheck.find((r: { url: string }) => r.url === url)?.toCheck).toMatch(/far below what most listings/);
+  });
+});

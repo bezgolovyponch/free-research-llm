@@ -1532,6 +1532,15 @@ export class ResearchEngine {
         node.status = 'pending';
         this.resetAncestors(project, node);
       }
+      const rerunWanted = pieces ? new Set(pieces) : null;
+      const rerunPieces = new Map();
+      for (const node of project.nodes) {
+        if (reuse || !isLeaf(project.nodes, node) || (node.status !== 'weak' && node.status !== 'unsupported')) continue;
+        if (rerunWanted && !rerunWanted.has(node.id)) continue;
+        rerunPieces.set(node.id, { finding: node.finding, status: node.status, verification: node.verification, critique: node.critique });
+        node.status = 'pending';
+        this.resetAncestors(project, node);
+      }
       const compacted = compactProject(project);
       if (compacted) this.emit(project, 'tree', `stored page text and links capped for ${compacted} source(s) to keep memory small`);
       const fixes = repairTree(project.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
@@ -1573,6 +1582,12 @@ export class ResearchEngine {
             if (isLeaf(project.nodes, node)) {
               await this.researchLeaf(project, node, hints[node.id]);
               node.sources = compactSources(node.sources).sources;
+              const previous = rerunPieces.get(node.id);
+              if (previous && (GRADE_RANK[node.status] ?? 0) < (GRADE_RANK[previous.status] ?? 0)) {
+                const regraded = node.status;
+                Object.assign(node, { finding: previous.finding, status: previous.status, verification: previous.verification, critique: previous.critique, error: null });
+                this.emit(project, 'node', `${node.id}: re-attempt graded ${regraded} below the previous ${previous.status}; previous finding kept`, { nodeId: node.id });
+              }
             } else await this.rollup(project, node);
           } catch (error) {
             if (error instanceof ResearchCancelled) node.status = 'pending';

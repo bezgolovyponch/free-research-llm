@@ -1,6 +1,7 @@
 export const SERVICE_LABEL = 'com.free-research-llm.app';
 export const WINDOWS_TASK = 'FreeResearchLLM';
 export const SYSTEMD_UNIT = 'free-research-llm.service';
+export const NODE_HEAP_FLAG = '--max-old-space-size=4096';
 
 function xml(value) {
   return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -13,7 +14,7 @@ export function launchAgentPlist({ nodePath, root, port = 4600, pathEnv = '' }) 
 <plist version="1.0">
 <dict>
   <key>Label</key><string>${SERVICE_LABEL}</string>
-  <key>ProgramArguments</key><array><string>${xml(nodePath)}</string><string>${xml(`${root}/src/server.mjs`)}</string></array>
+  <key>ProgramArguments</key><array><string>${xml(nodePath)}</string><string>${xml(NODE_HEAP_FLAG)}</string><string>${xml(`${root}/src/server.mjs`)}</string></array>
   <key>WorkingDirectory</key><string>${xml(root)}</string>
   <key>EnvironmentVariables</key><dict>${Object.entries(env).map(([k, v]) => `<key>${k}</key><string>${xml(v)}</string>`).join('')}</dict>
   <key>RunAtLoad</key><true/>
@@ -52,7 +53,7 @@ export function windowsServiceScript({ nodePath, root, port = 4600 }) {
     `Set-Location -LiteralPath ${psQuote(root)}`,
     `New-Item -ItemType Directory -Force -Path (Join-Path ${psQuote(root)} 'data\\logs') | Out-Null`,
     'while ($true) {',
-    `  & ${psQuote(nodePath)} (Join-Path ${psQuote(root)} 'src\\server.mjs') *>> (Join-Path ${psQuote(root)} 'data\\logs\\server.out')`,
+    `  & ${psQuote(nodePath)} ${NODE_HEAP_FLAG} (Join-Path ${psQuote(root)} 'src\\server.mjs') *>> (Join-Path ${psQuote(root)} 'data\\logs\\server.out')`,
     '  Start-Sleep -Seconds 5',
     '}',
     '',
@@ -77,7 +78,7 @@ Environment=PORT=${Number(port)}
 Environment=FRL_SUPERVISED=1
 Environment=FRL_BEHIND_PROXY=1
 Environment=FRL_SECRET_STORE=systemd
-ExecStart=${nodePath} ${root}/src/server.mjs
+ExecStart=${nodePath} ${NODE_HEAP_FLAG} ${root}/src/server.mjs
 Restart=always
 RestartSec=5
 ${credentials.map((name) => `LoadCredentialEncrypted=${name}:/etc/credstore.encrypted/${name}`).join('\n')}

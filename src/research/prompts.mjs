@@ -1,6 +1,19 @@
 import { collectDeliverables } from './acceptance.mjs';
+import { countryByCode, describeBrief } from './brief.mjs';
 import { MAX_NODES, METHODS } from './tree.mjs';
 import { resultModel } from './result.mjs';
+
+const REGION_LANGUAGE = { PT: 'Portuguese', ES: 'Spanish', TR: 'Turkish', VN: 'Vietnamese', GR: 'Greek', IT: 'Italian', FR: 'French', DE: 'German', BG: 'Bulgarian', HR: 'Croatian', RO: 'Romanian', PL: 'Polish', CZ: 'Czech', NL: 'Dutch', SE: 'Swedish', DK: 'Danish', NO: 'Norwegian', FI: 'Finnish', HU: 'Hungarian', SK: 'Slovak', SI: 'Slovenian', EE: 'Estonian', LV: 'Latvian', LT: 'Lithuanian', GB: 'English', US: 'English', IE: 'English', CH: 'German', AT: 'German', BE: 'Dutch' };
+
+export function regionLanguages(regions = []) {
+  const languages = ['English'];
+  for (const code of regions ?? []) {
+    const name = countryByCode(code)?.name ?? String(code);
+    const language = REGION_LANGUAGE[String(code).toUpperCase()] ?? `the main language of ${name}`;
+    if (!languages.includes(language)) languages.push(language);
+  }
+  return languages;
+}
 
 
 const SYSTEM = 'You are a rigorous research analyst. You decompose questions MECE-style, use only evidence you are given, label every assumption, show calculations as formulas, and never invent sources, URLs or numbers. You reply with a single JSON object only.';
@@ -285,22 +298,40 @@ export function variantPrompt({ project, node, score, trials, stall = null, play
   const drivers = project.nodes.filter((n) => n.parentId === 'Q').map((n) => `${n.id} [${n.status}] ${n.question}`).join('\n');
   const sources = (node.sources ?? []).filter((s) => s.url).slice(0, 8).map((s) => `${s.id} ${s.title} <${s.url}> (${(s.links ?? []).length} links)`).join('\n') || 'none';
   const tried = trials.slice(-6).map((t) => `- ${t.change} -> ${t.outcome} (${t.score})`).join('\n') || 'none';
+  const usedQ = [...new Set(trials.flatMap((t) => (Array.isArray(t.queries) ? t.queries : []).map(String)))];
+  const usedQueriesBlock = usedQ.length ? `\nQUERIES ALREADY USED ON THIS PIECE (never propose them again; code refuses the repeat without testing): ${usedQ.join(' | ')}` : '';
+  const brief = project.brief ?? null;
+  const briefText = brief ? describeBrief(brief) : '';
+  const regions = (brief?.regions ?? []).map((c) => `${countryByCode(c)?.name ?? c} (${c})`);
+  const languages = regionLanguages(brief?.regions ?? []).join(', ');
+  const purposeBlock = briefText
+    ? `RESEARCH PURPOSE (gather data only for this; every proposal must serve it):
+${briefText}
+ALLOWED REGIONS: ${regions.join(', ')} — never name a region outside them; code trims out-of-region names from the proposal before the trial.
+LANGUAGES of the asked countries (use them in searchQueries): ${languages}. Every listing row must pass the hard criteria above (kind, price cap, region, exclusions) plus the per-listing checks code applies (sea distance, workable months, not gone).
+`
+    : '';
   const refused = stall?.refusedRemovals?.length ? `\nREMOVALS ALREADY TESTED AND REFUSED (never propose them again): ${stall.refusedRemovals.join(', ')}` : '';
-  const stalled = stall?.stalled ? `\nTHE LOOP IS STALLED: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h kept nothing.${stall.weakest ? ` The weakest expected-result check is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%.` : ''} Removing or re-wording pieces has not raised the score. Propose a change that brings NEW evidence for that check: exact public pages to read (sourceUrls), local-language queries, a source type not used yet, or a region not covered yet.` : '';
+  const stallTarget = stall?.weakest
+    ? ` The lowest expected-result check below 100% is "${stall.weakest.label}" at ${Math.round(stall.weakest.value * 100)}%.`
+    : stall?.failingPieces?.length
+      ? ` Every expected-result check is at 100%, but these pieces do not pass: ${stall.failingPieces.join(', ')}.`
+      : '';
+  const stalled = stall?.stalled ? `\nTHE LOOP IS STALLED: ${stall.trialsSinceKept} trials in ${stall.hoursSinceKept} h kept nothing.${stallTarget} Removing or re-wording pieces has not raised the score. Propose a change that brings NEW evidence for what can still gain: exact public pages to read (sourceUrls), local-language queries, a source type not used yet, or a region not covered yet.` : '';
   return [
     { role: 'system', content: SYSTEM },
     {
       role: 'user',
       content: `${TASK_MARKERS.variant}
-You improve ONE piece of a research model so the whole model gets closer to the expected result. A machine will test your change and keep it only if the measured score rises.
+You improve ONE piece of a research model so the whole model gets closer to the expected result. A machine will test your change and keep it only if the measured score rises or it brings new data that serves the purpose below.
 
 QUESTION: ${project.question}
 EXPECTED RESULT: ${project.acceptance?.expected || 'a well-supported decision memo'}
-CURRENT SCORE: ${score.score} (share of verified/supported nodes${score.acceptance !== null ? ` and expected-result checks ${score.acceptance}` : ''}${score.results !== null && score.results !== undefined ? `; results rubric ${score.results}: the share of the decision model's criteria met by the best results, refuted results count 0` : ''})
+${purposeBlock}CURRENT SCORE: ${score.score} (share of verified/supported nodes${score.acceptance !== null ? ` and expected-result checks ${score.acceptance}` : ''}${score.results !== null && score.results !== undefined ? `; results rubric ${score.results}: the share of the decision model's criteria met by the best results, refuted results count 0` : ''})
 EXPECTED-RESULT CHECKS:
 ${acceptanceBlock(project.acceptanceResult)}
 
-${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change. Remove ("remove") a top-level piece only if it duplicates another or asks for the same items again; add ("add") only a piece for a missing criterion or a missing region, never another piece that finds the same items. At most 7 top-level pieces (now ${project.nodes.filter((n) => n.parentId === 'Q').length}); a change that adds duplicates or restates the question is refused by code.` : `PIECE ${node.id} [${node.status}]: ${node.question}
+${isRoot ? `TOP-LEVEL DECOMPOSITION:\n${drivers}\n\nPropose ONE structural change. Remove ("remove") a top-level piece only if it duplicates another or asks for the same items again; add ("add") only a piece for a missing criterion or a missing region of the allowed ones, never another piece that finds the same items. At most 7 top-level pieces (now ${project.nodes.filter((n) => n.parentId === 'Q').length}); a change that adds duplicates or restates the question is refused by code.` : `PIECE ${node.id} [${node.status}]: ${node.question}
 method: ${node.method} · metric: ${node.metric} ${node.unit} · queries: ${node.searchQueries.join(' | ')} · direct pages: ${(node.sourceUrls ?? []).join(' ') || 'none'}
 instructions: ${node.instructions || 'none'}
 answer: ${node.finding?.answer ?? 'none'}
@@ -310,10 +341,10 @@ desired outputs the user set (regression checks; a change that breaks a passing 
 sources it found:
 ${sources}
 
-Propose ONE change to this piece: a sharper question, better search queries (local language helps), exact public pages to read directly (sourceUrls), a different method, extra instructions, or a split into 2-3 smaller pieces ("split").`}
+Propose ONE change to this piece: a sharper question, better search queries (different from the ones already used: new portals or native-language queries for the allowed countries, never the same queries again), exact public pages to read directly (sourceUrls), a different method, extra instructions, or a split into 2-3 smaller pieces ("split") that stay inside the allowed regions.`}
 
 ${playbook ? `${playbook}\n\n` : ''}ALREADY TRIED (do not repeat; code refuses a repeat without testing it):
-${tried}${refused}${stalled}
+${tried}${refused}${usedQueriesBlock}${stalled}
 
 First diagnose: which gate or expected-result check keeps the score down, and why, from the trace above. Then propose the change that answers that diagnosis.
 
