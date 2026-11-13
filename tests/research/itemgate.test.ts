@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { plain, screenItem, screenItems } from '../../src/research/itemgate.mjs';
+import { templateById } from '../../src/research/templates.mjs';
 
 const kind = { label: 'plot of land', terms: ['land', 'terreno', 'arsa', 'parcela'] };
 const options = { valueRange: [0, 20000], unit: 'EUR', kind, convert: (v: number, from: string) => (from === 'USD' ? v * 0.9 : v) };
@@ -190,5 +191,13 @@ describe('item gate: car-only screens only apply to kinds that ask for a sub-typ
     const verdict = screenItem({ title: 'Plot with high growth rate area', url: 'https://www.idealista.pt/imovel/33912346/', value: 12000, unit: 'EUR' }, plotOptions);
     expect(verdict.reasons).not.toContain('an instalment, leasing or deposit ad, not a sale at the full price');
     expect(verdict.ok).toBe(true);
+  });
+
+  it('rejects a furniture ad whose title shares a plot word, on the real glamping template kind', () => {
+    const plotKind = templateById('glamping-location').itemKind;
+    const furniture = { url: 'https://www.olx.pt/d/anuncio/contador-consola-aparador-movel-armario-oriental-olmo-rustico-IDFQRgo.html', title: 'Contador consola aparador móvel armário oriental olmo rústico', value: 450, unit: 'EUR' };
+    const plot = { url: 'https://www.imovirtual.com/pt/anuncio/terreno-rustico-ID1iZBr', title: 'Terreno rústico', value: 18000, unit: 'EUR' };
+    expect(screenItem(furniture, { ...options, kind: plotKind }).reasons).toEqual(['not a plot of land']);
+    expect(screenItem(plot, { ...options, kind: plotKind })).toMatchObject({ ok: true });
   });
 });

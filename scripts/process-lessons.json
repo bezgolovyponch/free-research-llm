@@ -248,5 +248,17 @@
     "signal": "b7772e loop trial 2026-11-13 01:29 recorded kept-data with https://terrenos.es/en/contactar/propietario/422967 (an owner contact form) as a plot that passes every hard criterion",
     "cause": "passingHardRows screened rows by price and region only and never asked whether the URL is a single listing page; looksLikeListing accepted /contactar/ paths with a numeric id",
     "prevention": "passingHardRows requires looksLikeListing; NOT_A_LISTING rejects contact paths in the asked languages (contact, contacto, contactar, contato, contatti, kontakt, iletisim, lien-he)"
+  },
+  {
+    "id": "F19",
+    "title": "an exclusion word was ignored when the page kind was unknown, so a furniture ad passed as a plot",
+    "touches": [
+      "src/research/itemgate.mjs",
+      "src/research/templates.mjs",
+      "tests/research/itemgate.test.ts"
+    ],
+    "signal": "b7772e loop trial 2026-11-13 02:28 kept https://www.olx.pt/d/anuncio/contador-consola-aparador-movel-armario-oriental-olmo-rustico-IDFQRgo.html (a cabinet) as a plot that passes every hard criterion",
+    "cause": "screenItem checked kind.not only when the source page kind was known; otherwise one shared word (rustico) made isKind true; the plot template had no furniture words in kind.not",
+    "prevention": "kind.not exclusions apply on every path; the plot template excludes furniture words (movel, moveis, mueble(s), armario, aparador, consola, mobilya, furniture)"
   }
 ]
