@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { hardChecksPass, qualifies } from '../../src/research/acceptance.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -2102,9 +2103,51 @@ describe('hub search', () => {
     expect(item.checks).toBeDefined();
     expect(item.checks[0].answer).toBe('no');
     expect(item.valid).toBe(false);
-    // hardPass is computed by checklistSummary, not directly on item
     const hardChecks = item.checks.filter((c) => c.hard === true);
     expect(hardChecks.every((c) => c.answer === 'yes')).toBe(false);
+  });
+
+  it('on the first acceptance check, with no checklist yet, an unknown hard item is confirmed on a same-host page and the item becomes valid', async () => {
+    const itemUrl = 'https://shop.example.org/offer/used-goods-ID555';
+    const deepUrl = 'https://shop.example.org/shipping-countries';
+    const checkId = 'ships abroad|Does this ship to other countries?';
+    const search = {
+      ...fakeSearch,
+      async readPage(url: string) {
+        if (url === itemUrl) return { status: 200, text: 'Used goods offer, 40 EUR/kg', links: [{ url: deepUrl, text: 'Shipping countries' }, { url: 'https://elsewhere.example.net/ship', text: 'Shipping countries' }] };
+        if (url === deepUrl) return { status: 200, text: 'We ship to 30 countries across Europe', links: [] };
+        return { status: 404, text: '', links: [] };
+      },
+    };
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo-fast', deep: 'demo-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
+      async chat({ messages, tier }) {
+        const prompt = messages.map((m) => m.content).join('\n');
+        if (prompt.includes('yes/no questions')) {
+          return { content: JSON.stringify({ items: [{ clause: 'ships abroad', question: 'Does this ship to other countries?', hard: true, numeric: null }] }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
+        }
+        if (prompt.includes('Item page text:')) {
+          const reply = prompt.includes('We ship to 30 countries') ? { id: checkId, answer: 'yes', quote: 'We ship to 30 countries' } : { id: checkId, answer: 'unknown', quote: '' };
+          return { content: JSON.stringify([reply]), model: 'demo-fast', provider: 'demo', usage: {} };
+        }
+        return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
+      },
+    };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2, modeler: new ChecklistModeler({ router, samples: 3 }) });
+    const project = await engine.createProject({ question: 'Find used goods sellers that ship to other countries' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 1, valueRange: [0, 50], unit: 'EUR/kg' } });
+    project.candidates = { kept: [{ title: 'Seller A', url: itemUrl, value: 40, unit: 'EUR/kg', price: 40, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits', why: [], risks: [] } }], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
+    project.brief = { located: true, kind: { label: 'used goods seller', terms: ['used goods'] }, regions: [] };
+    project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    expect(project.checklist).toBeUndefined();
+    await engine.checkAcceptance(project);
+    const item = project.acceptanceResult!.items[0];
+    expect(item.checks.find((c) => c.id === checkId)).toMatchObject({ answer: 'yes', quote: 'We ship to 30 countries', source: deepUrl });
+    expect(hardChecksPass(item)).toBe(true);
+    expect(item.valid).toBe(qualifies(item, project.acceptance));
   });
 
   it('an item beyond the first 30 / with no checks keeps today\'s validity', async () => {

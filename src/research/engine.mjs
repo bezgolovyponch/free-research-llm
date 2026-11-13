@@ -1496,10 +1496,10 @@ export class ResearchEngine {
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage, convert });
-    const checklist = project.checklist;
-    const checkCache = project.checkCache ?? {};
+    project.checkCache = project.checkCache ?? {};
+    const checkCache = project.checkCache;
 
-    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist, readPage, checkCache });
+    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
 
     if (project.acceptanceResult?.items?.length && this.modeler && readPage) {
       const newChecklist = project.checklist ?? (await this.modeler.build(project.question, project.guidance ?? ''));
@@ -1530,20 +1530,18 @@ export class ResearchEngine {
       }
     }
 
-    if (checklist && readPage && project.acceptanceResult?.items?.length) {
+    if (project.checklist && readPage && project.acceptanceResult?.items?.length) {
       const deeperReader = new DeeperReader({ judge: this.checklistJudge, readPage });
       for (const item of project.acceptanceResult.items) {
         if (item.checks) {
-          await deeperReader.readDeeperForUnknown(item, checklist, checkCache);
+          await deeperReader.readDeeperForUnknown(item, project.checklist, project.checkCache);
         }
       }
     }
 
     if (project.acceptanceResult) {
-      this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, checklist);
+      this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, project.checklist);
     }
-
-    project.checkCache = checkCache;
 
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);

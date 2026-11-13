@@ -27,6 +27,12 @@ async function findRelevantLinks(links, itemUrl, keyWords, max = 3) {
   return [...new Set(relevant)].slice(0, max);
 }
 
+function onlyCheck(checklist, checkId) {
+  return checklist
+    .map((cluster) => ({ ...cluster, items: cluster.items.filter((ci) => `${cluster.clause}|${ci.question}` === checkId) }))
+    .filter((cluster) => cluster.items.length > 0);
+}
+
 export class DeeperReader {
   constructor({ judge, readPage } = {}) {
     this.judge = judge;
@@ -37,13 +43,12 @@ export class DeeperReader {
     const checks = item.checks ?? [];
     const unknownHard = checks.filter((c) => c.hard === true && c.answer === 'unknown');
     if (unknownHard.length === 0) return item;
-    const pageText = item.pageText ?? '';
-    if (!pageText) return item;
-    const links = item.links ?? [];
+    const page = await this.readPage(item.url).catch(() => null);
+    const links = page?.links ?? [];
+    if (links.length === 0) return item;
     for (const check of unknownHard) {
       const keyWords = extractKeyWords(check.clause + ' ' + check.id.split('|').pop());
       const relevantUrls = await findRelevantLinks(links, item.url, keyWords);
-      let foundYes = false;
       for (const url of relevantUrls) {
         const cacheKey = `${url}::${check.id}`;
         let deeperChecks;
@@ -52,7 +57,7 @@ export class DeeperReader {
         } else {
           const deeperPage = await this.readPage(url).catch(() => null);
           if (!deeperPage?.text) continue;
-          deeperChecks = await this.judge.judge({ url }, deeperPage.text, checklist);
+          deeperChecks = await this.judge.judge({ url }, deeperPage.text, onlyCheck(checklist, check.id));
           cache[cacheKey] = deeperChecks;
         }
         const deeperCheck = deeperChecks.find((c) => c.id === check.id);
@@ -60,7 +65,6 @@ export class DeeperReader {
           check.answer = 'yes';
           check.quote = deeperCheck.quote ?? '';
           check.source = url;
-          foundYes = true;
           break;
         }
       }
