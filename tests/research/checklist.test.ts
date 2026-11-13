@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, judgeItem, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck } from '../../src/research/checklist.mjs';
+import { clusterChecklist, judgeItem, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint } from '../../src/research/checklist.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -100,14 +100,18 @@ describe('judgeItem', () => {
 describe('checklistSummary', () => {
   it('computes hardPass, unknown, softYes per item', () => {
     const items = [
-      { checks: [{ id: 'a|q', answer: 'yes' }, { id: 'b|q', answer: 'yes' }] },
-      { checks: [{ id: 'a|q', answer: 'yes' }, { id: 'b|q', answer: 'unknown' }] },
-      { checks: [{ id: 'a|q', answer: 'no' }, { id: 'b|q', answer: 'yes' }] },
+      { checks: [{ id: 'a|q', answer: 'yes', hard: true }, { id: 'b|q', answer: 'yes', hard: true }] },
+      { checks: [{ id: 'a|q', answer: 'yes', hard: true }, { id: 'b|q', answer: 'unknown', hard: true }] },
+      { checks: [{ id: 'a|q', answer: 'no', hard: true }, { id: 'b|q', answer: 'yes', hard: true }] },
+      { checks: [{ id: 'a|q', answer: 'yes', hard: false }, { id: 'b|q', answer: 'yes', hard: false }] },
+      { checks: [{ id: 'a|q', answer: 'yes', hard: true }, { id: 'b|q', answer: 'yes', hard: false }] },
     ];
     const summary = checklistSummary(items);
-    expect(summary[0]).toEqual({ hardPass: true, unknown: 0, softYes: 2 });
-    expect(summary[1]).toEqual({ hardPass: false, unknown: 1, softYes: 1 });
-    expect(summary[2]).toEqual({ hardPass: false, unknown: 0, softYes: 1 });
+    expect(summary[0]).toEqual({ hardPass: true, unknown: 0, softYes: 0 });
+    expect(summary[1]).toEqual({ hardPass: false, unknown: 1, softYes: 0 });
+    expect(summary[2]).toEqual({ hardPass: false, unknown: 0, softYes: 0 });
+    expect(summary[3]).toEqual({ hardPass: false, unknown: 0, softYes: 2 });
+    expect(summary[4]).toEqual({ hardPass: true, unknown: 0, softYes: 1 });
   });
 });
 
@@ -220,6 +224,159 @@ describe('applyQuoteCheck', () => {
     const pageText = 'We sell wholesale clothing';
     const result = applyQuoteCheck(replies, pageText);
     expect(result[0].answer).toBe('unknown');
+  });
+});
+
+describe('ChecklistJudge reply binding', () => {
+  const testChecklist = [
+    { clause: 'brand', items: [
+      { clause: 'brand', question: 'Does this carry Barbour?', hard: true, numeric: null },
+      { clause: 'brand', question: 'Does this carry Ralph Lauren?', hard: false, numeric: null },
+    ]},
+  ];
+
+  it('ignores invented reply id not in asked questions', async () => {
+    const router = {
+      complete: async () => ({
+        provider: 'test',
+        data: [
+          { id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' },
+          { id: 'brand|Does this carry Ralph Lauren?', answer: 'yes', quote: 'Ralph Lauren' },
+          { id: 'brand|Does this carry FakeBrand?', answer: 'yes', quote: 'FakeBrand' },
+        ],
+      }),
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com' };
+    const pageText = 'We carry Barbour and Ralph Lauren';
+    const checks = await judge.judge(item, pageText, testChecklist);
+    const ids = checks.map(c => c.id).sort();
+    expect(ids).toEqual([
+      'brand|Does this carry Barbour?',
+      'brand|Does this carry Ralph Lauren?',
+    ]);
+    expect(checks.find(c => c.id === 'brand|Does this carry Barbour?')?.answer).toBe('yes');
+    expect(checks.find(c => c.id === 'brand|Does this carry Ralph Lauren?')?.answer).toBe('yes');
+  });
+
+  it('treats asked id with no reply as unknown', async () => {
+    const router = {
+      complete: async () => ({
+        provider: 'test',
+        data: [
+          { id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' },
+        ],
+      }),
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com' };
+    const pageText = 'We carry Barbour';
+    const checks = await judge.judge(item, pageText, testChecklist);
+    const barbourCheck = checks.find(c => c.id === 'brand|Does this carry Barbour?');
+    const ralphCheck = checks.find(c => c.id === 'brand|Does this carry Ralph Lauren?');
+    expect(barbourCheck?.answer).toBe('yes');
+    expect(ralphCheck?.answer).toBe('unknown');
+  });
+
+  it('treats answer not in yes|no|unknown as unknown', async () => {
+    const router = {
+      complete: async () => ({
+        provider: 'test',
+        data: [
+          { id: 'brand|Does this carry Barbour?', answer: 'maybe', quote: 'Barbour' },
+          { id: 'brand|Does this carry Ralph Lauren?', answer: 'yes', quote: 'Ralph Lauren' },
+        ],
+      }),
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com' };
+    const pageText = 'We carry Barbour and Ralph Lauren';
+    const checks = await judge.judge(item, pageText, testChecklist);
+    const barbourCheck = checks.find(c => c.id === 'brand|Does this carry Barbour?');
+    const ralphCheck = checks.find(c => c.id === 'brand|Does this carry Ralph Lauren?');
+    expect(barbourCheck?.answer).toBe('unknown');
+    expect(ralphCheck?.answer).toBe('yes');
+  });
+
+  it('carries hard and clause through to checks', async () => {
+    const router = {
+      complete: async () => ({
+        provider: 'test',
+        data: [
+          { id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' },
+        ],
+      }),
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com' };
+    const pageText = 'We carry Barbour';
+    const checks = await judge.judge(item, pageText, testChecklist);
+    const barbourCheck = checks.find(c => c.id === 'brand|Does this carry Barbour?');
+    expect(barbourCheck?.hard).toBe(true);
+    expect(barbourCheck?.clause).toBe('brand');
+  });
+});
+
+describe('checklistFingerprint and caching', () => {
+  const testChecklist = [
+    { clause: 'brand', items: [
+      { clause: 'brand', question: 'Does this carry Barbour?', hard: true, numeric: null },
+      { clause: 'brand', question: 'Does this carry Ralph Lauren?', hard: false, numeric: null },
+    ]},
+  ];
+
+  it('produces consistent fingerprint for same checklist', () => {
+    const fp1 = checklistFingerprint(testChecklist);
+    const fp2 = checklistFingerprint(testChecklist);
+    expect(fp1).toBe(fp2);
+    expect(fp1).toContain('brand|Does this carry Barbour?|1|none');
+    expect(fp1).toContain('brand|Does this carry Ralph Lauren?|0|none');
+  });
+
+  it('produces different fingerprint when checklist changes', () => {
+    const fp1 = checklistFingerprint(testChecklist);
+    const modifiedChecklist = [
+      { clause: 'brand', items: [
+        { clause: 'brand', question: 'Does this carry Barbour?', hard: true, numeric: null },
+        { clause: 'brand', question: 'Does this carry Ralph Lauren?', hard: true, numeric: null },
+      ]},
+    ];
+    const fp2 = checklistFingerprint(modifiedChecklist);
+    expect(fp1).not.toBe(fp2);
+  });
+
+  it('cache hit returns cached checks without calling judge', async () => {
+    let callCount = 0;
+    const router = {
+      complete: async () => {
+        callCount++;
+        return {
+          provider: 'test',
+          data: [
+            { id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' },
+          ],
+        };
+      },
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com/item1' };
+    const pageText = 'We carry Barbour';
+
+    const checks1 = await judge.judge(item, pageText, testChecklist);
+    expect(callCount).toBe(1);
+
+    const checkCache = new Map();
+    const fingerprint = checklistFingerprint(testChecklist);
+    const cacheKey = `${item.url}::${fingerprint}`;
+    checkCache.set(cacheKey, { checks: checks1, summary: checklistSummary([{ checks: checks1 }])[0] });
+
+    const cached = checkCache.get(cacheKey);
+    expect(cached).toBeDefined();
+    expect(cached!.checks).toEqual(checks1);
+
+    const checks2 = cached!.checks;
+    expect(checks2).toEqual(checks1);
+    expect(callCount).toBe(1);
   });
 });
 

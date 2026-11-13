@@ -5,7 +5,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
-import { ChecklistJudge, checklistSummary } from './checklist.mjs';
+import { ChecklistJudge, checklistSummary, checklistFingerprint } from './checklist.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -1479,13 +1479,23 @@ export class ResearchEngine {
       const checklist = project.checklist ?? (await this.modeler.build(project.question, project.guidance ?? ''));
       if (checklist) {
         project.checklist = checklist;
+        const fingerprint = checklistFingerprint(checklist);
+        project.checkCache = project.checkCache ?? new Map();
         const itemsToJudge = project.acceptanceResult.items.slice(0, 30);
         for (const item of itemsToJudge) {
+          const cacheKey = `${item.url}::${fingerprint}`;
+          const cached = project.checkCache.get(cacheKey);
+          if (cached) {
+            item.checks = cached.checks;
+            item.checklist = cached.summary;
+            continue;
+          }
           const page = await readPage(item.url).catch(() => null);
           const pageText = page?.text ?? '';
           if (pageText) {
             item.checks = await this.checklistJudge.judge(item, pageText, checklist);
             item.checklist = checklistSummary([item])[0];
+            project.checkCache.set(cacheKey, { checks: item.checks, summary: item.checklist });
           }
         }
       }

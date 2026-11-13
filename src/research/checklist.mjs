@@ -179,16 +179,26 @@ export const MEASURES = {
 export function checklistSummary(items) {
   return items.map((item) => {
     const checks = item.checks ?? [];
-    const hardChecks = checks.filter((c) => c.id.includes('|'));
+    const hardChecks = checks.filter((c) => c.hard === true);
     const hardPass = hardChecks.length > 0 && hardChecks.every((c) => c.answer === 'yes');
     const unknown = checks.filter((c) => c.answer === 'unknown').length;
-    const softYes = checks.filter((c) => c.answer === 'yes').length;
+    const softYes = checks.filter((c) => c.hard !== true && c.answer === 'yes').length;
     return { hardPass, unknown, softYes };
   });
 }
 
+export function checklistFingerprint(checklist) {
+  const parts = [];
+  for (const cluster of checklist) {
+    for (const ci of cluster.items) {
+      parts.push(`${cluster.clause}|${ci.question}|${ci.hard ? 1 : 0}|${ci.numeric ? `${ci.numeric.measure}:${ci.numeric.op}:${ci.numeric.value}:${ci.numeric.unit}` : 'none'}`);
+    }
+  }
+  return parts.sort().join('::');
+}
+
 function checklistPrompt({ question, guidance = '' }) {
-  const sys = 'You turn a research question into a checklist of yes/no questions, one per clause of the question. Each clause can produce multiple items. Answer with JSON only: {"items": [{"clause": "the exact words of the clause from the question", "question": "Does this ...?", "hard": true/false, "numeric": {"measure": "priceEur|coastKm|...", "op": "<=|>=|<|>", "value": 123, "unit": "EUR|km|..."} | null}]}.\n\n- "clause" is a clause from the user\'s question (split by commas, semicolons, "but also", "and also", "so").\n- "question" is a yes/no question that a human could answer by reading a supplier/listing page. Word it as "Does this <kind> ...?" or "Does the page state ...?".\n- "hard" = true when the user stated it as a requirement (must have, required, up to, at least, within). Soft = preference (highest, best, prefer, ratio).\n- "numeric" is present only when the question asks for a measurable quantity that code can verify (price, distance, months, area, etc.). Use only these measures: priceEur, coastKm, beachKm, lakeKm, workableMonths, comfortableMonths, optimalDays, hotDays, hottestC, coldestC, explorePoints, staysNearby, areaM2. When the question gives no number, set value to null. Never invent a number.\n- Each clause must yield at least one item. If a clause has no numeric measure, numeric is null and the question is qualitative.\n- The guidance field may add constraints; treat them as additional clauses.';
+  const sys = 'You turn a research question into a checklist of yes/no questions, one per clause of the question. Each clause can produce multiple items. Answer with JSON only: {"items": [{"clause": "the exact words of the clause from the question", "question": "Does this ...?", "hard": true/false, "numeric": {"measure": "priceEur|coastKm|...", "op": "<=|>=|<|>", "value": 123, "unit": "EUR|km|..."} | null}]}.\n\n- "clause" is a clause from the user\'s question (split by commas, semicolons, "but also", "and also", "so").\n- "question" is a yes/no question that a human could answer by reading the item page. Word it as "Does this <kind> ...?" or "Does the page state ...?".\n- "hard" = true when the user stated it as a requirement (must have, required, up to, at least, within). Soft = preference (highest, best, prefer, ratio).\n- "numeric" is present only when the question asks for a measurable quantity that code can verify (price, distance, months, area, etc.). Use only these measures: priceEur, coastKm, beachKm, lakeKm, workableMonths, comfortableMonths, optimalDays, hotDays, hottestC, coldestC, explorePoints, staysNearby, areaM2. When the question gives no number, set value to null. Never invent a number.\n- Each clause must yield at least one item. If a clause has no numeric measure, numeric is null and the question is qualitative.\n- The guidance field may add constraints; treat them as additional clauses.';
   return [
     { role: 'system', content: sys },
     { role: 'user', content: 'Question: ' + question + (guidance ? '\nGuidance: ' + guidance : '') }
@@ -228,6 +238,7 @@ export class ChecklistJudge {
     }
 
     const checks = [];
+    const askedIds = new Set();
 
     for (const { cluster, item: ci } of numericItems) {
       const m = MEASURES[ci.numeric.measure];
@@ -242,7 +253,9 @@ export class ChecklistJudge {
         }
         quote = `${ci.numeric.measure}: ${val} ${ci.numeric.unit}`;
       }
-      checks.push({ id: cluster.clause + '|' + ci.question, answer, quote });
+      const id = cluster.clause + '|' + ci.question;
+      askedIds.add(id);
+      checks.push({ id, answer, quote, hard: ci.hard, clause: cluster.clause });
     }
 
     if (qualitativeItems.length > 0 && this.router) {
@@ -253,24 +266,44 @@ export class ChecklistJudge {
         hard: ci.hard,
       }));
 
+      for (const q of questions) askedIds.add(q.id);
+
       const prompt = judgePrompt({ questions, pageText: pageTextCut });
-      const reply = await this.router.complete({
-        purpose: 'checklist',
-        tier: 'fast',
-        temperature: 0,
-        messages: prompt,
-      }).catch(() => null);
+      let reply = null;
+      try {
+        reply = await this.router.complete({
+          purpose: 'checklist',
+          tier: 'fast',
+          temperature: 0,
+          messages: prompt,
+        });
+      } catch {
+        reply = null;
+      }
 
       const replies = reply?.data ?? [];
       const validated = applyQuoteCheck(replies, pageTextCut);
+
+      const repliedIds = new Set(validated.map((r) => r.id).filter(Boolean));
+      for (const q of questions) {
+        const reply = validated.find((r) => r.id === q.id);
+        if (reply) {
+          const answer = ['yes', 'no', 'unknown'].includes(reply.answer) ? reply.answer : 'unknown';
+          checks.push({ id: q.id, answer, quote: reply.quote ?? '', hard: q.hard, clause: q.id.split('|')[0] });
+        } else {
+          checks.push({ id: q.id, answer: 'unknown', quote: '', hard: q.hard, clause: q.id.split('|')[0] });
+        }
+      }
+
       for (const r of validated) {
-        checks.push({ id: r.id, answer: r.answer, quote: r.quote ?? '' });
+        if (!askedIds.has(r.id)) continue;
       }
     }
 
     for (const { cluster, item: ci } of qualitativeItems) {
       if (!this.router) {
-        checks.push({ id: cluster.clause + '|' + ci.question, answer: 'unknown', quote: '' });
+        const id = cluster.clause + '|' + ci.question;
+        checks.push({ id, answer: 'unknown', quote: '', hard: ci.hard, clause: cluster.clause });
       }
     }
 
@@ -283,6 +316,6 @@ function judgePrompt({ questions, pageText }) {
   const qText = questions.map((q) => `${q.id}: ${q.question}`).join('\n');
   return [
     { role: 'system', content: sys },
-    { role: 'user', content: `Page text:\n${pageText}\n\nQuestions:\n${qText}` },
+    { role: 'user', content: `Item page text:\n${pageText}\n\nQuestions:\n${qText}` },
   ];
 }
