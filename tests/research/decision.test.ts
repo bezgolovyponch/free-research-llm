@@ -330,9 +330,17 @@ describe('decision model version', () => {
   it('treats a model built under an older logic version as stale so it is rebuilt', async () => {
     const { DecisionModeler, DECISION_MODEL_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
-    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 } } };
+    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] } } };
     expect(modeler.fresh(project)).toBe(false);
     expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, version: DECISION_MODEL_VERSION } })).toBe(true);
+  });
+
+  it('treats a current model with no kind and no criteria as stale so the next run tries again', async () => {
+    const { DecisionModeler, DECISION_MODEL_VERSION } = await import('../../src/research/decision.mjs');
+    const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
+    const empty = { question: 'q', guidance: '', version: DECISION_MODEL_VERSION, agreement: { samples: 3 }, kind: { label: '', terms: [] }, criteria: [], noLimit: [] };
+    expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: empty })).toBe(false);
+    expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: { ...empty, criteria: [{ measure: 'priceEur', op: '<=', value: 1 }] } })).toBe(true);
   });
 });
 
