@@ -21,7 +21,7 @@ const sweep = process.argv.includes('--sweep');
 const project = JSON.parse(await fs.readFile(path.join(ROOT, 'data', 'projects', `${id}.json`), 'utf8'));
 const sitesAt = process.argv.indexOf('--sites');
 const sites = sitesAt > 0 && process.argv[sitesAt + 1] ? new SiteAssessor({ file: path.resolve(process.argv[sitesAt + 1]) }) : null;
-const engine = new ResearchEngine({ router: null, search: sweep || sites ? new SearchService({ backends: [], fetchPages: true }) : null, store: { cache: new Map(), save: async (p) => p }, rates: new ExchangeRates({ fetchImpl: fetch }), sites, onEvent: (_id, e) => { if (e.type === 'candidates') console.log(e.message); } });
+const engine = new ResearchEngine({ router: null, search: sweep || sites || process.argv.includes('--fetch') ? new SearchService({ backends: [], fetchPages: true }) : null, store: { cache: new Map(), save: async (p) => p }, rates: new ExchangeRates({ fetchImpl: fetch }), sites, onEvent: (_id, e) => { if (e.type === 'candidates') console.log(e.message); } });
 const report = await previewMaintenance(engine, project, { sweep });
 const section = (title, rows) => console.log(`\n${title} (${rows.length})${rows.length ? `\n  ${rows.join('\n  ')}` : ''}`);
 console.log(`Dry run for ${id}: nothing is written.`);
