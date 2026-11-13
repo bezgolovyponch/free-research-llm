@@ -293,6 +293,10 @@ export class ModelRouter {
 
   record(entry) {
     const row = { ts: new Date(this.now()).toISOString(), ...entry };
+    if (!row.ok && row.provider && row.provider !== 'router') {
+      const provider = this.providers.find((p) => p.id === row.provider);
+      if (provider?.keyCount !== undefined) row.keys = provider.keyCount;
+    }
     this.ledger.push(row);
     if (this.ledger.length > 500) this.ledger.shift();
     if (row.provider && row.provider !== 'router') {
@@ -341,6 +345,8 @@ export class ModelRouter {
     const restored = [];
     for (const [id, row] of latest) {
       if (row.ok || !this.providers.some((p) => p.id === id)) continue;
+      const provider = this.providers.find((p) => p.id === id);
+      if (provider?.keyCount !== undefined && row.keys !== undefined && provider.keyCount > row.keys) continue;
       const status = Number(/HTTP (\d{3})/.exec(String(row.error ?? ''))?.[1] ?? 0);
       const at = Date.parse(row.ts);
       const badKey = (status === 401 || status === 403) && this.now() - at < BAD_KEY_MS;
@@ -360,6 +366,7 @@ export class ModelRouter {
     const now = this.now();
     for (const [id, list] of byProvider) {
       if (!this.providers.some((p) => p.id === id)) continue;
+      const provider = this.providers.find((p) => p.id === id);
       const calls = list.filter((row) => row.purpose !== 'router');
       const benchRows = list.filter((row) => row.purpose === 'router');
       const recent = calls.filter((row) => {
@@ -370,6 +377,7 @@ export class ModelRouter {
       while (streak < recent.length && recent[recent.length - 1 - streak].ok === false) streak++;
       if (streak < FAILURE_STREAK_BENCH) continue;
       const at = Date.parse(recent[recent.length - 1].ts);
+      if (provider?.keyCount !== undefined && recent[recent.length - 1].keys !== undefined && provider.keyCount > recent[recent.length - 1].keys) continue;
       const benches = benchRows.filter((row) => /failed calls in a row; rests/.test(String(row.error ?? '')) && now - Date.parse(row.ts) <= STREAK_BENCH_MAX_MS && Date.parse(row.ts) < at).length;
       const rest = Math.min(STREAK_BENCH_MS * 2 ** benches, STREAK_BENCH_MAX_MS);
       const until = at + rest;
@@ -451,6 +459,15 @@ export class ModelRouter {
       });
     }
     return snapshot;
+  }
+
+  forgetBench(providerId) {
+    this.failureStreak.delete(providerId);
+    this.timeoutStreak.delete(providerId);
+    this.computeErrorStreak.delete(providerId);
+    this.streakBenches.delete(providerId);
+    this.cooldownUntil.delete(providerId);
+    this.cooldownReason.delete(providerId);
   }
 
   restoreProviderState(snapshot) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { OutcomeBook } from '../../src/llm/outcomes.mjs';
 import { ProviderError } from '../../src/llm/provider.mjs';
+import { PROVIDER_PRESETS } from '../../src/llm/presets.mjs';
 import { COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
@@ -18,6 +19,15 @@ function provider(id: string, replies: Array<string | Error>) {
     describe: () => ({ id }),
   };
 }
+
+describe('NVIDIA preset', () => {
+  it('prefers only the three served models', () => {
+    const nvidia = PROVIDER_PRESETS.find((p) => p.id === 'nvidia');
+    expect(nvidia?.prefer.fast).toEqual(['nvidia/nemotron-3.5-lightning-30b-a3b', 'nvidia/nemotron-3-ultra-550b-a55b', 'mistralai/mistral-large-4-1t-a52b']);
+    expect(nvidia?.prefer.deep).toEqual(['nvidia/nemotron-3-ultra-550b-a55b', 'mistralai/mistral-large-4-1t-a52b', 'nvidia/nemotron-3.5-lightning-30b-a3b']);
+    expect(nvidia?.fallbackModels).toEqual({ fast: 'nvidia/nemotron-3.5-lightning-30b-a3b', deep: 'nvidia/nemotron-3-ultra-550b-a55b' });
+  });
+});
 
 describe('tierTimeoutMs', () => {
   it('gives fast calls a shorter timeout than deep calls', () => {
@@ -1091,5 +1101,81 @@ describe('ModelRouter network outages', () => {
     await expect(router.complete({ messages: [] })).rejects.toBeInstanceOf(NoModelAvailableError);
     await expect(router.complete({ messages: [] })).rejects.toBeInstanceOf(NoModelAvailableError);
     expect(waits).toEqual([]);
+  });
+});
+
+describe('ModelRouter.forgetBench', () => {
+  it('clears all streak and cooldown state for a provider', () => {
+    const router = new ModelRouter({ providers: [], now: () => 1000 });
+    router.failureStreak.set('groq', 5);
+    router.timeoutStreak.set('groq', 1);
+    router.computeErrorStreak.set('groq', 2);
+    router.streakBenches.set('groq', 3);
+    router.cooldownUntil.set('groq', 2000);
+    router.cooldownReason.set('groq', 'daily quota');
+    router.forgetBench('groq');
+    expect(router.failureStreak.has('groq')).toBe(false);
+    expect(router.timeoutStreak.has('groq')).toBe(false);
+    expect(router.computeErrorStreak.has('groq')).toBe(false);
+    expect(router.streakBenches.has('groq')).toBe(false);
+    expect(router.cooldownUntil.has('groq')).toBe(false);
+    expect(router.cooldownReason.has('groq')).toBe(false);
+  });
+});
+
+describe('ModelRouter.restoreCooldowns key count', () => {
+  it('skips restoring a daily-quota bench when the provider now has more keys than the ledger row', () => {
+    const now = Date.parse('2026-11-13T10:00:00Z');
+    const p = (id: string, keyCount: number) => ({ id, ready: true, keyCount, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('groq', 2)], now: () => now });
+    const restored = router.restoreCooldowns([
+      { ts: '2026-11-13T09:00:00Z', provider: 'groq', ok: false, error: 'groq HTTP 402: {"balance_units":0}', keys: 1 },
+    ]);
+    expect(restored).toEqual([]);
+    expect(router.cooldownUntil.has('groq')).toBe(false);
+  });
+
+  it('restores a daily-quota bench when the provider has the same number of keys as the ledger row', () => {
+    const now = Date.parse('2026-11-13T10:00:00Z');
+    const p = (id: string, keyCount: number) => ({ id, ready: true, keyCount, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('groq', 2)], now: () => now });
+    const restored = router.restoreCooldowns([
+      { ts: '2026-11-13T09:00:00Z', provider: 'groq', ok: false, error: 'groq HTTP 402: {"balance_units":0}', keys: 2 },
+    ]);
+    expect(restored).toEqual(['groq']);
+    expect(router.cooldownUntil.get('groq')).toBe(nextUtcMidnight(now));
+    expect(router.cooldownReason.get('groq')).toContain('daily quota');
+  });
+
+  it('restores a daily-quota bench when the ledger row has no keys field', () => {
+    const now = Date.parse('2026-11-13T10:00:00Z');
+    const p = (id: string, keyCount: number) => ({ id, ready: true, keyCount, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('groq', 2)], now: () => now });
+    const restored = router.restoreCooldowns([
+      { ts: '2026-11-13T09:00:00Z', provider: 'groq', ok: false, error: 'groq HTTP 402: {"balance_units":0}' },
+    ]);
+    expect(restored).toEqual(['groq']);
+    expect(router.cooldownUntil.get('groq')).toBe(nextUtcMidnight(now));
+  });
+
+  it('skips restoring a failure-streak bench when the provider now has more keys than the last failed row', () => {
+    const now = Date.parse('2026-11-13T13:21:00Z');
+    const p = (id: string, keyCount: number) => ({ id, ready: true, keyCount, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('sambanova', 2)], now: () => now });
+    const failures = Array.from({ length: 12 }, (_, i) => ({ ts: new Date(now - 60000 - (11 - i) * 60000).toISOString(), provider: 'sambanova', ok: false, error: 'sambanova HTTP 429: model is currently experiencing high traffic', keys: 1 }));
+    const restored = router.restoreCooldowns(failures);
+    expect(restored).toEqual([]);
+    expect(router.cooldownUntil.has('sambanova')).toBe(false);
+  });
+
+  it('restores a failure-streak bench when the provider has the same number of keys as the last failed row', () => {
+    const now = Date.parse('2026-11-13T13:21:00Z');
+    const p = (id: string, keyCount: number) => ({ id, ready: true, keyCount, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('sambanova', 2)], now: () => now });
+    const failures = Array.from({ length: 12 }, (_, i) => ({ ts: new Date(now - 60000 - (11 - i) * 60000).toISOString(), provider: 'sambanova', ok: false, error: 'sambanova HTTP 429: model is currently experiencing high traffic', keys: 2 }));
+    const restored = router.restoreCooldowns(failures);
+    expect(restored).toEqual(['sambanova']);
+    expect(router.cooldownUntil.get('sambanova')).toBe(now - 60000 + 30 * 60 * 1000);
+    expect(router.cooldownReason.get('sambanova')).toBe('12 failed calls in a row before the restart; rests 30 min');
   });
 });

@@ -307,5 +307,20 @@
     "signal": "b7772e kept-data trial 2026-11-13 04:29 (node D8.2.1.1.b.1): detail read '+126 listings from academia.edu, apify.com, bestrealestateplanet.com, ... , 4 pass every hard criterion' while only 4 imovirtual.com plots were kept; a UI that cuts the line shows '+126 listings from academia.edu'; the 05:18 D17 trial showed the same shape with '+232 listings' and 3 fotocasa.es plots kept",
     "cause": "dataGain built the detail string from the fresh rows first and the passing count last, so the leading hosts named rows that were never kept and the kept hosts appeared only after the truncation point",
     "prevention": "the detail leads with the kept rows and the hosts of the passing rows only, then the raw count ('+4 listings that pass every hard criterion (imovirtual.com); 126 new rows found in total', or 'no new listing passes every hard criterion; ...' when none pass); tests/research/improve.test.ts 'collects the new listing rows and keeps only those that pass every hard criterion', 'keeps new passing rows on a reverted text change and logs them in plain words, counting the trial as a gain', 'names the kept listings and their hosts first when most fresh rows come from non-listing hosts (b7772e 2026-11-13 04:29 trial)' and 'names the empty kept set first when no fresh row passes (b7772e 2026-11-13 05:18 trial shape)'"
+  },
+  {
+    "id": "F23",
+    "title": "new keys reach the router; NVIDIA uses models that are still served",
+    "touches": [
+      "src/llm/presets.mjs",
+      "src/llm/ranking.mjs",
+      "src/llm/router.mjs",
+      "src/app.mjs",
+      "tests/llm/router.test.ts",
+      "tests/app.test.ts"
+    ],
+    "signal": "2026-11-13 measurements on build.nvidia.com: meta/llama-3.3-70b-instruct, meta/llama-3.1-8b-instruct → HTTP 410 end of life; openai/gpt-oss-120b, deepseek-ai/deepseek-v3, 01-ai/yi-large → not in /v1/models or 404; openai/gpt-oss-20b → no answer in 120 s; WORK: nvidia/nemotron-3.5-lightning-30b-a3b (JSON in 9 s), nvidia/nemotron-3-ultra-550b-a55b (JSON 5 s), mistralai/mistral-large-4-1t-a52b (8-120 s, unreliable). NVIDIA provider failed 12 calls in a row and rested 60 min with two valid keys. Separately, adding a 2nd GROQ key at 14:30 (POST /api/keys/reload ran; status shows groq keys=2) did not lift the provider bench; groq stayed 'daily quota or credit used up; waits for the daily reset' for ~10 h.",
+    "cause": "NVIDIA preset listed only deprecated/unavailable models. Router's provider-level cooldown/streak maps (cooldownUntil, cooldownReason, failureStreak, streakBenches) keyed by provider id survived reloadKeys; restoreCooldowns re-benched from model-calls ledger on restart without checking if key count had increased.",
+    "prevention": "NVIDIA prefer/fast/deep/fallbackModels updated to three served models. Router.forgetBench(providerId) deletes all provider-level rest/streak state. reloadKeys calls forgetBench for each changed keyEnv and logs lifted benches. restoreCooldowns records provider.keyCount on failed ledger rows and skips restore when current keyCount > row.keys (rows without keys restore as before). Covered by tests/llm/router.test.ts 'ModelRouter.forgetBench', 'ModelRouter.restoreCooldowns key count' and tests/app.test.ts 'App.reloadKeys lifts bench on key change'."
   }
 ]
