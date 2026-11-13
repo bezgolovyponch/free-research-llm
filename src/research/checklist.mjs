@@ -7,6 +7,16 @@ const JACCARD = (a, b) => {
   return union ? [...a].filter((w) => b.has(w)).length / union : 0;
 };
 
+export function applyQuoteCheck(replies, pageText) {
+  return replies.map((r) => {
+    if (!r || typeof r !== 'object') return { ...r, answer: 'unknown', quote: '' };
+    if (r.answer !== 'unknown' && r.quote && !quoteFound(pageText, r.quote)) {
+      return { ...r, answer: 'unknown', quote: '' };
+    }
+    return r;
+  });
+};
+
 export const CHECKLIST_VERSION = 1;
 
 export async function proposeChecklist({ router, question, guidance = '', samples = 3 }) {
@@ -196,4 +206,83 @@ export class ChecklistModeler {
     if (samples.length < 2) return null;
     return clusterChecklist(samples);
   }
+}
+
+export class ChecklistJudge {
+  constructor({ router } = {}) {
+    this.router = router;
+  }
+
+  async judge(item, pageText, checklist) {
+    const numericItems = [];
+    const qualitativeItems = [];
+
+    for (const cluster of checklist) {
+      for (const ci of cluster.items) {
+        if (ci.numeric?.measure && ci.numeric.op && ci.numeric.value !== null && MEASURES[ci.numeric.measure]) {
+          numericItems.push({ cluster, item: ci });
+        } else {
+          qualitativeItems.push({ cluster, item: ci });
+        }
+      }
+    }
+
+    const checks = [];
+
+    for (const { cluster, item: ci } of numericItems) {
+      const m = MEASURES[ci.numeric.measure];
+      const val = m.read(item, {});
+      let answer = 'unknown';
+      let quote = '';
+      if (val !== undefined) {
+        if (compare(val, ci.numeric.op, ci.numeric.value)) {
+          answer = 'yes';
+        } else {
+          answer = 'no';
+        }
+        quote = `${ci.numeric.measure}: ${val} ${ci.numeric.unit}`;
+      }
+      checks.push({ id: cluster.clause + '|' + ci.question, answer, quote });
+    }
+
+    if (qualitativeItems.length > 0 && this.router) {
+      const pageTextCut = String(pageText ?? '').slice(0, 6000);
+      const questions = qualitativeItems.map(({ cluster, item: ci }) => ({
+        id: cluster.clause + '|' + ci.question,
+        question: ci.question,
+        hard: ci.hard,
+      }));
+
+      const prompt = judgePrompt({ questions, pageText: pageTextCut });
+      const reply = await this.router.complete({
+        purpose: 'checklist',
+        tier: 'fast',
+        temperature: 0,
+        messages: prompt,
+      }).catch(() => null);
+
+      const replies = reply?.data ?? [];
+      const validated = applyQuoteCheck(replies, pageTextCut);
+      for (const r of validated) {
+        checks.push({ id: r.id, answer: r.answer, quote: r.quote ?? '' });
+      }
+    }
+
+    for (const { cluster, item: ci } of qualitativeItems) {
+      if (!this.router) {
+        checks.push({ id: cluster.clause + '|' + ci.question, answer: 'unknown', quote: '' });
+      }
+    }
+
+    return checks;
+  }
+}
+
+function judgePrompt({ questions, pageText }) {
+  const sys = 'You are a strict judge. For each question, answer whether the page text supports "yes", "no", or "unknown". Provide a short quote from the page text that directly supports your answer, or empty string if unknown. Answer with JSON only: [{"id": "...", "answer": "yes|no|unknown", "quote": "exact text from page"}]';
+  const qText = questions.map((q) => `${q.id}: ${q.question}`).join('\n');
+  return [
+    { role: 'system', content: sys },
+    { role: 'user', content: `Page text:\n${pageText}\n\nQuestions:\n${qText}` },
+  ];
 }

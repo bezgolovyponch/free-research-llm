@@ -5,6 +5,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
+import { ChecklistJudge, checklistSummary } from './checklist.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -292,6 +293,7 @@ export class ResearchEngine {
     this.listeners = new Map();
     this.running = new Set();
     this.cancelled = new Set();
+    this.checklistJudge = new ChecklistJudge({ router });
   }
 
   subscribe(projectId, listener) {
@@ -1469,8 +1471,26 @@ export class ResearchEngine {
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))])).filter((d) => !isExcludedSurfaceUrl(d.url));
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
-    const checker = new AcceptanceChecker({ readPage: this.cachedPageReader(pages), convert });
+    const readPage = this.cachedPageReader(pages);
+    const checker = new AcceptanceChecker({ readPage, convert });
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project) });
+
+    if (project.acceptanceResult?.items?.length && this.modeler && readPage) {
+      const checklist = project.checklist ?? (await this.modeler.build(project.question, project.guidance ?? ''));
+      if (checklist) {
+        project.checklist = checklist;
+        const itemsToJudge = project.acceptanceResult.items.slice(0, 30);
+        for (const item of itemsToJudge) {
+          const page = await readPage(item.url).catch(() => null);
+          const pageText = page?.text ?? '';
+          if (pageText) {
+            item.checks = await this.checklistJudge.judge(item, pageText, checklist);
+            item.checklist = checklistSummary([item])[0];
+          }
+        }
+      }
+    }
+
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }

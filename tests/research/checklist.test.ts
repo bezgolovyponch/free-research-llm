@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, judgeItem, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler } from '../../src/research/checklist.mjs';
+import { clusterChecklist, judgeItem, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck } from '../../src/research/checklist.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -188,5 +188,124 @@ describe('ChecklistModeler with fake router', () => {
     const modeler = new ChecklistModeler({ router, samples: 3 });
     const checklist = await modeler.build(supplierQuestion, '');
     expect(checklist).toBeNull();
+  });
+});
+
+describe('applyQuoteCheck', () => {
+  it('keeps valid answer with quote found in page', () => {
+    const replies = [{ id: 'a|q', answer: 'yes', quote: 'wholesale' }];
+    const pageText = 'We sell wholesale clothing';
+    const result = applyQuoteCheck(replies, pageText);
+    expect(result[0].answer).toBe('yes');
+    expect(result[0].quote).toBe('wholesale');
+  });
+
+  it('sets answer to unknown when quote not found in page', () => {
+    const replies = [{ id: 'a|q', answer: 'yes', quote: 'Barbour' }];
+    const pageText = 'We sell wholesale clothing';
+    const result = applyQuoteCheck(replies, pageText);
+    expect(result[0].answer).toBe('unknown');
+    expect(result[0].quote).toBe('');
+  });
+
+  it('sets answer to unknown for invalid reply', () => {
+    const replies = [{ id: 'a|q', answer: 'maybe', quote: 'something' }];
+    const pageText = 'We sell wholesale clothing';
+    const result = applyQuoteCheck(replies, pageText);
+    expect(result[0].answer).toBe('unknown');
+  });
+
+  it('sets answer to unknown for missing reply', () => {
+    const replies = [null];
+    const pageText = 'We sell wholesale clothing';
+    const result = applyQuoteCheck(replies, pageText);
+    expect(result[0].answer).toBe('unknown');
+  });
+});
+
+describe('ChecklistJudge with fake router', () => {
+  const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
+  const supplierChecklist = [
+    { clause: 'brands', items: [
+      { clause: 'brands', question: 'Does this carry Barbour?', hard: true, numeric: null },
+      { clause: 'brands', question: 'Does this carry Ralph Lauren?', hard: true, numeric: null },
+    ]},
+    { clause: 'price', items: [
+      { clause: 'price', question: 'Is the price per kg stated?', hard: false, numeric: { measure: 'priceEur', op: '<=', value: 50, unit: 'EUR/kg' } },
+    ]},
+  ];
+
+  it('returns unknown for Barbour when page mentions supplier but not Barbour', async () => {
+    let callCount = 0;
+    const router = {
+      complete: async ({ messages }) => {
+        callCount++;
+        const userMsg = messages.find(m => m.role === 'user')?.content ?? '';
+        expect(userMsg).toContain('Barbour');
+        expect(userMsg).toContain('Ralph Lauren');
+        return {
+          provider: 'test',
+          data: [
+            { id: 'brands|Does this carry Barbour?', answer: 'no', quote: '' },
+            { id: 'brands|Does this carry Ralph Lauren?', answer: 'no', quote: '' },
+          ],
+        };
+      },
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com', value: 40 };
+    const pageText = 'We are a wholesale supplier of clothing';
+    const checks = await judge.judge(item, pageText, supplierChecklist);
+    const barbourCheck = checks.find(c => c.id.includes('Barbour'));
+    expect(barbourCheck).toBeDefined();
+    expect(barbourCheck!.answer).not.toBe('yes');
+    expect(['no', 'unknown']).toContain(barbourCheck!.answer);
+  });
+
+  it('returns unknown for fabricated quote not in page', async () => {
+    let callCount = 0;
+    const router = {
+      complete: async () => {
+        callCount++;
+        return {
+          provider: 'test',
+          data: [
+            { id: 'brands|Does this carry Barbour?', answer: 'yes', quote: 'Barbour jackets available' },
+          ],
+        };
+      },
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com' };
+    const pageText = 'We sell wholesale clothing';
+    const checks = await judge.judge(item, pageText, supplierChecklist);
+    const barbourCheck = checks.find(c => c.id.includes('Barbour'));
+    expect(barbourCheck).toBeDefined();
+    expect(barbourCheck!.answer).toBe('unknown');
+    expect(barbourCheck!.quote).toBe('');
+  });
+
+  it('uses numeric measure for priceEur', async () => {
+    const router = { complete: async () => null };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com', value: 40 };
+    const pageText = 'Price: 40 EUR per kg';
+    const checks = await judge.judge(item, pageText, supplierChecklist);
+    const priceCheck = checks.find(c => c.id.includes('price'));
+    expect(priceCheck).toBeDefined();
+    expect(priceCheck!.answer).toBe('yes');
+    expect(priceCheck!.quote).toContain('priceEur: 40');
+  });
+
+  it('returns no for numeric measure when value exceeds limit', async () => {
+    const router = { complete: async () => null };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com', value: 100 };
+    const pageText = 'Price: 100 EUR per kg';
+    const checks = await judge.judge(item, pageText, supplierChecklist);
+    const priceCheck = checks.find(c => c.id.includes('price'));
+    expect(priceCheck).toBeDefined();
+    expect(priceCheck!.answer).toBe('no');
+    expect(priceCheck!.quote).toContain('priceEur: 100');
   });
 });
