@@ -811,3 +811,36 @@ Asked: "audit entire engine off the app, see how it works with data, scrapes and
 - **Refuted audit findings (not changed):** Pareto layers ranking a missing value best; `lakesNamed`; `tableVerdict` throwing.
 - **Deferred:** cadastral gates grounded in fetched pages (an optional instance check, not a gate; patch kept outside the repo); WebKit e2e tests that time out now and then in CI (a free-model fix weakened the tests and was rejected); Turkish rows show no place (cosmetic, country shown).
 - **Incident, 15:25–15:50 local:** #52 also committed `node_modules` as a symlink (the `node_modules/` ignore rule misses links); deploying it replaced the live app's `node_modules` with a self-link and the app stopped answering (`Cannot find package 'ws'`). Restored with `npm ci` from the lockfile; #58 untracks it and ignores `node_modules` whatever its type. Reviews now check each PR's full file list.
+
+## Session 2026-11-12/13 · Mac handoff from the PC; router upgrade; whole-engine audit (Fable 5.2)
+
+Asked:
+- Carry out the Mac handoff (`START-HERE.md`) on the Windows PC through branches and PRs only.
+- Upgrade routing from evidence: research into routing standards first, then the decision.
+- Audit the whole engine for logic and UI mistakes, fix the definite ones, and write the rest down for the next full audit fix PR. Use Claude Fable 5.2.
+
+- **Prerequisite:** #154 (merged).
+  - `npm run quality` crashed on Windows: `npx` was spawned without a shell. The e2e demo server also inherited the real search keys, so test runs spent search quota and failed the loop test.
+  - Every later commit from the PC depended on this fix.
+- **Handoff, stacked in lesson order, CI green on Node 22 and 24:**
+  - #156: treeaudit listing work (F9).
+  - #158: store journal, snapshots and refusal of silent deletion; its review fix keeps an off-scope researched piece as covered (F10).
+  - #155: audit b2f5b7 verified against main. Claim (a) holds in code but drops nothing; claim (b) holds and is deliberate.
+  - #159: whole-word excluded phrases, so b2f5b7 delivers 3 → 6 suppliers (F11).
+  - #160: region verdict on entity lists (F12).
+  - #157: b7772e losses qualified: VALUE 0, 18 live plots, none lost to the removal.
+  - #161: restore plan: restore nothing, and never `--before` an old time.
+- **Router (#162, F17)**, decided from research on 2023–2026 routing and this app's 1,351 logged calls:
+  - learning per model;
+  - deprecated (410) models retired;
+  - a half-open trial after a bench;
+  - rate limits no longer counted as unreliability.
+- **Audit (this PR, F18):**
+  - Five read-only Fable 5.2 auditors, one per layer (concept, loop, listings, learning, UI), on real data: 70 findings in `docs/audits/engine-audit-2026-11-12.md`.
+  - Three Fable 5.2 fixers reproduced each definite finding with a failing test before fixing it. 38 are fixed here (some in part); the 32 others are the spec for the next PR, together with five new items found while fixing.
+  - Four auditors independently found row A1 again (the headline counted unconfirmed fits).
+  - UI-2 was confirmed on the live app: a foreign Host and Origin got 200.
+- **Fixture hygiene:** a fixture copied from the call log carried the Groq organization id; it is redacted (`org_REDACTED`).
+- **Not done:**
+  - The external verifier was not re-run on live data.
+  - The pieces resting only on assumptions (NEW-5) still need a re-research on the Mac.
