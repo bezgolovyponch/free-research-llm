@@ -388,11 +388,12 @@ export function passingHardRows(rows, brief) {
 export function dataGain(before, after, brief) {
   const fresh = newListingRows(before, after);
   const passing = passingHardRows(fresh, brief);
-  const hosts = [...new Set(fresh.map((r) => hostOf(r.url)).filter(Boolean))].sort();
+  const keptHosts = [...new Set(passing.map((r) => hostOf(r.url)).filter(Boolean))].sort();
+  const kept = passing.length ? `+${passing.length} listings that pass every hard criterion (${keptHosts.join(', ')})` : 'no new listing passes every hard criterion';
   return {
     found: fresh.length,
     passing,
-    detail: `+${fresh.length} listings from ${hosts.join(', ') || 'new sources'}, ${passing.length} pass every hard criterion`,
+    detail: `${kept}; ${fresh.length} new rows found in total`,
   };
 }
 

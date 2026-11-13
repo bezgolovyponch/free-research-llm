@@ -996,11 +996,47 @@ describe('new data that serves the purpose is kept', () => {
     ]);
     expect(gain.found).toBe(4);
     expect(gain.passing.map((r: { url: string }) => r.url)).toEqual(['https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8']);
-    expect(gain.detail).toBe('+4 listings from imovirtual.com, olx.pl, sahibinden.com, 1 pass every hard criterion');
+    expect(gain.detail).toBe('+1 listings that pass every hard criterion (imovirtual.com); 4 new rows found in total');
     expect(passingHardRows(gain.passing, brief)).toHaveLength(1);
     expect(passingHardRows([after.nodes[0].finding.items[2], after.nodes[0].finding.items[3], after.nodes[0].finding.items[4]], brief)).toEqual([]);
     const contactPage = { ...gain.passing[0], url: 'https://terrenos.es/en/contactar/propietario/422967' };
     expect(passingHardRows([contactPage], brief)).toEqual([]);
+  });
+
+  it('names the kept listings and their hosts first when most fresh rows come from non-listing hosts (b7772e 2026-11-13 04:29 trial)', () => {
+    const wideBefore = { nodes: [{ id: 'D8.2.1.1.b.1', parentId: 'Q', status: 'weak', sources: [], finding: { answer: 'none', items: [knownRow] } }] };
+    const wideAfter = { nodes: [{ id: 'D8.2.1.1.b.1', parentId: 'Q', status: 'weak', sources: [], finding: { answer: 'none', items: [
+      knownRow,
+      { title: 'Terreno com contentor', url: 'https://www.imovirtual.com/pt/anuncio/terreno-com-contentor-ID1iYk0', value: 8500, unit: 'EUR', place: 'Ericeira, Portugal' },
+      { title: 'Terreno rústico a venda ideal para pedido de isenção IMT', url: 'https://www.imovirtual.com/pt/anuncio/terreno-rustico-a-venda-ideal-para-pedido-de-isencao-imt-ID1fHtV', value: 12000, unit: 'EUR', place: 'Óbidos, Portugal' },
+      { title: 'Terreno florestal em Belinho de 220m2 não construtivo', url: 'https://www.imovirtual.com/pt/anuncio/terreno-florestal-em-belinho-de-220m2-nao-construtivo-ID1cv3a', value: 6000, unit: 'EUR', place: 'Esposende, Portugal' },
+      { title: 'Terreno para venda Ericeira Portugal', url: 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8', value: 1500, unit: 'EUR', place: 'Ericeira, Portugal' },
+      { title: 'Coastal land price studies in Southern Europe', url: 'https://www.academia.edu/85231471/coastal_land_price_studies' },
+      { title: 'Apify web scraper actors', url: 'https://www.apify.com/actors' },
+      { title: 'Best real estate planet land portal', url: 'https://bestrealestateplanet.com/land-for-sale' },
+    ] } }] };
+    const gain = dataGain(wideBefore, wideAfter, brief);
+    expect(gain.found).toBe(7);
+    expect(gain.passing.map((r: { url: string }) => r.url)).toEqual([
+      'https://www.imovirtual.com/pt/anuncio/terreno-com-contentor-ID1iYk0',
+      'https://www.imovirtual.com/pt/anuncio/terreno-rustico-a-venda-ideal-para-pedido-de-isencao-imt-ID1fHtV',
+      'https://www.imovirtual.com/pt/anuncio/terreno-florestal-em-belinho-de-220m2-nao-construtivo-ID1cv3a',
+      'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8',
+    ]);
+    expect(gain.detail.startsWith('+4 listings that pass every hard criterion (imovirtual.com)')).toBe(true);
+    expect(gain.detail).toBe('+4 listings that pass every hard criterion (imovirtual.com); 7 new rows found in total');
+  });
+
+  it('names the empty kept set first when no fresh row passes (b7772e 2026-11-13 05:18 trial shape)', () => {
+    const noneBefore = { nodes: [{ id: 'D17', parentId: 'Q', status: 'weak', sources: [], finding: { answer: 'none', items: [knownRow] } }] };
+    const noneAfter = { nodes: [{ id: 'D17', parentId: 'Q', status: 'weak', sources: [], finding: { answer: 'none', items: [
+      knownRow,
+      { title: 'Działka na sprzedaż Gdańsk Polska', url: 'https://www.olx.pl/ogloszenie/dzialka-ID5', value: 5000, unit: 'EUR', place: 'Gdańsk, Poland' },
+    ] } }] };
+    const gain = dataGain(noneBefore, noneAfter, brief);
+    expect(gain.found).toBe(1);
+    expect(gain.passing).toEqual([]);
+    expect(gain.detail).toBe('no new listing passes every hard criterion; 1 new rows found in total');
   });
 
   it('merges the passing rows into the research node and never rows that fail a hard criterion', () => {
@@ -1040,7 +1076,7 @@ describe('new data that serves the purpose is kept', () => {
     const base = { at: at(0), nodeId: 'D3', before: 0.3 };
     const result = await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state);
     expect(result).toMatchObject({ kept: true, data: true });
-    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'kept-data', score: 0.3, detail: '+1 listings from imovirtual.com, 1 pass every hard criterion' });
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'kept-data', score: 0.3, detail: '+1 listings that pass every hard criterion (imovirtual.com); 1 new rows found in total' });
     expect(saved.nodes.find((n) => n.id === 'D3')!.question).toBe('permits?');
     expect(saved.nodes.find((n) => n.id === 'D3')!.finding.items.map((i: { url: string }) => i.url)).toContain('https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8');
   });

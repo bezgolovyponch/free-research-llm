@@ -296,5 +296,16 @@
     "signal": "one number told three ways on the same research (b7772e: verdict 273, count 266, proposal 273 'count toward your result'); a memo check that calls the table's own count a contradiction; an API that answers a foreign Host or a cross-site Origin; a loop whose re-measure never re-runs anything",
     "cause": "rules fixed in one stage were not carried to the stages that report the same number (row A1 returned through the verdict text, the proposal, the workbook and the UI), and some defects only show when the whole engine is read layer by layer against real data",
     "prevention": "a periodic whole-engine audit by layer on real data (docs/audits/engine-audit-2026-11-12.md: 70 findings, each fixed only after a failing test on its real input); tests named in the three fix commits, among them candidates 'the verdict headline counts fits that are confirmed', server 'refuses cross-site writes and a foreign Host on this computer', lifecycle 'the re-measure researches the changed piece again'"
+  },
+  {
+    "id": "F22",
+    "title": "a kept-data trial line led with the raw new-row count and its hosts, so a truncated UI showed a gain the kept rows did not support",
+    "touches": [
+      "src/research/improve.mjs",
+      "tests/research/improve.test.ts"
+    ],
+    "signal": "b7772e kept-data trial 2026-11-13 04:29 (node D8.2.1.1.b.1): detail read '+126 listings from academia.edu, apify.com, bestrealestateplanet.com, ... , 4 pass every hard criterion' while only 4 imovirtual.com plots were kept; a UI that cuts the line shows '+126 listings from academia.edu'; the 05:18 D17 trial showed the same shape with '+232 listings' and 3 fotocasa.es plots kept",
+    "cause": "dataGain built the detail string from the fresh rows first and the passing count last, so the leading hosts named rows that were never kept and the kept hosts appeared only after the truncation point",
+    "prevention": "the detail leads with the kept rows and the hosts of the passing rows only, then the raw count ('+4 listings that pass every hard criterion (imovirtual.com); 126 new rows found in total', or 'no new listing passes every hard criterion; ...' when none pass); tests/research/improve.test.ts 'collects the new listing rows and keeps only those that pass every hard criterion', 'keeps new passing rows on a reverted text change and logs them in plain words, counting the trial as a gain', 'names the kept listings and their hosts first when most fresh rows come from non-listing hosts (b7772e 2026-11-13 04:29 trial)' and 'names the empty kept set first when no fresh row passes (b7772e 2026-11-13 05:18 trial shape)'"
   }
 ]
