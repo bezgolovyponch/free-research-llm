@@ -333,6 +333,50 @@ function hostOf(url) {
   }
 }
 
+function groupListingsByEntity(listings) {
+  const byHost = new Map();
+  for (const listing of listings) {
+    if (!listing.url) continue;
+    try {
+      const u = new URL(listing.url);
+      const host = u.hostname.replace(/^www\./, '');
+      const segments = u.pathname.split('/').filter(Boolean);
+      if (segments.length < 2) continue;
+      if (!byHost.has(host)) byHost.set(host, []);
+      byHost.get(host).push({ url: listing.url, title: listing.title, segments });
+    } catch {
+      continue;
+    }
+  }
+
+  const entityGroups = new Map();
+  for (const [host, entries] of byHost) {
+    if (entries.length < 2) continue;
+    let commonLength = entries[0].segments.length;
+    for (const e of entries) {
+      let i = 0;
+      while (i < commonLength && i < e.segments.length && entries[0].segments[i] === e.segments[i]) {
+        i++;
+      }
+      commonLength = i;
+    }
+    if (commonLength < 1) continue;
+    const groups = new Map();
+    for (const e of entries) {
+      if (e.segments.length <= commonLength) continue;
+      const entityKey = e.segments.slice(0, commonLength + 1).join('/');
+      if (!groups.has(entityKey)) groups.set(entityKey, []);
+      groups.get(entityKey).push(e);
+    }
+    for (const [key, group] of groups) {
+      if (group.length >= 2) {
+        entityGroups.set(`${host}/${key}`, group);
+      }
+    }
+  }
+  return entityGroups;
+}
+
 async function readEntityWebsite(profileUrl, readPage) {
   if (!readPage) return null;
   try {
@@ -468,19 +512,17 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
         entitiesAdded++;
       }
       if (entitiesAdded === 0 && page.source.listings?.length) {
-        for (const listing of page.source.listings) {
-          if (!listing.url || !listing.title) continue;
-          const entityHost = hostOf(listing.url);
-          const entityKey = listing.url; // Use full URL as key for listings
-          if (entityMap.has(entityKey)) continue;
+        const entityGroups = groupListingsByEntity(page.source.listings);
+        for (const [entityKey, listings] of entityGroups) {
+          const representative = listings[0];
           const deliverable = {
-            title: text(listing.title, 200),
-            url: listing.url.endsWith('/') ? listing.url : listing.url,
+            title: text(representative.title, 200),
+            url: representative.url.endsWith('/') ? representative.url : representative.url,
             value: null,
             unit: '',
             nodeId: page.node.id,
             evidence: page.url,
-            entity: { name: listing.title, country: '', city: '' }
+            entity: { name: representative.title, country: '', city: '' }
           };
           const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
           if (region) deliverable.region = region.text;

@@ -53,7 +53,6 @@ if (c?.sites) {
   } else for (const r of c.kept.slice(0, 25)) console.log(`  ${r.fit ? r.fit.score.toFixed(2) : ' -  '} | ${r.value ?? '?'} ${r.unit} | ${r.area ?? '?'} m² | sea ${r.site?.coastKm ?? '?'} km | ${r.site?.climate ? `${r.site.climate.workable} workable / ${r.site.climate.comfortable} comfortable months, hottest ${r.site.climate.hottest}°C` : r.siteNote ?? ''} | explore ${r.site ? r.site.beaches + r.site.viewpoints + r.site.attractions + r.site.reserves + r.site.protectedAreas + r.site.hikingRoutes : '?'} | ${r.fit?.zoning ?? ''} | ${r.country} | ${r.url}`);
 }
 
-// Acceptance preview
 const useFetch = process.argv.includes('--fetch');
 const brief = project.brief ?? { located: false, regions: [], kind: null };
 if (!brief.regions?.length && project.area?.countries?.length) brief.regions = project.area.countries;
@@ -62,17 +61,14 @@ const notTerms = [...new Set([...(project.domain?.not ?? []), ...(project.decisi
 const kindLabel = project.decisionModel?.kind?.label ?? brief.kind?.label ?? '';
 const nodesForEntities = [...(project.nodes ?? []), { id: 'hubs', sources: project.hubSources ?? [] }];
 const readPage = useFetch ? engine.cachedPageReader(null) : (url) => {
-  // Try to find page in sweep pages cache
   const sweepPages = project.sweep?.pages ?? [];
   for (const page of sweepPages) {
     if (page.url === url) return Promise.resolve({ text: page.text ?? '', status: 200, listings: page.listings ?? [] });
   }
-  // Try hub sources
   const hubSources = project.hubSources ?? [];
   for (const source of hubSources) {
     if (source.url === url) return Promise.resolve({ text: source.text ?? '', status: 200, listings: source.listings ?? [] });
   }
-  // Try node sources
   for (const node of project.nodes ?? []) {
     for (const source of node.sources ?? []) {
       if (source.url === url) return Promise.resolve({ text: source.text ?? '', status: 200, listings: source.listings ?? [] });
@@ -88,10 +84,10 @@ const deliverables = (brief.located === false
   : (project.candidates ? fromTable : [...fromTable, ...collectNodeDeliverables(project.nodes).filter((d) => !listed.has(d.url))])).filter((d) => !isExcludedSurfaceUrl(d.url));
 
 console.log(`\n--- Acceptance Preview ---`);
-console.log(`deliverables: ${deliverables.length}`);
+console.log(`distinct entities: ${deliverables.length}`);
 if (deliverables.length > 0) {
-  console.log(`first 10 deliverable urls:`);
-  for (const d of deliverables.slice(0, 10)) console.log(`  ${d.url}`);
+  console.log(`sample rows (entity name | url):`);
+  for (const d of deliverables.slice(0, 20)) console.log(`  ${d.title} | ${d.url}`);
 }
 
 if (project.acceptance && (project.acceptance.itemCount || project.acceptance.urlsLive || project.acceptance.valueRange || project.acceptance.mustMention?.length || purposeChecks(project).length)) {
@@ -99,9 +95,11 @@ if (project.acceptance && (project.acceptance.itemCount || project.acceptance.ur
   const checker = new AcceptanceChecker({ readPage, convert });
   const acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project) });
   if (acceptanceResult) {
+    const validItems = acceptanceResult.items.filter((i) => i.live && i.listing && (!project.acceptance.valueRange || i.inRange) && (i.purpose ?? []).every((c) => c.passed)).length;
+    console.log(`\nvalid items (from checker): ${validItems}`);
     const passing = acceptanceResult.checks.filter((c) => c.passed).length;
     const total = acceptanceResult.checks.length;
-    console.log(`\nacceptance: ${Math.round(acceptanceResult.score * 100)}% (${passing}/${total} checks passed)`);
+    console.log(`acceptance: ${Math.round(acceptanceResult.score * 100)}% (${passing}/${total} checks passed)`);
     for (const check of acceptanceResult.checks) {
       console.log(`  ${check.label}: ${Math.round(check.value * 100)}% ${check.passed ? '✓' : '✗'}`);
     }

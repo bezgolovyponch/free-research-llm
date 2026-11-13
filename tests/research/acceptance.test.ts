@@ -676,9 +676,16 @@ describe('entityDeliverables with directory pages', () => {
   it('falls back to parsed listings when directory page has no JSON-LD', async () => {
     const noJsonLdHtml = '<html><body>wholesale second hand clothing bales graded A <div class="listing">Company 1</div></body></html>';
     const listings = Array.from({ length: 10 }, (_, i) => ({
-      url: `https://www.example-dir.com/company/entity-${i}`,
-      title: `Entity ${i + 1}`,
+      url: `https://www.example-dir.com/company/entity-${i}/products/product-a`,
+      title: `Entity ${i + 1} - Product A`,
     }));
+    // Add second product for each entity to satisfy the ≥2 links rule
+    for (let i = 0; i < 5; i++) {
+      listings.push({
+        url: `https://www.example-dir.com/company/entity-${i}/products/product-b`,
+        title: `Entity ${i + 1} - Product B`,
+      });
+    }
     const nodes = [
       {
         id: 'D1',
@@ -697,12 +704,18 @@ describe('entityDeliverables with directory pages', () => {
       kindLabel: 'wholesale clothing provider',
       readPage: async () => ({ text: '', status: 404 }),
     });
-    expect(deliverables).toHaveLength(10);
+    expect(deliverables).toHaveLength(5);
     const titles = deliverables.map((d: { title: string }) => d.title).sort();
-    const expectedTitles = Array.from({ length: 10 }, (_, i) => `Entity ${i + 1}`).sort();
+    const expectedTitles = Array.from({ length: 5 }, (_, i) => `Entity ${i + 1} - Product A`).sort();
     expect(titles).toEqual(expectedTitles);
     const urls = deliverables.map((d: { url: string }) => d.url).sort();
-    expect(urls).toEqual(listings.map((l) => l.url).sort());
+    expect(urls).toEqual([
+      'https://www.example-dir.com/company/entity-0/products/product-a',
+      'https://www.example-dir.com/company/entity-1/products/product-a',
+      'https://www.example-dir.com/company/entity-2/products/product-a',
+      'https://www.example-dir.com/company/entity-3/products/product-a',
+      'https://www.example-dir.com/company/entity-4/products/product-a',
+    ].sort());
     for (const d of deliverables) {
       expect(d.evidence).toBe('https://www.example-dir.com/wholesale-clothing');
       expect(d.nodeId).toBe('D1');
