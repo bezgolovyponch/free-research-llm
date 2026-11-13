@@ -6,6 +6,7 @@ import { ExchangeRates } from '../src/research/rates.mjs';
 import { previewMaintenance } from '../src/research/dryrun.mjs';
 import { SiteAssessor } from '../src/research/site.mjs';
 import { SearchService } from '../src/search/search.mjs';
+import { modelText } from '../src/research/decision.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const id = process.argv[2];
@@ -28,6 +29,10 @@ section('grades changed', report.changes.regraded);
 section('listings removed by the item gate', report.changes.removedItems);
 section('listings taken from pages already read', report.harvested);
 console.log(`\nlistings kept: ${report.itemsKept}`);
+if (project.decisionModel) {
+  console.log(`\n=== Decision Model ===`);
+  console.log(modelText(project.decisionModel));
+}
 if (sweep) {
   const pagesRead = report.project?.sweep?.pagesRead ?? 0;
   const pages = (report.project?.sweep?.pages ?? []).slice(0, pagesRead);

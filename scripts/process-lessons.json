@@ -322,5 +322,19 @@
     "signal": "2026-11-13 measurements on build.nvidia.com: meta/llama-3.3-70b-instruct, meta/llama-3.1-8b-instruct → HTTP 410 end of life; openai/gpt-oss-120b, deepseek-ai/deepseek-v3, 01-ai/yi-large → not in /v1/models or 404; openai/gpt-oss-20b → no answer in 120 s; WORK: nvidia/nemotron-3.5-lightning-30b-a3b (JSON in 9 s), nvidia/nemotron-3-ultra-550b-a55b (JSON 5 s), mistralai/mistral-large-4-1t-a52b (8-120 s, unreliable). NVIDIA provider failed 12 calls in a row and rested 60 min with two valid keys. Separately, adding a 2nd GROQ key at 14:30 (POST /api/keys/reload ran; status shows groq keys=2) did not lift the provider bench; groq stayed 'daily quota or credit used up; waits for the daily reset' for ~10 h.",
     "cause": "NVIDIA preset listed only deprecated/unavailable models. Router's provider-level cooldown/streak maps (cooldownUntil, cooldownReason, failureStreak, streakBenches) keyed by provider id survived reloadKeys; restoreCooldowns re-benched from model-calls ledger on restart without checking if key count had increased.",
     "prevention": "NVIDIA prefer/fast/deep/fallbackModels updated to three served models. Router.forgetBench(providerId) deletes all provider-level rest/streak state. reloadKeys calls forgetBench for each changed keyEnv and logs lifted benches. restoreCooldowns records provider.keyCount on failed ledger rows and skips restore when current keyCount > row.keys (rows without keys restore as before). restoreCooldowns also records the model on failed rows and ignores failures on models no longer selected by the provider when rebuilding failure streaks (rows without model count as today); single-row model-gone restores apply the same model check. Covered by tests/llm/router.test.ts 'ModelRouter.forgetBench', 'ModelRouter.restoreCooldowns key count', 'ModelRouter.restoreCooldowns model-aware streak' and tests/app.test.ts 'App.reloadKeys lifts bench on key change'."
+  },
+  {
+    "id": "F24",
+    "title": "every clause becomes a checked criterion (checklist model)",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/decision.mjs",
+      "scripts/dryrun.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/decision.test.ts"
+    ],
+    "signal": "decision.mjs kept a criterion only if its measure was in MEASURES (price plus plot/glamping quantities) and 2 of 3 samples used the identical measure|op key; result on live researches: suppliers b2f5b7 agreement {samples:3, proposed:0, kept:0}, cars 0c750f proposed 1 kept 0; every clause in decisionModel.missing; so 'proven good quality', 'assortment', named brands, 'engine information', 'usage trends', 'recently posted', 'highest price/value ratio' never checked, acceptance only tested count/live/range/kind",
+    "cause": "the decision model only accepted criteria with measures in MEASURES; clauses without a measurable quantity (brands, quality, assortment, delivery, engine info, posting date, price/value ratio) were dropped into missing and never verified per item",
+    "prevention": "new checklist.mjs module turns each clause into yes/no questions judged per supplier/page; proposeChecklist samples 3x, clusterChecklist groups by clause then meaning (Jaccard >= 0.5), keeps majority; judgeItem checks each question against page text, requires quote evidence; checklistSummary computes hardPass/unknown/softYes; DecisionModeler now builds checklist alongside criteria, stores in decisionModel.checklist, modelText prints it; dryrun shows checklist; MEASURES criteria unchanged for plots regression"
   }
 ]

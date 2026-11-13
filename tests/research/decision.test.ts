@@ -166,13 +166,24 @@ describe('stage 0: the purpose, its value and the needs it implies are chosen by
 
 describe('DecisionModeler: several independent model calls, code decides', () => {
   const reply = (criteria: object[]) => ({ provider: 'p', data: { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria } });
+  const checklistReply = { items: [{ clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] };
 
   it('asks several times with sampling, keeps the agreed criteria and records the case', async () => {
     const calls: { temperature: number; purpose: string }[] = [];
     const answers = [reply([sea, heat]), reply([sea]), null];
+    const checklistAnswers = [checklistReply, checklistReply, checklistReply];
+    let decisionCalls = 0;
+    let checklistCalls = 0;
     const router = { complete: async (req: { temperature: number; purpose: string }) => {
       calls.push(req);
+      if (req.purpose === 'checklist') {
+        const next = checklistAnswers.shift();
+        checklistCalls++;
+        if (!next) throw new Error('quota');
+        return { provider: 'p', data: next };
+      }
       const next = answers.shift();
+      decisionCalls++;
       if (!next) throw new Error('quota');
       return next;
     } };
@@ -180,9 +191,11 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
     const cases = { retrieve: async () => [REFERENCE_CASE], record: async (id: string) => { recorded.push(id); } };
     const project: Record<string, unknown> = { id: 'p9', question, guidance: '', acceptance: { expected: '20 plots' } };
     const model = await new DecisionModeler({ router, cases }).build(project);
-    expect(calls).toHaveLength(3);
-    expect(calls.every((c) => c.purpose === 'decision-model' && c.temperature > 0)).toBe(true);
+    expect(decisionCalls).toBe(3);
+    expect(checklistCalls).toBe(3);
+    expect(calls.every((c) => (c.purpose === 'decision-model' || c.purpose === 'checklist') && c.temperature > 0)).toBe(true);
     expect(model.criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+    expect(model.checklist).toBeDefined();
     expect(model.caseIds).toEqual([REFERENCE_CASE.id]);
     expect(recorded).toEqual(['p9']);
     expect(await new DecisionModeler({ router: { complete: async () => { throw new Error('no call expected'); } } }).build(project)).toBe(model);

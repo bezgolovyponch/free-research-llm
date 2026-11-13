@@ -3,8 +3,9 @@ import { bm25 } from './evidence.mjs';
 import { plain } from './itemgate.mjs';
 import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf, quoteFound } from './strategy.mjs';
+import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 
-export const DECISION_MODEL_VERSION = 2;
+export const DECISION_MODEL_VERSION = 3;
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
 export const CASES_RETRIEVED = 2;
@@ -287,6 +288,16 @@ export function modelText(model) {
   if (model.criteria?.length) lines.push(`Decision model (code measures each listing): ${model.criteria.map((c) => `${MEASURES[c.measure].label} ${c.op} ${c.value} ${MEASURES[c.measure].unit} (${c.source})`).join('; ')}`);
   if (model.noLimit?.length) lines.push(`Asked but no limit stated, so not checked: ${model.noLimit.map((c) => MEASURES[c.measure].label).join('; ')}`);
   if (model.missing?.length) lines.push(`Not modelled yet (no code check): ${model.missing.join('; ')}`);
+  if (model.checklist?.length) {
+    lines.push(`Checklist (each item judged per supplier/page):`);
+    for (const cluster of model.checklist) {
+      for (const item of cluster.items) {
+        const hard = item.hard ? ' [hard]' : '';
+        const numeric = item.numeric ? ` (${item.numeric.measure} ${item.numeric.op} ${item.numeric.value} ${item.numeric.unit})` : '';
+        lines.push(`  - ${cluster.clause}: ${item.question}${hard}${numeric}`);
+      }
+    }
+  }
   return lines.join('\n');
 }
 
@@ -392,6 +403,7 @@ export class DecisionModeler {
     this.router = router;
     this.cases = cases;
     this.samples = samples;
+    this.checklistModeler = new ChecklistModeler({ router, samples });
   }
 
   fresh(project) {
@@ -409,7 +421,8 @@ export class DecisionModeler {
     const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));
     if (samples.length < 2) return project.decisionModel ?? null;
     const model = aggregate(samples, { question, guidance, cases: examples, id: project.id });
-    project.decisionModel = { ...carried(project.decisionModel, model), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString() };
+    const checklist = await this.checklistModeler.build(question, guidance);
+    project.decisionModel = { ...carried(project.decisionModel, model), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION };
     if (this.cases) await this.cases.record(project.id, question, model);
     return project.decisionModel;
   }
