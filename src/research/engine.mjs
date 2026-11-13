@@ -6,7 +6,7 @@ import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, hardCheckPassRate, hardChecksPass, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks, qualifies, softYesCount } from './acceptance.mjs';
 import { ChecklistJudge, checklistSummary, checklistFingerprint } from './checklist.mjs';
-import { runChecksOnItems } from './deeper.mjs';
+import { DeeperReader } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -1531,7 +1531,12 @@ export class ResearchEngine {
     }
 
     if (checklist && readPage && project.acceptanceResult?.items?.length) {
-      await runChecksOnItems(project.acceptanceResult.items, readPage, checklist, checkCache);
+      const deeperReader = new DeeperReader({ judge: this.checklistJudge, readPage });
+      for (const item of project.acceptanceResult.items) {
+        if (item.checks) {
+          await deeperReader.readDeeperForUnknown(item, checklist, checkCache);
+        }
+      }
     }
 
     if (project.acceptanceResult) {

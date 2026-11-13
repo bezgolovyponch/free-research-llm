@@ -1,15 +1,21 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { readDeeperForUnknown, runChecksOnItems } from '../../src/research/deeper.mjs';
+import { DeeperReader } from '../../src/research/deeper.mjs';
 
 const wholesaleChecklist = [
   { clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
 ];
 
-describe('readDeeperForUnknown', () => {
+describe('DeeperReader', () => {
+  let mockJudge;
   let mockReadPage;
+  let deeperReader;
 
   beforeEach(() => {
+    mockJudge = {
+      judge: vi.fn(),
+    };
     mockReadPage = vi.fn();
+    deeperReader = new DeeperReader({ judge: mockJudge, readPage: mockReadPage });
     vi.clearAllMocks();
   });
 
@@ -26,10 +32,11 @@ describe('readDeeperForUnknown', () => {
     const checklist = wholesaleChecklist;
     const cache = {};
 
-    const result = await readDeeperForUnknown(item, mockReadPage, checklist, cache);
+    const result = await deeperReader.readDeeperForUnknown(item, checklist, cache);
 
     expect(result).toBe(item);
     expect(mockReadPage).not.toHaveBeenCalled();
+    expect(mockJudge.judge).not.toHaveBeenCalled();
   });
 
   it('returns item unchanged when no pageText', async () => {
@@ -44,10 +51,11 @@ describe('readDeeperForUnknown', () => {
     const checklist = wholesaleChecklist;
     const cache = {};
 
-    const result = await readDeeperForUnknown(item, mockReadPage, checklist, cache);
+    const result = await deeperReader.readDeeperForUnknown(item, checklist, cache);
 
     expect(result).toBe(item);
     expect(mockReadPage).not.toHaveBeenCalled();
+    expect(mockJudge.judge).not.toHaveBeenCalled();
   });
 
   it('reads deeper pages for unknown hard checks and updates to yes when found', async () => {
@@ -62,16 +70,19 @@ describe('readDeeperForUnknown', () => {
     const checklist = wholesaleChecklist;
     const cache = {};
 
-    mockReadPage
-      .mockResolvedValueOnce({ text: 'We sell wholesale in bulk', status: 200 })
-      .mockResolvedValueOnce({ text: 'Another page', status: 200 });
+    mockReadPage.mockResolvedValueOnce({ text: 'We sell wholesale in bulk', status: 200, links: [] });
+    mockJudge.judge.mockResolvedValueOnce([
+      { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', quote: 'We sell wholesale in bulk', clause: 'wholesale' },
+    ]);
 
-    const result = await readDeeperForUnknown(item, mockReadPage, checklist, cache);
+    const result = await deeperReader.readDeeperForUnknown(item, checklist, cache);
 
     expect(result.checks[0].answer).toBe('yes');
-    expect(result.checks[0].quote).toBe('confirmed on linked page');
+    expect(result.checks[0].quote).toBe('We sell wholesale in bulk');
+    expect(result.checks[0].source).toBe('http://example.com/wholesale-details');
     expect(mockReadPage).toHaveBeenCalledTimes(1);
     expect(mockReadPage).toHaveBeenCalledWith('http://example.com/wholesale-details');
+    expect(mockJudge.judge).toHaveBeenCalledTimes(1);
   });
 
   it('uses cache for deeper page checks', async () => {
@@ -86,16 +97,18 @@ describe('readDeeperForUnknown', () => {
     const checklist = wholesaleChecklist;
     const cache = {
       'http://example.com/wholesale-details::wholesale|Does this sell wholesale?': [
-        { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
+        { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', quote: 'cached quote', clause: 'wholesale' },
       ],
     };
 
     mockReadPage.mockResolvedValue({ text: 'We sell wholesale in bulk', status: 200 });
 
-    const result = await readDeeperForUnknown(item, mockReadPage, checklist, cache);
+    const result = await deeperReader.readDeeperForUnknown(item, checklist, cache);
 
     expect(result.checks[0].answer).toBe('yes');
+    expect(result.checks[0].quote).toBe('cached quote');
     expect(mockReadPage).not.toHaveBeenCalled();
+    expect(mockJudge.judge).not.toHaveBeenCalled();
   });
 
   it('stops at first yes and does not check remaining urls', async () => {
@@ -110,13 +123,15 @@ describe('readDeeperForUnknown', () => {
     const checklist = wholesaleChecklist;
     const cache = {};
 
-    mockReadPage
-      .mockResolvedValueOnce({ text: 'We sell wholesale in bulk', status: 200 })
-      .mockResolvedValueOnce({ text: 'Another page', status: 200 });
+    mockReadPage.mockResolvedValue({ text: 'We sell wholesale in bulk', status: 200, links: [] });
+    mockJudge.judge.mockResolvedValue([
+      { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', quote: 'We sell wholesale in bulk', clause: 'wholesale' },
+    ]);
 
-    await readDeeperForUnknown(item, mockReadPage, checklist, cache);
+    await deeperReader.readDeeperForUnknown(item, checklist, cache);
 
     expect(mockReadPage).toHaveBeenCalledTimes(1);
+    expect(mockJudge.judge).toHaveBeenCalledTimes(1);
   });
 
   it('keeps answer as unknown when no deeper page confirms', async () => {
@@ -131,68 +146,84 @@ describe('readDeeperForUnknown', () => {
     const checklist = wholesaleChecklist;
     const cache = {};
 
-    mockReadPage.mockResolvedValue({ text: 'No details here', status: 200 });
+    mockReadPage.mockResolvedValue({ text: 'No details here', status: 200, links: [] });
+    mockJudge.judge.mockResolvedValue([
+      { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', quote: '', clause: 'wholesale' },
+    ]);
 
-    const result = await readDeeperForUnknown(item, mockReadPage, checklist, cache);
+    const result = await deeperReader.readDeeperForUnknown(item, checklist, cache);
 
     expect(result.checks[0].answer).toBe('unknown');
-  });
-});
-
-describe('runChecksOnItems', () => {
-  let mockReadPage;
-
-  beforeEach(() => {
-    mockReadPage = vi.fn();
-    vi.clearAllMocks();
+    expect(result.checks[0].quote).toBeFalsy();
   });
 
-  it('runs judgeItem on items without checks', async () => {
-    const items = [
-      { url: 'http://example.com/item1', pageText: 'We sell wholesale clothing in bulk', links: [] },
-      { url: 'http://example.com/item2', pageText: 'We sell retail clothing only', links: [] },
-      { url: 'http://example.com/item3', pageText: '', links: [] },
-    ];
+  it('does not go deeper when check answer is no on the item page', async () => {
+    const item = {
+      url: 'http://example.com/item',
+      pageText: 'Main page with wholesale details',
+      links: [{ url: '/wholesale-details', text: 'wholesale details' }],
+      checks: [
+        { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'no', clause: 'wholesale' },
+      ],
+    };
     const checklist = wholesaleChecklist;
-    const checkCache = {};
+    const cache = {};
 
-    await runChecksOnItems(items, mockReadPage, checklist, checkCache);
+    const result = await deeperReader.readDeeperForUnknown(item, checklist, cache);
 
-    expect(items[0].checks).toBeDefined();
-    expect(items[0].checks[0].answer).toBe('yes');
-    expect(items[1].checks).toBeDefined();
-    expect(items[1].checks[0].answer).toBe('unknown');
-    expect(items[2].checks).toBeUndefined();
+    expect(result.checks[0].answer).toBe('no');
+    expect(mockReadPage).not.toHaveBeenCalled();
+    expect(mockJudge.judge).not.toHaveBeenCalled();
   });
 
-  it('skips items that already have checks', async () => {
-    const items = [
-      { url: 'http://example.com/item1', pageText: 'We sell wholesale clothing', links: [], checks: [{ id: 'wholesale|Does this sell wholesale?', answer: 'yes' }] },
-      { url: 'http://example.com/item2', pageText: 'We sell retail clothing only', links: [] },
-    ];
+  it('ignores other-host links', async () => {
+    const item = {
+      url: 'http://example.com/item',
+      pageText: 'Main page with wholesale details',
+      links: [
+        { url: 'http://other-host.com/wholesale', text: 'wholesale details' },
+        { url: '/wholesale-details', text: 'wholesale details' },
+      ],
+      checks: [
+        { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' },
+      ],
+    };
     const checklist = wholesaleChecklist;
-    const checkCache = {};
+    const cache = {};
 
-    await runChecksOnItems(items, mockReadPage, checklist, checkCache);
+    mockReadPage.mockResolvedValue({ text: 'We sell wholesale in bulk', status: 200, links: [] });
+    mockJudge.judge.mockResolvedValue([
+      { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', quote: 'We sell wholesale in bulk', clause: 'wholesale' },
+    ]);
 
-    expect(items[0].checks[0].answer).toBe('yes');
-    expect(items[1].checks).toBeDefined();
-    expect(items[1].checks[0].answer).toBe('unknown');
+    const result = await deeperReader.readDeeperForUnknown(item, checklist, cache);
+
+    expect(result.checks[0].answer).toBe('yes');
+    expect(mockReadPage).toHaveBeenCalledTimes(1);
+    expect(mockReadPage).toHaveBeenCalledWith('http://example.com/wholesale-details');
   });
 
-  it('runs readDeeperForUnknown on items with checks', async () => {
-    const items = [
-      { url: 'http://example.com/item1', pageText: 'Main page with wholesale details', links: [{ url: '/wholesale-details', text: 'wholesale details' }], checks: [{ id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' }] },
-      { url: 'http://example.com/item2', pageText: 'We sell wholesale clothing', links: [], checks: [{ id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' }] },
-    ];
+  it('cache hit = no readPage or judge call', async () => {
+    const item = {
+      url: 'http://example.com/item',
+      pageText: 'Main page with wholesale details',
+      links: [{ url: '/wholesale-details', text: 'wholesale details' }],
+      checks: [
+        { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' },
+      ],
+    };
     const checklist = wholesaleChecklist;
-    const checkCache = {};
+    const cache = {
+      'http://example.com/wholesale-details::wholesale|Does this sell wholesale?': [
+        { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', quote: 'cached quote', clause: 'wholesale' },
+      ],
+    };
 
-    mockReadPage.mockResolvedValue({ text: 'We sell wholesale in bulk', status: 200 });
+    const result = await deeperReader.readDeeperForUnknown(item, checklist, cache);
 
-    await runChecksOnItems(items, mockReadPage, checklist, checkCache);
-
-    expect(mockReadPage).toHaveBeenCalled();
-    expect(items[0].checks[0].answer).toBe('yes');
+    expect(result.checks[0].answer).toBe('yes');
+    expect(result.checks[0].quote).toBe('cached quote');
+    expect(mockReadPage).not.toHaveBeenCalled();
+    expect(mockJudge.judge).not.toHaveBeenCalled();
   });
 });

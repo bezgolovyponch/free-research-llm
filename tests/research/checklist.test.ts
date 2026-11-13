@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, judgeItem, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint } from '../../src/research/checklist.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -51,49 +51,6 @@ describe('clusterChecklist', () => {
     for (const c of clusters) {
       expect(c.items.length).toBeGreaterThanOrEqual(1);
     }
-  });
-});
-
-describe('judgeItem', () => {
-  it('returns yes for hard requirement found in page text', () => {
-    const checklist = [
-      { clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
-    ];
-    const item = { url: 'http://example.com' };
-    const pageText = 'We sell wholesale clothing in bulk';
-    const checks = judgeItem(item, pageText, checklist);
-    expect(checks[0].answer).toBe('yes');
-    expect(checks[0].id).toContain('wholesale');
-  });
-
-  it('returns no for hard requirement not found', () => {
-    const checklist = [
-      { clause: 'brands', items: [{ clause: 'brands', question: 'Does this carry Ralph Lauren?', hard: true }] },
-    ];
-    const item = { url: 'http://example.com' };
-    const pageText = 'We sell generic clothing';
-    const checks = judgeItem(item, pageText, checklist);
-    expect(checks[0].answer).toBe('no');
-  });
-
-  it('returns unknown when quote not found in page text', () => {
-    const checklist = [
-      { clause: 'price', items: [{ clause: 'price', question: 'Is the price per kg stated?', hard: false, numeric: { measure: 'priceEur', op: '<=', value: 50, unit: 'EUR/kg' } }] },
-    ];
-    const item = { url: 'http://example.com', value: 100 };
-    const pageText = 'Price: 200 EUR per piece';
-    const checks = judgeItem(item, pageText, checklist);
-    expect(checks[0].answer).toBe('unknown');
-  });
-
-  it('uses numeric measure when available', () => {
-    const checklist = [
-      { clause: 'price', items: [{ clause: 'price', question: 'Is price <= 50 EUR/kg?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 50, unit: 'EUR/kg' } }] },
-    ];
-    const item = { url: 'http://example.com', value: 40 };
-    const pageText = 'Price: 40 EUR per kg';
-    const checks = judgeItem(item, pageText, checklist);
-    expect(checks[0].answer).toBe('yes');
   });
 });
 

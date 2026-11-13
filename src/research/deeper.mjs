@@ -1,11 +1,4 @@
 import { plain } from './itemgate.mjs';
-import { judgeItem } from './checklist.mjs';
-
-const MIN_LIVE_TEXT = 200;
-
-function text(value, max = 200) {
-  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
-}
 
 function extractKeyWords(question) {
   return plain(question).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
@@ -34,53 +27,44 @@ async function findRelevantLinks(links, itemUrl, keyWords, max = 3) {
   return [...new Set(relevant)].slice(0, max);
 }
 
-export async function readDeeperForUnknown(item, readPage, checklist, cache) {
-  const checks = item.checks ?? [];
-  const unknownHard = checks.filter((c) => c.hard === true && (c.answer === 'unknown' || c.answer === 'no'));
-  if (unknownHard.length === 0) return item;
-  const pageText = item.pageText ?? '';
-  if (!pageText) return item;
-  const links = item.links ?? [];
-  for (const check of unknownHard) {
-    const keyWords = extractKeyWords(check.clause + ' ' + check.id.split('|').pop());
-    const relevantUrls = await findRelevantLinks(links, item.url, keyWords);
-    let foundYes = false;
-    for (const url of relevantUrls) {
-      const cacheKey = `${url}::${check.id}`;
-      let deeperChecks;
-      if (cache[cacheKey]) {
-        deeperChecks = cache[cacheKey];
-      } else {
-        const deeperPage = await readPage(url).catch(() => null);
-        if (!deeperPage?.text) continue;
-        deeperChecks = await judgeItem({ url }, deeperPage.text, checklist);
-        cache[cacheKey] = deeperChecks;
-      }
-      const deeperCheck = deeperChecks.find((c) => c.id === check.id);
-      if (deeperCheck?.answer === 'yes') {
-        foundYes = true;
-        break;
-      }
-    }
-    if (foundYes) {
-      check.answer = 'yes';
-      check.quote = 'confirmed on linked page';
-    }
+export class DeeperReader {
+  constructor({ judge, readPage } = {}) {
+    this.judge = judge;
+    this.readPage = readPage;
   }
-  return item;
-}
 
-export async function runChecksOnItems(items, readPage, checklist, checkCache) {
-  for (const item of items) {
-    if (item.checks) continue;
+  async readDeeperForUnknown(item, checklist, cache) {
+    const checks = item.checks ?? [];
+    const unknownHard = checks.filter((c) => c.hard === true && c.answer === 'unknown');
+    if (unknownHard.length === 0) return item;
     const pageText = item.pageText ?? '';
-    if (pageText) {
-      item.checks = await judgeItem(item, pageText, checklist);
+    if (!pageText) return item;
+    const links = item.links ?? [];
+    for (const check of unknownHard) {
+      const keyWords = extractKeyWords(check.clause + ' ' + check.id.split('|').pop());
+      const relevantUrls = await findRelevantLinks(links, item.url, keyWords);
+      let foundYes = false;
+      for (const url of relevantUrls) {
+        const cacheKey = `${url}::${check.id}`;
+        let deeperChecks;
+        if (cache[cacheKey]) {
+          deeperChecks = cache[cacheKey];
+        } else {
+          const deeperPage = await this.readPage(url).catch(() => null);
+          if (!deeperPage?.text) continue;
+          deeperChecks = await this.judge.judge({ url }, deeperPage.text, checklist);
+          cache[cacheKey] = deeperChecks;
+        }
+        const deeperCheck = deeperChecks.find((c) => c.id === check.id);
+        if (deeperCheck?.answer === 'yes') {
+          check.answer = 'yes';
+          check.quote = deeperCheck.quote ?? '';
+          check.source = url;
+          foundYes = true;
+          break;
+        }
+      }
     }
-  }
-  for (const item of items) {
-    if (item.checks) {
-      await readDeeperForUnknown(item, readPage, checklist, checkCache);
-    }
+    return item;
   }
 }
