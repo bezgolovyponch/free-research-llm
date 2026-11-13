@@ -54,3 +54,55 @@ describe('memo claim check: every number the model wrote, against the verified r
     expect(claimNote(checkMemoClaims({ summary: 'no numbers here' }, candidates))).toBe('');
   });
 });
+
+describe('memo check on a table without tiers (audit 2026-11-12, car research 0c750f)', () => {
+  const car = (title: string, url: string, value: number, price = value, currency = 'CZK') => ({ title, url, value, unit: 'CZK', price, currency, countryCode: currency === 'PLN' ? 'PL' : 'CZ' });
+  const table = {
+    found: 3257,
+    keptCount: 205,
+    toCheckCount: 2546,
+    screenedCount: 506,
+    kept: [
+      car('Motor dacia sandero', 'https://auto.bazos.cz/inzerat/225314130/motor-dacia-sandero.php', 25000),
+      car('Peugeot 207', 'https://www.otomoto.pl/osobowe/oferta/peugeot-207-ID6Ijdpj.html', 33209, 5999, 'PLN'),
+      car('Dacia Sandero 1,2i LPG', 'https://auto.bazos.cz/inzerat/226135083/dacia-sandero-12i-lpg.php', 25000),
+    ],
+  };
+  const report = {
+    modelVerdict: 'GO',
+    summary: 'The dataset contains 205 verified hatchback listings within 300 km of Prague and ≤ 65 000 CZK. This exceeds the required 20 primary and 80 trade‑off listings. Verification of seller reputation is weak (D4), but the volume supports proceeding. The next step is to extract URLs and rank by price/value ratio.',
+    keyNumbers: [
+      { label: 'Total kept listings', value: '205', unit: 'listings', nodeId: 'code' },
+      { label: 'Required primary listings', value: '20', unit: 'listings', nodeId: 'requirement' },
+      { label: 'Required trade‑off listings', value: '80', unit: 'listings', nodeId: 'requirement' },
+      { label: 'Price cap', value: '65000', unit: 'CZK', nodeId: 'requirement' },
+      { label: 'Radius', value: '300', unit: 'km', nodeId: 'requirement' },
+    ],
+  };
+  const asked = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback The list of 20 highest possible price/value ratio to buy, working links, no broken links, verified with the research logic, recently posted, 80 trade offs to confirm and review';
+
+  it('kept count of a table without tiers is supported', () => {
+    const check = checkMemoClaims(report, table, { valueRange: [0, 65000], itemCount: 20, asked })!;
+    const status = Object.fromEntries(check.claims.map((c: { text: string; status: string }) => [c.text, c.status]));
+    expect(status['Total kept listings: 205 listings']).toBe('supported');
+    expect(status['The dataset contains 205 verified hatchback listings']).toBe('supported');
+    expect(check.contradicted.filter((c: { value: number }) => c.value === 205)).toEqual([]);
+    expect(check.basis).toBe('205 listing(s) the table keeps');
+  });
+
+  it('a count the user asked for in their own words is not a contradiction', () => {
+    const check = checkMemoClaims(report, table, { valueRange: [0, 65000], itemCount: 20, asked })!;
+    expect(check.contradicted).toEqual([]);
+    const without = checkMemoClaims(report, table, { valueRange: [0, 65000], itemCount: 20 })!;
+    expect(without.contradicted.map((c: { text: string }) => c.text)).toEqual(['Required trade‑off listings: 80 listings']);
+  });
+
+  it('still contradicts a count the table does not hold', () => {
+    const wrong = checkMemoClaims({ ...report, keyNumbers: [{ label: 'Total kept listings', value: '150', unit: 'listings' }], summary: '' }, table, { itemCount: 20, asked })!;
+    expect(wrong.contradicted.map((c: { text: string }) => c.text)).toEqual(['Total kept listings: 150 listings']);
+  });
+
+  it('keeps prices in another currency out of the euro facts', () => {
+    expect(verifiedFacts(table, { valueRange: [0, 65000] }).eur).toEqual([65000]);
+  });
+});

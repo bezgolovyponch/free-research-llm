@@ -55,6 +55,8 @@ test('results tab shows what was delivered and has its own chat', async ({ page 
   await expect(page.locator('#phasePill')).toContainText('done', { timeout: 40000 });
   await page.locator('.tabs .tab', { hasText: 'Results' }).click();
   await expect(page.locator('#resultsBody')).toContainText('Still weak, and why', { timeout: 40000 });
+  await expect(page.locator('#resultsBody')).toContainText('the answer rests only on assumptions: no claim carries a quote from a fetched source');
+  await expect(page.locator('#resultsBody')).not.toContainText('What the research found');
   await expect(page.locator('#resultsBody')).toContainText('Memo verdict');
   await noSideScroll(page);
   await expect(page.locator('#resultsBody')).toContainText('Best estimate');
@@ -283,6 +285,34 @@ test('share: More → Share explains the one-research link and says when remote 
   await expect(page.locator('#chatScopes [data-scope="app"]')).toHaveCount(1);
   await page.locator('#shareClose').click();
   await expect(box).toBeHidden();
+});
+
+test('results: the headline counts only fits the verifier confirmed, and a GO memo with a met expected result shows no "not settled" notice', async ({ page }) => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const base = await (await page.request.post('/api/projects', { data: { question: 'E2E base research for the counted headline', autoRun: false } })).json();
+  const checks = [{ id: 'sea', label: 'sea within 20 km by e-bike', ok: true, detail: 'sea 19.7 km' }];
+  const fit = (slug: string, rank: number, entry: number, verdict: string) => ({ title: 'Terreno para venda', url: `https://www.imovirtual.com/pt/anuncio/${slug}`, price: entry, currency: 'EUR', value: entry, unit: 'EUR', area: 3080, areaUnit: 'm²', place: 'Vilarinho do Bairro, Anadia, Aveiro', country: 'Portugal', countryCode: 'PT', fit: { hpi: 15.1, zoning: 'not stated' }, verified: { verdict, failed: [], at: '2026-11-12T13:52:18.332Z' }, plan: { tier: 'fits', verdict: 'fits every criterion', why: ['sea 19.7 km: inside the 20 km e-bike ride'], tradeoffs: [], potential: [], risks: [], units: 30, areaM2: 3080, share: 1, entry: { total: entry + 2931, price: entry, tax: 231, taxLabel: 'IMT 5%', tents: 2700, units: 3, excludes: 'permits' }, checks, proposal: { role: verdict === 'confirmed' ? 'primary' : 'secondary', opportunity: 'fits', rank, layer: 1, headline: 'Fits all 1 criteria you set', standsOut: [], confirm: [], confidence: verdict === 'confirmed' ? 'confirmed' : 'measured', confidenceText: verdict === 'confirmed' ? 'confirmed by the external verifier' : 'measured by the app' } } });
+  const kept = [fit('terreno-para-venda-ID1h5zV', 1, 4900, 'confirmed'), fit('terreno-para-venda-ID1icmH', 2, 4620, 'unconfirmed'), fit('terreno-para-venda-ID1icmM', 3, 5000, 'unconfirmed')];
+  const { results: _results, ...stored } = base;
+  const candidates = { found: 3, kept, outside: [], keptCount: 1, tiers: { fits: 3, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, verification: { at: '2026-11-12T13:52:18.332Z', fits: 3, checked: 3, confirmed: 1, refuted: 0, unconfirmed: 2, pending: 0, fitsConfirmed: 1, fitsRefuted: 0, fitsOpen: 2 }, toCheck: [], toCheckCount: 0, screened: {}, screenedCount: 0, examples: [], proposals: { method: 'Pareto layers over the measured values', objectives: [{ id: 'entry', label: 'entry cost', better: 'min' }], sections: [{ id: 'fits', label: 'Fits every criterion', why: 'every criterion you set is measured and met; the ones the external verifier confirmed count toward your result', urls: kept.map((r) => r.url) }], primary: [kept[0].url], secondary: [] } };
+  const memo = (modelVerdict: string) => ({ verdict: `PROVISIONAL (low confidence; 6 pieces to fix, research or clarify) — Decision model: 1 result of the 50 asked fit every check and is confirmed by the external verifier — model memo: ${modelVerdict}`, modelVerdict, summary: '', keyNumbers: [], status: { provisional: true, coverage: 0.4, confidence: 'low', blocking: [], counts: { fix: 0, research: 6, clarify: 0 } } });
+  const project = (id: string, modelVerdict: string) => ({ ...stored, id, question: `E2E counted headline ${modelVerdict}`, phase: 'done', acceptance: { ...stored.acceptance, itemCount: 50 }, acceptanceResult: { score: 1, checks: [{ id: 'count', label: 'At least 50 valid items', value: 1, passed: true }], items: [] }, report: memo(modelVerdict), brief: { kind: { label: 'plot of land', terms: ['plot'] }, regions: ['PT'], text: 'Deliver: plots' }, candidates });
+  await fs.writeFile(path.join(process.env.FRL_E2E_DATA_DIR!, 'e2e-counted-headline-01.json'), JSON.stringify(project('e2e-counted-headline-01', 'GO')));
+  await fs.writeFile(path.join(process.env.FRL_E2E_DATA_DIR!, 'e2e-counted-headline-02.json'), JSON.stringify(project('e2e-counted-headline-02', 'NO-GO')));
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/#p=e2e-counted-headline-01');
+  await page.locator('.tabs .tab', { hasText: 'Results' }).click();
+  await expect(page.locator('#proposals .verdict')).toHaveText('1 result(s) fit every criterion and are confirmed outside the app', { timeout: 20000 });
+  await expect(page.locator('#fitsWaiting')).toContainText('2 more fit every criterion and are not yet confirmed outside the app');
+  await expect(page.locator('#candidateTable')).toContainText('1 fit every criterion and are confirmed');
+  await expect(page.locator('#candidateTable')).toContainText('1 confirmed (1 of them fit every criterion and count)');
+  await expect(page.locator('#resultsBody')).toContainText('100% met');
+  await expect(page.locator('#notSettled')).toHaveCount(0);
+  await page.goto('/#p=e2e-counted-headline-02');
+  await page.reload();
+  await page.locator('.tabs .tab', { hasText: 'Results' }).click();
+  await expect(page.locator('#notSettled')).toContainText('The memo verdict is NO-GO', { timeout: 20000 });
 });
 
 test('results: the sortable table is the list, opportunities filter it, and a selected row opens a docked details panel that replaces the right column and collapses', async ({ page }) => {

@@ -260,6 +260,39 @@ describe('far below its peers is checked, not ranked first', () => {
   });
 });
 
+describe('the verdict counts what counts (audit 2026-11-12, row A1)', () => {
+  const plot = (id: string, tier: string, verdict: string, title = 'Terreno para venda') => ({ title, url: `https://www.imovirtual.com/pt/anuncio/${id}`, plan: { tier }, verified: { verdict } });
+  const waiting = ['terreno-para-venda-ID1icmH', 'terreno-para-venda-ID1icmM', 'terreno-para-venda-ID1irgj', 'terreno-para-venda-ID1ir6G', 'terreno-para-venda-ID1ifaX', 'terreno-para-venda-ID1ir7F', 'terreno-para-venda-ID1hSxw'];
+  const stored = {
+    found: 2950,
+    keptCount: 2,
+    tiers: { fits: 9, 'trade-off': 2, unverified: 2, weak: 1, blocked: 0 },
+    verification: { at: '2026-11-12T13:52:18.332Z', fits: 9, checked: 13, confirmed: 4, refuted: 2, unconfirmed: 7, pending: 0 },
+    kept: [
+      plot('terreno-agricola-novo-em-paiao-figueira-da-foz-ID1j2CF', 'fits', 'confirmed', 'Terreno Agrícola Novo em Paião, Figueira da Foz'),
+      plot('terreno-para-venda-ID1h5zV', 'fits', 'confirmed'),
+      ...waiting.map((id) => plot(id, 'fits', 'unconfirmed')),
+      { title: 'Terreno en Camino de Sotaia', url: 'https://www.pisos.com/comprar/terreno-rafelcofer_centro_urbano-65859308247_525029/', plan: { tier: 'trade-off' }, verified: { verdict: 'confirmed' } },
+      plot('terreno-para-venda-ID1isDS', 'trade-off', 'refuted'),
+      plot('pinhal-com-1-425-m-em-brejal-cabeca-alta-seixo-de-gatoes-montemor-ID1iFtr', 'unverified', 'confirmed', 'Pinhal com 1.425 m² em Brejal – Cabeça Alta, Seixo de Gatões, Montemor'),
+      { title: 'Terreno - Bombarral', url: 'https://www.imovirtual.com/hpr/pt/anuncio/terreno-4-quartos-34-m2-remodelado-ID9P5lli', plan: { tier: 'unverified' }, verified: { verdict: 'refuted' } },
+      { title: 'Tekirdağ Yeni Çiflik De 300m Ful Deniz Manzaralı Satılık Arsalar', url: 'https://www.emlakjet.com/ilan/tekirdag-yeni-ciflik-de-300m-ful-deniz-manzarali-satilik-arsalar-20048143', plan: { tier: 'weak' } },
+    ],
+  };
+
+  it('the verdict headline counts fits that are confirmed', () => {
+    const text = tableVerdict(stored, 50);
+    expect(text).toBe('Decision model: 2 results of the 50 asked fit every check and are confirmed by the external verifier (9 fit: 2 confirmed, 0 refuted, 7 not yet confirmed; only confirmed fits count); 2 trade-offs with their potential; 2 to confirm; 1 weak; 0 blocked by law');
+    expect(text).not.toContain('4 confirmed');
+    expect(Number(/\d+/.exec(text)![0])).toBe(stored.keptCount);
+  });
+
+  it('keeps the plain sentence while no verifier record exists', () => {
+    const { verification: _none, ...unverified } = stored;
+    expect(tableVerdict(unverified, 50)).toBe('Decision model: 9 results of the 50 asked fit every check; 2 trade-offs with their potential; 2 to confirm; 1 weak; 0 blocked by law');
+  });
+});
+
 describe('rows that pass every hard criterion are never set aside or capped (recover-b7772e)', () => {
   const realPlots: Array<[string, string, number]> = [
     ['Terreno com contentor', 'https://www.imovirtual.com/pt/anuncio/terreno-com-contentor-ID1iYk0', 500],

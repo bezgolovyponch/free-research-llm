@@ -190,6 +190,7 @@ export function summaryRows(project, exportedAt = new Date()) {
     ['expected result score', a ? Math.round(a.score * 100) / 100 : ''],
     ...(a?.checks ?? []).map((k) => [`  ${k.label}`, Math.round(k.value * 100) / 100]),
     ['listings found', num(c.found)],
+    ...(c.tiers ? [[v ? 'counted toward the result (fit every check and confirmed)' : 'counted toward the result (fit every check)', num(c.keptCount)]] : []),
     ['fit every check (decision model)', num(t.fits)],
     ['confirmed by the external verifier', v ? v.confirmed : ''],
     ['refuted by the external verifier', v ? v.refuted : ''],

@@ -389,11 +389,16 @@ export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = ''
 
 const identity = (value) => value;
 
-export function inRange(amounts, spec, itemValue, convert = identity) {
+export function inRange(amounts, spec, itemValue, convert = identity, itemUnit = '') {
   const [min, max] = spec.valueRange;
   const wanted = currencyOf(spec.unit);
   const headline = headlinePrice(amounts);
-  if (!headline) return itemValue !== null && itemValue !== undefined && Number(itemValue) >= min && Number(itemValue) <= max;
+  if (!headline) {
+    if (itemValue === null || itemValue === undefined) return false;
+    const from = currencyOf(itemUnit) || wanted;
+    const own = wanted && from !== wanted ? convert(Number(itemValue), from, wanted) : Number(itemValue);
+    return own !== null && own !== undefined && own >= min && own <= max;
+  }
   const value = wanted ? convert(headline.value, headline.currency, wanted) : headline.value;
   return value !== null && value >= min && value <= max;
 }
@@ -487,7 +492,7 @@ export class AcceptanceChecker {
       ...item,
       live,
       listing: located ? looksLikeListing(item.url) : !kind?.terms?.length || kindOnPage(pageText, kind),
-      inRange: spec.valueRange ? live && inRange(amounts, spec, item.value, this.convert) : null,
+      inRange: spec.valueRange ? live && inRange(amounts, spec, item.value, this.convert, item.unit) : null,
       mentions: spec.mustMention.length ? spec.mustMention.filter((m) => pageText.toLowerCase().includes(m.toLowerCase())).length / spec.mustMention.length : null,
       purpose: purpose.map((c) => ({ id: c.id, passed: purposePass(c, pageText, item) })),
     };

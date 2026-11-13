@@ -264,3 +264,26 @@ describe('the sea criterion: asked by the user words, not by a coastal case', ()
     expect(mixed).toMatchObject({ coastal: true, seaImpossible: false, regions: ['CZ', 'PT'] });
   });
 });
+
+describe('2026-11-12 engine audit: site addresses and entity lists', () => {
+  it('a .eu address names no country', () => {
+    const listing = { url: 'https://www.autobazar.eu/detail-aaa/peugeot-308-14-vti-klima-po-stk-klima/AeSL8U3fXrNd/', title: 'Peugeot 308 1.4 VTi, Klíma, po STK, Klíma', place: 'Nitriansky kraj' };
+    const page = { url: 'https://www.autobazar.eu/vysledky/osobne-vozidla/?page=6', country: 'SK' };
+    expect(itemCountry(listing, page)).toEqual({ code: 'SK', by: 'source page' });
+    expect(itemCountry(listing).code).toBe('');
+    expect(sourceCountry({ url: 'https://wiltex.eu/second-hand-clothing/' })).toBe('');
+    expect(regionVerdict({ url: 'https://wiltex.eu/second-hand-clothing/', text: 'Wholesale of second hand clothing.' }, ['CZ'])).toMatchObject({ status: 'outside' });
+    expect(itemCountry({ url: 'https://auto.bazos.cz/inzerat/225314130/motor-dacia-sandero.php', title: 'Motor dacia sandero' })).toEqual({ code: 'CZ', by: 'site address' });
+    expect(itemCountry({ url: 'https://www.autoscout24.de/angebote/skoda-fabia', title: 'Skoda Fabia' }).code).toBe('DE');
+  });
+
+  it('an entity list is not described as listing pages', () => {
+    const stored = { kind: { label: 'wholesale clothing provider', terms: ['wholesale used clothing', 'second hand clothes', 'used clothing wholesale'] }, itemCount: 20, valueRange: null, unit: '', valueFrom: null, regions: ['CZ'], groups: [], narrowed: [], coastal: false, seaImpossible: false, excludes: ['offered for rent', 'offered as a swap', 'wanted ads', 'news, blog or guide pages', 'search or category pages'], located: false };
+    const text = describeBrief(stored);
+    expect(text).not.toContain('listing pages for sale');
+    expect(text).not.toContain('offered for rent');
+    expect(text).not.toContain('Where: Czechia');
+    expect(text).toBe('Deliver: 20 results of the kind "wholesale clothing provider", each with its own website\nUsed in: Czechia (sources may be anywhere)\nExclude: news, blog or guide pages; search or category pages');
+    expect(describeBrief({ ...stored, located: true })).toContain('Deliver: 20 single wholesale clothing provider listing pages for sale\nWhere: Czechia\nExclude: offered for rent');
+  });
+});

@@ -62,6 +62,8 @@ export function ledger(trials = [], nodes = [], type = null) {
 }
 
 export function refusedByLedger(trials, nodes, type, change) {
+  const keptLike = (trials ?? []).some((t) => t.outcome === 'kept' && t.change && (!type || (t.type ?? typeOf(nodes, t.nodeId)) === type) && similarChange(t.change, change) >= LEDGER_SIMILARITY);
+  if (keptLike) return null;
   return ledger(trials, nodes, type).find((b) => b.helpful === 0 && b.harmful >= HARMFUL_LIMIT && b.pieces.length >= 2 && similarChange(b.change, change) >= LEDGER_SIMILARITY) ?? null;
 }
 

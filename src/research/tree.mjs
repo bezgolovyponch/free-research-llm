@@ -178,7 +178,7 @@ export function nextNodeId(nodes, parentId) {
 
 export function progress(nodes) {
   const total = nodes.length;
-  const finished = nodes.filter((n) => ['verified', 'supported', 'weak', 'unsupported', 'failed'].includes(n.status)).length;
+  const finished = nodes.filter((n) => ['verified', 'supported', 'covered', 'weak', 'unsupported', 'failed'].includes(n.status)).length;
   const verified = nodes.filter((n) => ['verified', 'supported'].includes(n.status)).length;
   return { total, finished, verified };
 }

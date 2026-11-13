@@ -156,3 +156,12 @@ describe('valuation columns in the export', () => {
     expect(String(at('value notes'))).toContain('https://forum.example/sandero');
   });
 });
+
+describe('summary sheet (audit 2026-11-12, row A1)', () => {
+  it('summary states the counted number', () => {
+    const counted = { ...project, candidates: { ...project.candidates, keptCount: 1 } };
+    const rows = summaryRows(counted, new Date(Date.UTC(2026, 10, 12, 14)));
+    expect(rows).toContainEqual(['counted toward the result (fit every check and confirmed)', 1]);
+    expect(rows.findIndex((r: unknown[]) => String(r[0]).startsWith('counted toward the result'))).toBeLessThan(rows.findIndex((r: unknown[]) => r[0] === 'fit every check (decision model)'));
+  });
+});

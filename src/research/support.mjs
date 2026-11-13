@@ -131,6 +131,14 @@ export function isStale(claim, finding, node) {
   return claim?.support?.version !== SUPPORT_LOGIC_VERSION && claimsToCheck(finding, node).includes(claim);
 }
 
+export function unanswered(claim, finding, node) {
+  return claim?.support?.version === SUPPORT_LOGIC_VERSION && claim.support.verdict === 'unchecked' && claimsToCheck(finding, node).includes(claim);
+}
+
+export function needsRecheck(claim, finding, node) {
+  return isStale(claim, finding, node) || unanswered(claim, finding, node);
+}
+
 export function sentencesOf(text) {
   return String(text ?? '').split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length >= SENTENCE_CHARS.min && s.length <= SENTENCE_CHARS.max);
 }
@@ -150,10 +158,11 @@ export function resolveFromSources(claim, sources = []) {
 }
 
 export function supportAudit(nodes = []) {
-  const audit = { version: SUPPORT_LOGIC_VERSION, checked: 0, supported: 0, toConfirm: 0, disagree: 0, stale: 0, queue: [] };
+  const audit = { version: SUPPORT_LOGIC_VERSION, checked: 0, supported: 0, toConfirm: 0, disagree: 0, stale: 0, unanswered: 0, queue: [] };
   for (const node of nodes) {
     for (const claim of node.finding?.claims ?? []) {
       if (isStale(claim, node.finding, node)) audit.stale += 1;
+      if (unanswered(claim, node.finding, node)) audit.unanswered += 1;
       if (!claim.support) continue;
       audit.checked += 1;
       if (claim.support.verdict === 'supported') audit.supported += 1;

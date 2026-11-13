@@ -61,7 +61,7 @@ export const PROVIDER_PRESETS = [
   },
   {
     id: 'sambanova',
-    label: 'SambaNova Cloud (free tier, ~20 requests/day)',
+    label: 'SambaNova Cloud (free tier)',
     baseURL: 'https://api.sambanova.ai/v1',
     keyEnv: 'SAMBANOVA_API_KEY',
     signup: 'https://cloud.sambanova.ai/apis',

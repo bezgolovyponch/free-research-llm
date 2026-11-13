@@ -515,12 +515,20 @@ export class App {
   async settleStale() {
     const settled = [];
     for (const p of await this.store.list()) {
-      if (!INTERRUPTIBLE_PHASES.has(p.phase) || this.engine.running.has(p.id) || this.improver.isActive(p.id)) continue;
+      if (this.engine.running.has(p.id) || this.improver.isActive(p.id)) continue;
+      const staleRun = INTERRUPTIBLE_PHASES.has(p.phase);
+      if (!staleRun && !p.loop?.active) continue;
       try {
         const project = await this.engine.load(p.id);
-        project.phase = 'cancelled';
-        this.engine.emit(project, 'phase', 'cancelled (the app stopped while it ran; press Run to continue)');
-        await this.store.save(project, { reason: 'stale run settled at start' });
+        if (project.improve?.active) {
+          project.improve = { ...project.improve, active: false, stopReason: 'app stopped' };
+          this.engine.emit(project, 'improve-state', 'self-improving loop ended: the app stopped while it ran; press Improve loop to start it again');
+        }
+        if (staleRun) {
+          project.phase = 'cancelled';
+          this.engine.emit(project, 'phase', 'cancelled (the app stopped while it ran; press Run to continue)');
+        }
+        await this.store.save(project, { reason: staleRun ? 'stale run settled at start' : 'stale loop flag settled at start' });
         settled.push(p.id);
       } catch {
         continue;

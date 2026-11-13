@@ -23,7 +23,7 @@ export const CAPABILITY = {
   custom: [3, 'depends on your endpoint'],
   fcc: [4, 'the models the local fcc proxy routes to'],
   cloudflare: [2, 'Llama 3.3 70B fp8, small daily pool'],
-  pollinations: [2, 'small keyless model, 1 reply per 30 s'],
+  pollinations: [2, 'small keyless model, 1 reply per 45 s'],
   ollama: [1, 'a 7–8B model on this computer'],
   llamacpp: [2, 'depends on the model you run'],
   'llamacpp-lan': [3, 'depends on the model the other PC runs'],
@@ -50,6 +50,7 @@ const WEIGHTS = {
 };
 const WINDOW_MS = 24 * 3600 * 1000;
 const MIN_RELIABILITY = 0.5;
+export const RATE_LIMITED = /HTTP 429|HTTP 413|too many requests|rate.?limit|quota|request too large|limit (?:reached|exceeded)/i;
 
 function median(values) {
   if (!values.length) return null;
@@ -74,10 +75,10 @@ export function providerStats(ledger, { now = Date.now(), windowMs = WINDOW_MS }
       }
     } else {
       s.failed++;
-      if (/429|413|quota|rate|limit/i.test(String(row.error ?? ''))) s.rateLimited++;
+      if (RATE_LIMITED.test(String(row.error ?? ''))) s.rateLimited++;
     }
   }
-  return Object.fromEntries(Object.entries(stats).map(([id, s]) => [id, { calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, reliability: (s.ok + 1) / (s.calls + 2), spentMs: s.spentMs, msPerAnswer: s.ok ? s.spentMs / s.ok : null, medianMs: { fast: median(s.ms.fast) ?? median(s.ms.all), deep: median(s.ms.deep) ?? median(s.ms.all) } }]));
+  return Object.fromEntries(Object.entries(stats).map(([id, s]) => [id, { calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, reliability: (s.ok + 1) / (s.calls - s.rateLimited + 2), spentMs: s.spentMs, msPerAnswer: s.ok ? s.spentMs / s.ok : null, medianMs: { fast: median(s.ms.fast) ?? median(s.ms.all), deep: median(s.ms.deep) ?? median(s.ms.all) } }]));
 }
 
 function qualityText(row) {
@@ -99,15 +100,16 @@ function reasonFor(row, role, strategy, rank) {
   return parts.join(' · ');
 }
 
-export function rankRole({ role, strategy, providers, stats, customOrder = [], now = Date.now(), outcomes = null, purposeClass = null, rng = Math.random, paid = null, env = process.env }) {
+export function rankRole({ role, strategy, providers, stats, customOrder = [], now = Date.now(), outcomes = null, purposeClass = null, rng = Math.random, paid = null, env = process.env, modelRole = role }) {
   const cls = purposeClass ?? (role === 'deep' ? 'research' : 'volume');
   const paidIds = new Set(paid ?? paidProviderIds(env));
   const rows = providers.map((p) => {
     const s = stats[p.id] ?? { calls: 0, ok: 0, failed: 0, rateLimited: 0, reliability: 0.5, spentMs: 0, msPerAnswer: null, medianMs: {} };
     const [capability, capabilityBasis] = capabilityOf(p);
-    const posterior = outcomes ? outcomes.posterior(p.id, cls, capability) : { mean: capability / 5, observed: 0, pass: 0, fail: 0 };
-    const draw = outcomes ? outcomes.sample(p.id, cls, capability, rng) : capability / 5;
-    return { id: p.id, label: p.label, model: p[role] ?? null, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, quality: posterior.mean, qualityObserved: posterior.observed, passed: posterior.pass, draw, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, msPerAnswer: s.msPerAnswer ?? null, medianMs: s.medianMs[role] ?? null, paid: paidIds.has(p.id) || p.paid === true || p.preset?.paid === true };
+    const armModel = p[modelRole] ?? null;
+    const posterior = outcomes ? outcomes.posterior(p.id, cls, capability, armModel) : { mean: capability / 5, observed: 0, pass: 0, fail: 0 };
+    const draw = outcomes ? outcomes.sample(p.id, cls, capability, rng, armModel) : capability / 5;
+    return { id: p.id, label: p.label, model: armModel, ready: p.state === 'ready', notReady: p.state === 'ready' ? '' : p.detail || 'not connected', cooling: p.coolingDownMs > 0 ? Math.ceil(p.coolingDownMs / 1000) : 0, coolingReason: p.coolingReason ?? null, capability, capabilityBasis, quality: posterior.mean, qualityObserved: posterior.observed, passed: posterior.pass, draw, reliability: s.reliability, calls: s.calls, ok: s.ok, failed: s.failed, rateLimited: s.rateLimited, msPerAnswer: s.msPerAnswer ?? null, medianMs: s.medianMs[modelRole] ?? null, paid: paidIds.has(p.id) || p.paid === true || p.preset?.paid === true };
   });
   const speedMs = (r) => r.msPerAnswer ?? r.medianMs;
   const timed = rows.map(speedMs).filter((ms) => ms);
@@ -144,13 +146,13 @@ export function routeFor({ strategy, providers, ledger, enabled, customOrder, no
 export const DAILY_LIMITS = {
   groq: { requests: 1000, note: '1,000 requests/day per model' },
   openrouter: { requests: 50, note: '50 requests/day on :free models' },
-  sambanova: { requests: 20, note: '20 requests/day' },
+  sambanova: { note: 'no daily request cap seen: 38 of 38 calls answered on 2026-11-03' },
   cerebras: { tokens: 1000000, note: '1M tokens/day' },
   cloudflare: { note: '10,000 neurons/day (not countable here)' },
   gemini: { note: 'per-model daily limit, shown in AI Studio' },
   mistral: { note: '1B tokens/month per model' },
   cohere: { note: '1,000 calls/month' },
-  pollinations: { note: 'no daily cap; 1 reply per 30 s without a key' },
+  pollinations: { note: 'no daily cap; 1 reply per 45 s without a key' },
   llamacpp: { note: 'unlimited: your own GPU' },
   'llamacpp-lan': { note: 'unlimited: the other PC\'s GPU' },
 };
@@ -227,9 +229,9 @@ function orderBy(rows, compare) {
 
 export function purposePlan({ providers, stats, usage = {}, enabled, outcomes = null, rng = Math.random, paid = null, env = process.env }) {
   const used = providers.filter((p) => enabled.includes(p.id));
-  const rank = (role, purposeClass) => rankRole({ role, strategy: 'balanced', providers: used, stats, outcomes, purposeClass, rng, paid, env });
+  const rank = (role, purposeClass, modelRole = role) => rankRole({ role, strategy: 'balanced', providers: used, stats, outcomes, purposeClass, rng, paid, env, modelRole });
   const topRows = rank('deep', 'top');
-  const deep = rank('deep', 'research');
+  const deep = rank('deep', 'research', 'fast');
   const fast = rank('fast', 'volume');
   const weak = (r) => (r.capability <= 1 && !(r.qualityObserved >= 5 && r.quality >= 0.5) ? 2 : 0) + (r.reliability < 0.5 && r.calls >= 4 ? 1 : 0) + (neverAnswered(r) ? 1 : 0);
   const spent = (r) => ((usage[r.id]?.today?.used ?? 0) >= 0.9 ? 1 : 0);

@@ -1,0 +1,371 @@
+[
+ {
+  "at": "2026-11-04T08:07:54.756Z",
+  "nodeId": "D2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "no-gain",
+  "change": "Switch the source type to a not-yet-used one: the public 'brands we stock'/per-brand catalog pages on the real domains of named Czech and EU second-hand graders/wholesalers (not search pages, not consumer marketplaces), read directly via ex"
+ },
+ {
+  "at": "2026-11-04T08:08:51.622Z",
+  "nodeId": "D1.2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.559,
+  "outcome": "reverted-whole",
+  "change": "Convert the abstract lookup into a direct-page harvest of a not-yet-used source type — public Czech/Central-European B2B wholesale marketplaces and trade directories (e.g. Bazoš, Sbazar, Aukro, Flagma, Europages, Kompass) filtered to second"
+ },
+ {
+  "at": "2026-11-04T08:11:24.479Z",
+  "nodeId": "D1.2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.55,
+  "outcome": "reverted-whole",
+  "change": "Replace the Google-search lookup with a direct-URL harvest of a source type not yet used for this piece — the public per-brand category pages of large European consumer-facing branded second-hand/vintage resale platforms and multi-brand ret"
+ },
+ {
+  "at": "2026-11-04T08:14:26.601Z",
+  "nodeId": "D2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.559,
+  "outcome": "reverted-whole",
+  "change": "Switch the source type to a not-yet-used one — public B2B supplier storefront and product pages on wholesale marketplaces/trade directories (Alibaba, Made-in-China, TradeKey, Europages, Faire) plus named grader domains — and read those conc"
+ },
+ {
+  "at": "2026-11-04T08:16:23.257Z",
+  "nodeId": "D3.1.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "no-gain",
+  "change": "Repurpose D3.1.2 into a direct-page harvest of the public exhibitor/vendor listing pages of European second-hand clothing trade fairs and B2B sourcing events (a source type not yet used), where each exhibitor entry is a named wholesaler/gra"
+ },
+ {
+  "at": "2026-11-04T08:16:49.343Z",
+  "nodeId": "D2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "no-gain",
+  "change": "Replace the Google-search lookup with a direct-URL harvest of the real-domain per-brand/'brands we stock' catalog pages of specific named Czech and EU second-hand graders/wholesalers (not search pages, not consumer marketplaces), using exac"
+ },
+ {
+  "at": "2026-11-04T08:17:53.834Z",
+  "nodeId": "D1.2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.572,
+  "outcome": "reverted-whole",
+  "change": "Replace the Google-search lookup with direct reads of exact, named public per-brand category pages on a source type not yet used for this piece — Czech/Central-European B2B second-hand graders'/wholesalers' own 'brands we stock' and per-bra"
+ },
+ {
+  "at": "2026-11-04T08:18:49.724Z",
+  "nodeId": "D4.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "no-gain",
+  "change": "Convert D4.1 from an unanswerable SKU-count lookup into a direct-page harvest of a source type not yet used — the public brand-filtered product-listing pages of European branded second-hand online outlet/resale platforms and their B2B/whole"
+ },
+ {
+  "at": "2026-11-04T08:20:42.300Z",
+  "nodeId": "D3.1.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.18,
+  "outcome": "reverted-whole",
+  "change": "Repurpose D3.1.2 into a direct-page harvest of the public exhibitor/vendor profile pages of the two largest European second-hand clothing trade fairs (Fashion Revolution-style sourcing events are exhausted, so use the trade-fair exhibitor d"
+ },
+ {
+  "at": "2026-11-04T08:22:13.779Z",
+  "nodeId": "D2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "reverted-whole",
+  "change": "Switch the source type to a not-yet-used one: the public B2B wholesale catalog pages of named European second-hand graders/wholesalers that publish per-brand or 'brands we stock' pages with kg pricing and grades, read directly via exact rea"
+ },
+ {
+  "at": "2026-11-04T08:22:54.835Z",
+  "nodeId": "D1.2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.559,
+  "outcome": "reverted-whole",
+  "change": "Convert the abstract lookup into a direct-page harvest of a not-yet-used source type — the public per-brand and price-per-kg catalog pages of named European branded second-hand graders/wholesalers that ship to Prague — using exact real-doma"
+ },
+ {
+  "at": "2026-11-04T08:26:11.112Z",
+  "nodeId": "D4.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "reverted-piece",
+  "change": "Repurpose D4.1 from an unanswerable SKU-count lookup into a direct-page harvest of a source type not yet used for this piece — the public B2B wholesale catalog/'brands we stock' and price-per-kg pages of named European branded second-hand g"
+ },
+ {
+  "at": "2026-11-04T08:28:05.349Z",
+  "nodeId": "D3.1.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "no-gain",
+  "change": "Repurpose D3.1.2 into a direct-page harvest of a source type not yet used here — the public exhibitor/stand-list and 'brands we stock' pages of Central-European (Czech, Polish, Slovak, German) branded second-hand graders/wholesalers that pu"
+ },
+ {
+  "at": "2026-11-04T08:29:11.485Z",
+  "nodeId": "D1.2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.564,
+  "outcome": "reverted-whole",
+  "change": "Convert the abstract lookup into a direct-page harvest of a source type not yet used for this piece — the public per-brand and price-per-kg catalog pages of named European branded second-hand graders/wholesalers that ship to Prague — using "
+ },
+ {
+  "at": "2026-11-04T08:31:06.388Z",
+  "nodeId": "D4.2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.37,
+  "outcome": "reverted-whole",
+  "change": "Repurpose D4.2.1 into a direct-page harvest of a source type not yet used here — the public B2B wholesale/bale-supplier directory and marketplace listing pages (e.g. second-hand clothing B2B portals and trade directories) that publish per-s"
+ },
+ {
+  "at": "2026-11-04T08:32:23.755Z",
+  "nodeId": "D2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "no-gain",
+  "change": "Replace the Google-search sourceUrls with direct reads of the public per-brand/'brands we stock' and published kg-price/grade pages on the real domains of named European second-hand graders/wholesalers that ship to Prague, using local-langu"
+ },
+ {
+  "at": "2026-11-04T08:33:47.989Z",
+  "nodeId": "D2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "no-gain",
+  "change": "Switch D2.2 to reading the public per-brand and per-supplier catalog pages of B2B second-hand clothing wholesale aggregators/marketplaces (not individual grader sites, not consumer marketplaces, not Google search pages), which host many nam"
+ },
+ {
+  "at": "2026-11-04T08:36:06.640Z",
+  "nodeId": "D3.1.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "reverted-piece",
+  "change": "Switch to a source type not yet used for this piece — the public B2B wholesale catalog pages of named European branded second-hand graders/wholesalers that publish per-brand or per-grade price-per-kg and assortment, read directly via exact "
+ },
+ {
+  "at": "2026-11-04T08:37:11.487Z",
+  "nodeId": "D2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.577,
+  "outcome": "reverted-whole",
+  "change": "Switch to a source type not yet used: the public B2B trade-directory and association member pages of European second-hand clothing exporters/graders (e.g. used-clothing trade associations and B2B export directories), read directly via exact"
+ },
+ {
+  "at": "2026-11-04T08:38:30.269Z",
+  "nodeId": "D2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.278,
+  "outcome": "reverted-whole",
+  "change": "Switch the source type to public B2B trade-directory company profile pages (Europages, Kompass, Faire, and Czech B2B directories) that list second-hand clothing wholesalers with brand and price-per-kg descriptions, giving many live pages th"
+ },
+ {
+  "at": "2026-11-04T08:40:14.826Z",
+  "nodeId": "D2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.564,
+  "outcome": "reverted-whole",
+  "change": "Reframe D2.2 to harvest the public per-brand and per-category catalog pages of named European second-hand clothing graders/wholesalers that DO publish brand lists (Ralph Lauren, Moncler, The North Face, Barbour) with grade and kg price, usi"
+ },
+ {
+  "at": "2026-11-04T08:42:04.805Z",
+  "nodeId": "D1.2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.577,
+  "score": 0.592,
+  "outcome": "kept",
+  "change": "Replace the search-engine lookups with direct reads of exact, named public per-brand catalog pages on a source type not yet used for this piece — the consumer-facing online resale/outlet platforms' own brand-filtered category URLs (Vinted, "
+ },
+ {
+  "at": "2026-11-04T08:43:54.924Z",
+  "nodeId": "D1.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.592,
+  "score": 0.592,
+  "outcome": "no-gain",
+  "change": "Replace the blocked Google-search lookups with direct reads of exact, named public per-brand catalog pages on a source type not yet used for this piece — the consumer-facing online resale/outlet platforms' own brand-filtered category URLs ("
+ },
+ {
+  "at": "2026-11-04T08:46:10.224Z",
+  "nodeId": "D4.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.592,
+  "score": 0.592,
+  "outcome": "reverted-piece",
+  "change": "Repurpose D4.1 from an unanswerable SKU-count lookup into a direct-page harvest of a source type not yet used for this piece — the public per-brand product-listing pages of European branded second-hand online outlet/resale platforms (Vinted"
+ },
+ {
+  "at": "2026-11-04T08:50:46.506Z",
+  "nodeId": "D2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.592,
+  "score": 0.592,
+  "outcome": "reverted-whole",
+  "change": "Replace the Google-search lookups with direct reads of exact, named public per-brand catalog pages on a source type not yet used for this piece — the B2B wholesale marketplaces' own brand-filtered category URLs (e.g. Vinted Pro, Sellpy, Kle"
+ },
+ {
+  "at": "2026-11-04T08:52:44.939Z",
+  "nodeId": "D1.2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.592,
+  "score": 0.592,
+  "outcome": "reverted-whole",
+  "change": "Replace the abstract lookup with a direct-page harvest of a source type not yet used for this piece — the public per-brand catalog pages of consumer resale/outlet platforms (Vinted, Zalando pre-owned, About You outlet, eBay) filtered to Ral"
+ },
+ {
+  "at": "2026-11-04T08:55:00.485Z",
+  "nodeId": "D2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.592,
+  "score": 0.597,
+  "outcome": "kept",
+  "change": "Replace the blocked Google-search lookups with direct reads of the public per-brand category pages on consumer resale/outlet platforms (Vinted, eBay, Zalando Lounge, About You, Remix, Sellpy) whose brand-filtered URLs verbatim name Ralph La"
+ },
+ {
+  "at": "2026-11-04T08:58:20.436Z",
+  "nodeId": "D2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.597,
+  "score": 0.597,
+  "outcome": "reverted-piece",
+  "change": "Repurpose D2.1 from consumer resale platforms to direct reads of the public per-brand/'brands we stock' catalog and published kg-price/grade pages on the real domains of named European branded second-hand graders/wholesalers that ship to Pr"
+ },
+ {
+  "at": "2026-11-04T08:59:35.583Z",
+  "nodeId": "D3.1.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.597,
+  "score": 0.597,
+  "outcome": "reverted-piece",
+  "change": "Replace the search-engine lookups with direct reads of exact, named public per-brand catalog pages on a source type not yet used for this piece — the consumer-facing online resale/outlet platforms' own brand-filtered category URLs (Vinted, "
+ },
+ {
+  "at": "2026-11-04T09:01:41.468Z",
+  "nodeId": "D4.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.597,
+  "score": 0.597,
+  "outcome": "reverted-piece",
+  "change": "Repurpose D4.1 into a direct-page harvest of a not-yet-used source type — the public per-brand category pages of Czech/Central-European brick-and-mortar second-hand retail chains and charity-shop networks (e.g. Textile House, Potex, Genesis"
+ },
+ {
+  "at": "2026-11-04T09:02:55.145Z",
+  "nodeId": "D4.2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.597,
+  "score": 0.597,
+  "outcome": "reverted-piece",
+  "change": "Repurpose D4.2.1 to read the exact public per-brand catalog pages of the four brands' own official outlet/stockist and the named consumer resale platforms' brand-filtered category URLs (Vinted, eBay, Zalando Lounge, Remix, Sellpy), which ve"
+ },
+ {
+  "at": "2026-11-04T09:05:58.866Z",
+  "nodeId": "D2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.597,
+  "score": 0.619,
+  "outcome": "kept",
+  "change": "Replace the Google-search lookups with direct reads of the public per-brand and 'brands we stock' catalog pages on a source type not yet used for this piece — the B2B wholesale marketplaces' own brand-filtered category URLs (e.g. Faire, Ank"
+ },
+ {
+  "at": "2026-11-04T09:07:11.690Z",
+  "nodeId": "D1.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.619,
+  "score": 0.619,
+  "outcome": "no-gain",
+  "change": "Replace the blocked Google-search lookups with direct reads of the public per-brand and 'brands we stock' catalog pages on a source type not yet used for this piece — the B2B wholesale marketplaces' own brand-filtered category URLs (Faire, "
+ },
+ {
+  "at": "2026-11-04T09:09:46.457Z",
+  "nodeId": "D1.2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.619,
+  "score": 0.619,
+  "outcome": "reverted-piece",
+  "change": "Repurpose the piece from consumer Vinted search pages to direct reads of the public per-brand and 'brands we stock' catalogue pages on B2B wholesale marketplaces' own brand-filtered URLs (Faire, Ankorstore, Alibaba), a source type not yet u"
+ },
+ {
+  "at": "2026-11-04T09:10:56.606Z",
+  "nodeId": "D4.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.619,
+  "score": 0.601,
+  "outcome": "reverted-whole",
+  "change": "Repurpose D4.1 from an unanswerable SKU-count lookup into a direct-page harvest of a not-yet-used source type — the public per-brand filtered category pages of European B2B second-hand wholesale marketplaces (Faire, Ankorstore, Alibaba, Eur"
+ },
+ {
+  "at": "2026-11-04T09:14:01.445Z",
+  "nodeId": "D3.1.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.619,
+  "score": 0.619,
+  "outcome": "reverted-piece",
+  "change": "Replace the Google-search lookups with direct reads of the public per-brand catalog pages on a not-yet-used source type — the B2B wholesale marketplaces' own brand-filtered category URLs (Faire, Ankorstore, Alibaba) — so each delivered item"
+ },
+ {
+  "at": "2026-11-04T09:15:18.683Z",
+  "nodeId": "D1.2.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.619,
+  "score": 0.619,
+  "outcome": "no-gain",
+  "change": "Replace the abstract lookup with direct reads of a not-yet-used source type for this piece — the public per-brand catalog and price-list pages of named European branded second-hand graders/wholesalers that ship to Prague (e.g. SOEX, Texaid,"
+ },
+ {
+  "at": "2026-11-04T09:16:52.100Z",
+  "nodeId": "D1.2.2",
+  "type": "sub-question|lookup|fact",
+  "before": 0.619,
+  "score": 0.619,
+  "outcome": "reverted-piece",
+  "change": "Repurpose the piece from consumer Vinted search pages to direct reads of the public per-brand and 'brands we stock' catalogue pages on a not-yet-used source type — the B2B wholesale marketplaces' own brand-filtered category URLs (Faire, Ank"
+ },
+ {
+  "at": "2026-11-04T09:18:04.979Z",
+  "nodeId": "D4.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.619,
+  "score": 0.619,
+  "outcome": "reverted-piece",
+  "change": "Repurpose D4.1 from an unanswerable SKU-count lookup into a direct-page harvest of a not-yet-used source type — the public per-brand category pages of European branded second-hand online outlet/resale platforms (Vinted, eBay, Zalando Lounge"
+ },
+ {
+  "at": "2026-11-04T09:21:22.988Z",
+  "nodeId": "D1.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.619,
+  "score": 0.642,
+  "outcome": "kept",
+  "change": "Replace the blocked Google-search lookups with direct reads of the public per-brand and 'brands we stock' catalog pages on a source type not yet used for this piece — the B2B second-hand clothing wholesale platforms' own brand-filtered cate"
+ },
+ {
+  "at": "2026-11-04T09:23:53.945Z",
+  "nodeId": "D4.1",
+  "type": "sub-question|lookup|fact",
+  "before": 0.642,
+  "score": 0.642,
+  "outcome": "reverted-piece",
+  "change": "Repurpose D4.1 from an unanswerable SKU-count lookup into a direct-page harvest of a not-yet-used source type — the public per-brand product-listing pages of European branded second-hand online outlet/resale platforms that publish item coun"
+ }
+]

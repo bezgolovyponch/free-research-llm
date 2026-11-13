@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { App, ROOT_DIR } from './app.mjs';
 import { KeychainSecrets } from './secrets.mjs';
-import { AccessGate, newAccessToken } from './auth.mjs';
+import { AccessGate, crossOrigin, newAccessToken } from './auth.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { RemovalRefusedError, StoreBusyError } from './store.mjs';
 import { TEMPLATES } from './research/templates.mjs';
@@ -254,7 +254,7 @@ export function createServer(app, gate = new AccessGate()) {
     }],
     ['POST', /^\/api\/chat\/decide$/, async (req) => {
       const body = await readJson(req);
-      return app.appChat.decide(String(body.at ?? ''), String(body.pid ?? ''), { accept: body.accept !== false });
+      return app.appChat.decide(String(body.at ?? ''), String(body.pid ?? ''), { accept: body.accept !== false, engine: body.engine ?? null });
     }],
     ['GET', /^\/api\/changes$/, async () => app.changes.all()],
     ['GET', /^\/api\/changes\/(C\d{1,5})\/?$/, async (req, [id]) => {
@@ -401,6 +401,8 @@ export function createServer(app, gate = new AccessGate()) {
     const access = gate.decide(req, url);
     if (!gate.isLoopback(req)) visits.record(req, url.pathname, access);
     if (!access.allowed) return deny(res, access.reason, { address: String(req.socket?.remoteAddress ?? '').replace(/^::ffff:/, ''), research: /share|research link/.test(access.reason) });
+    if (crossOrigin(req)) return send(res, 403, { error: 'refused: this request was sent by another website, not by the page of this app' });
+    if (gate.foreignHost(req)) return send(res, 403, { error: 'refused: on this computer the app answers only at 127.0.0.1, localhost or [::1]' });
     if (access.share && !shareAllows({ method: req.method, pathname: url.pathname, projectId: access.share })) return send(res, 403, { error: 'this link opens one research only' });
     req.access = access;
     if (!gate.isLoopback(req) && access.allowed) app.peers?.note(req.socket?.remoteAddress);

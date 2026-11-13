@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AccessGate, newAccessToken } from '../src/auth.mjs';
+import { AccessGate, crossOrigin, newAccessToken } from '../src/auth.mjs';
 
 const req = (address: string, headers: Record<string, string> = {}) => ({ socket: { remoteAddress: address }, headers });
 const url = (q = '') => new URL(`http://host/api/status${q}`);
@@ -45,5 +45,23 @@ describe('AccessGate', () => {
     expect(gate.decide(req('10.0.0.2'), url('?share=old'))).toMatchObject({ allowed: false, reason: expect.stringMatching(/turned off or replaced/) });
     expect(gate.decide(req('127.0.0.1'), url('?share=share-tok'))).toEqual({ allowed: true });
     expect(new AccessGate({ shares }).decide(req('10.0.0.2'), url('?share=share-tok'))).toMatchObject({ allowed: true, share: 'p1' });
+  });
+
+  it('refuses a Host that is not this computer on a loopback connection (DNS rebinding), and leaves token devices alone', () => {
+    const gate = new AccessGate({ token: newAccessToken() });
+    for (const host of ['127.0.0.1:4600', 'localhost:4600', 'LOCALHOST:8080', '[::1]:4600', 'localhost']) expect(gate.foreignHost(req('127.0.0.1', { host })), host).toBe(false);
+    for (const host of ['attacker.example:4600', 'attacker.example', '127.0.0.1.attacker.example:4600', '']) expect(gate.foreignHost(req('::ffff:127.0.0.1', { host })), host).toBe(true);
+    expect(gate.foreignHost(req('127.0.0.1'))).toBe(true);
+    expect(gate.foreignHost(req('192.168.1.9', { host: '192.168.1.5:4600' }))).toBe(false);
+    expect(gate.foreignHost(req('127.0.0.1', { host: 'mac.tail1.ts.net', 'x-forwarded-for': '203.0.113.7' }))).toBe(false);
+  });
+
+  it('tells a request sent by another website from one sent by the page of the app', () => {
+    expect(crossOrigin({ headers: { origin: 'https://evil.example', host: '127.0.0.1:4600' } })).toBe(true);
+    expect(crossOrigin({ headers: { origin: 'null', host: '127.0.0.1:4600' } })).toBe(true);
+    expect(crossOrigin({ headers: { origin: 'http://127.0.0.1:4600', host: '127.0.0.1:4600' } })).toBe(false);
+    expect(crossOrigin({ headers: { origin: 'http://10.0.0.5:4600', host: '10.0.0.5:4600' } })).toBe(false);
+    expect(crossOrigin({ headers: { origin: 'https://mac.tail1.ts.net', host: '127.0.0.1:4600', 'x-forwarded-host': 'mac.tail1.ts.net' } })).toBe(false);
+    expect(crossOrigin({ headers: { host: '127.0.0.1:4600' } })).toBe(false);
   });
 });

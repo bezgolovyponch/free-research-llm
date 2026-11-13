@@ -4,6 +4,7 @@ const COOKIE = 'frl_token';
 const SHARE_COOKIE = 'frl_share';
 const YEAR_SECONDS = 31536000;
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const LOCAL_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const PROXY_HEADERS = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'forwarded', 'x-real-ip', 'cf-connecting-ip', 'tailscale-funnel-request', 'tailscale-user-login'];
 
 function cookieValue(header, name) {
@@ -18,6 +19,23 @@ function sameSecret(a, b) {
   const x = Buffer.from(String(a));
   const y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function hostName(value) {
+  const host = String(value ?? '').trim().toLowerCase();
+  return host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.split(':')[0];
+}
+
+export function crossOrigin(req) {
+  const origin = req.headers?.origin;
+  if (origin === undefined) return false;
+  try {
+    const host = new URL(origin).host.toLowerCase();
+    const forwarded = String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim().toLowerCase();
+    return host !== String(req.headers.host ?? '').toLowerCase() && !(forwarded !== '' && host === forwarded);
+  } catch {
+    return true;
+  }
 }
 
 export function newAccessToken() {
@@ -37,6 +55,10 @@ export class AccessGate {
 
   isLoopback(req) {
     return !this.behindProxy && !this.proxied(req) && LOOPBACK.has(req.socket?.remoteAddress ?? '');
+  }
+
+  foreignHost(req) {
+    return this.isLoopback(req) && !LOCAL_NAMES.has(hostName(req.headers?.host));
   }
 
   presented(req, url) {

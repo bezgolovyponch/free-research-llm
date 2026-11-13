@@ -5,6 +5,7 @@ import path from 'node:path';
 import { climateOf } from './cci.mjs';
 import { ClimateCells } from './climatecells.mjs';
 import { CoastFile } from './coastline.mjs';
+import { plain } from './itemgate.mjs';
 
 export const GONE_STATUS = new Set([404, 410]);
 
@@ -137,8 +138,18 @@ export function parseCoast(json, lat, lon) {
   return nearestKm(lat, lon, coastPoints(json?.elements ?? []));
 }
 
-export function pitchesFor(areaM2) {
-  const area = Number(areaM2);
+export function areaM2(row) {
+  const area = Number(row.area);
+  if (!Number.isFinite(area) || area <= 0) return null;
+  const unit = plain(row.areaUnit ?? '');
+  if (/^(?:ha|hectares?)$/.test(unit)) return area * 10000;
+  if (/^acres?$/.test(unit)) return Math.round(area * 4046.86);
+  if (/^d[oö]n[uü]m$/.test(plain(unit))) return area * 1000;
+  return area;
+}
+
+export function pitchesFor(squareMetres) {
+  const area = Number(squareMetres);
   if (!Number.isFinite(area) || area <= 0) return null;
   return Math.min(RURAL_PARK_MAX_PITCHES, Math.floor((area * CAMPING_SHARE) / PITCH_M2));
 }
@@ -180,7 +191,7 @@ export function trendOf(hpi, hicp) {
 }
 
 export function fitOf(row, { hpi = null } = {}) {
-  return { zoning: zoningOf(row), pitches: pitchesFor(row.area), hpi };
+  return { zoning: zoningOf(row), pitches: pitchesFor(areaM2(row)), hpi };
 }
 
 const NUMBER = '(-?\\d{1,3}\\.\\d{3,})';

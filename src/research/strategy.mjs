@@ -3,7 +3,7 @@ import { SEA_WORDS } from './brief.mjs';
 import { PERCEIVED_MAX_C } from './cci.mjs';
 import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
-import { zoningOf, explorePoints, haversineKm } from './site.mjs';
+import { areaM2, zoningOf, explorePoints, haversineKm } from './site.mjs';
 import { cadastreNotes } from './parcels.mjs';
 import { withConfirmRisk } from './blockers.mjs';
 
@@ -201,15 +201,7 @@ export function quoteFound(text, quote) {
   return plain(String(text ?? '').replace(/\s+/g, ' ')).includes(plain(quote.replace(/\s+/g, ' ')));
 }
 
-export function areaM2(row) {
-  const area = Number(row.area);
-  if (!Number.isFinite(area) || area <= 0) return null;
-  const unit = plain(row.areaUnit ?? '');
-  if (/^(?:ha|hectares?)$/.test(unit)) return area * 10000;
-  if (/^acres?$/.test(unit)) return Math.round(area * 4046.86);
-  if (/^d[oö]n[uü]m$/.test(plain(unit))) return area * 1000;
-  return area;
-}
+export { areaM2 };
 
 export const DENSITY_COUNTRY = 'PT';
 export const DENSITY_COUNTRY_NAME = 'Portugal';

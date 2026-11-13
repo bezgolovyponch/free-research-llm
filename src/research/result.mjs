@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { isEvidenceGap } from './verify.mjs';
 import { ROOT_ID } from './tree.mjs';
 
-export const GRADE_PROBABILITY = { verified: 0.9, supported: 0.75, covered: 0.75, weak: 0.4, unsupported: 0.15 };
+export const GRADE_PROBABILITY = { verified: 0.9, supported: 0.75, covered: 0.75, weak: 0.4, unsupported: 0.15, failed: 0.15 };
 export const EXTREMIZE = 1.5;
 const NO_INFO = 0.5;
 const CLAMP = 0.02;
@@ -38,7 +38,8 @@ export function nodeProbabilities(nodes) {
     if (memo.has(node.id)) return memo.get(node.id);
     const own = GRADE_PROBABILITY[effectiveGrade(node)];
     const children = kids.get(node.id) ?? [];
-    const p = children.length ? aggregate([...children.map((c) => ({ p: of(c), weight: c.impact ?? 3 })), ...(own === undefined ? [] : [{ p: own, weight: 1 }])], 1) : own ?? NO_INFO;
+    const known = [...children.map((c) => ({ p: of(c), weight: c.impact ?? 3 })), ...(own === undefined ? [] : [{ p: own, weight: 1 }])].filter((i) => Number.isFinite(i.p));
+    const p = children.length ? (known.length ? aggregate(known, 1) : null) : own ?? null;
     memo.set(node.id, p);
     return p;
   };
@@ -53,6 +54,7 @@ const KINDS = [
 ];
 
 export function questionKind(project) {
+  if (Number(project.acceptance?.itemCount) > 0) return 'list';
   const text = `${project.question ?? ''} ${project.decision ?? ''}`;
   return KINDS.find(([, re]) => re.test(text))?.[0] ?? 'decision';
 }
@@ -84,7 +86,7 @@ export function resultModel(project) {
   const nodes = project.nodes ?? [];
   const probs = nodeProbabilities(nodes);
   const drivers = nodes.filter((n) => n.parentId === ROOT_ID).map((d) => ({ id: d.id, title: d.title, grade: effectiveGrade(d), probability: round(probs.get(d.id) ?? NO_INFO), weight: d.impact ?? 3 }));
-  const overall = round(aggregate(drivers.map((d) => ({ p: d.probability, weight: d.weight }))));
+  const overall = round(aggregate(drivers.filter((d) => Number.isFinite(probs.get(d.id))).map((d) => ({ p: d.probability, weight: d.weight }))));
   const regraded = nodes.filter((n) => effectiveGrade(n) !== n.status).map((n) => n.id);
   const report = project.report ?? null;
   const kind = questionKind(project);
@@ -103,7 +105,7 @@ export function resultModel(project) {
     const options = report.options.map((o) => {
       const support = (o.support ?? []).filter((id) => probs.has(id));
       const against = (o.against ?? []).filter((id) => probs.has(id));
-      const score = support.reduce((s, id) => s + logit(probs.get(id)), 0) - against.reduce((s, id) => s + logit(probs.get(id)), 0);
+      const score = support.reduce((s, id) => s + logit(probs.get(id) ?? NO_INFO), 0) - against.reduce((s, id) => s + logit(probs.get(id) ?? NO_INFO), 0);
       return { option: String(o.option ?? '').slice(0, 160), support, against, score };
     });
     const z = options.map((o) => Math.exp(o.score / Math.max(1, options.length)));

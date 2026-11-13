@@ -319,3 +319,22 @@ describe('C21 purpose and kind before the pieces are researched', () => {
   });
 });
 
+describe('C5 on a table without tiers (audit 2026-11-12, car research 0c750f)', () => {
+  const car = (title: string, url: string, value: number) => ({ title, url, value, unit: 'CZK', price: value, currency: 'CZK', countryCode: 'CZ' });
+  const cars = (first: number) => ({
+    id: 'find-accurate-and-verified-car-l-0c750f',
+    question: 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback',
+    brief: { valueRange: [0, 65000], unit: 'CZK' },
+    candidates: { found: 3257, keptCount: 2, toCheckCount: 2546, screenedCount: 506, kept: [car('Motor dacia sandero', 'https://auto.bazos.cz/inzerat/225314130/motor-dacia-sandero.php', first), car('Dacia Sandero 1,2i LPG', 'https://auto.bazos.cz/inzerat/226135083/dacia-sandero-12i-lpg.php', 25000)] },
+  });
+  const c5 = (project: object) => conceptAudit(project, { now: NOW }).findings.find((f: { id: string }) => f.id === 'C5');
+
+  it('C5 reads the rows that count when the table has no tiers', () => {
+    expect(c5(cars(650000))).toMatchObject({ ok: false, severity: 'error', detail: '1 counted row(s) are above 65000 CZK: https://auto.bazos.cz/inzerat/225314130/motor-dacia-sandero.php' });
+  });
+
+  it('C5 passes on the rows that count and names their unit', () => {
+    expect(c5(cars(25000))).toMatchObject({ ok: true, detail: 'All 2 counted row(s) are within 65000 CZK.' });
+  });
+});
+

@@ -148,6 +148,14 @@ describe('site measurements', () => {
     expect(fit).toEqual({ zoning: 'agricultural', pitches: 18, hpi: 13.9 });
   });
 
+  it('fitOf converts dönüm and hectares before counting pitches', () => {
+    expect(fitOf({ title: 'Balcity - Çanakkale | Biga Güleç Mahallesinde 4 Dönüm Yatırım Fırsatı', value: 757500, area: 4, areaUnit: 'dönüm' }, { hpi: -10.7 }).pitches).toBe(30);
+    expect(fitOf({ title: 'Çanakkale Biga Güleç Köyünde Deniz Manzaralı Satılık Arazi', value: 630000, area: 2274, areaUnit: 'm²' }, { hpi: -10.7 }).pitches).toBe(30);
+    expect(fitOf({ title: 'Satılık Çanakkale Biga Güleç Köyünde Denize Yakın Tek Tapu Yer', value: 825000, area: 1860, areaUnit: 'm²' }, { hpi: -10.7 }).pitches).toBe(27);
+    expect(fitOf({ title: 'Terreno rústico de 0,65Ha localizado a cerca de 250mt da localidade...', value: 5500, area: 0.65, areaUnit: 'ha' }).pitches).toBe(30);
+    expect(fitOf({ title: 'Terreno rústico de 0,65Ha localizado a cerca de 250mt da localidade...', value: 5500 }).pitches).toBeNull();
+  });
+
   it('omits the coastline statement from the Overpass query when the research does not ask for the sea', () => {
     expect(overpassQuery(VIR.lat, VIR.lon, 10, true)).toContain('[natural=coastline]');
     expect(overpassQuery(VIR.lat, VIR.lon, 10, false)).not.toContain('[natural=coastline]');

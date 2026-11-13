@@ -397,9 +397,87 @@ describe('ResearchEngine', () => {
     expect(project.decisionModel.subtype).toEqual({ label: 'hatchback', models: ['fabia', 'corsa'], variants: [], source: 'model proposal, matched to listing titles by code' });
     expect(project.decisionModel.calibrated).toBeTruthy();
     expect(project.brief.subtype).toEqual(project.decisionModel.subtype);
+    expect(project.brief.kind.not).toEqual(['parts', 'kola', 'svetlo', 'pneumatiky']);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'decision' && /^kind calibrated on 10 titles: not parts, kola, svetlo, pneumatiky; hatchback: 2 models$/.test(l.message))).toBe(true);
     await engine.collectCandidates(project as never, { sweep: true });
     expect(calls).toHaveLength(3);
+  });
+
+  it('briefOf keeps the kind\'s calibrated words', () => {
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }) });
+    const project: Record<string, any> = {
+      id: 'find-accurate-and-verified-car-l-0c750f',
+      question: 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, price up to 65000CZK or equivalent',
+      templateId: 'generic',
+      acceptance: { itemCount: 20, valueRange: [0, 65000], unit: 'CZK' },
+      decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], condition: ['na dily'], upgrades: ['nova stk'], verified: { titles: 3277, matched: 8, share: 0 }, dropped: [] }, criteria: [] },
+    };
+    expect(engine.briefOf(project as never).kind).toEqual({ label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], condition: ['na dily'], upgrades: ['nova stk'] });
+    project.decisionModel.kind = { label: 'used car', terms: ['hatchback'], verified: null };
+    expect(engine.briefOf(project as never).kind).toEqual({ label: 'used car', terms: ['hatchback'] });
+  });
+
+  it('briefOf describes a list of a kind no portal lists as entities, not as listing pages for sale', () => {
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }) });
+    const terms = ['wholesale used clothing', 'second hand clothes', 'used clothing wholesale'];
+    const project: Record<string, any> = {
+      id: 'find-the-wholesale-branded-secon-b2f5b7',
+      question: 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic',
+      templateId: 'generic',
+      acceptance: { itemCount: 20 },
+      decisionModel: { kind: { label: 'wholesale clothing provider', terms, not: ['retail', 'maloobchod', 'donation', 'consignment'], verified: null, hubs: ['czech republic'], validated: { pages: 10, terms, at: '2026-11-05T02:04:03.161Z' } }, criteria: [] },
+    };
+    const brief = engine.briefOf(project as never);
+    expect(brief.located).toBe(false);
+    expect(brief.text).toContain('Deliver: 20 results of the kind "wholesale clothing provider", each with its own website\nUsed in: Czechia (sources may be anywhere)');
+    expect(brief.text).not.toContain('listing pages for sale');
+    expect(brief.text).not.toContain('offered for rent');
+  });
+
+  it('drops an exclusion word that full-price listings of an asked model carry, so a car sold with spare wheels stays a car', async () => {
+    const rows: Array<[string, string, number]> = [
+      ['Honda Civic 2,2 CTDi"103kW"+ Al kola 17 l', '226020175/honda-civic-22-ctdi103kw-al-kola-17-l.php', 45000],
+      ['Kia Rio, 1.1 CRDI 55KW klima,2x kola', '226235794/kia-rio-11-crdi-55kw-klima2x-kola.php', 59000],
+      ['ŠKODA FABIA II COMFORT 2009 1,2 HTP KLIMA, EL.OKNA', '225652792/skoda-fabia-ii-comfort-2009-12-htp-klima-elokna.php', 49999],
+      ['Škoda Fabia VELKÝ SERVIS', '226256383/skoda-fabia-velky-servis.php', 64900],
+      ['Prodám Škoda Fabia 1.4 16V 74 KW', '226246786/prodam-skoda-fabia-14-16v-74-kw.php', 35000],
+      ['Škoda fabia', '226208092/skoda-fabia.php', 27000],
+      ['Pěkná Škoda Fabia 1.2 MPi, málo najeto, velmi dobrý stav', '226126886/pekna-skoda-fabia-12-mpi-malo-najeto-velmi-dobry-stav.php', 35000],
+      ['ŠKODA FABIA 2 1.2 HTP', '225962420/skoda-fabia-2-12-htp.php', 55000],
+      ['ŠKODA FABIA II 1.2 HTP', '225859354/skoda-fabia-ii-12-htp.php', 55000],
+      ['Škoda Fabia 2, LPG', '225810909/skoda-fabia-2-lpg.php', 46000],
+      ['škoda fabia 1.2', '226084281/skoda-fabia-12.php', 24000],
+      ['Škoda Fabia 1 1.2 MPI 40kW', '226050045/skoda-fabia-1-12-mpi-40kw.php', 26000],
+      ['Škoda Fabia 1.2 tsi 77kw', '226204633/skoda-fabia-12-tsi-77kw.php', 55000],
+      ['Škoda Felicia 1.9D GLX', '225957221/skoda-felicia-19d-glx.php', 28000],
+      ['Škoda Fabia II 1.2 HTP', '225884698/skoda-fabia-ii-12-htp.php', 37000],
+      ['NOVA STK Škoda Fabia 1.2 HTP 2004', '225780289/skoda-fabia-12-htp-2004.php', 19500],
+      ['Škoda Fabia 1.4-55kw,AUTOMAT ,klima,2007', '226315746/skoda-fabia-14-55kwautomat-klima2007.php', 59999],
+      ['Škoda Fabia II 1.2 HTP', '226299305/skoda-fabia-ii-12-htp.php', 25000],
+      ['Škoda Fabia 2 1.2htp', '223755133/skoda-fabia-2-12htp.php', 40000],
+      ['Alu kola 16" Škoda Karoq', '226253219/alu-kola-16-skoda-karoq.php', 12000],
+      ['Letni kola + disky škoda oct 1', '226145989/letni-kola-disky-skoda-oct-1.php', 3000],
+      ['Škoda Octavia I kola R15 5x100 ET38', '224466858/skoda-octavia-i-kola-r15-5x100-et38.php', 2500],
+      ['Prodám alu kola DEZENT 5x112r17', '226106581/prodam-alu-kola-dezent-5x112r17.php', 8000],
+      ['Originální alu kola Škoda R17, 7J×17 ET45 – sada 4 ks', '225662126/originalni-alu-kola-skoda-r17-7j17-et45-sada-4-ks.php', 3500],
+      ['Alu kola Škoda', '226208253/alu-kola-skoda.php', 5000],
+    ];
+    const listings = rows.map(([title, slug, value]) => ({ title, url: `https://auto.bazos.cz/inzerat/${slug}`, value, unit: 'CZK' }));
+    const router = { complete: async () => ({ provider: 'groq', data: { not: ['kola', 'disky'], subtype: { label: 'hatchback', models: ['kia rio', 'honda civic', 'skoda fabia', 'skoda felicia'], variants: [] } } }) };
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) } as never);
+    const project: Record<string, any> = {
+      id: 'find-accurate-and-verified-car-l-0c750f',
+      question: 'Find accurate and verified car listings within 300km from prague, hatchback, price up to 65000CZK or equivalent',
+      log: [],
+      sweep: { pages: [{ id: 'P1', url: 'https://auto.bazos.cz/skoda/40/?hledat=&hlokalita=&humkreis=&cenaod=0&cenado=65000&order=', listings }] },
+      decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], verified: { titles: 25, matched: 0, share: 0 } } },
+    };
+    expect(await (engine as unknown as { calibrateKind: (p: unknown) => Promise<boolean> }).calibrateKind(project)).toBe(true);
+    expect(project.decisionModel.kind.not).toEqual(['parts', 'accessories']);
+    expect(project.decisionModel.subtype.models).toEqual(['kia rio', 'honda civic', 'skoda fabia', 'skoda felicia']);
+    const few: Record<string, any> = { ...project, log: [], sweep: { pages: [{ id: 'P1', url: project.sweep.pages[0].url, listings: listings.slice(0, 6) }] }, decisionModel: { kind: { label: 'used car', terms: ['hatchback'], not: ['parts', 'accessories', 'kola'], verified: { titles: 6, matched: 0, share: 0 } } } };
+    await (engine as unknown as { calibrateKind: (p: unknown) => Promise<boolean> }).calibrateKind(few);
+    expect(few.decisionModel.kind.not).toEqual(['parts', 'accessories', 'kola']);
   });
 
   it('turns the place and radius a question names into the countries the brief uses as regions', async () => {
@@ -831,6 +909,40 @@ describe('ResearchEngine', () => {
     const stopped = await engine.run(project.id);
     expect(stopped.phase).toBe('cancelled');
     expect(stopped.report).toBeNull();
+    expect(engine.cancelled.has(project.id)).toBe(false);
+  });
+
+  it('a resumed failed leaf re-rolls its parent', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with proven good quality for a second hand shop in Czech Republic' });
+    const piece = (id: string, parentId: string, title: string, question: string, more: object) => ({ id, parentId, title, question, method: 'lookup', dependsOn: [], impact: 4, uncertainty: 3, sources: [], attempts: 1, ...more });
+    const stale = { answer: 'Suppliers stock the target brands with varying SKU counts.', claims: [], items: [], confidence: 'low', gaps: [] };
+    project.nodes = [
+      piece('D4', 'Q', 'Assortment breadth', 'Do the suppliers stock the target brands?', { status: 'unsupported', finding: stale, verification: { grade: 'unsupported', score: 50, checks: [], failures: [], rolledUpFrom: ['D4.1:failed', 'D4.2:supported'] } }),
+      piece('D4.1', 'D4', 'Brand presence', 'Which target brands does each supplier list?', { status: 'failed', error: 'all free model quotas are cooling down after rate limits; retry in a minute' }),
+      piece('D4.2', 'D4', 'SKU quantity', 'Count distinct SKUs for each target brand per supplier', { status: 'supported', finding: { answer: 'Supplier catalogs list the brands.', claims: [], items: [], confidence: 'low', gaps: [] }, verification: { grade: 'supported', score: 100, checks: [], failures: [] } }),
+    ];
+    project.phase = 'error';
+    await engine.store.save(project);
+    const done = await engine.run(project.id);
+    const byId = Object.fromEntries(done.nodes.map((n: { id: string }) => [n.id, n]));
+    expect(byId['D4.1'].status).not.toBe('failed');
+    expect(byId['D4'].verification.rolledUpFrom).toEqual([`D4.1:${byId['D4.1'].status}`, 'D4.2:supported']);
+    expect(byId['D4'].finding).not.toEqual(stale);
+  });
+
+  it('a drift downgrade of a leaf sends its parent back to be rolled up', () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const drift = { baseline: { values: [4], at: '2026-11-05T02:10:00.000Z' }, samples: [{ values: [1], score: 0.84, at: '2026-11-06T13:45:00.000Z' }] };
+    const project = { id: 'p', log: [], nodes: [
+      { id: 'D4', parentId: 'Q', status: 'supported', dependsOn: [], finding: { answer: 'Suppliers stock the target brands.' }, verification: { grade: 'supported', rolledUpFrom: ['D4.1:supported', 'D4.2:supported'] } },
+      { id: 'D4.1', parentId: 'D4', status: 'supported', dependsOn: [], finding: { answer: '4 suppliers list Barbour.' }, verification: { grade: 'supported' }, drift },
+      { id: 'D4.2', parentId: 'D4', status: 'supported', dependsOn: [], finding: { answer: 'Supplier catalogs list the brands.' }, verification: { grade: 'supported' } },
+    ] };
+    const changed = engine.monitorPass(project as never);
+    if (!changed.length) throw new Error('the stored drift sample of D4.1 no longer triggers a drift downgrade: rebuild this fixture from monitor.mjs');
+    expect(project.nodes.map((n) => [n.id, n.status])).toEqual([['D4', 'pending'], ['D4.1', 'pending'], ['D4.2', 'supported']]);
+    expect(project.nodes[0].finding).toBeNull();
   });
 
   it('honours a stop raised while collecting candidates', async () => {
@@ -1076,7 +1188,8 @@ describe('graded research answers feed routing', () => {
     router.outcomes = outcomes;
     const project = await engine.createProject({ question: 'Is it profitable to resell used vans from Germany in Czechia?', autoRun: false });
     await engine.run(project.id);
-    const seen = outcomes.posterior(provider.id, 'research', 3);
+    const seen = outcomes.posterior(provider.id, 'research', 3, provider.selected.fast);
+    expect(outcomes.posterior(provider.id, 'research', 3).observed).toBe(0);
     expect(seen.observed).toBeGreaterThan(0);
   });
 
@@ -1211,8 +1324,8 @@ describe('meaning check of claims', () => {
 
   function votingEngine(votes: Record<string, string>) {
     const { engine, router } = engineWith(new ScriptedProvider());
-    const calls: { purpose: string; tier: string; avoid?: string; quote: string }[] = [];
-    router.complete = (async (request: { purpose: string; tier: string; avoid?: string; messages: { content: string }[] }) => {
+    const calls: { purpose: string; tier: string; avoid?: string | string[]; quote: string }[] = [];
+    router.complete = (async (request: { purpose: string; tier: string; avoid?: string | string[]; messages: { content: string }[] }) => {
       const asked = /QUOTE: (.*)/.exec(request.messages[1].content)?.[1] ?? '';
       calls.push({ purpose: request.purpose, tier: request.tier, avoid: request.avoid, quote: asked });
       const provider = request.purpose === 'support' ? 'gemini' : 'groq';
@@ -1229,7 +1342,7 @@ describe('meaning check of claims', () => {
     expect(result).toEqual({ checked: 1, open: 1 });
     expect(calls.slice(0, 2)).toEqual([
       { purpose: 'support', tier: 'deep', avoid: 'cerebras', quote: `${quote}. Delivery is extra.` },
-      { purpose: 'support-second', tier: 'fast', avoid: 'gemini', quote: `${quote}. Delivery is extra.` },
+      { purpose: 'support-second', tier: 'fast', avoid: ['cerebras', 'gemini'], quote: `${quote}. Delivery is extra.` },
     ]);
     const support = finding.claims[0].support;
     expect(support.verdict).toBe('disagree');
@@ -1266,6 +1379,51 @@ describe('meaning check of claims', () => {
     const saved = await engine.load(project.id);
     expect(saved.nodes[0].finding.claims[0].support.verdict).toBe('supported');
     expect(saved.supportAudit).toMatchObject({ checked: 1, supported: 1, stale: 0 });
+  });
+
+  it('the second meaning vote avoids the author', async () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    const avoided: Array<{ purpose: string; avoid: unknown }> = [];
+    router.complete = (async (request: { purpose: string; avoid?: unknown }) => {
+      avoided.push({ purpose: request.purpose, avoid: request.avoid });
+      return request.purpose === 'support' ? { data: { supports: 'yes', reason: 'Exact match' }, provider: 'pollinations', model: 'openai-fast' } : { data: { supports: 'yes', reason: '' }, provider: 'groq', model: 'openai/gpt-oss-20b' };
+    }) as typeof router.complete;
+    const said = "Testimonials underscore the company's reputation, boasting a 4.9/5 rating from 44 reviews.";
+    const finding = { answer: 'Ora Industries has a 4.9/5 rating from 44 reviews.', claims: [{ text: 'Ora Industries has a 4.9/5 rating from 44 reviews.', quote: said, sourceIds: ['S1'], attributed: true }] };
+    await engine.checkSupport({ id: 'p', nodes: [] }, { id: 'D3.2', method: 'lookup', sources: [{ id: 'S1', text: said }] }, finding, 'gemini');
+    expect(avoided).toEqual([{ purpose: 'support', avoid: 'gemini' }, { purpose: 'support-second', avoid: ['gemini', 'pollinations'] }]);
+  });
+
+  it('keeps the earlier meaning record when no model answers a recheck, and rechecks it next time', async () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'What does a camp permit cost in Czechia?' });
+    const older = { version: 1, verdict: 'supported', votes: [{ provider: 'groq', model: 'm', vote: 'yes', reason: '' }, { provider: 'cerebras', model: 'm', vote: 'yes', reason: '' }], missing: [], cause: '', at: '2026-10-27T08:41:14.185Z' };
+    const finding = { answer: 'A permit costs €950.', claims: [{ text: 'A permit costs €950', quote: 'The permit costs €950 for a camp', sourceIds: ['S1'], attributed: true, support: older }] };
+    project.nodes = [{ id: 'D1', parentId: 'Q', title: 'Permit', question: 'Permit cost?', method: 'lookup', dependsOn: [], status: 'verified', finding, sources: [{ id: 'S1', text: 'The permit costs €950 for a camp.' }], verification: { grade: 'verified', score: 100, checks: [], failures: [] }, model: 'gemini/m' }];
+    await engine.store.save(project);
+    const answer = router.complete;
+    router.complete = (async () => { throw new Error('all free model quotas are cooling down after rate limits; retry in a minute'); }) as typeof router.complete;
+    const outage = await engine.recheckSupport(project.id);
+    expect(outage.message).toBe('rechecked 0 piece(s), 0 claim(s): 0 to confirm; no model answered for 1 claim(s), they stay due for a recheck');
+    const kept = await engine.load(project.id);
+    expect(kept.nodes[0].status).toBe('verified');
+    expect(kept.nodes[0].finding.claims[0].support).toEqual(older);
+    router.complete = (async () => ({ data: { supports: 'yes', reason: '' }, provider: 'groq', model: 'groq-m' })) as typeof router.complete;
+    expect((await engine.recheckSupport(project.id)).message).toBe('rechecked 1 piece(s), 1 claim(s): 0 to confirm');
+    expect((await engine.load(project.id)).nodes[0].finding.claims[0].support).toMatchObject({ version: 2, verdict: 'supported' });
+    router.complete = answer;
+  });
+
+  it('a stop on an idle research does not block the next action', async () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    router.complete = (async () => ({ data: { supports: 'yes', reason: '' }, provider: 'groq', model: 'groq-m' })) as typeof router.complete;
+    const project = await engine.createProject({ question: 'What does a camp permit cost in Czechia?' });
+    const finding = { answer: 'A permit costs €950.', claims: [{ text: 'A permit costs €950', quote: 'The permit costs €950 for a camp', sourceIds: ['S1'], attributed: true }] };
+    project.nodes = [{ id: 'D1', parentId: 'Q', title: 'Permit', question: 'Permit cost?', method: 'lookup', dependsOn: [], status: 'supported', finding, sources: [{ id: 'S1', text: 'The permit costs €950 for a camp.' }], verification: { grade: 'supported', score: 100, checks: [], failures: [] }, model: 'gemini/m' }];
+    await engine.store.save(project);
+    engine.cancel(project.id);
+    expect(engine.cancelled.has(project.id)).toBe(false);
+    await expect(engine.recheckSupport(project.id)).resolves.toMatchObject({ ok: true, message: 'rechecked 1 piece(s), 1 claim(s): 0 to confirm' });
   });
 
   it('drops pages that share fewer than two topic terms with the node before any model call', async () => {

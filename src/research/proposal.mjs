@@ -93,7 +93,7 @@ function rankWithin(rows, objectives) {
 const checkOk = (row, id) => row.plan.checks.find((c) => c.id === id)?.ok;
 
 export const OPPORTUNITIES = [
-  { id: 'fits', label: 'Fits every criterion', why: 'every criterion you set is measured and met; these count toward your result', test: (r) => r.plan.tier === 'fits' && !refuted(r) },
+  { id: 'fits', label: 'Fits every criterion', why: 'every criterion you set is measured and met; these count toward your result', whyVerified: 'every criterion you set is measured and met; the ones the external verifier confirmed count toward your result', test: (r) => r.plan.tier === 'fits' && !refuted(r) },
   { id: 'short-season-sea', label: 'Short-season sea site', why: 'the sea is within your e-bike ride but the camping season is shorter than you asked: a summer-only site that can still earn in the season', test: (r) => r.plan.tier === 'trade-off' && checkOk(r, 'season') === false && checkOk(r, 'sea') === true },
   { id: 'nature-draw', label: 'Nature or lake draw', why: `a named lake within ${NEAR_LAKE_KM} km or ${STRONG_EXPLORE}+ beaches, viewpoints, sights, reserves and trails within 15 km draw guests and make up for a missed criterion`, test: (r) => r.plan.tier === 'trade-off' && Boolean(r.site) && ((r.site.lakesNamed && Number.isFinite(r.site.lakeKm) && r.site.lakeKm <= NEAR_LAKE_KM) || explorePoints(r.site) >= STRONG_EXPLORE) },
   { id: 'low-entry', label: 'Lowest entry to start', why: 'among the cheapest quarter to start (price, transfer tax and first units) with room for the first units; a test site before a bigger one', test: (r, ctx) => ['trade-off', 'unverified'].includes(r.plan.tier) && !refuted(r) && checkOk(r, 'units') !== false && entryOf(r) !== null && entryOf(r) <= ctx.lowEntry },
@@ -142,14 +142,16 @@ export function withProposals(candidates) {
     const o = opportunityOf(row, ctx);
     if (o) groups.get(o.id).push(row);
   }
+  const outsideChecked = Boolean(candidates.verification);
+  const counts = (row) => !outsideChecked || confirmed(row);
   const roles = new Map();
   const sections = [];
   for (const o of OPPORTUNITIES) {
     const rows = groups.get(o.id);
     if (!rows.length) continue;
     const ranked = rankWithin(rows, objectives);
-    ranked.forEach((x, i) => roles.set(x.row, { role: o.id === 'fits' ? 'primary' : 'secondary', opportunity: o.id, rank: i + 1, layer: x.layer, group: rows }));
-    sections.push({ id: o.id, label: o.label, why: o.why, urls: ranked.map((x) => x.row.url) });
+    ranked.forEach((x, i) => roles.set(x.row, { role: o.id === 'fits' && counts(x.row) ? 'primary' : 'secondary', opportunity: o.id, rank: i + 1, layer: x.layer, group: rows }));
+    sections.push({ id: o.id, label: o.label, why: outsideChecked && o.whyVerified ? o.whyVerified : o.why, urls: ranked.map((x) => x.row.url) });
   }
   const rows = kept.map((row) => (row.plan?.checks ? { ...row, plan: { ...row.plan, proposal: proposalOf(row, roles.get(row), objectives) } } : row));
   const outsideRows = (candidates.outside ?? []).filter((r) => r.plan?.checks);
@@ -157,5 +159,6 @@ export function withProposals(candidates) {
   const outside = (candidates.outside ?? []).map((row) => (outsideRoles.has(row) ? { ...row, plan: { ...row.plan, proposal: proposalOf(row, outsideRoles.get(row), objectives) } } : row));
   if (outsideRows.length) sections.push({ id: OUTSIDE.id, label: OUTSIDE.label, why: OUTSIDE.why, urls: outsideRows.map((r) => r.url) });
   const urlsOf = (id) => sections.find((x) => x.id === id)?.urls ?? [];
-  return { ...candidates, kept: rows, ...(candidates.outside ? { outside } : {}), proposals: { method: PROPOSAL_METHOD, objectives: objectives.map((o) => ({ id: o.id, label: o.label, better: o.better })), sections, primary: urlsOf('fits'), secondary: sections.filter((x) => x.id !== 'fits').flatMap((x) => x.urls) } };
+  const countedUrls = new Set((groups.get('fits') ?? []).filter(counts).map((r) => r.url));
+  return { ...candidates, kept: rows, ...(candidates.outside ? { outside } : {}), proposals: { method: PROPOSAL_METHOD, objectives: objectives.map((o) => ({ id: o.id, label: o.label, better: o.better })), sections, primary: urlsOf('fits').filter((url) => countedUrls.has(url)), secondary: sections.filter((x) => x.id !== 'fits').flatMap((x) => x.urls) } };
 }

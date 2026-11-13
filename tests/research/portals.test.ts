@@ -115,4 +115,23 @@ describe('listedKind', () => {
     expect(listedKind({ label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing', 'used clothing wholesale'] })).toBe(false);
     expect(listedKind(null)).toBe(false);
   });
+
+  it('seedPortals keeps ES and PT for a CZK budget', () => {
+    const rates: Record<string, number> = { EUR: 1, CZK: 24.3, TRY: 55.9 };
+    const convert = (value: number, from: string, to: string) => (rates[from] && rates[to] ? (value / rates[from]) * rates[to] : null);
+    const plots = { kind: { label: 'plot of land', terms: ['land', 'plot', 'terreno', 'parcela', 'arsa', 'tarla'] }, itemCount: 50, regions: ['PT', 'ES', 'TR', 'VN'], coastal: true };
+    const count = (seeds: Array<{ country: string }>, country: string) => seeds.filter((s) => s.country === country).length;
+    const eur = seedPortals({ ...plots, valueRange: [0, 20000], unit: 'EUR' }, convert);
+    expect([count(eur, 'ES'), count(eur, 'TR'), count(eur, 'PT')]).toEqual([8, 11, 10]);
+    const czk = seedPortals({ ...plots, valueRange: [0, 486000], unit: 'CZK' }, convert);
+    expect([count(czk, 'ES'), count(czk, 'TR'), count(czk, 'PT')]).toEqual([8, 11, 10]);
+    const low = seedPortals({ ...plots, valueRange: [0, 19000], unit: 'CZK' }, convert);
+    expect([count(low, 'ES'), count(low, 'PT')]).toEqual([8, 10]);
+    const high = seedPortals({ ...plots, valueRange: [0, 1215000], unit: 'CZK' }, convert);
+    expect([count(high, 'ES'), count(high, 'TR'), count(high, 'PT')]).toEqual([0, 11, 0]);
+    const lira = seedPortals({ ...plots, valueRange: [0, 19000], unit: 'TRY' }, convert);
+    expect([count(lira, 'ES'), count(lira, 'PT')]).toEqual([8, 10]);
+    const unknown = seedPortals({ ...plots, valueRange: [0, 486000], unit: 'CZK' });
+    expect([count(unknown, 'ES'), count(unknown, 'PT')]).toEqual([8, 10]);
+  });
 });

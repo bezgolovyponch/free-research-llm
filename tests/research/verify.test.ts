@@ -186,6 +186,33 @@ describe('meaning check', () => {
   });
 });
 
+describe('a finding that rests only on assumptions (audit 2026-11-12, supplier research b2f5b7 D4.2)', () => {
+  const assumed = (text: string, value: number) => ({ text, value, unit: 'SKUs', sourceIds: [], quote: '', assumption: true, attributed: null });
+  const node = { id: 'D4.2', parentId: 'D4', title: 'SKU quantity', question: 'Count distinct SKUs for each target brand per supplier', method: 'lookup', unit: 'count', metric: 'SKU count' };
+  const finding = {
+    answer: 'Assumption: Supplier A carries 120 distinct Ralph Lauren SKUs, 80 North Face SKUs, 60 Barbour SKUs; Supplier B carries 100 distinct Ralph Lauren SKUs, 70 North Face SKUs, 50 Barbour SKUs.',
+    claims: [
+      assumed('Supplier A carries 120 distinct Ralph Lauren SKUs', 120),
+      assumed('Supplier A carries 80 distinct North Face SKUs', 80),
+      assumed('Supplier A carries 60 distinct Barbour SKUs', 60),
+      assumed('Supplier B carries 100 distinct Ralph Lauren SKUs', 100),
+      assumed('Supplier B carries 70 distinct North Face SKUs', 70),
+      assumed('Supplier B carries 50 distinct Barbour SKUs', 50),
+    ],
+    items: [],
+    calculation: null,
+    confidence: 'low',
+    gaps: ['No verified SKU counts from supplier catalogs.'],
+  };
+  const critique = { agree: true, severity: 'none', issues: [], betterAnswer: '' };
+
+  it('assumption-only finding with no sources is weak', () => {
+    const verification = verifyFinding({ finding, sources: [], node, critique });
+    expect(verification.grade).toBe('weak');
+    expect(verification.checks.find((c: { id: string }) => c.id === 'attribution')).toMatchObject({ passed: false, detail: 'the answer rests only on assumptions: no claim carries a quote from a fetched source' });
+  });
+});
+
 describe('b2f5b7 all-assumption findings are not supported', () => {
   const d41Sources = [
     {
@@ -239,7 +266,7 @@ describe('b2f5b7 all-assumption findings are not supported', () => {
   it('grades the verbatim D4.1 finding (one assumption claim) below supported', () => {
     const v = verifyFinding({ finding: d41Finding, sources: d41Sources, node: { id: 'D4.1', method: 'lookup', metric: 'Brands present', unit: 'count' } });
     expect(v.checks.find((c) => c.id === 'attribution')).toMatchObject({ passed: false });
-    expect(v.checks.find((c) => c.id === 'attribution')!.detail).toMatch(/0 of 0 claim\(s\)/);
+    expect(v.checks.find((c) => c.id === 'attribution')!.detail).toMatch(/rests only on assumptions/);
     expect(v.grade).toBe('weak');
     expect(v.grade).not.toBe('supported');
   });

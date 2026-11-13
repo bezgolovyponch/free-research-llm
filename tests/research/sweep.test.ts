@@ -118,6 +118,22 @@ describe('portal sweep', () => {
   });
 });
 
+describe('a stop during the portal sweep (audit 2026-11-12, row D7)', () => {
+  it('reads no further page once the research is stopped', async () => {
+    const pages: Record<string, { listings: unknown[]; next: string; links: unknown[] }> = {
+      'https://imo.example/pt/resultados': { listings: [listing(1, 9000), listing(2, 90000)], next: 'https://imo.example/pt/resultados?page=2', links: [] },
+      'https://imo.example/pt/resultados?page=2': { listings: [listing(3, 12000)], next: 'https://imo.example/pt/resultados?page=3', links: [] },
+      'https://imo.example/pt/resultados?page=3': { listings: [listing(4, 15000)], next: '', links: [] },
+    };
+    const read: string[] = [];
+    const search = { readPage: async (url: string) => { read.push(url); return { status: 200, locale: 'pt', text: '', ...pages[url] }; } };
+    const project = { nodes: [{ id: 'D1', sources: [{ url: 'https://imo.example/pt/resultados', locale: 'pt', listings: [listing(1, 9000), listing(2, 90000), listing(9, 1)] }] }] };
+    const result = await new CandidateSweeper({ search, budget: 3, seeds: () => [], shouldStop: () => read.length >= 1 }).sweep(project, brief, {});
+    expect(read).toEqual(['https://imo.example/pt/resultados']);
+    expect(result?.pages).toHaveLength(1);
+  });
+});
+
 describe('portalPages with model-named kinds', () => {
   it('keeps a seed portal already matched to the kind even when the kind terms are narrower than its sample words', async () => {
     const { portalPages } = await import('../../src/research/sweep.mjs');

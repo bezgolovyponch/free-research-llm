@@ -74,3 +74,16 @@ describe('proposals: primary and secondary results ranked by Pareto layers on me
     expect(withProposals(null)).toBeNull();
   });
 });
+
+describe('proposals after the external verifier ran (audit 2026-11-12, row A1)', () => {
+  it('holds only confirmed fits as primary and says which fits count', () => {
+    const confirmed = row('https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1h5zV', 'fits', { entry: 4900, verified: { verdict: 'confirmed' } });
+    const waiting = row('https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1icmH', 'fits', { entry: 4620, verified: { verdict: 'unconfirmed' } });
+    const out = withProposals({ kept: [waiting, confirmed], tiers: { fits: 2 }, verification: { fits: 2, confirmed: 1, refuted: 0, unconfirmed: 1, pending: 0 } });
+    expect(out.proposals.primary).toEqual([confirmed.url]);
+    expect(out.proposals.sections[0]).toMatchObject({ id: 'fits', urls: [confirmed.url, waiting.url] });
+    expect(out.proposals.sections[0].why).toBe('every criterion you set is measured and met; the ones the external verifier confirmed count toward your result');
+    const by = Object.fromEntries(out.kept.map((r: { url: string; plan: { proposal: { role: string } } }) => [r.url, r.plan.proposal.role]));
+    expect(by).toEqual({ [confirmed.url]: 'primary', [waiting.url]: 'secondary' });
+  });
+});

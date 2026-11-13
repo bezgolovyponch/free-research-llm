@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contextOf, quotesOtherPieces, isStale, CAUSE_MAX_CHARS, MAX_SUPPORT_CLAIMS, SUPPORT_LOGIC_VERSION, affectsResult, causeOf, claimsToCheck, keyTerms, looksEnglish, normalizeVote, resolveFromSources, supportAudit, supportPrompt, supportRecord, supportVerdict, termCheck, toConfirm } from '../../src/research/support.mjs';
+import { contextOf, quotesOtherPieces, isStale, needsRecheck,CAUSE_MAX_CHARS, MAX_SUPPORT_CLAIMS, SUPPORT_LOGIC_VERSION, affectsResult, causeOf, claimsToCheck, keyTerms, looksEnglish, normalizeVote, resolveFromSources, supportAudit, supportPrompt, supportRecord, supportVerdict, termCheck, toConfirm } from '../../src/research/support.mjs';
 
 const PERMIT = 'A building permit costs €950';
 const yes = (provider = 'gemini') => ({ provider, model: 'm', vote: 'yes', reason: '' });
@@ -182,5 +182,22 @@ describe('live-data fixes', () => {
   it('counts only claims inside the per-piece cap as stale', () => {
     const claims = Array.from({ length: 9 }, (_, i) => ({ text: `Fee ${i + 1} €`, attributed: true }));
     expect(supportAudit([{ id: 'D1', decides: true, finding: { claims } }]).stale).toBe(MAX_SUPPORT_CLAIMS);
+  });
+});
+
+describe('a meaning check no model answered (audit 2026-11-12, plots research b7772e)', () => {
+  it('an unchecked claim stays due for a recheck', () => {
+    const outage = supportRecord({ votes: [], at: '2026-11-12T12:12:00.000Z' });
+    expect(outage).toMatchObject({ version: SUPPORT_LOGIC_VERSION, verdict: 'unchecked', cause: '• Meaning not checked yet (no free model answered)' });
+    const claim = { text: 'A permit costs €950', quote: 'The permit costs €950 for a camp', sourceIds: ['S1'], attributed: true, support: outage };
+    const finding = { answer: 'A permit costs €950.', claims: [claim] };
+    const node = { id: 'D1', method: 'lookup' };
+    expect(needsRecheck(claim, finding, node)).toBe(true);
+    expect(isStale(claim, finding, node)).toBe(false);
+    expect(supportAudit([{ ...node, finding }])).toMatchObject({ stale: 0, unanswered: 1, toConfirm: 1 });
+    const checked = { ...claim, support: supportRecord({ votes: [yes('gemini'), yes('groq')] }) };
+    expect(needsRecheck(checked, { ...finding, claims: [checked] }, node)).toBe(false);
+    const older = { ...claim, support: { ...checked.support, version: SUPPORT_LOGIC_VERSION - 1 } };
+    expect(needsRecheck(older, { ...finding, claims: [older] }, node)).toBe(true);
   });
 });
