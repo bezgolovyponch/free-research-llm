@@ -6,6 +6,7 @@ import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { ChecklistJudge, checklistSummary, checklistFingerprint } from './checklist.mjs';
+import { runChecksOnItems } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -1047,6 +1048,7 @@ export class ResearchEngine {
     this.emit(project, 'candidates', state.verified ? 'external verifier finished; table rebuilt: only plots it confirmed count toward the result' : `site fit in the background: ${state.measured} listing(s) measured${state.pending ? `, ${state.pending} still queued` : ''}; table rebuilt from the measurements`);
     await this.collectCandidates(project);
     await this.checkAcceptance(project);
+    this.planActions(project);
     await this.store.save(project, { reason: 'table rebuilt from background site measurements' });
     return project;
   }
@@ -1304,6 +1306,21 @@ export class ResearchEngine {
     project.report.verdict = `${provisionalVerdict(table ? `${table} — model memo: ${said}` : said, status).slice(0, 600 - note.length)}${note}`;
     project.report.status = { provisional: status.provisional, coverage: status.coverage, confidence: status.confidence, blocking: status.blocking, counts: status.counts };
     project.report.actions = status.plan.slice(0, 40);
+
+    if (project.acceptanceResult) {
+      const asked = project.acceptanceResult.totalAsked ?? 0;
+      const valid = project.acceptanceResult.validCount ?? 0;
+      const hardChecks = project.acceptanceResult.checks?.filter((c) => c.id.startsWith('checklist-')) ?? [];
+      const failedHard = hardChecks.filter((c) => c.value === 0 || c.value < 0.01);
+      const short = asked > 0 && valid < asked;
+      const contradicts = short || failedHard.length > 0;
+      if (contradicts) {
+        const failedLabels = failedHard.map((c) => c.label).join('; ') || 'item count short';
+        const msg = short ? `${asked} asked, ${valid} valid` : `hard checks at 0%: ${failedLabels}`;
+        project.report.status = { ...project.report.status, provisional: true, acceptanceContradiction: msg };
+        project.report.verdict = `PROVISIONAL (acceptance: ${msg}) — ${project.report.verdict.replace(/^PROVISIONAL\s*[—:-]?\s*/i, '')}`;
+      }
+    }
     return status;
   }
 
@@ -1437,13 +1454,19 @@ export class ResearchEngine {
       await this.store.save(project, { reason: 'start-of-loop repairs before a re-run' });
       return this.run(id, { pages });
     }
-    if (project.report) await this.checkAcceptance(project, pages);
+    if (project.report) {
+      await this.checkAcceptance(project, pages);
+      this.planActions(project);
+    }
     return this.store.save(project, { reason: 'start-of-loop repairs and re-score' });
   }
 
   async remeasure(id, { pages = null } = {}) {
     const project = await this.load(id);
-    if (project.report) await this.checkAcceptance(project, pages);
+    if (project.report) {
+      await this.checkAcceptance(project, pages);
+      this.planActions(project);
+    }
     return this.store.save(project, { reason: 'expected result re-measured' });
   }
 
@@ -1473,13 +1496,19 @@ export class ResearchEngine {
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage, convert });
-    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project) });
+    const checklist = project.checklist;
+    const checkCache = project.checkCache ?? {};
+    project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist, readPage, checkCache });
+    if (checklist && readPage && project.acceptanceResult?.items?.length) {
+      await runChecksOnItems(project.acceptanceResult.items, readPage, checklist, checkCache);
+    }
+    project.checkCache = checkCache;
 
     if (project.acceptanceResult?.items?.length && this.modeler && readPage) {
-      const checklist = project.checklist ?? (await this.modeler.build(project.question, project.guidance ?? ''));
-      if (checklist) {
-        project.checklist = checklist;
-        const fingerprint = checklistFingerprint(checklist);
+      const newChecklist = project.checklist ?? (await this.modeler.build(project.question, project.guidance ?? ''));
+      if (newChecklist) {
+        project.checklist = newChecklist;
+        const fingerprint = checklistFingerprint(newChecklist);
         project.checkCache = project.checkCache ?? {};
         const itemsToJudge = project.acceptanceResult.items.slice(0, 30);
         for (const item of itemsToJudge) {
@@ -1493,7 +1522,7 @@ export class ResearchEngine {
           const page = await readPage(item.url).catch(() => null);
           const pageText = page?.text ?? '';
           if (pageText) {
-            item.checks = await this.checklistJudge.judge(item, pageText, checklist);
+            item.checks = await this.checklistJudge.judge(item, pageText, newChecklist);
             item.checklist = checklistSummary([item])[0];
             project.checkCache[cacheKey] = { checks: item.checks, summary: item.checklist };
             const keys = Object.keys(project.checkCache);
@@ -1647,12 +1676,16 @@ export class ResearchEngine {
       if (memo || !project.report) await this.synthesize(project, pages);
       else await this.checkAcceptance(project, pages);
       this.checkSpecs(project);
-      project.phase = 'done';
+      const asked = project.acceptanceResult?.totalAsked ?? 0;
+      const valid = project.acceptanceResult?.validCount ?? 0;
+      const short = asked > 0 && valid < asked;
+      project.phase = short ? 'short' : 'done';
+      project.acceptanceSummary = short ? `${asked} asked, ${valid} valid` : `${valid} of ${asked} valid`;
       release();
-      this.emit(project, 'phase', 'done');
+      this.emit(project, 'phase', short ? `short (${project.acceptanceSummary})` : 'done');
       appendAppMessage(project, runSummary(project));
-      if (!this.quiet.has(id)) await this.onStop(project, { reason: 'research finished' });
-      return await this.store.save(project, { reason: 'research finished' });
+      if (!this.quiet.has(id)) await this.onStop(project, { reason: short ? `research finished but short: ${project.acceptanceSummary}` : 'research finished' });
+      return await this.store.save(project, { reason: short ? 'research finished but short of asked items' : 'research finished' });
     } catch (error) {
       if (project) {
         const offline = error instanceof OfflineError;
@@ -1907,9 +1940,14 @@ export class ResearchEngine {
     try {
       const project = await this.load(id);
       await this.synthesize(project, pages);
+      await this.checkAcceptance(project, pages);
       this.checkSpecs(project);
-      project.phase = project.nodes.every((n) => DONE.has(n.status)) ? 'done' : project.phase;
-      this.emit(project, 'phase', 'memo rewritten from the current pieces');
+      this.planActions(project);
+      const asked = project.acceptanceResult?.totalAsked ?? 0;
+      const valid = project.acceptanceResult?.validCount ?? 0;
+      const short = asked > 0 && valid < asked;
+      project.phase = short ? 'short' : (project.nodes.every((n) => DONE.has(n.status)) ? 'done' : project.phase);
+      this.emit(project, 'phase', short ? `short (${asked} asked, ${valid} valid)` : 'memo rewritten from the current pieces');
       return await this.store.save(project, { reason: 'memo rewritten on request' });
     } finally {
       this.running.delete(id);

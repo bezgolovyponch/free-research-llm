@@ -1,5 +1,5 @@
 import { plain } from './itemgate.mjs';
-import { quoteFound } from './strategy.mjs';
+import { quoteFound } from './quote.mjs';
 
 const CONTENT_WORDS = (text) => new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
 const JACCARD = (a, b) => {
@@ -102,7 +102,7 @@ export function judgeItem(item, pageText, checklist) {
         answer.answer = 'unknown';
         answer.quote = '';
       }
-      checks.push({ id: cluster.clause + '|' + ci.question, ...answer });
+      checks.push({ id: cluster.clause + '|' + ci.question, ...answer, hard: ci.hard, clause: cluster.clause });
     }
   }
   return checks;

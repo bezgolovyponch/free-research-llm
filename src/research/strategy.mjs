@@ -6,6 +6,7 @@ import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
 import { areaM2, zoningOf, explorePoints, haversineKm } from './site.mjs';
 import { cadastreNotes } from './parcels.mjs';
 import { withConfirmRisk } from './blockers.mjs';
+import { quoteFound } from './quote.mjs';
 
 export const STRATEGY_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -195,10 +196,6 @@ export function foundationText(foundation) {
   if (foundation.missing.length) lines.push(`Not modelled yet (no code check): ${foundation.missing.join('; ')}`);
   if (foundation.excluded?.length) lines.push(`Not applied: ${foundation.excluded.map((e) => `${foundation.criteria.find((c) => c.id === e.id)?.label ?? e.id}${e.reason ? ` (${e.reason})` : ''}`).join('; ')}`);
   return lines.join('\n');
-}
-
-export function quoteFound(text, quote) {
-  return plain(String(text ?? '').replace(/\s+/g, ' ')).includes(plain(quote.replace(/\s+/g, ' ')));
 }
 
 export { areaM2 };

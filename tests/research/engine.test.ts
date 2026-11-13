@@ -1483,7 +1483,8 @@ describe('list-first research flow', () => {
       return null;
     }) as never;
     const done = await engine.run(project.id);
-    expect(done.phase).toBe('done');
+    expect(done.phase).toBe('short');
+    expect(done.acceptanceSummary).toBe('20 asked, 0 valid');
     expect(calls[0]).toEqual({ sweep: true, research: 0 });
     expect(calls.at(-1)!.sweep).toBe(true);
     expect(calls.at(-1)!.research).toBeGreaterThan(0);

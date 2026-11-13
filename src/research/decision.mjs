@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import { bm25 } from './evidence.mjs';
 import { plain } from './itemgate.mjs';
 import { explorePoints } from './site.mjs';
-import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf, quoteFound } from './strategy.mjs';
+import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
+import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 
 export const DECISION_MODEL_VERSION = 3;

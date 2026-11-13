@@ -598,6 +598,55 @@ export function qualifies(item, spec) {
   return Boolean(item.live && (entity || item.listing) && (!spec.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
 }
 
+export function hardChecksPass(item) {
+  const checks = item.checks ?? [];
+  const hard = checks.filter((c) => c.hard === true);
+  if (hard.length === 0) return true;
+  return hard.every((c) => c.answer === 'yes');
+}
+
+export function softYesCount(item) {
+  const checks = item.checks ?? [];
+  return checks.filter((c) => c.hard !== true && c.answer === 'yes').length;
+}
+
+export function hardCheckPassRate(items, checkId) {
+  const relevant = items.filter((i) => (i.checks ?? []).some((c) => c.id === checkId));
+  if (relevant.length === 0) return 0;
+  const pass = relevant.filter((i) => (i.checks ?? []).some((c) => c.id === checkId && c.answer === 'yes')).length;
+  return pass / relevant.length;
+}
+
+function extractKeyWords(question) {
+  return plain(question).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+}
+
+function sameHost(url1, url2) {
+  try {
+    const h1 = new URL(url1).hostname.replace(/^www\./, '');
+    const h2 = new URL(url2).hostname.replace(/^www\./, '');
+    return h1 === h2;
+  } catch {
+    return false;
+  }
+}
+
+async function findRelevantLinks(pageText, itemUrl, keyWords, max = 3) {
+  const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([^<]*)<\/a>/gi;
+  const links = [];
+  for (const m of pageText.matchAll(linkRegex)) {
+    const href = m[1];
+    const text = m[2];
+    const fullUrl = href.startsWith('http') ? href : new URL(href, itemUrl).href;
+    if (!sameHost(fullUrl, itemUrl)) continue;
+    const combined = `${text} ${href}`.toLowerCase();
+    if (keyWords.some((kw) => combined.includes(kw.toLowerCase()))) {
+      links.push(fullUrl);
+    }
+  }
+  return [...new Set(links)].slice(0, max);
+}
+
 function pageIsLive(page, item, located, allowRedirect = false) {
   const status = Number(page?.status ?? 0);
   const text = String(page?.text ?? '');
@@ -645,6 +694,7 @@ export class AcceptanceChecker {
     return {
       ...item,
       live,
+      pageText,
       listing: located ? looksLikeListing(item.url) : !kind?.terms?.length || kindOnPage(pageText, kind),
       inRange: spec.valueRange ? live && inRange(amounts, spec, item.value, this.convert, item.unit) : null,
       mentions: spec.mustMention.length ? spec.mustMention.filter((m) => pageText.toLowerCase().includes(m.toLowerCase())).length / spec.mustMention.length : null,
@@ -652,14 +702,19 @@ export class AcceptanceChecker {
     };
   }
 
-  async evaluate(spec, deliverables, { located = true, kind = null, purpose = [] } = {}) {
+  async evaluate(spec, deliverables, { located = true, kind = null, purpose = [], checklist = null, readPage = null, checkCache = {} } = {}) {
     if (!hasCriteria(spec) && !purpose.length) return null;
     const wanted = spec.itemCount ?? MAX_ITEM_CHECKS;
     const items = await this.inspectAll(deliverables.slice(0, Math.min(MAX_ITEM_CHECKS, Math.ceil(wanted * 1.5))), spec, { located, kind, purpose });
     const target = spec.itemCount ?? Math.max(1, items.length);
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
     const checks = [];
-    const valid = items.filter((i) => qualifies(i, spec)).length;
+    const validItems = items.filter((i) => hardChecksPass(i) && qualifies(i, spec));
+    const valid = validItems.length;
+    for (const item of items) {
+      item.valid = hardChecksPass(item) && qualifies(item, spec);
+      item.softYes = softYesCount(item);
+    }
     if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, valid / spec.itemCount), detail: `${valid} of ${deliverables.length} delivered pass every check; first ${items.length} inspected (${located ? 'a single listing page that opens' : 'a page that opens and describes the asked kind'}${spec.valueRange ? ', price in range' : ''})` });
     if (spec.urlsLive) checks.push({ id: 'live', label: 'Links open a real page', value: good((i) => i.live), detail: `${items.filter((i) => i.live).length} of ${items.length} checked links are live` });
     if (spec.valueRange) checks.push({ id: 'range', label: `Value within ${spec.valueRange.join('–')} ${spec.unit}`.trim(), value: good((i) => i.inRange), detail: `${items.filter((i) => i.inRange).length} of ${items.length} pages show a value in range` });
@@ -668,7 +723,17 @@ export class AcceptanceChecker {
       const passed = items.filter((i) => (i.purpose ?? []).some((c) => c.id === criterion.id && c.passed)).length;
       checks.push({ id: criterion.id, label: criterion.label, value: items.length ? passed / items.length : 0, detail: `${passed} of ${items.length} delivered pages show it` });
     }
+    const allHardCheckIds = [...new Set(items.flatMap((i) => (i.checks ?? []).filter((c) => c.hard === true).map((c) => c.id)))];
+    for (const checkId of allHardCheckIds) {
+      const rate = hardCheckPassRate(items, checkId);
+      const label = items[0]?.checks?.find((c) => c.id === checkId)?.clause ?? checkId;
+      checks.push({ id: `checklist-${checkId}`, label: `Checklist: ${label}`, value: rate, detail: `${Math.round(rate * items.length)} of ${items.length} checked items pass this hard check` });
+    }
     const score = checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length;
-    return { score: Math.round(score * 1000) / 1000, checks: checks.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })), items, checkedAt: new Date().toISOString() };
+    const sortedItems = [...items].sort((a, b) => {
+      if (a.valid !== b.valid) return a.valid ? -1 : 1;
+      return softYesCount(b) - softYesCount(a);
+    });
+    return { score: Math.round(score * 1000) / 1000, checks: checks.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })), items: sortedItems, checkedAt: new Date().toISOString(), validCount: valid, totalAsked: spec.itemCount ?? 0 };
   }
 }
