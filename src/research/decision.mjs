@@ -391,6 +391,18 @@ const MODEL_STATE = ['subtype', 'calibrated', 'calibratedOn'];
 const KIND_STATE = ['condition', 'upgrades', 'verified', 'dropped', 'validated', 'hubs'];
 const defined = (source, keys) => Object.fromEntries(keys.filter((key) => source?.[key] !== undefined && source[key] !== null).map((key) => [key, source[key]]));
 
+function keptCriteriaCount(model) {
+  return (model?.criteria?.length ?? 0) + (model?.noLimit?.length ?? 0);
+}
+
+function hasKind(model) {
+  return Boolean(model?.kind?.label);
+}
+
+function isDegenerate(model) {
+  return !hasKind(model) && keptCriteriaCount(model) === 0;
+}
+
 function carried(before, model) {
   const was = before?.kind;
   if (!was || !model.kind || plain(was.label).trim() !== plain(model.kind.label).trim()) return model;
@@ -422,9 +434,30 @@ export class DecisionModeler {
     const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));
     if (samples.length < 2) return project.decisionModel ?? null;
     const model = aggregate(samples, { question, guidance, cases: examples, id: project.id });
+    const stored = project.decisionModel;
+    let finalModel = model;
+    let rebuildWeaker = false;
+    if (stored) {
+      const storedKept = keptCriteriaCount(stored);
+      const newKept = keptCriteriaCount(model);
+      const storedHasKind = hasKind(stored);
+      const newHasKind = hasKind(model);
+      if ((storedHasKind && !newHasKind) || (storedKept > 0 && newKept < storedKept)) {
+        finalModel = { ...model };
+        if (storedHasKind && !newHasKind) {
+          finalModel.kind = stored.kind;
+          rebuildWeaker = true;
+        }
+        if (storedKept > 0 && newKept < storedKept) {
+          finalModel.criteria = stored.criteria;
+          finalModel.noLimit = stored.noLimit;
+          rebuildWeaker = true;
+        }
+      }
+    }
     const checklist = await this.checklistModeler.build(question, guidance);
-    project.decisionModel = { ...carried(project.decisionModel, model), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION };
-    if (this.cases) await this.cases.record(project.id, question, model);
+    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, rebuildWeaker };
+    if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
     return project.decisionModel;
   }
 }

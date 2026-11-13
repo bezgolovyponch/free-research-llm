@@ -2029,6 +2029,7 @@ describe('hub search', () => {
     };
     project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
 
+    project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
     project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
     await engine.checkAcceptance(project);
     expect(project.acceptanceResult).toBeTruthy();
@@ -2097,6 +2098,7 @@ describe('hub search', () => {
     };
     project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
 
+    project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
     project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
     await engine.checkAcceptance(project);
     const item = project.acceptanceResult!.items[0];
@@ -2141,8 +2143,8 @@ describe('hub search', () => {
     await engine.updateProject(project.id, { acceptance: { itemCount: 1, valueRange: [0, 50], unit: 'EUR/kg' } });
     project.candidates = { kept: [{ title: 'Seller A', url: itemUrl, value: 40, unit: 'EUR/kg', price: 40, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits', why: [], risks: [] } }], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
     project.brief = { located: true, kind: { label: 'used goods seller', terms: ['used goods'] }, regions: [] };
+    project.decisionModel = { checklist: [{ clause: 'ships abroad', items: [{ clause: 'ships abroad', question: 'Does this ship to other countries?', hard: true, numeric: null }] }] };
     project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
-    expect(project.checklist).toBeUndefined();
     await engine.checkAcceptance(project);
     const item = project.acceptanceResult!.items[0];
     expect(item.checks.find((c) => c.id === checkId)).toMatchObject({ answer: 'yes', quote: 'We ship to 30 countries', source: deepUrl });
@@ -2209,7 +2211,7 @@ describe('hub search', () => {
       verification: null,
     };
     project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
-
+    project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
     project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
     await engine.checkAcceptance(project);
     // Some items should have checks (up to 30)

@@ -364,5 +364,18 @@
     "signal": "checklist verdicts (item.checks) are recorded but acceptance still uses only count/live/range/kind checks; research phase becomes 'done' even when valid items < asked items; memo states items found but acceptance shows K < N or hard checklist items at 0%",
     "cause": "acceptance evaluation used qualifies() based on live/listing/range/purpose only, ignoring the per-item checklist verdicts; phase transition to 'done' did not check validCount vs totalAsked; planActions did not cross-check memo claims against acceptanceResult",
     "prevention": "AcceptanceChecker.evaluate now requires all HARD checklist checks to be 'yes' for an item to be valid (unknown/no = fail); soft checks rank valid items; per-hard-check pass rates shown in acceptance checks; research phase set to 'short' with 'N asked, K valid' summary when K < N; planActions marks memo 'provisional' and lists failed hard items when acceptance contradicts memo"
+  },
+  {
+    "id": "F27",
+    "title": "checkAcceptance called wrong modeler.build signature; rebuild made the decision model worse; degenerate models recorded as cases",
+    "touches": [
+      "src/research/engine.mjs",
+      "src/research/decision.mjs",
+      "tests/research/engine.test.ts",
+      "tests/research/decision.test.ts"
+    ],
+    "signal": "checkAcceptance called this.modeler.build(question, guidance) but the app injects a DecisionModeler whose build takes a project; rebuild with 0 criteria replaced a model that had criteria; decisionModel with no kind and no criteria recorded as a case and polluted future researches",
+    "cause": "engine wired with ChecklistModeler in tests (build(question, guidance)) but app wires DecisionModeler (build(project, {force})); DecisionModeler.build did not guard against weaker rebuilds and did not filter degenerate models from cases.record",
+    "prevention": "checkAcceptance uses project.decisionModel.checklist directly (single source); DecisionModeler.build carries stored kind/criteria when new aggregate has no kind or fewer kept criteria; isDegenerate guards cases.record; tests wire DecisionModeler-shaped modeler; covered by tests/research/engine.test.ts (checklist from decisionModel) and tests/research/decision.test.ts (rebuild keeps stored kind/criteria; degenerate not recorded)"
   }
 ]

@@ -205,6 +205,77 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
     const router = { complete: async () => { throw new Error('down'); } };
     expect(await new DecisionModeler({ router }).build({ id: 'x', question })).toBeNull();
   });
+
+  it('a rebuild with an empty aggregate keeps the stored kind and criteria', async () => {
+    const stored = {
+      kind: { label: 'used car', terms: ['hatchback'], not: ['parts'], verified: { titles: 10, matched: 5, share: 0.5 } },
+      criteria: [{ measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000', source: 'question' }],
+      noLimit: [],
+      agreement: { samples: 3, majority: 2, proposed: 5, kept: 1 },
+    };
+    const answers = [
+      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
+      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
+      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
+    ];
+    const router = {
+      complete: async (req: { purpose: string }) => {
+        if (req.purpose === 'checklist') return { provider: 'p', data: { items: [{ clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] } };
+        return answers.shift()!;
+      }
+    };
+    const project = { id: 'p-rebuild', question, guidance: '', acceptance: { expected: '20 cars' }, decisionModel: stored };
+    const model = await new DecisionModeler({ router }).build(project, { force: true });
+    expect(model.kind).toEqual(stored.kind);
+    expect(model.criteria).toEqual(stored.criteria);
+    expect(model.rebuildWeaker).toBe(true);
+  });
+
+  it('a rebuild with fewer kept criteria keeps the stored criteria', async () => {
+    const stored = {
+      kind: { label: 'used car', terms: ['hatchback'], not: ['parts'] },
+      criteria: [
+        { measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000', source: 'question' },
+        { measure: 'coastKm', op: '<=', value: 100, quote: 'within 100 km', source: 'guidance' },
+      ],
+      noLimit: [],
+      agreement: { samples: 3, majority: 2, proposed: 5, kept: 2 },
+    };
+    const answers = [
+      { provider: 'p', data: { concept: 'c', kind: { label: 'used car', terms: ['hatchback'] }, criteria: [{ measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000' }] } },
+      { provider: 'p', data: { concept: 'c', kind: { label: 'used car', terms: ['hatchback'] }, criteria: [{ measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000' }] } },
+      { provider: 'p', data: { concept: 'c', kind: { label: 'used car', terms: ['hatchback'] }, criteria: [{ measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000' }] } },
+    ];
+    const router = {
+      complete: async (req: { purpose: string }) => {
+        if (req.purpose === 'checklist') return { provider: 'p', data: { items: [{ clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] } };
+        return answers.shift()!;
+      }
+    };
+    const project = { id: 'p-rebuild-2', question, guidance: '', acceptance: { expected: '20 cars' }, decisionModel: stored };
+    const model = await new DecisionModeler({ router }).build(project, { force: true });
+    expect(model.criteria).toEqual(stored.criteria);
+    expect(model.rebuildWeaker).toBe(true);
+  });
+
+  it('a degenerate model (no kind and no criteria) is not recorded as a case', async () => {
+    const recorded: string[] = [];
+    const answers = [
+      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
+      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
+      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
+    ];
+    const cases = { retrieve: async () => [], record: async (id: string) => { recorded.push(id); } };
+    const router = {
+      complete: async (req: { purpose: string }) => {
+        if (req.purpose === 'checklist') return { provider: 'p', data: { items: [{ clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] } };
+        return answers.shift()!;
+      }
+    };
+    const project = { id: 'p-degenerate', question, guidance: '', acceptance: { expected: '20 cars' } };
+    await new DecisionModeler({ router, cases }).build(project, { force: true });
+    expect(recorded).toEqual([]);
+  });
 });
 
 describe('item kind calibrated on real listing titles', () => {
