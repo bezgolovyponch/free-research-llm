@@ -5,9 +5,10 @@ import { describe, expect, it } from 'vitest';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
-import { NOISE_MIN_SAMPLES, PLATEAU_TRIALS, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, failingPieces, noiseFloor, nothingLeftToGain, plateauCheck, purposeScore, resultsRubric, REST_AFTER_FUTILE, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, loopCanImprove, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage, trialVerdict } from '../../src/research/improve.mjs';
+import { NOISE_MIN_SAMPLES, PLATEAU_TRIALS, ProjectImprover, REPEAT_SIMILARITY, acceptsTrial, dataGain, failingPieces, GAIN_OUTCOMES, mergeDataRows, newListingRows, noiseFloor, nothingLeftToGain, passingHardRows, plateauCheck, purposeScore, resultsRubric, REST_AFTER_FUTILE, sameQueriesAgain, STALL_TRIALS, structuralIssues, REST_HOURS, applyVariant, cannotGain, distinctResearches, improvementTargets, inScope, loopCanImprove, projectScore, repeatOf, restRotation, restingPieces, scopeScore, similarChange, stallCheck, stallMessage, trimProposalRegions, trialVerdict, usedQueries } from '../../src/research/improve.mjs';
 import { addSpec, normalizeSpec } from '../../src/research/specs.mjs';
 import { blankNode } from '../../src/research/tree.mjs';
+import { countriesIn } from '../../src/research/treeaudit.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 
 function tree() {
@@ -874,5 +875,188 @@ describe('nothing left to gain', () => {
     expect(withWeak.failingPieces).toEqual(['D3']);
     expect(failingPieces(weakPiece)).toEqual(['D3']);
     expect(nothingLeftToGain({ nodes, acceptanceResult: null }).ok).toBe(false);
+  });
+});
+
+describe('proposals stay in the asked regions', () => {
+  const regions = ['PT', 'ES', 'TR', 'VN'];
+  const outsideOf = (text: string) => countriesIn(text).filter((c: string) => !regions.includes(c));
+
+  it('trims out-of-region names from a proposal before it is tried, using the b7772e trial strings', () => {
+    const { variant, trimmed } = trimProposalRegions({
+      change: 'Search for coastal plots in Italy, Greece, Croatia, Bulgaria and Turkey on sahibinden.com, hepsiemlak.com; Vietnam on batdongsan.com.vn, chotot.com',
+      searchQueries: ['land for sale in Italy Greece Croatia', 'satılık tarla arsa Muğla denize yakın'],
+      split: [{ title: 'Italy Greece', question: 'Plots in Italy, Greece, Croatia and Bulgaria under 20000 EUR?' }],
+      add: [{ question: 'Add a new sub-piece that searches for low-cost coastal plots in Greece, Bulgaria, Romania, and Croatia' }],
+      sourceUrls: ['https://www.idealista.pt/x', 'https://www.immobiliare.it/vendita/terreno/'],
+    }, regions);
+    expect([...trimmed].sort()).toEqual(['Bulgaria', 'Croatia', 'Greece', 'Italy', 'Romania']);
+    expect(variant.change).toBe('Search for coastal plots in Turkey on sahibinden.com, hepsiemlak.com; Vietnam on batdongsan.com.vn, chotot.com');
+    expect(variant.change).toContain('Turkey');
+    expect(variant.change).toContain('Vietnam');
+    expect(variant.searchQueries[0]).toBe('land for sale in Portugal and Spain and Turkey and Vietnam');
+    expect(variant.searchQueries[1]).toBe('satılık tarla arsa Muğla denize yakın');
+    expect(variant.sourceUrls).toEqual(['https://www.idealista.pt/x']);
+    const allText = [variant.change, ...variant.searchQueries, variant.split[0].title, variant.split[0].question, variant.add[0].question].join(' ');
+    expect(outsideOf(allText)).toEqual([]);
+    expect(countriesIn(allText)).toEqual(expect.arrayContaining(['TR', 'VN']));
+  });
+
+  it('leaves a proposal that names only allowed regions untouched', () => {
+    const change = 'Which coastal parcels in Portugal, Spain, Turkey and Vietnam are listed for sale under 20,000 EUR?';
+    const { variant, trimmed } = trimProposalRegions({ change, searchQueries: ['arsa satılık Muğla', 'đất nền Bình Thuận abaixo de 500 milhões'] }, regions);
+    expect(trimmed).toEqual([]);
+    expect(variant.change).toBe(change);
+    expect(variant.searchQueries).toEqual(['arsa satılık Muğla', 'đất nền Bình Thuận abaixo de 500 milhões']);
+  });
+
+  it('a trimmed split no longer trips the outside-regions structural gate instead of being reverted whole', () => {
+    const project = {
+      question: 'Find appropriate plots to buy for a glamping business under 20000 EUR near the sea in Portugal, Spain, Turkey and Vietnam',
+      brief: { kind: { label: 'plot of land', terms: ['terreno', 'plot of land'] }, regions, valueRange: [0, 20000], unit: 'EUR' },
+      nodes: [
+        { id: 'D1', parentId: 'Q', title: 'Land cost', question: 'Average land price per m² in Spain coastal zones?', dependsOn: [], status: 'weak', searchQueries: [], sourceUrls: [] },
+        { id: 'D8', parentId: 'Q', title: 'Candidates', question: 'Which coastal plots in the asked countries are for sale?', dependsOn: [], status: 'weak', searchQueries: [], sourceUrls: [] },
+      ],
+    };
+    const raw = {
+      change: 'Split into sub-pieces for France, Italy, Spain, Greece and Turkey',
+      split: [
+        { question: 'Which coastal plots in Greece, Bulgaria, Romania and Croatia are for sale under 20,000 EUR?' },
+        { question: 'Which Turkish coastal plots on sahibinden.com and hepsiemlak.com are for sale under 20,000 EUR?' },
+      ],
+    };
+    const untrimmed = structuredClone(project);
+    applyVariant(untrimmed, 'D8', raw as never);
+    expect(structuralIssues(untrimmed).some((i: string) => i.startsWith('outside-regions:'))).toBe(true);
+    const { variant, trimmed } = trimProposalRegions(raw, regions);
+    expect(trimmed.length).toBeGreaterThan(0);
+    const trimmedProject = structuredClone(project);
+    applyVariant(trimmedProject, 'D8', variant as never);
+    expect(structuralIssues(trimmedProject).some((i: string) => i.startsWith('outside-regions:'))).toBe(false);
+    const splitText = trimmedProject.nodes.filter((n) => n.parentId === 'D8').map((n: { question: string }) => n.question).join(' ');
+    expect(outsideOf(splitText)).toEqual([]);
+    expect(splitText).toContain('sahibinden.com');
+  });
+});
+
+describe('new data that serves the purpose is kept', () => {
+  const brief = { kind: { label: 'plot of land', terms: ['terreno', 'plot of land', 'arsa', 'tarla'] }, regions: ['PT', 'ES', 'TR', 'VN'], valueRange: [0, 20000], unit: 'EUR', excludes: [] };
+  const knownRow = { title: 'Terreno para venda Ericeira Portugal', url: 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1iW4W', value: 9000, unit: 'EUR', place: 'Ericeira, Portugal' };
+  const before = { nodes: [{ id: 'D8.3', parentId: 'Q', status: 'weak', sources: [], finding: { answer: 'none', items: [knownRow] } }] };
+  const after = { nodes: [{ id: 'D8.3', parentId: 'Q', status: 'weak', sources: [], finding: { answer: 'none', items: [
+    knownRow,
+    { title: 'Terreno para venda Ericeira Portugal', url: 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8', value: 1500, unit: 'EUR', place: 'Ericeira, Portugal' },
+    { title: 'Tarla satılık Muğla Türkiye', url: 'https://www.sahibinden.com/ilan/tarla-satilik-mugla-ID99', value: 600000, unit: 'TRY', place: 'Muğla, Turkey' },
+    { title: 'Terreno para venda Lisboa Portugal', url: 'https://www.imovirtual.com/pt/anuncio/terreno-caro-ID77', value: 25000, unit: 'EUR', place: 'Lisboa, Portugal' },
+    { title: 'Działka na sprzedaż Gdańsk Polska', url: 'https://www.olx.pl/ogloszenie/dzialka-ID5', value: 5000, unit: 'EUR', place: 'Gdańsk, Poland' },
+  ] } }] };
+
+  it('collects the new listing rows and keeps only those that pass every hard criterion', () => {
+    const gain = dataGain(before, after, brief);
+    expect(newListingRows(before, after).map((r: { url: string }) => r.url)).toEqual([
+      'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8',
+      'https://www.sahibinden.com/ilan/tarla-satilik-mugla-ID99',
+      'https://www.imovirtual.com/pt/anuncio/terreno-caro-ID77',
+      'https://www.olx.pl/ogloszenie/dzialka-ID5',
+    ]);
+    expect(gain.found).toBe(4);
+    expect(gain.passing.map((r: { url: string }) => r.url)).toEqual(['https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8']);
+    expect(gain.detail).toBe('+4 listings from imovirtual.com, olx.pl, sahibinden.com, 1 pass every hard criterion');
+    expect(passingHardRows(gain.passing, brief)).toHaveLength(1);
+    expect(passingHardRows([after.nodes[0].finding.items[2], after.nodes[0].finding.items[3], after.nodes[0].finding.items[4]], brief)).toEqual([]);
+  });
+
+  it('merges the passing rows into the research node and never rows that fail a hard criterion', () => {
+    const target = structuredClone(before);
+    expect(mergeDataRows(target, dataGain(before, after, brief).passing, 'D8.3')).toEqual(['https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8']);
+    expect(target.nodes[0].finding.items.map((i: { url: string }) => i.url)).toEqual([knownRow.url, 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8']);
+  });
+
+  it('adds nothing when the research already holds the listing, so the trial is no data gain', () => {
+    const target = structuredClone(before);
+    const passing = dataGain(before, after, brief).passing;
+    mergeDataRows(target, passing, 'D8.3');
+    expect(mergeDataRows(target, passing, 'D8.3')).toEqual([]);
+  });
+
+  it('keeps new passing rows on a reverted text change and logs them in plain words, counting the trial as a gain', async () => {
+    const t0 = Date.parse('2026-11-12T10:00:00Z');
+    const at = (min: number) => new Date(t0 + min * 60000).toISOString();
+    const project = { id: 'p', question: 'q', brief, nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak' })], improve: { trials: [], remeasureNoise: [0, 0, 0, 0, 0] } };
+    let saved = structuredClone(project);
+    const engine = {
+      load: async () => structuredClone(saved),
+      store: { save: async (p: typeof project) => { saved = structuredClone(p); } },
+      emit: () => {},
+      resetWithAncestors: (p: typeof project, id: string) => { p.nodes.find((n) => n.id === id)!.status = 'pending'; },
+      run: async () => {
+        const after = structuredClone(saved);
+        after.nodes.find((n) => n.id === 'D3')!.finding = { answer: 'x', items: [{ title: 'Terreno para venda Ericeira Portugal', url: 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8', value: 1500, unit: 'EUR', place: 'Ericeira, Portugal' }] };
+        return { ...after, phase: 'done' };
+      },
+      resynthesize: async () => {},
+    };
+    const state = { best: { score: 0.3 }, deadline: Date.now() + 3600000, lock: { run: (f: () => unknown) => f() }, measure: () => ({ score: 0.3 }) };
+    const improver = new ProjectImprover({ engine: engine as never });
+    const trialProject = structuredClone(project);
+    trialProject.nodes.find((n) => n.id === 'D3')!.question = 'which permits apply to tents?';
+    const base = { at: at(0), nodeId: 'D3', before: 0.3 };
+    const result = await improver.commit('p', { snapshot: project, project: trialProject, touched: ['D3'], removed: [], researched: false, nodeId: 'D3', base, change: 'sharper permit question' }, state);
+    expect(result).toMatchObject({ kept: true, data: true });
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'kept-data', score: 0.3, detail: '+1 listings from imovirtual.com, 1 pass every hard criterion' });
+    expect(saved.nodes.find((n) => n.id === 'D3')!.question).toBe('permits?');
+    expect(saved.nodes.find((n) => n.id === 'D3')!.finding.items.map((i: { url: string }) => i.url)).toContain('https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8');
+  });
+
+  it('a kept-data trial resets the plateau, the stall and the rest like a kept change', () => {
+    const t0 = Date.parse('2026-11-12T10:00:00Z');
+    const at = (min: number) => new Date(t0 + min * 60000).toISOString();
+    expect([...GAIN_OUTCOMES]).toEqual(['kept', 'kept-data']);
+    const trials = [
+      ...Array.from({ length: PLATEAU_TRIALS }, (_, i) => ({ nodeId: 'D1.1', outcome: 'reverted-whole', change: `try ${i}`, at: at(i) })),
+      { nodeId: 'D1.1', outcome: 'kept-data', change: 'k', at: at(PLATEAU_TRIALS) },
+      { nodeId: 'D1.1', outcome: 'reverted-whole', change: 'after', at: at(PLATEAU_TRIALS + 1) },
+    ];
+    expect(plateauCheck(trials).plateaued).toBe(false);
+    expect(plateauCheck(trials).trialsSinceKept).toBe(1);
+    const project = { improve: { startedAt: at(0), trials }, acceptanceResult: { checks: [] } };
+    const stall = stallCheck(project, t0 + (PLATEAU_TRIALS + 30) * 60000);
+    expect(stall.stalled).toBe(false);
+    expect(stall.trialsSinceKept).toBe(1);
+    const rest = [...Array.from({ length: REST_AFTER_FUTILE }, (_, i) => ({ nodeId: 'D1.1', outcome: 'reverted-whole', at: at(100 + i) })), { nodeId: 'D1.1', outcome: 'kept-data', at: at(200) }, ...Array.from({ length: REST_AFTER_FUTILE - 1 }, (_, i) => ({ nodeId: 'D1.1', outcome: 'reverted-whole', at: at(300 + i) }))];
+    expect([...restingPieces(rest, t0 + 400 * 60000)]).toEqual([]);
+  });
+});
+
+describe('a weak piece is retried with different queries', () => {
+  const t0 = Date.parse('2026-11-12T10:00:00Z');
+  const at = (min: number) => new Date(t0 + min * 60000).toISOString();
+
+  it('records the queries a trial used and refuses the same queries again', () => {
+    const trials = [
+      { nodeId: 'D8.3.b', outcome: 'no-gain', queries: ['arsa satılık Muğla', 'tarla satılık denize yakın'], at: at(0) },
+      { nodeId: 'D8.3.b', outcome: 'reverted-whole', queries: ['arsa satılık Muğla'], at: at(1) },
+      { nodeId: 'D9.1', outcome: 'no-gain', queries: ['đất nền Bình Thuận'], at: at(2) },
+    ];
+    expect(usedQueries(trials, 'D8.3.b')).toEqual(['arsa satılık Muğla', 'tarla satılık denize yakın']);
+    expect(sameQueriesAgain({ searchQueries: ['arsa satılık Muğla', 'tarla satılık denize yakın'] }, { searchQueries: ['arsa satılık Muğla'] }, trials, 'D8.3.b')).toBe(true);
+    expect(sameQueriesAgain({ searchQueries: ['arsa satılık Muğla', 'sahibinden satılık arsa Aydın'] }, { searchQueries: ['arsa satılık Muğla'] }, trials, 'D8.3.b')).toBe(false);
+    expect(sameQueriesAgain({ searchQueries: ['arsa satılık Muğla'], sourceUrls: ['https://www.hepsiemlak.com/arsa/Mugla'] }, { searchQueries: ['arsa satılık Muğla'], sourceUrls: [] }, trials, 'D8.3.b')).toBe(false);
+    expect(sameQueriesAgain({ change: 'reword only' }, { searchQueries: [] }, trials, 'D8.3.b')).toBe(false);
+  });
+
+  it('refuses a retry with the same queries on the same piece without researching it again', async () => {
+    const project = { id: 'p', question: 'q', nodes: [...tree().nodes, blankNode({ id: 'D3', parentId: 'Q', question: 'permits?', status: 'weak', searchQueries: ['permit tents Brno'] })], improve: { trials: [{ nodeId: 'D3', outcome: 'no-gain', change: 'first try', queries: ['permit tents Brno'], at: at(0) }] } };
+    let runs = 0;
+    let saved = structuredClone(project);
+    const engine = { load: async () => structuredClone(saved), store: { save: async (p: typeof project) => { saved = p; } }, emit: () => {}, run: async () => { runs += 1; }, researchLeaf: async () => { runs += 1; }, resetWithAncestors: () => {} };
+    const improver = new ProjectImprover({ engine: engine as never });
+    improver.propose = async () => ({ change: 'retry with the same queries', searchQueries: ['permit tents Brno'], type: 'sub-question|lookup|fact' });
+    const state = { best: { score: 0.3 }, deadline: Date.now() + 60000, lock: { run: (f: () => unknown) => f() } };
+    expect(await improver.trial('p', 'D3', state)).toEqual({ kept: false });
+    expect(runs).toBe(0);
+    expect(saved.improve.trials.at(-1)).toMatchObject({ outcome: 'repeat', queries: ['permit tents Brno'] });
+    expect(saved.improve.trials.at(-1).detail).toMatch(/the same queries were already used on D3 \(permit tents Brno\); different sources or queries are required/);
   });
 });

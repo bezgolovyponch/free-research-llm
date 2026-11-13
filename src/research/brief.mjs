@@ -209,7 +209,7 @@ export function describeBrief(brief) {
   return lines.filter(Boolean).join('\n');
 }
 
-function tldCountry(url) {
+export function tldCountry(url) {
   try {
     const tld = new URL(url).hostname.split('.').pop().toLowerCase();
     if (GENERIC_TLDS.has(tld)) return '';

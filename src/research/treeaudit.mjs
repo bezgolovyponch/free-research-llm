@@ -217,7 +217,7 @@ export function narrowText(text, regions) {
   return out.replace(/\(\s*,\s*/g, '(').replace(/,\s*\)/g, ')').replace(/\s{2,}/g, ' ').replace(/,\s*,/g, ',').replace(/,\s*and\s*,/g, ' and').replace(/\s+,/g, ',').replace(/,\s*(?:and\s*)?$/g, '').trim();
 }
 
-const DEMONYMS = { Italian: 'IT', Greek: 'GR', Croatian: 'HR', French: 'FR', German: 'DE', Spanish: 'ES', Portuguese: 'PT', Turkish: 'TR', Vietnamese: 'VN', Bulgarian: 'BG', Cypriot: 'CY', Maltese: 'MT', Albanian: 'AL', Montenegrin: 'ME', Slovenian: 'SI', Romanian: 'RO', Moroccan: 'MA', Thai: 'TH' };
+export const DEMONYMS = { Italian: 'IT', Greek: 'GR', Croatian: 'HR', French: 'FR', German: 'DE', Spanish: 'ES', Portuguese: 'PT', Turkish: 'TR', Vietnamese: 'VN', Bulgarian: 'BG', Cypriot: 'CY', Maltese: 'MT', Albanian: 'AL', Montenegrin: 'ME', Slovenian: 'SI', Romanian: 'RO', Moroccan: 'MA', Thai: 'TH' };
 
 export function countriesIn(text) {
   const codes = new Set(regionsIn(text));

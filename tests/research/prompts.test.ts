@@ -25,6 +25,47 @@ describe('variantPrompt', () => {
   });
 });
 
+describe('variantPrompt purpose, regions and query memory', () => {
+  const plots = {
+    question: 'Find appropriate plots to buy for glamping business, 20000EUR max, 10 month a year, mild climate, nearby sea accessible by ebike',
+    acceptance: { expected: '50 Plots In EU, Vietnam and Turkey strongly feasible for Glamping business 10 minth, 1 year' },
+    acceptanceResult: null,
+    brief: {
+      kind: { label: 'plot of land', terms: ['terreno', 'plot of land'] },
+      itemCount: 50,
+      valueRange: [0, 20000],
+      unit: 'EUR',
+      regions: ['PT', 'ES', 'TR', 'VN'],
+      groups: ['EU'],
+      narrowed: ['EU narrowed to Portugal, Spain, the members you named'],
+      coastal: true,
+      excludes: ['offered for rent', 'offered as a swap', 'wanted ads', 'news, blog or guide pages', 'search or category pages'],
+    },
+    nodes: [{ id: 'D8.3', parentId: 'Q', status: 'weak', question: 'Turkey/Vietnam coastal glamping parcels under 20000 EUR?', searchQueries: [], sourceUrls: [] }],
+  };
+  const promptOf = (trials: object[]) => variantPrompt({ project: plots as never, node: plots.nodes[0] as never, score: { score: 0.807, acceptance: 0.807 } as never, trials: trials as never, stall: null })[1].content;
+
+  it('tells the proposer the research purpose, the allowed regions, the price cap, the kind and the countries\' languages, and that out-of-region names are trimmed', () => {
+    const prompt = promptOf([]);
+    expect(prompt).toContain('RESEARCH PURPOSE (gather data only for this; every proposal must serve it):');
+    expect(prompt).toContain('Deliver: 50 single plot of land listing pages for sale');
+    expect(prompt).toContain('Hard limit: price 0–20000 EUR');
+    expect(prompt).toContain('Where: EU (27 countries), Turkey, Vietnam (near the sea) · EU narrowed to Portugal, Spain, the members you named');
+    expect(prompt).toContain('ALLOWED REGIONS: Portugal (PT), Spain (ES), Turkey (TR), Vietnam (VN)');
+    expect(prompt).toContain('never name a region outside them; code trims out-of-region names from the proposal before the trial');
+    expect(prompt).toContain('LANGUAGES of the asked countries (use them in searchQueries): English, Portuguese, Spanish, Turkish, Vietnamese');
+  });
+
+  it('lists the queries already used on the piece and requires different sources or queries, never the same ones', () => {
+    const prompt = promptOf([
+      { change: 'Add native Turkish queries', outcome: 'no-gain', score: 0.807, queries: ['arsa satılık Muğla', 'tarla satılık denize yakın'] },
+      { change: 'Add Vietnamese portal queries', outcome: 'reverted-whole', score: 0.807, queries: ['đất nền Bình Thuận dưới 500 triệu'] },
+    ]);
+    expect(prompt).toContain('QUERIES ALREADY USED ON THIS PIECE (never propose them again; code refuses the repeat without testing): arsa satılık Muğla | tarla satılık denize yakın | đất nền Bình Thuận dưới 500 triệu');
+    expect(prompt).toContain('different from the ones already used: new portals or native-language queries for the allowed countries, never the same queries again');
+  });
+});
+
 describe('list-first decomposition', () => {
   const template = { label: 't', drivers: 'd', metrics: 'm', sources: 's', decisionRule: 'r' };
 
