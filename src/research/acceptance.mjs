@@ -1,5 +1,6 @@
 import { plain } from './itemgate.mjs';
 import { regionVerdict } from './brief.mjs';
+import { entitiesFromJsonLd } from '../search/listings.mjs';
 const CURRENCIES = {
   EUR: ['€', 'eur', 'euro'],
   PLN: ['zł', 'zl', 'pln'],
@@ -227,7 +228,6 @@ function nearName(page, name) {
 
 function purposePass(criterion, pageText, item) {
   if (criterion.type === 'kind') {
-    if (item?.harvested && item?.nodeId === 'sweep') return true;
     if (kindOnPage(pageText, { terms: criterion.terms })) return true;
     const subtype = criterion.subtype;
     if (!subtype?.models?.length) return false;
@@ -300,7 +300,6 @@ export function isExcludedSurfaceUrl(url) {
   const host = parsed.hostname.replace(/^www\./, '');
   return SUPPLIER_DIRECTORY_HOSTS.has(host) || BLOG_GUIDE_PATH.test(parsed.pathname);
 }
-const WHOLESALE_SIGNAL = /\b(?:wholesale|bulk|bales?|per\s+kg|container|b2b|export|groothandel|großhandel|ingrosso|hurtownia|didmena|velkoobchod)\b/i;
 const GENERIC_SEGMENTS = new Set(['about', 'about-us', 'contact', 'contact-us', 'blog', 'news', 'faq', 'help', 'privacy', 'terms', 'search', 'category', 'categories', 'product', 'products', 'sitemap', 'login', 'register', 'cart', 'jobs', 'careers', 'press', 'media', 'home', 'index', 'suppliers', 'vendors', 'manufacturers', 'companies', 'directory', 'browse']);
 
 function registrableDomain(host) {
@@ -322,7 +321,93 @@ function entityDeliverable(page, regions) {
   return region ? { ...deliverable, region: region.text } : deliverable;
 }
 
-export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '', regions = [] } = {}) {
+function normalizeName(name) {
+  return String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function groupListingsByEntity(listings) {
+  const byHost = new Map();
+  for (const listing of listings) {
+    if (!listing.url) continue;
+    try {
+      const u = new URL(listing.url);
+      const host = u.hostname.replace(/^www\./, '');
+      const segments = u.pathname.split('/').filter(Boolean);
+      if (segments.length < 2) continue;
+      if (!byHost.has(host)) byHost.set(host, []);
+      byHost.get(host).push({ url: listing.url, title: listing.title, segments });
+    } catch {
+      continue;
+    }
+  }
+
+  const entityGroups = new Map();
+  for (const [host, entries] of byHost) {
+    if (entries.length < 2) continue;
+    let commonLength = entries[0].segments.length;
+    for (const e of entries) {
+      let i = 0;
+      while (i < commonLength && i < e.segments.length && entries[0].segments[i] === e.segments[i]) {
+        i++;
+      }
+      commonLength = i;
+    }
+    if (commonLength < 1) continue;
+    const groups = new Map();
+    for (const e of entries) {
+      if (e.segments.length <= commonLength) continue;
+      const entityKey = e.segments.slice(0, commonLength + 1).join('/');
+      if (!groups.has(entityKey)) groups.set(entityKey, []);
+      groups.get(entityKey).push(e);
+    }
+    for (const [key, group] of groups) {
+      if (group.length >= 2) {
+        entityGroups.set(`${host}/${key}`, group);
+      }
+    }
+  }
+  return entityGroups;
+}
+
+async function readEntityWebsite(profileUrl, readPage) {
+  if (!readPage) return null;
+  try {
+    const page = await readPage(profileUrl);
+    if (!page || !page.text) return null;
+    const entities = entitiesFromJsonLd(page.text, profileUrl);
+    for (const e of entities) {
+      if (e.url && e.url !== profileUrl) {
+        return e.url;
+      }
+    }
+    const anchors = page.text.match(/<a\s[^>]*href\s*=\s*["'](https?:\/\/[^"']+)["']/gi);
+    if (anchors) {
+      for (const a of anchors) {
+        const match = a.match(/href\s*=\s*["'](https?:\/\/[^"']+)["']/i);
+        if (match) {
+          const url = match[1];
+          const host = hostOf(url);
+          if (host) {
+            return url;
+          }
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export async function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '', regions = [], readPage = null } = {}) {
   const wanted = (terms ?? []).filter(Boolean);
   const banned = (not ?? []).map((phrase) => plain(phrase).trim()).filter(Boolean);
   const anchors = anchorWords(kindLabel);
@@ -366,25 +451,94 @@ export function entityDeliverables(nodes, { terms = [], not = [], kindLabel = ''
       for (const host of hosts) marketplaces.add(host);
     }
   }
-  const wholesale = typeof kindLabel === 'string' && /wholesale/i.test(kindLabel);
   const hosts = new Map();
+  const entityMap = new Map();
   for (const page of pages) {
-    if (directories.has(page.host)) continue;
-    if (marketplaces.has(page.host)) continue;
-    if (REVIEW_NEWS_HOST.test(page.host)) continue;
-    if (LISTICLE_TITLE.test(String(page.source.title ?? ''))) continue;
-    if (isExcludedSurfaceUrl(page.url)) continue;
-    if (wholesale && !WHOLESALE_SIGNAL.test(page.pageText)) continue;
-    const { matched, ok } = matchedTerms(page.pageText, wanted);
+    const isDirectory = directories.has(page.host);
+    const isMarketplace = marketplaces.has(page.host);
+    const isReview = REVIEW_NEWS_HOST.test(page.host);
+    const isListicle = LISTICLE_TITLE.test(String(page.source.title ?? ''));
+    const isExcluded = isExcludedSurfaceUrl(page.url);
+    if (!isDirectory && (isMarketplace || isReview || isListicle || isExcluded)) continue;
+    let { matched, ok } = matchedTerms(page.pageText, wanted);
+    if (!ok && isDirectory && page.source.listings?.length) {
+      for (const listing of page.source.listings) {
+        if (listing.title && kindOnPage(listing.title, { terms: wanted })) {
+          const listingMatched = matchedTerms(listing.title, wanted);
+          if (listingMatched.ok) {
+            matched = listingMatched.matched;
+            ok = true;
+            break;
+          }
+        }
+      }
+    }
     if (!ok) continue;
     if (!anchoredTerm(matched, anchors)) continue;
     if (wordMatch(page.pageText, banned)) continue;
-    const hits = matched.length;
-    const current = hosts.get(page.host);
-    if (current && current.hits >= hits) continue;
-    hosts.set(page.host, { hits, deliverable: entityDeliverable(page, regions) });
+    if (isDirectory) {
+      const entities = entitiesFromJsonLd(page.source.text ?? '', page.url);
+      let entitiesAdded = 0;
+      for (const entity of entities) {
+        const entityHost = entity.url ? hostOf(entity.url) : '';
+        const entityKey = entityHost || normalizeName(entity.name);
+        if (entityMap.has(entityKey)) continue;
+        let finalUrl = entity.url;
+        let evidenceUrl = page.url;
+        if (entity.profileUrl && entity.profileUrl !== entity.url && !entityHost) {
+          const websiteUrl = await readEntityWebsite(entity.profileUrl, readPage);
+          if (websiteUrl) {
+            finalUrl = websiteUrl;
+            evidenceUrl = entity.profileUrl;
+          } else {
+            finalUrl = entity.profileUrl;
+            evidenceUrl = entity.profileUrl;
+          }
+        } else if (entity.url) {
+          evidenceUrl = page.url;
+        }
+        const deliverable = {
+          title: text(entity.name, 200),
+          url: finalUrl ? (finalUrl.endsWith('/') ? finalUrl : finalUrl) : `${page.parsed.protocol}//${page.host}/`,
+          value: null,
+          unit: '',
+          nodeId: page.node.id,
+          evidence: evidenceUrl,
+          entity: { name: entity.name, country: entity.country, city: entity.city }
+        };
+        const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
+        if (region) deliverable.region = region.text;
+        entityMap.set(entityKey, deliverable);
+        entitiesAdded++;
+      }
+      if (entitiesAdded === 0 && page.source.listings?.length) {
+        const entityGroups = groupListingsByEntity(page.source.listings);
+        for (const [entityKey, listings] of entityGroups) {
+          const representative = listings[0];
+          const deliverable = {
+            title: text(representative.title, 200),
+            url: representative.url.endsWith('/') ? representative.url : representative.url,
+            value: null,
+            unit: '',
+            nodeId: page.node.id,
+            evidence: page.url,
+            entity: { name: representative.title, country: '', city: '' }
+          };
+          const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
+          if (region) deliverable.region = region.text;
+          entityMap.set(entityKey, deliverable);
+        }
+      }
+    } else {
+      const hits = matched.length;
+      const current = hosts.get(page.host);
+      if (current && current.hits >= hits) continue;
+      hosts.set(page.host, { hits, deliverable: entityDeliverable(page, regions) });
+    }
   }
-  return [...hosts.values()].sort((a, b) => b.hits - a.hits).map((entry) => entry.deliverable);
+  const entityDeliverablesArr = [...entityMap.values()].map((d) => ({ hits: 0, deliverable: d }));
+  const allDeliverables = [...hosts.values(), ...entityDeliverablesArr].sort((a, b) => (b.hits ?? 0) - (a.hits ?? 0));
+  return allDeliverables.map((entry) => entry.deliverable);
 }
 
 const identity = (value) => value;

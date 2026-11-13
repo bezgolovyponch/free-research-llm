@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { coordsOf, extractListings, pagePlace, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate } from '../../src/search/listings.mjs';
+import { describe, expect, it, beforeAll } from 'vitest';
+import { coordsOf, extractListings, pagePlace, fromCards, fromEmbeddedJson, fromJsonLd, listingKey, nextPageUrl, pagedNext, pathTemplate, entitiesFromJsonLd } from '../../src/search/listings.mjs';
 
 const BASE = 'https://portal.example/land-for-sale';
 const CZ_BASE = 'https://www.sreality.cz/hledani/prodej/pozemky';
@@ -312,5 +312,40 @@ describe('listing extraction', () => {
     const items = fromJsonLd(html, CZ_BASE);
     expect(items.length).toBe(1);
     expect(items[0].title).toBe('Prodej pozemku 500 m²');
+  });
+});
+
+describe('entitiesFromJsonLd', () => {
+  const EUROPAGES_BASE = 'https://www.europages.nl/ondernemingen/balen-gebruikte-kleding.html';
+  let europagesHtml: string;
+  beforeAll(async () => {
+    const fs = await import('node:fs/promises');
+    europagesHtml = await fs.readFile(new URL('../fixtures/europages-balen-gebruikte-kleding.html', import.meta.url), 'utf8');
+  });
+
+  it('extracts entities from Europages ItemList with Organization entries', () => {
+    const entities = entitiesFromJsonLd(europagesHtml, EUROPAGES_BASE);
+    expect(entities.length).toBeGreaterThanOrEqual(3);
+    const first = entities[0];
+    expect(first.name).toBe('UK CLOTHING CARAVAN');
+    expect(first.url).toBe('https://www.ukclothingcaravan.co.uk/');
+    expect(first.country).toBe('GB');
+    expect(first.city).toBe('Grays');
+    const second = entities[1];
+    expect(second.name).toBe('Wakted BV');
+    expect(second.country).toBe('BE');
+    expect(second.city).toBe('Sint-Pieters-Leeuw');
+    const third = entities[2];
+    expect(third.name).toBe('LIBERTY GLOBAL EXPORTS Ltd.');
+    expect(third.country).toBe('IE');
+    expect(third.city).toBe('DUBLIN');
+  });
+
+  it('includes profileUrl for entities that only have directory profile links', () => {
+    const entities = entitiesFromJsonLd(europagesHtml, EUROPAGES_BASE);
+    for (const e of entities.slice(0, 3)) {
+      expect(e.profileUrl).toBeTruthy();
+      expect(e.profileUrl).toContain('europages.nl/nl/company/');
+    }
   });
 });

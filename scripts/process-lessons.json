@@ -335,6 +335,20 @@
     ],
     "signal": "decision.mjs kept a criterion only if its measure was in MEASURES (price plus plot/glamping quantities) and 2 of 3 samples used the identical measure|op key; result on live researches: suppliers b2f5b7 agreement {samples:3, proposed:0, kept:0}, cars 0c750f proposed 1 kept 0; every clause in decisionModel.missing; so 'proven good quality', 'assortment', named brands, 'engine information', 'usage trends', 'recently posted', 'highest price/value ratio' never checked, acceptance only tested count/live/range/kind",
     "cause": "the decision model only accepted criteria with measures in MEASURES; clauses without a measurable quantity (brands, quality, assortment, delivery, engine info, posting date, price/value ratio) were dropped into missing and never verified per item",
-    "prevention": "new checklist.mjs module turns each clause into yes/no questions judged per supplier/page; proposeChecklist samples 3x, clusterChecklist groups by clause then meaning (Jaccard >= 0.5), keeps majority; judgeItem checks each question against page text, requires quote evidence; checklistSummary computes hardPass/unknown/softYes; DecisionModeler now builds checklist alongside criteria, stores in decisionModel.checklist, modelText prints it; dryrun shows checklist; MEASURES criteria unchanged for plots regression"
+    "prevention": "new checklist.mjs module turns each clause into yes/no questions judged on its own page; proposeChecklist samples 3x, clusterChecklist groups by clause then meaning (Jaccard >= 0.5), keeps majority; judgeItem checks each question against page text, requires quote evidence; checklistSummary computes hardPass/unknown/softYes; DecisionModeler now builds checklist alongside criteria, stores in decisionModel.checklist, modelText prints it; dryrun shows checklist; MEASURES criteria unchanged for plots regression"
+  },
+  {
+    "id": "F25",
+    "title": "hard-coded host names in directory detection and wholesale filter leaked into universal engine",
+    "touches": [
+      "src/research/acceptance.mjs",
+      "src/search/listings.mjs",
+      "tests/research/acceptance.test.ts",
+      "tests/search/listings.test.ts",
+      "tests/fixtures/"
+    ],
+    "signal": "entityDeliverables hard-coded 'europages', 'kompass', 'wllw.net', 'visable' in readEntityWebsite and WHOLESALE_SIGNAL regex plus /wholesale/i.test(kindLabel) branch; tests asserted wholesale filter behavior",
+    "cause": "the directory detection was implemented by host name instead of by JSON-LD structure (ItemList or ≥3 Organization/LocalBusiness nodes pointing to same-host profiles), and the wholesale requirement was baked into acceptance instead of coming from the checklist model",
+    "prevention": "a page is a directory by structure only; an entity's own website is a url/sameAs on a different host than the directory page; the checklist model judges kind-specific requirements from the question's clauses; tests use fixtures (Europages HTML + single Organization HTML) to prove the structural rule; grep for host names in src/ must return nothing"
   }
 ]
