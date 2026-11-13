@@ -296,6 +296,7 @@ export class ModelRouter {
     if (!row.ok && row.provider && row.provider !== 'router') {
       const provider = this.providers.find((p) => p.id === row.provider);
       if (provider?.keyCount !== undefined) row.keys = provider.keyCount;
+      if (!row.model && provider?.selected) row.model = provider.selected[row.tier] ?? provider.selected.fast;
     }
     this.ledger.push(row);
     if (this.ledger.length > 500) this.ledger.shift();
@@ -359,6 +360,13 @@ export class ModelRouter {
       }
       const noCredit = !SHORT_LIMIT.test(text) && (status === 402 || CREDIT_EXHAUSTED.test(text)) && !/exceeded your current quota|per day/i.test(text);
       const daily = noCredit && nextUtcMidnight(at) > this.now();
+      const modelGoneError = modelGone({ status, message: text });
+      if (modelGoneError) {
+        if (row.model && !this.isModelCurrent(provider, row.model)) continue;
+        this.coolDown({ id }, { status, message: String(row.error ?? '') });
+        restored.push(id);
+        continue;
+      }
       if (!badKey && !daily) continue;
       this.coolDown({ id }, { status, message: String(row.error ?? '') });
       restored.push(id);
@@ -373,11 +381,12 @@ export class ModelRouter {
         const at = Date.parse(row.ts);
         return !Number.isNaN(at) && now - at <= STREAK_BENCH_MAX_MS;
       });
+      const relevant = recent.filter((row) => !row.model || this.isModelCurrent(provider, row.model));
       let streak = 0;
-      while (streak < recent.length && recent[recent.length - 1 - streak].ok === false) streak++;
+      while (streak < relevant.length && relevant[relevant.length - 1 - streak].ok === false) streak++;
       if (streak < FAILURE_STREAK_BENCH) continue;
-      const at = Date.parse(recent[recent.length - 1].ts);
-      if (provider?.keyCount !== undefined && recent[recent.length - 1].keys !== undefined && provider.keyCount > recent[recent.length - 1].keys) continue;
+      const at = Date.parse(relevant[relevant.length - 1].ts);
+      if (provider?.keyCount !== undefined && relevant[relevant.length - 1].keys !== undefined && provider.keyCount > relevant[relevant.length - 1].keys) continue;
       const benches = benchRows.filter((row) => /failed calls in a row; rests/.test(String(row.error ?? '')) && now - Date.parse(row.ts) <= STREAK_BENCH_MAX_MS && Date.parse(row.ts) < at).length;
       const rest = Math.min(STREAK_BENCH_MS * 2 ** benches, STREAK_BENCH_MAX_MS);
       const until = at + rest;
@@ -387,6 +396,11 @@ export class ModelRouter {
       if (!restored.includes(id)) restored.push(id);
     }
     return restored;
+  }
+
+  isModelCurrent(provider, model) {
+    if (!provider?.selected || !model) return false;
+    return provider.selected.fast === model || provider.selected.deep === model || provider.selected.vision === model;
   }
 
   cooldownFor(provider, error) {

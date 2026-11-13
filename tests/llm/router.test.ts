@@ -1123,17 +1123,103 @@ describe('ModelRouter.forgetBench', () => {
   });
 });
 
-describe('ModelRouter.restoreCooldowns key count', () => {
-  it('skips restoring a daily-quota bench when the provider now has more keys than the ledger row', () => {
-    const now = Date.parse('2026-11-13T10:00:00Z');
-    const p = (id: string, keyCount: number) => ({ id, ready: true, keyCount, preset: {}, describe: () => ({}), chat: async () => ({}) });
-    const router = new ModelRouter({ providers: [p('groq', 2)], now: () => now });
-    const restored = router.restoreCooldowns([
-      { ts: '2026-11-13T09:00:00Z', provider: 'groq', ok: false, error: 'groq HTTP 402: {"balance_units":0}', keys: 1 },
-    ]);
+describe('ModelRouter.restoreCooldowns model-aware streak', () => {
+  it('ignores failures on models no longer selected by the provider (old dead models)', () => {
+    const now = Date.parse('2026-11-13T15:19:00Z');
+    const p = (id: string) => ({ id, ready: true, selected: { fast: 'nvidia/nemotron-3.5-lightning-30b-a3b', deep: 'nvidia/nemotron-3-ultra-550b-a55b', vision: null }, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('nvidia')], now: () => now });
+    const oldModelFailures = Array.from({ length: 17 }, (_, i) => ({
+      ts: new Date(now - 60000 - (16 - i) * 60000).toISOString(),
+      provider: 'nvidia',
+      ok: false,
+      error: 'nvidia HTTP 404: model not found',
+      model: '01-ai/yi-large',
+    }));
+    const restored = router.restoreCooldowns(oldModelFailures);
     expect(restored).toEqual([]);
-    expect(router.cooldownUntil.has('groq')).toBe(false);
+    expect(router.cooldownUntil.has('nvidia')).toBe(false);
   });
+
+  it('benches when failures are on the current selected model', () => {
+    const now = Date.parse('2026-11-13T15:19:00Z');
+    const p = (id: string) => ({ id, ready: true, selected: { fast: 'nvidia/nemotron-3.5-lightning-30b-a3b', deep: 'nvidia/nemotron-3-ultra-550b-a55b', vision: null }, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('nvidia')], now: () => now });
+    const currentModelFailures = Array.from({ length: 17 }, (_, i) => ({
+      ts: new Date(now - 60000 - (16 - i) * 60000).toISOString(),
+      provider: 'nvidia',
+      ok: false,
+      error: 'nvidia HTTP 429: rate limited',
+      model: 'nvidia/nemotron-3.5-lightning-30b-a3b',
+    }));
+    const restored = router.restoreCooldowns(currentModelFailures);
+    expect(restored).toEqual(['nvidia']);
+    expect(router.cooldownUntil.get('nvidia')).toBe(now - 60000 + 30 * 60 * 1000);
+    expect(router.cooldownReason.get('nvidia')).toBe('17 failed calls in a row before the restart; rests 30 min');
+  });
+
+  it('benches when failures have no model field (legacy rows)', () => {
+    const now = Date.parse('2026-11-13T15:19:00Z');
+    const p = (id: string) => ({ id, ready: true, selected: { fast: 'nvidia/nemotron-3.5-lightning-30b-a3b', deep: 'nvidia/nemotron-3-ultra-550b-a55b', vision: null }, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('nvidia')], now: () => now });
+    const legacyFailures = Array.from({ length: 17 }, (_, i) => ({
+      ts: new Date(now - 60000 - (16 - i) * 60000).toISOString(),
+      provider: 'nvidia',
+      ok: false,
+      error: 'nvidia unreachable: timed out',
+    }));
+    const restored = router.restoreCooldowns(legacyFailures);
+    expect(restored).toEqual(['nvidia']);
+    expect(router.cooldownUntil.get('nvidia')).toBe(now - 60000 + 30 * 60 * 1000);
+    expect(router.cooldownReason.get('nvidia')).toBe('17 failed calls in a row before the restart; rests 30 min');
+  });
+
+  it('ignores model-gone error on old model in single-row restore, but restores for current model', () => {
+    const now = Date.parse('2026-11-13T15:19:00Z');
+    const p = (id: string) => ({ id, ready: true, selected: { fast: 'nvidia/nemotron-3.5-lightning-30b-a3b', deep: 'nvidia/nemotron-3-ultra-550b-a55b', vision: null }, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('nvidia')], now: () => now });
+    const oldModelGone = [
+      { ts: '2026-11-13T14:00:00Z', provider: 'nvidia', ok: false, error: 'nvidia HTTP 404: {"status":404,"title":"Not Found"}', model: '01-ai/yi-large' },
+    ];
+    let restored = router.restoreCooldowns(oldModelGone);
+    expect(restored).toEqual([]);
+    expect(router.cooldownUntil.has('nvidia')).toBe(false);
+
+    router.cooldownUntil.delete('nvidia');
+    router.cooldownReason.delete('nvidia');
+
+    const currentModelGone = [
+      { ts: '2026-11-13T14:00:00Z', provider: 'nvidia', ok: false, error: 'nvidia HTTP 404: {"status":404,"title":"Not Found"}', model: 'nvidia/nemotron-3.5-lightning-30b-a3b' },
+    ];
+    restored = router.restoreCooldowns(currentModelGone);
+    expect(restored).toEqual(['nvidia']);
+    expect(router.cooldownReason.get('nvidia')).toBe('rate limit');
+  });
+
+  it('restores bad-key errors regardless of model (provider-wide), but not daily-quota 429', () => {
+    const now = Date.parse('2026-11-13T15:19:00Z');
+    const p = (id: string) => ({ id, ready: true, selected: { fast: 'nvidia/nemotron-3.5-lightning-30b-a3b', deep: 'nvidia/nemotron-3-ultra-550b-a55b', vision: null }, preset: {}, describe: () => ({}), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('nvidia')], now: () => now });
+
+    const dailyQuotaOldModel = [
+      { ts: '2026-11-13T14:00:00Z', provider: 'nvidia', ok: false, error: 'nvidia HTTP 429: tokens per day limit exceeded', model: '01-ai/yi-large' },
+    ];
+    let restored = router.restoreCooldowns(dailyQuotaOldModel);
+    expect(restored).toEqual([]);
+    expect(router.cooldownUntil.has('nvidia')).toBe(false);
+
+    router.cooldownUntil.delete('nvidia');
+    router.cooldownReason.delete('nvidia');
+
+    const badKeyOldModel = [
+      { ts: '2026-11-13T14:00:00Z', provider: 'nvidia', ok: false, error: 'nvidia HTTP 401: invalid key', model: '01-ai/yi-large' },
+    ];
+    restored = router.restoreCooldowns(badKeyOldModel);
+    expect(restored).toEqual(['nvidia']);
+    expect(router.cooldownReason.get('nvidia')).toContain('key rejected');
+  });
+});
+
+describe('ModelRouter.restoreCooldowns key count', () => {
 
   it('restores a daily-quota bench when the provider has the same number of keys as the ledger row', () => {
     const now = Date.parse('2026-11-13T10:00:00Z');
