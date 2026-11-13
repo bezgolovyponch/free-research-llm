@@ -1501,8 +1501,8 @@ export class ResearchEngine {
 
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
 
-    if (project.acceptanceResult?.items?.length && this.modeler && readPage) {
-      const newChecklist = project.checklist ?? (await this.modeler.build(project.question, project.guidance ?? ''));
+    if (project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
+      const newChecklist = project.decisionModel.checklist;
       if (newChecklist) {
         project.checklist = newChecklist;
         const fingerprint = checklistFingerprint(newChecklist);
