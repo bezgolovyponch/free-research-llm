@@ -54,10 +54,10 @@ export const PROVIDER_PRESETS = [
     keyEnv: 'NVIDIA_API_KEY',
     signup: 'https://build.nvidia.com',
     prefer: {
-      fast: ['meta/llama-3.3-70b-instruct', 'openai/gpt-oss-20b', 'meta/llama-3.1-8b-instruct'],
-      deep: ['openai/gpt-oss-120b', 'deepseek-ai/deepseek-v3', 'qwen/qwen3', 'meta/llama-3.3-70b-instruct'],
+      fast: ['nvidia/nemotron-3.5-lightning-30b-a3b', 'nvidia/nemotron-3-ultra-550b-a55b', 'mistralai/mistral-large-4-1t-a52b'],
+      deep: ['nvidia/nemotron-3-ultra-550b-a55b', 'mistralai/mistral-large-4-1t-a52b', 'nvidia/nemotron-3.5-lightning-30b-a3b'],
     },
-    fallbackModels: { fast: 'meta/llama-3.3-70b-instruct', deep: 'openai/gpt-oss-120b' },
+    fallbackModels: { fast: 'nvidia/nemotron-3.5-lightning-30b-a3b', deep: 'nvidia/nemotron-3-ultra-550b-a55b' },
   },
   {
     id: 'sambanova',

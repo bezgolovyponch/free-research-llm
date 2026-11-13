@@ -571,11 +571,20 @@ export class App {
 
   async reloadKeys() {
     const changed = this.secrets ? await this.secrets.refresh(this.env) : [];
+    if (changed.length) {
+      for (const envName of changed) {
+        const providers = this.router.providers.filter((p) => p.preset?.keyEnv === envName);
+        for (const provider of providers) {
+          this.router.forgetBench(provider.id);
+        }
+      }
+    }
     this.search = buildSearch({ env: { ...this.env, ...this.sessionSearchEnv }, fetchImpl: this.fetchImpl, recipes: this.recipes, browser: this.browser });
     this.engine.search = this.search;
     this.factory.env = this.env;
     await this.refreshProviders();
-    void this.logs.append('history', { type: 'session', message: `keys reloaded${changed.length ? `: ${changed.join(', ')}` : ' (no change)'} · search: ${this.search.describe().backends.join(', ')}` });
+    const lifted = changed.length ? this.router.providers.filter((p) => p.preset?.keyEnv && changed.includes(p.preset.keyEnv) && p.state === 'ready').map((p) => p.id) : [];
+    void this.logs.append('history', { type: 'session', message: `keys reloaded${changed.length ? `: ${changed.join(', ')}` : ' (no change)'}${lifted.length ? ` · bench lifted: ${lifted.join(', ')}` : ''} · search: ${this.search.describe().backends.join(', ')}` });
     this.noteApp(`Keys reloaded${changed.length ? `: ${changed.join(', ')}` : ' (no change)'} · models: ${this.router.status().filter((p) => p.state === 'ready').map((p) => p.id).join(', ') || 'none'} · search: ${this.search.describe().backends.join(', ')}`);
     return { changed, status: this.status() };
   }

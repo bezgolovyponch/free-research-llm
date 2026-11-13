@@ -338,3 +338,70 @@ describe('build id', () => {
     expect(new App({ env: {}, providers: [] }).status().build).toMatch(/^[0-9a-f]{12}$/);
   });
 });
+
+describe('App.reloadKeys lifts bench on key change', () => {
+  it('clears the bench for a provider whose key env changed', async () => {
+    const fetchImpl = (async (url: string) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'llama-3.1-8b-instant' }] }));
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }));
+    }) as never;
+    const future = Date.now() + 3600000;
+    const secrets = {
+      refresh: async (env: Record<string, string>) => {
+        env.GROQ_API_KEY = 'k1,k2';
+        return ['GROQ_API_KEY'];
+      },
+    };
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'groq', GROQ_API_KEY: 'k1' }, fetchImpl, dataDir: '/tmp/frl-unused', secrets });
+    await app.refreshProviders();
+    expect(app.status().providers.find((p: { id: string }) => p.id === 'groq')?.state).toBe('ready');
+    app.router.cooldownUntil.set('groq', future);
+    app.router.cooldownReason.set('groq', 'daily quota or credit used up; waits for the daily reset');
+    expect(app.status().providers.find((p: { id: string }) => p.id === 'groq')?.coolingDownMs).toBeGreaterThan(0);
+    await app.reloadKeys();
+    expect(app.status().providers.find((p: { id: string }) => p.id === 'groq')?.coolingDownMs).toBe(0);
+    await app.logs.queue;
+  });
+
+  it('keeps the bench for a provider whose key env did not change', async () => {
+    const fetchImpl = (async (url: string) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'llama-3.1-8b-instant' }] }));
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }));
+    }) as never;
+    const future = Date.now() + 3600000;
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'groq', GROQ_API_KEY: 'k1' }, fetchImpl, dataDir: '/tmp/frl-unused' });
+    await app.refreshProviders();
+    expect(app.status().providers.find((p: { id: string }) => p.id === 'groq')?.state).toBe('ready');
+    app.router.cooldownUntil.set('groq', future);
+    app.router.cooldownReason.set('groq', 'daily quota or credit used up; waits for the daily reset');
+    await app.reloadKeys();
+    expect(app.status().providers.find((p: { id: string }) => p.id === 'groq')?.coolingDownMs).toBeGreaterThan(0);
+    await app.logs.queue;
+  });
+
+  it('logs the lifted bench in the reload message', async () => {
+    const fetchImpl = (async (url: string) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'llama-3.1-8b-instant' }] }));
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }));
+    }) as never;
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'groq', GROQ_API_KEY: 'k1' }, fetchImpl, dataDir: '/tmp/frl-unused' });
+    await app.refreshProviders();
+    expect(app.status().providers.find((p: { id: string }) => p.id === 'groq')?.state).toBe('ready');
+    const future = Date.now() + 3600000;
+    app.router.cooldownUntil.set('groq', future);
+    app.router.cooldownReason.set('groq', 'daily quota or credit used up; waits for the daily reset');
+    const logs: Array<{ type: string; message: string }> = [];
+    const originalAppend = app.logs.append.bind(app.logs);
+    app.logs.append = async (type: string, entry: { message: string }) => {
+      logs.push({ type, message: entry.message });
+      return originalAppend(type, entry);
+    };
+    const secrets = { refresh: async (env: Record<string, string>) => { env.GROQ_API_KEY = 'k1,k2'; return ['GROQ_API_KEY']; } };
+    app.secrets = secrets;
+    await app.reloadKeys();
+    const msg = logs.find((l) => l.message.includes('bench lifted'));
+    expect(msg).toBeDefined();
+    expect(msg?.message).toContain('bench lifted: groq');
+    await app.logs.queue;
+  });
+});
