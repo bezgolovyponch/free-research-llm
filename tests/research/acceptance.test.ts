@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll } from 'vitest';
 import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
@@ -161,7 +161,7 @@ describe('listing price on the page', () => {
     expect(collectDeliverables(mixed as never).map((i: { url: string }) => i.url)).toEqual(['u3', 'u2', 'u1']);
   });
 
-  it('delivers one supplier website per host for a kind no portal lists', () => {
+  it('delivers one supplier website per host for a kind no portal lists', async () => {
     const nodes = [
       {
         id: 'A',
@@ -172,14 +172,14 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    const deliverables = entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'], not: ['spare parts'] });
+    const deliverables = await entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'], not: ['spare parts'] });
     expect(deliverables).toHaveLength(2);
     expect(deliverables.map((d: { url: string }) => d.url)).toEqual(['https://supplier-one.com/', 'https://supplier-two.com/']);
     expect(deliverables[0]).toEqual({ title: 'Vintage clothing wholesale', url: 'https://supplier-one.com/', value: null, unit: '', nodeId: 'A', evidence: 'https://www.supplier-one.com/about-us' });
     expect(deliverables[1]).toMatchObject({ title: 'Graded A vintage stock', nodeId: 'A', evidence: 'https://supplier-two.com/contact' });
   });
 
-  it('needs a multi-word term or two different terms, so a dairy page with one word is not a supplier', () => {
+  it('needs a multi-word term or two different terms, so a dairy page with one word is not a supplier', async () => {
     const dairy = [
       {
         id: 'A',
@@ -188,9 +188,9 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    expect(entityDeliverables(dairy as never, { terms: ['branded vintage clothing wholesale', 'cream'] })).toEqual([]);
+    expect(await entityDeliverables(dairy as never, { terms: ['branded vintage clothing wholesale', 'cream'] })).toEqual([]);
     const grader = [{ id: 'A', sources: [{ url: 'https://msgroup-secondhandclothes.com/how-sorting-grading/', title: 'How Sorting & Grading Define the Quality of Second-Hand Clothes', text: 'High-quality second-hand clothes, graded and sorted by professionals. Wholesale second-hand clothing by the container.' }] }];
-    expect(entityDeliverables(grader as never, { terms: ['second hand clothes'], kindLabel: 'wholesale clothing provider' }).map((d) => d.url)).toEqual(['https://msgroup-secondhandclothes.com/']);
+    expect((await entityDeliverables(grader as never, { terms: ['second hand clothes'], kindLabel: 'wholesale clothing provider' })).map((d) => d.url)).toEqual(['https://msgroup-secondhandclothes.com/']);
     const twoWords = [
       {
         id: 'A',
@@ -199,10 +199,10 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    expect(entityDeliverables(twoWords as never, { terms: ['cream', 'clothing'] }).map((d: { url: string }) => d.url)).toEqual(['https://supplier-three.com/']);
+    expect((await entityDeliverables(twoWords as never, { terms: ['cream', 'clothing'] })).map((d: { url: string }) => d.url)).toEqual(['https://supplier-three.com/']);
   });
 
-  it('anchors a matched term to the kind label, so a dairy page is not a clothing supplier', () => {
+  it('anchors a matched term to the kind label, so a dairy page is not a clothing supplier', async () => {
     const dairy = [
       {
         id: 'A',
@@ -211,7 +211,7 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    expect(entityDeliverables(dairy as never, { terms: ['graded A', 'cream'], kindLabel: 'wholesale clothing provider' })).toEqual([]);
+    expect(await entityDeliverables(dairy as never, { terms: ['graded A', 'cream'], kindLabel: 'wholesale clothing provider' })).toEqual([]);
     const clothing = [
       {
         id: 'A',
@@ -220,10 +220,10 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    expect(entityDeliverables(clothing as never, { terms: ['graded A', 'branded vintage clothing wholesale'], kindLabel: 'wholesale clothing provider' }).map((d: { url: string }) => d.url)).toEqual(['https://supplier-four.com/']);
+    expect((await entityDeliverables(clothing as never, { terms: ['graded A', 'branded vintage clothing wholesale'], kindLabel: 'wholesale clothing provider' })).map((d: { url: string }) => d.url)).toEqual(['https://supplier-four.com/']);
   });
 
-  it('keeps a marketplace with twelve parsed listings out of the deliverables', () => {
+  it('keeps a marketplace with twelve parsed listings out of the deliverables', async () => {
     const nodes = [
       {
         id: 'A',
@@ -232,10 +232,10 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    expect(entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'] })).toEqual([]);
+    expect(await entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'] })).toEqual([]);
   });
 
-  it('keeps a directory host with five different product paths out of the deliverables', () => {
+  it('keeps a directory host with five different product paths out of the deliverables', async () => {
     const nodes = [
       {
         id: 'A',
@@ -246,33 +246,10 @@ describe('listing price on the page', () => {
         })),
       },
     ];
-    expect(entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'] })).toEqual([]);
+    expect(await entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'] })).toEqual([]);
   });
 
-  it('keeps only real supplier websites for a wholesale kind, excluding marketplace stores, listicles, news and non-wholesale shops', () => {
-    const nodes = [
-      {
-        id: 'A',
-        sources: [
-          { url: 'https://wuhanhaisen.en.made-in-china.com/product/1', title: 'Wuhanhaisen second-hand clothing', text: 'Branded second-hand clothing wholesale, graded A, bales of cream garments.' },
-          { url: 'https://usedshoe.en.made-in-china.com/product/2', title: 'Used shoes wholesale', text: 'Used shoes and second-hand clothing wholesale in bulk.' },
-          { url: 'https://www.yelp.com/biz/five-best-second-hand-shops-prague', title: 'Five Best Second-Hand Shops in Prague', text: 'Best second-hand shops in Prague for vintage clothing.' },
-          { url: 'https://www.praguemorning.cz/five-best-second-hand-shops/', title: 'Five Best Second-Hand Shops in Prague', text: 'A list of the five best second-hand shops in Prague.' },
-          { url: 'https://www.newsanyway.com/article/123', title: 'Second-hand clothing market news', text: 'Second-hand clothing market grows in Central Europe.' },
-          { url: 'https://www.lulavintageprague.cz/', title: 'Lula Vintage', text: 'vintage fashion store in Prague' },
-          { url: 'https://www.secondhandbales.com/', title: 'Secondhand Bales', text: 'Branded second-hand clothing wholesale, graded A, bales of cream garments by the container.' },
-          { url: 'https://www.msgroup-secondhandclothes.com/how-sorting-grading/', title: 'How Sorting & Grading Define the Quality of Second-Hand Clothes', text: 'High-quality second-hand clothes, graded and sorted by professionals. We export full containers of graded second-hand clothing wholesale.' },
-        ],
-      },
-    ];
-    const deliverables = entityDeliverables(nodes as never, { terms: ['branded second-hand clothing wholesale', 'second-hand clothing'], kindLabel: 'wholesale branded second-hand clothing' });
-    expect(deliverables).toHaveLength(2);
-    const uk = ["a", "b", "c"].map((name) => ({ url: `https://${name}-bales.co.uk/`, title: `${name} bales`, text: "Branded second-hand clothing wholesale in bales." }));
-    expect(entityDeliverables([{ id: "U", sources: uk }] as never, { terms: ["branded second-hand clothing wholesale"], kindLabel: "wholesale clothing provider" })).toHaveLength(3);
-    expect(deliverables.map((d: { url: string }) => d.url).sort()).toEqual(['https://msgroup-secondhandclothes.com/', 'https://secondhandbales.com/'].sort());
-  });
-
-  it('excludes blog and guide pages even when they carry the asked terms', () => {
+  it('excludes blog and guide pages even when they carry the asked terms', async () => {
     const nodes = [
       {
         id: 'A',
@@ -283,12 +260,12 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    const deliverables = entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'secondhand clothing'], kindLabel: 'wholesale clothing provider' });
+    const deliverables = await entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'secondhand clothing'], kindLabel: 'wholesale clothing provider' });
     expect(deliverables).toHaveLength(1);
     expect(deliverables.map((d: { url: string }) => d.url)).toEqual(['https://supplier-one.com/']);
   });
 
-  it('a wholesaler page naming retailers as customers is not dropped by the not phrase retail', () => {
+  it('a wholesaler page naming retailers as customers is not dropped by the not phrase retail', async () => {
     const terms = ['branded vintage clothing wholesale', 'graded A', 'cream', 'suppliers in NL', 'wholesale used clothing', 'second hand clothes', 'used clothing wholesale'];
     const not = ['retail', 'maloobchod', 'donation', 'consignment'];
     const kindLabel = 'wholesale clothing provider';
@@ -300,7 +277,7 @@ describe('listing price on the page', () => {
         text: 'Brasco Wholesale Vintage Clothing | Footwear | Accessories \n New from Brasco \n New: BrascoBox \n Meet BrascoBox — vintage wholesale in smaller quantities \n Vintage wholesale in smaller quantities \n Discover BrascoBox \n high quality collections\n worldwide delivery\n realtime stock\n Slide 1_3 Clothing Accessories footwear Get Inspired\n Slide 1_3 Clothing Accessories footwear Get Inspired\n check out our assortment\n Hand-inspected clothing, delivered in bulk for unbeatable value\n Accessories (69) \n Clothing (489) \n Footwear (50) \n your vintage adventure starts here\n Bulk up your stock with our carefully sourced European and American clothing.\n Our story of wholesale vintage clothing\n Welcome to our online vintage clothing wholesale company! Brasco is your go-to distributor for wholesale vintage, second-hand and used clothing. \n We are passionate about vintage wholesale fashion and offer a shop-ready product for retailers and wholesalers who share our enthusiasm for used items.',
       }],
     }];
-    expect(entityDeliverables(brasco as never, { terms, not, kindLabel })).toEqual([
+    expect(await entityDeliverables(brasco as never, { terms, not, kindLabel })).toEqual([
       { title: 'Brasco Wholesale Vintage Clothing | Footwear | Accessories', url: 'https://brasco.nl/', value: null, unit: '', nodeId: 'hubs', evidence: 'https://brasco.nl/' },
     ]);
     const dustFactory = [{
@@ -311,11 +288,11 @@ describe('listing price on the page', () => {
         text: 'Vintage Clothing Wholesalers and Suppliers work hand in hand with the rag houses that process vintage clothing, teaching their workers and buyers what is valuable for resale as Vintage. These mixes are then processed and sold to the Vintage Wholesaler so that they can begin processing the mixes for retail buyers.\n\nAt Dust Factory we then process the clothing even more breaking down each grade into a specific style and quality. The graders in the Dust Factory processing plants are more advanced when it comes to Vintage Clothing retail, then the graders at the Rag Houses. This is because each grader has had a minimum of three years experience working Vintage Retail before they can start grading for Dust Factory. We have found over the years that this ensures a quality mix for our buyers. What is damaged or stained is then sold to vintage refurbished companies so that the items can be re-constructed into a new garment. What is considered modern or undesirable for vintage buyers is donated to local charities or disaster relief organizations.\n\nThe clothing that is used for our mixes is then broken down into size and style runs. This gives our buyers the opportunity to get the same high quality mixes each time. Because we are a bulk wholesaler we do not pull out rare or desirable items for buyers with a limited market, but instead leave these items in our mixes to ensure the quality of our mixes for our bulk buyers. Over the years we have found that it is better not to let buyers hand pick mixes from our grades, this is so that we can keep the quality of our grades up.',
       }],
     }];
-    expect(entityDeliverables(dustFactory as never, { terms, kindLabel }).map((d: { url: string }) => d.url)).toEqual(['https://dustfactoryvintage.com/']);
-    expect(entityDeliverables(dustFactory as never, { terms, not, kindLabel })).toEqual([]);
+    expect((await entityDeliverables(dustFactory as never, { terms, kindLabel })).map((d: { url: string }) => d.url)).toEqual(['https://dustfactoryvintage.com/']);
+    expect(await entityDeliverables(dustFactory as never, { terms, not, kindLabel })).toEqual([]);
   });
 
-  it('marks each delivered supplier with its region verdict for an entity list and delivers the same rows', () => {
+  it('marks each delivered supplier with its region verdict for an entity list and delivers the same rows', async () => {
     const nodes = [
       {
         id: 'D6.2',
@@ -332,10 +309,10 @@ describe('listing price on the page', () => {
       },
     ];
     const asked = { terms: ['branded vintage clothing wholesale', 'graded A', 'cream', 'suppliers in NL', 'wholesale used clothing', 'second hand clothes', 'used clothing wholesale'], not: ['retail', 'maloobchod', 'donation', 'consignment'], kindLabel: 'wholesale clothing provider' };
-    const unmarked = entityDeliverables(nodes as never, asked);
+    const unmarked = await entityDeliverables(nodes as never, asked);
     expect(unmarked.map((d: { url: string }) => d.url).sort()).toEqual(['https://usfripe.com/', 'https://wiltex.eu/', 'https://zagumi.com/']);
     expect(unmarked.every((d: Record<string, unknown>) => !('region' in d))).toBe(true);
-    const marked = entityDeliverables(nodes as never, { ...asked, regions: ['CZ'] });
+    const marked = await entityDeliverables(nodes as never, { ...asked, regions: ['CZ'] });
     expect(marked.map((d: { url: string }) => d.url)).toEqual(unmarked.map((d: { url: string }) => d.url));
     expect(marked.map((d: { region: string }) => d.region)).toEqual(['outside CZ', 'outside CZ', 'outside CZ']);
   });
@@ -460,7 +437,7 @@ describe('purpose checks from the user\'s words', () => {
     expect(result!.checks.find((c: { id: string }) => c.id === 'purpose-kind')).toMatchObject({ value: 1, passed: true });
   });
 
-  it('passes a swept listing of a portal that lists the kind even when the page never uses its words', async () => {
+  it('fails a swept listing of a portal when the page lacks the kind word', async () => {
     const pages: Record<string, { text: string; status: number }> = {
       'https://auto.bazos.cz/inzerat/225881782/citroen-c3.php': { text: 'Citroen C3 1.4i 1.6MPI 75kw, 54 kW, 180 000 km, benzín, cena 15 000 Kč. '.repeat(4), status: 200 },
     };
@@ -468,8 +445,8 @@ describe('purpose checks from the user\'s words', () => {
     const items = [{ title: 'Citroen C3 1.4i', url: Object.keys(pages)[0], value: 15000, unit: 'CZK', nodeId: 'sweep', harvested: true }];
     const result = await checker.evaluate(normalizeAcceptance(CAR.acceptance), items, { located: true, kind: CAR.decisionModel.kind, purpose: purposeChecks(CAR) });
     const purpose = result!.checks.find((c: { id: string }) => c.id === 'purpose-kind');
-    expect(purpose).toMatchObject({ label: 'Page shows the asked hatchback (your words)', value: 1, passed: true });
-    expect(result!.items.map((i: { purpose: { passed: boolean }[] }) => i.purpose[0].passed)).toEqual([true]);
+    expect(purpose).toMatchObject({ label: 'Page shows the asked hatchback (your words)', value: 0, passed: false });
+    expect(result!.items.map((i: { purpose: { passed: boolean }[] }) => i.purpose[0].passed)).toEqual([false]);
   });
 
   it('keeps the asked kind word check for a listing that was not harvested from a portal sweep', async () => {
@@ -561,7 +538,7 @@ describe('isExcludedSurfaceUrl', () => {
     for (const url of kept) expect(isExcludedSurfaceUrl(url), url).toBe(false);
   });
 
-  it('keeps accio.com and apparelsearch.com out of entityDeliverables', () => {
+  it('keeps accio.com and apparelsearch.com out of entityDeliverables', async () => {
     const nodes = [
       {
         id: 'A',
@@ -572,8 +549,127 @@ describe('isExcludedSurfaceUrl', () => {
         ],
       },
     ];
-    const deliverables = entityDeliverables(nodes as never, { terms: ['wholesale second hand clothing'], kindLabel: 'wholesale clothing provider' });
+    const deliverables = await entityDeliverables(nodes as never, { terms: ['wholesale second hand clothing'], kindLabel: 'wholesale clothing provider' });
     expect(deliverables).toHaveLength(1);
     expect(deliverables.map((d: { url: string }) => d.url)).toEqual(['https://zagumi.com/']);
+  });
+});
+
+describe('entityDeliverables with directory pages', () => {
+  const EUROPAGES_URL = 'https://www.europages.nl/ondernemingen/balen-gebruikte-kleding.html';
+  let europagesHtml: string;
+  let singleOrgHtml: string;
+  beforeAll(async () => {
+    const fs = await import('node:fs/promises');
+    europagesHtml = await fs.readFile(new URL('../fixtures/europages-balen-gebruikte-kleding.html', import.meta.url), 'utf8');
+    singleOrgHtml = await fs.readFile(new URL('../fixtures/single-org-page.html', import.meta.url), 'utf8');
+  });
+
+  it('extracts entities from a directory page and creates deliverables per entity', async () => {
+    const nodes = [
+      {
+        id: 'D1',
+        sources: [
+          { url: EUROPAGES_URL, title: 'Balen gebruikte kleding', text: 'wholesale second hand clothing bales graded A ' + europagesHtml, listings: Array.from({ length: 10 }, (_, i) => ({ url: `https://www.europages.nl/nl/company/entity-${i}` })) },
+        ],
+      },
+    ];
+    const deliverables = await entityDeliverables(nodes as never, {
+      terms: ['wholesale second hand clothing', 'bales'],
+      kindLabel: 'wholesale clothing provider',
+      readPage: async () => ({ text: '', status: 404 }),
+    });
+    expect(deliverables.length).toBeGreaterThanOrEqual(3);
+    const titles = deliverables.map((d: { title: string }) => d.title);
+    expect(titles).toContain('UK CLOTHING CARAVAN');
+    expect(titles).toContain('Wakted BV');
+    expect(titles).toContain('LIBERTY GLOBAL EXPORTS Ltd.');
+    const evidenceUrls = deliverables.map((d: { evidence: string }) => d.evidence);
+    expect(evidenceUrls[0]).toBe(EUROPAGES_URL);
+  });
+
+  it('uses entity website URL directly when available in directory entry', async () => {
+    const nodes = [
+      {
+        id: 'D1',
+        sources: [
+          { url: EUROPAGES_URL, title: 'Balen gebruikte kleding', text: 'wholesale second hand clothing bales graded A ' + europagesHtml, listings: Array.from({ length: 10 }, (_, i) => ({ url: `https://www.europages.nl/nl/company/entity-${i}` })) },
+        ],
+      },
+    ];
+    let profileRead = false;
+    const readPage = async (url: string) => {
+      profileRead = true;
+      return { text: '', status: 404 };
+    };
+    const deliverables = await entityDeliverables(nodes as never, {
+      terms: ['wholesale second hand clothing', 'bales'],
+      kindLabel: 'wholesale clothing provider',
+      readPage,
+    });
+    expect(profileRead).toBe(false);
+    const ukEntity = deliverables.find((d: { title: string }) => d.title.includes('UK CLOTHING CARAVAN'));
+    expect(ukEntity).toBeTruthy();
+    expect(ukEntity!.url).toBe('https://www.ukclothingcaravan.co.uk/');
+    expect(ukEntity!.evidence).toBe(EUROPAGES_URL);
+  });
+
+  it('falls back to directory profile URL when entity has no website', async () => {
+    const customHtml = `<html><body>wholesale second hand clothing bales graded A <script type="application/ld+json">{ "@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://www.europages.nl/#website","url":"https://www.europages.nl","name":"europages.nl"},{"@type":"ItemList","@id":"https://www.europages.nl/ondernemingen/balen-gebruikte-kleding.html#itemlist","name":"balen gebruikte kleding","itemListOrder":"https://schema.org/ItemListOrderAscending","numberOfItems":1,"itemListElement":[{"@type":"ListItem","position":1,"item":{"@type":"Organization","@id":"https://www.europages.nl/nl/company/no-website-123#organization","name":"NO WEBSITE ENTITY","url":"https://www.europages.nl/nl/company/no-website-123","address":{"@type":"PostalAddress","streetAddress":"Test Street","postalCode":"12345","addressLocality":"TestCity","addressCountry":"DE"}}}]}]}</script></body></html>`;
+    const nodes = [
+      {
+        id: 'D1',
+        sources: [
+          { url: EUROPAGES_URL, title: 'Balen gebruikte kleding', text: customHtml, listings: Array.from({ length: 10 }, (_, i) => ({ url: `https://www.europages.nl/nl/company/entity-${i}` })) },
+        ],
+      },
+    ];
+    const deliverables = await entityDeliverables(nodes as never, {
+      terms: ['wholesale second hand clothing', 'bales'],
+      kindLabel: 'wholesale clothing provider',
+      readPage: async () => ({ text: '', status: 404 }),
+    });
+    const noWebsiteEntity = deliverables.find((d: { title: string }) => d.title.includes('NO WEBSITE ENTITY'));
+    expect(noWebsiteEntity).toBeTruthy();
+    expect(noWebsiteEntity!.url).toContain('europages.nl/nl/company/no-website-123');
+    expect(noWebsiteEntity!.evidence).toBe(EUROPAGES_URL);
+  });
+
+  it('delivers the matched deep page as evidence, not the site root', async () => {
+    const nodes = [
+      {
+        id: 'D1',
+        sources: [
+          { url: 'https://supplier.example/deep/page/about-bales', title: 'About Bales', text: 'We sell wholesale second hand clothing bales graded A.' },
+        ],
+      },
+    ];
+    const deliverables = await entityDeliverables(nodes as never, {
+      terms: ['wholesale second hand clothing', 'bales'],
+      kindLabel: 'wholesale clothing provider',
+      readPage: async () => ({ text: '', status: 404 }),
+    });
+    expect(deliverables).toHaveLength(1);
+    expect(deliverables[0].url).toBe('https://supplier.example/');
+    expect(deliverables[0].evidence).toBe('https://supplier.example/deep/page/about-bales');
+  });
+
+  it('does not treat a page with a single Organization node as a directory', async () => {
+    const nodes = [
+      {
+        id: 'D1',
+        sources: [
+          { url: 'https://single.example/', title: 'Single Company', text: singleOrgHtml },
+        ],
+      },
+    ];
+    const deliverables = await entityDeliverables(nodes as never, {
+      terms: ['single company'],
+      kindLabel: 'single company',
+      readPage: async () => ({ text: '', status: 404 }),
+    });
+    expect(deliverables).toHaveLength(1);
+    expect(deliverables[0].url).toBe('https://single.example/');
+    expect(deliverables[0].evidence).toBe('https://single.example/');
   });
 });

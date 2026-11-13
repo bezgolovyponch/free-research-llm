@@ -301,6 +301,83 @@ export function fromJsonLd(html, base, anchors = anchorsOf(html, base)) {
   return items;
 }
 
+const ENTITY_TYPES = new Set(['Organization', 'LocalBusiness', 'Store']);
+
+function entityUrl(record) {
+  if (record.sameAs) {
+    const sameAs = Array.isArray(record.sameAs) ? record.sameAs[0] : record.sameAs;
+    if (typeof sameAs === 'string' && /^https?:\/\//i.test(sameAs)) return sameAs;
+  }
+  if (record.url && typeof record.url === 'string' && /^https?:\/\//i.test(record.url)) return record.url;
+  return '';
+}
+
+function entityCountry(record) {
+  const addr = record.address;
+  if (addr && typeof addr === 'object') {
+    const country = addr.addressCountry;
+    if (typeof country === 'string') return country.toUpperCase();
+    if (country && typeof country === 'object' && country.name) return String(country.name).toUpperCase();
+  }
+  const area = record.areaServed;
+  if (typeof area === 'string') {
+    const match = area.match(/\b([A-Z]{2})\b/);
+    if (match) return match[1];
+  }
+  return '';
+}
+
+function entityCity(record) {
+  const addr = record.address;
+  if (addr && typeof addr === 'object') {
+    const city = addr.addressLocality ?? addr.addressCity ?? addr.city;
+    if (typeof city === 'string') return city;
+  }
+  return '';
+}
+
+export function entitiesFromJsonLd(html, base) {
+  const entities = [];
+  const anchors = anchorsOf(html, base);
+  for (const body of scripts(html, /application\/ld\+json/i)) {
+    const parsed = parseJson(body);
+    if (!parsed) continue;
+    walk(parsed, (node) => {
+      if (Array.isArray(node)) return;
+      if (node['@type'] === 'ItemList' || (Array.isArray(node['@type']) && node['@type'].includes('ItemList'))) {
+        const elements = node.itemListElement;
+        if (Array.isArray(elements)) {
+          for (const el of elements) {
+            const item = el.item ?? el;
+            if (!item || typeof item !== 'object') continue;
+            const type = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
+            if (!type.some((t) => ENTITY_TYPES.has(t))) continue;
+            const name = clean(item.name ?? '', 160);
+            if (!name) continue;
+            const url = entityUrl(item);
+            const profileUrl = item.url && typeof item.url === 'string' ? item.url : '';
+            const country = entityCountry(item);
+            const city = entityCity(item);
+            entities.push({ name, url: url || profileUrl, country, city, profileUrl: profileUrl || url });
+          }
+        }
+      } else {
+        const type = Array.isArray(node['@type']) ? node['@type'] : [node['@type']];
+        if (!type.some((t) => ENTITY_TYPES.has(t))) return;
+        if (node.itemListElement || node.numberOfItems) return;
+        const name = clean(node.name ?? '', 160);
+        if (!name) return;
+        const url = entityUrl(node);
+        const profileUrl = node.url && typeof node.url === 'string' ? node.url : '';
+        const country = entityCountry(node);
+        const city = entityCity(node);
+        entities.push({ name, url: url || profileUrl, country, city, profileUrl: profileUrl || url });
+      }
+    });
+  }
+  return entities;
+}
+
 const STATE_ASSIGNMENT = /(?:window\.)?__[A-Z_]{3,}__\s*=\s*(\{[\s\S]*\})\s*;?\s*$/;
 
 function embeddedRoots(html) {
