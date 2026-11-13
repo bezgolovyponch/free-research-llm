@@ -344,40 +344,6 @@ describe('checklistFingerprint and caching', () => {
     const fp2 = checklistFingerprint(modifiedChecklist);
     expect(fp1).not.toBe(fp2);
   });
-
-  it('cache hit returns cached checks without calling judge', async () => {
-    let callCount = 0;
-    const router = {
-      complete: async () => {
-        callCount++;
-        return {
-          provider: 'test',
-          data: [
-            { id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' },
-          ],
-        };
-      },
-    };
-    const judge = new ChecklistJudge({ router });
-    const item = { url: 'http://example.com/item1' };
-    const pageText = 'We carry Barbour';
-
-    const checks1 = await judge.judge(item, pageText, testChecklist);
-    expect(callCount).toBe(1);
-
-    const checkCache = new Map();
-    const fingerprint = checklistFingerprint(testChecklist);
-    const cacheKey = `${item.url}::${fingerprint}`;
-    checkCache.set(cacheKey, { checks: checks1, summary: checklistSummary([{ checks: checks1 }])[0] });
-
-    const cached = checkCache.get(cacheKey);
-    expect(cached).toBeDefined();
-    expect(cached!.checks).toEqual(checks1);
-
-    const checks2 = cached!.checks;
-    expect(checks2).toEqual(checks1);
-    expect(callCount).toBe(1);
-  });
 });
 
 describe('ChecklistJudge with fake router', () => {

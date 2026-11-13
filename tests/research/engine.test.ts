@@ -10,6 +10,7 @@ import { ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLangu
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 import { researchedNode } from '../helpers/research-shapes';
+import { ChecklistModeler } from '../../src/research/checklist.mjs';
 
 const fakeSearch = {
   enabled: true,
@@ -21,6 +22,15 @@ const fakeSearch = {
     ];
   },
   describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+};
+
+const fakeSearchForChecklist = {
+  ...fakeSearch,
+  async readPage(url: string) {
+    if (url === 'https://zagumi.com/anuncio/used-clothing-ID12345') return { status: 200, text: 'We sell wholesale clothing in bulk. Brands: Barbour, Ralph Lauren, Moncler, The North Face. Grade A quality guaranteed. Price: 40 EUR per kg. We deliver to Czech Republic and EU. Large assortment of vintage and second hand clothing in bales. Contact us for pricing and shipping details.' };
+    if (url === 'https://example.com/anuncio/supplier-b-ID67890') return { status: 200, text: 'Wholesale supplier of branded clothing. Carries Barbour and Moncler. Grade A quality guaranteed. Price: 35 EUR/kg. We ship to Czech Republic and EU. Large assortment includes coats, jackets, shirts, pants, dresses. Established 2010. Contact for bulk orders.' };
+    return { status: 404, text: '' };
+  },
 };
 
 let dir: string;
@@ -1962,6 +1972,81 @@ describe('hub search', () => {
     } as never;
     await engine.checkAcceptance(project);
     expect(project.report.deliverables.map((d: { url: string }) => d.url)).toEqual(['https://zagumi.com/nl/used-clothing/']);
+  });
+
+  it('verdict cache survives a save and reload', async () => {
+    const judgeCalls: string[] = [];
+    const checklistProposal = {
+      items: [
+        { clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null },
+        { clause: 'brands', question: 'Does this carry at least one of Ralph Lauren, Moncler, The North Face, Barbour?', hard: true, numeric: null },
+        { clause: 'quality', question: 'Does this state a quality grade or guarantee?', hard: true, numeric: null },
+        { clause: 'price/value', question: 'Is the price per kg or piece published?', hard: false, numeric: { measure: 'priceEur', op: '<=', value: null, unit: 'EUR/kg' } },
+      ],
+    };
+    const judgeReply = [
+      { id: 'wholesale|Does this sell wholesale or bulk?', answer: 'yes', quote: 'wholesale' },
+      { id: 'brands|Does this carry at least one of Ralph Lauren, Moncler, The North Face, Barbour?', answer: 'yes', quote: 'Barbour' },
+      { id: 'quality|Does this state a quality grade or guarantee?', answer: 'yes', quote: 'grade A' },
+      { id: 'price/value|Is the price per kg or piece published?', answer: 'yes', quote: 'priceEur: 40 EUR/kg' },
+    ];
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo-fast', deep: 'demo-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
+      async chat({ messages, tier }) {
+        const fullPrompt = messages.map((m) => m.content).join('\n');
+        if (fullPrompt.includes('checklist') || fullPrompt.includes('yes/no questions')) {
+          return { content: JSON.stringify(checklistProposal), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
+        }
+        if (fullPrompt.includes('strict judge') || fullPrompt.includes('Item page text:')) {
+          judgeCalls.push(fullPrompt);
+          return { content: JSON.stringify(judgeReply), model: 'demo-fast', provider: 'demo', usage: {} };
+        }
+        return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
+      },
+    };
+    const router = new ModelRouter({ providers: [provider] });
+    const modeler = new ChecklistModeler({ router, samples: 3 });
+    const engine = new ResearchEngine({ router, search: fakeSearchForChecklist, store: new ProjectStore({ dir }), lanes: 2, modeler });
+    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with highest price/value ratio for a retail second hand shop business in Czech Republic' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 20, valueRange: [0, 50], unit: 'EUR/kg' } });
+    project.candidates = {
+      kept: [
+        { title: 'Wholesale Supplier A', url: 'https://zagumi.com/anuncio/used-clothing-ID12345', value: 40, unit: 'EUR/kg', price: 40, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits all checks', why: ['wholesale', 'brands'], risks: [] } },
+        { title: 'Wholesale Supplier B', url: 'https://example.com/anuncio/supplier-b-ID67890', value: 35, unit: 'EUR/kg', price: 35, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits all checks', why: ['wholesale', 'brands'], risks: [] } },
+      ],
+      keptCount: 2,
+      toCheck: [],
+      toCheckCount: 0,
+      tiers: { fits: 2, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 },
+      screened: {},
+      screenedCount: 0,
+      found: 2,
+      verification: null,
+    };
+    project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
+
+    project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    await engine.checkAcceptance(project);
+    expect(project.acceptanceResult).toBeTruthy();
+    expect(project.acceptanceResult!.items.length).toBeGreaterThanOrEqual(2);
+    expect(project.acceptanceResult!.items[0].checks).toBeDefined();
+    expect(project.acceptanceResult!.items[0].checklist).toBeDefined();
+    const firstRunJudgeCalls = judgeCalls.length;
+    expect(firstRunJudgeCalls).toBeGreaterThan(0);
+
+    await engine.store.save(project);
+
+    const reloaded = await engine.store.get(project.id);
+    expect(reloaded).not.toBeNull();
+    expect(reloaded!.checkCache).toBeDefined();
+
+    judgeCalls.length = 0;
+    await engine.checkAcceptance(reloaded!);
+    expect(judgeCalls.length).toBe(0);
+    expect(reloaded!.acceptanceResult!.items[0].checks).toEqual(project.acceptanceResult!.items[0].checks);
+    expect(reloaded!.acceptanceResult!.items[1].checks).toEqual(project.acceptanceResult!.items[1].checks);
   });
 });
 
