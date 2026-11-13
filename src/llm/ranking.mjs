@@ -15,7 +15,7 @@ export const CAPABILITY = {
   mistral: [4, 'Mistral Large'],
   cerebras: [4, 'gpt-oss-120b'],
   groq: [4, 'gpt-oss-120b'],
-  nvidia: [4, 'Nemotron 3 Ultra, Nemotron 3.5 Lightning, Mistral Large 4.1'],
+  nvidia: [4, 'Nemotron 3 Ultra, Nemotron 3.5 Lightning, Mistral Large 4'],
   sambanova: [4, 'DeepSeek-V3.2'],
   puter: [4, 'GPT, Claude, Gemini through one account'],
   openrouter: [3, 'whichever :free model is up'],
