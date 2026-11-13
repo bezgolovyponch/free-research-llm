@@ -1,3 +1,4 @@
+import { looksLikeListing } from './acceptance.mjs';
 import { gradeAverage, scoreProject } from './score.mjs';
 import { appendAppMessage, loopSummary } from './notify.mjs';
 import { variantPrompt, withGuidance } from './prompts.mjs';
@@ -379,7 +380,7 @@ export function passingHardRows(rows, brief) {
   const out = [];
   for (const row of rows ?? []) {
     const verdict = screenCandidate(row, brief, {});
-    if (passesEveryHardCriterion(row, verdict, brief)) out.push(row);
+    if (looksLikeListing(row.url) && passesEveryHardCriterion(row, verdict, brief)) out.push(row);
   }
   return out;
 }

@@ -965,6 +965,8 @@ describe('new data that serves the purpose is kept', () => {
     expect(gain.detail).toBe('+4 listings from imovirtual.com, olx.pl, sahibinden.com, 1 pass every hard criterion');
     expect(passingHardRows(gain.passing, brief)).toHaveLength(1);
     expect(passingHardRows([after.nodes[0].finding.items[2], after.nodes[0].finding.items[3], after.nodes[0].finding.items[4]], brief)).toEqual([]);
+    const contactPage = { ...gain.passing[0], url: 'https://terrenos.es/en/contactar/propietario/422967' };
+    expect(passingHardRows([contactPage], brief)).toEqual([]);
   });
 
   it('merges the passing rows into the research node and never rows that fail a hard criterion', () => {

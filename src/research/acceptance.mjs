@@ -409,7 +409,7 @@ function isDeepLink(url) {
 
 const PATH_ID = /(?:^|[/_.-])(?:\d{6,}|ID[A-Za-z0-9]{4,}|[A-Za-z]{0,6}\d[A-Za-z0-9]{5,})(?=[/_.?&#-]|$)|(?:property|listing|ad|item|ref)?id[-_=]*\d{3,}|-\d{5,}(?:\.html?)?\/?$/i;
 const QUERY_ID = /(?:^|[?&])(?:id|ref|ad|adid|listing|listingid|propertyid|itemid)=[A-Za-z0-9-]{3,}/i;
-const NOT_A_LISTING = /\/(?:blog|news|noticias|search|busca|buscar|cerca|category|categoria|tag|guides?|geo|list|s|q)(?:\/|$|-)/i;
+const NOT_A_LISTING = /\/(?:blog|news|noticias|search|busca|buscar|cerca|category|categoria|tag|guides?|geo|list|s|q|contact|contacto|contactar|contato|contatti|kontakt|iletisim|lien-he)(?:\/|$|-)/i;
 const ASSET_FILE = /\.(?:jpe?g|png|webp|gif|svg|ico|css|js|pdf|mp4|webm|zip)$/i;
 const NOT_A_LISTING_HOST = /^(?:wa\.me|api\.|web\.archive\.org|t\.me|(?:[a-z]+\.)?(?:facebook|instagram|twitter|x|linkedin|youtube|tiktok|pinterest|google|whatsapp)\.com)/i;
 const SEARCH_QUERY = /(?:^|[?&])(?:max_?price|min_?price|price_?(?:max|min|from|to)|maximum-price|minimum-price|ordem|order|sort|ordenado-por|page|q)=/i;
