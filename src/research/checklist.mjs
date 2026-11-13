@@ -1,11 +1,5 @@
 import { plain } from './itemgate.mjs';
-import { quoteFound } from './strategy.mjs';
-
-const CONTENT_WORDS = (text) => new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
-const JACCARD = (a, b) => {
-  const union = new Set([...a, ...b]).size;
-  return union ? [...a].filter((w) => b.has(w)).length / union : 0;
-};
+import { quoteFound } from './quote.mjs';
 
 export function applyQuoteCheck(replies, pageText) {
   return replies.map((r) => {
@@ -15,7 +9,7 @@ export function applyQuoteCheck(replies, pageText) {
     }
     return r;
   });
-};
+}
 
 export const CHECKLIST_VERSION = 1;
 
@@ -86,69 +80,18 @@ export function clusterChecklist(samples) {
 }
 
 function sameMeaning(a, b) {
-  const wa = CONTENT_WORDS(a);
-  const wb = CONTENT_WORDS(b);
-  return JACCARD(wa, wb) >= 0.3;
+  const wa = contentWords(a);
+  const wb = contentWords(b);
+  return jaccard(wa, wb) >= 0.3;
 }
 
-export function judgeItem(item, pageText, checklist) {
-  const checks = [];
-  const text = String(pageText ?? '');
-  for (const cluster of checklist) {
-    for (const ci of cluster.items) {
-      const question = ci.question;
-      const answer = judgeYesNo(question, text, ci.numeric, item);
-      if (answer.answer !== 'unknown' && !quoteFound(text, answer.quote)) {
-        answer.answer = 'unknown';
-        answer.quote = '';
-      }
-      checks.push({ id: cluster.clause + '|' + ci.question, ...answer });
-    }
-  }
-  return checks;
+function contentWords(text) {
+  return new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
 }
 
-function judgeYesNo(question, pageText, numeric, item) {
-  const lower = pageText.toLowerCase();
-  const q = question.toLowerCase();
-
-  if (numeric?.measure && numeric.op && numeric.value !== null) {
-    const m = MEASURES[numeric.measure];
-    if (m) {
-      const val = m.read(item, {});
-      if (val !== undefined && compare(val, numeric.op, numeric.value)) {
-        return { answer: 'yes', quote: String(val) };
-      }
-      if (val !== undefined) {
-        return { answer: 'no', quote: String(val) };
-      }
-      return { answer: 'unknown', quote: '' };
-    }
-  }
-
-  const qWords = new Set(q.split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
-  let score = 0;
-  let matchedKeyWords = 0;
-  for (const w of qWords) {
-    if (lower.includes(w)) {
-      score++;
-      matchedKeyWords++;
-    }
-  }
-
-  const negationWords = ['not', 'no', 'without', 'lack', 'missing', 'unavailable', 'cannot', 'unable', 'never'];
-  for (const w of negationWords) {
-    if (q.includes(w) && lower.includes(w)) score -= 2;
-  }
-
-  const hasNumber = /\d/.test(q) && /\d/.test(lower);
-  if (hasNumber && score > 0) return { answer: 'yes', quote: '' };
-  if (hasNumber && score < 0) return { answer: 'no', quote: '' };
-
-  if (matchedKeyWords >= 2) return { answer: 'yes', quote: '' };
-  if (matchedKeyWords === 0 && qWords.size > 0) return { answer: 'no', quote: '' };
-
-  return { answer: 'unknown', quote: '' };
+function jaccard(a, b) {
+  const union = new Set([...a, ...b]).size;
+  return union ? [...a].filter((w) => b.has(w)).length / union : 0;
 }
 
 const OPS = ['<=', '>=', '<', '>'];

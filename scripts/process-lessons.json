@@ -350,5 +350,19 @@
     "signal": "entityDeliverables hard-coded 'europages', 'kompass', 'wllw.net', 'visable' in readEntityWebsite and WHOLESALE_SIGNAL regex plus /wholesale/i.test(kindLabel) branch; tests asserted wholesale filter behavior",
     "cause": "the directory detection was implemented by host name instead of by JSON-LD structure (ItemList or ≥3 Organization/LocalBusiness nodes pointing to same-host profiles), and the wholesale requirement was baked into acceptance instead of coming from the checklist model",
     "prevention": "a page is a directory by structure only; an entity's own website is a url/sameAs on a different host than the directory page; the checklist model judges kind-specific requirements from the question's clauses; tests use fixtures (Europages HTML + single Organization HTML) to prove the structural rule; grep for host names in src/ must return nothing"
+  },
+  {
+    "id": "F26",
+    "title": "checklist verdicts recorded but not used for acceptance; research marked done when short of asked items; memo not marked provisional when contradicted",
+    "touches": [
+      "src/research/acceptance.mjs",
+      "src/research/engine.mjs",
+      "src/research/checklist.mjs",
+      "tests/research/acceptance.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "checklist verdicts (item.checks) are recorded but acceptance still uses only count/live/range/kind checks; research phase becomes 'done' even when valid items < asked items; memo states items found but acceptance shows K < N or hard checklist items at 0%",
+    "cause": "acceptance evaluation used qualifies() based on live/listing/range/purpose only, ignoring the per-item checklist verdicts; phase transition to 'done' did not check validCount vs totalAsked; planActions did not cross-check memo claims against acceptanceResult",
+    "prevention": "AcceptanceChecker.evaluate now requires all HARD checklist checks to be 'yes' for an item to be valid (unknown/no = fail); soft checks rank valid items; per-hard-check pass rates shown in acceptance checks; research phase set to 'short' with 'N asked, K valid' summary when K < N; planActions marks memo 'provisional' and lists failed hard items when acceptance contradicts memo"
   }
 ]

@@ -722,3 +722,153 @@ describe('entityDeliverables with directory pages', () => {
     }
   });
 });
+
+describe('checklist-based acceptance', () => {
+  const checklist = [
+    { clause: 'wholesale', items: [
+      { clause: 'wholesale', question: 'Does this sell wholesale?', hard: true, numeric: null },
+      { clause: 'brands', question: 'Does this carry Ralph Lauren?', hard: true, numeric: null },
+      { clause: 'quality', question: 'Is quality proven?', hard: false, numeric: null },
+    ]},
+  ];
+
+  const longText = 'We sell wholesale Ralph Lauren clothing. Quality guaranteed. '.repeat(10);
+
+  it('item with all hard yes is valid', async () => {
+    const readPage = async () => ({ status: 200, text: longText });
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
+    const items = [{ url: 'https://example.com/supplier' }];
+    const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
+    expect(result!.validCount).toBe(1);
+    expect(result!.items[0].valid).toBe(true);
+  });
+
+  it('item with one hard unknown is not valid', async () => {
+    const readPage = async () => ({ status: 200, text: 'We sell wholesale clothing. Quality guaranteed. '.repeat(10) });
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
+    const items = [{ url: 'https://example.com/supplier', checks: [{ id: 'brands|Does this carry Barbour?', hard: true, answer: 'unknown', clause: 'brands' }] }];
+    const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
+    expect(result!.validCount).toBe(0);
+    expect(result!.items[0].valid).toBe(false);
+  });
+
+  it('soft yes only reorders valid items', async () => {
+    const readPage = async (url: string) => {
+      if (url.includes('supplier1')) return { status: 200, text: 'We sell wholesale Ralph Lauren clothing. Quality guaranteed. Proven quality. '.repeat(10) };
+      if (url.includes('supplier2')) return { status: 200, text: 'We sell wholesale Ralph Lauren clothing. '.repeat(10) };
+      return { status: 200, text: ''.repeat(10) };
+    };
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 2, urlsLive: true });
+    const items = [
+      { url: 'https://example.com/supplier1' },
+      { url: 'https://example.com/supplier2' },
+    ];
+    const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
+    expect(result!.validCount).toBe(2);
+    expect(result!.items[0].url).toBe('https://example.com/supplier1');
+    expect(result!.items[1].url).toBe('https://example.com/supplier2');
+  });
+});
+
+describe('deeper read for unknown hard checks', () => {
+  const checklist = [
+    { clause: 'brands', items: [
+      { clause: 'brands', question: 'Does this carry Barbour?', hard: true, numeric: null },
+    ]},
+  ];
+
+  const longText = 'We sell wholesale clothing. '.repeat(10);
+
+  it('validates item with hard yes from pre-populated checks', async () => {
+    const readPage = async (url: string) => {
+      if (url === 'https://supplier.example.com/') {
+        return { status: 200, text: longText, links: [{ url: '/brands', text: 'Our brands' }] };
+      }
+      if (url === 'https://supplier.example.com/brands') {
+        return { status: 200, text: 'We carry Barbour and other premium brands. '.repeat(10), links: [] };
+      }
+      return { status: 404, text: '', links: [] };
+    };
+    const checkCache = {};
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
+    const items = [{ url: 'https://supplier.example.com/', checks: [{ id: 'brands|Does this carry Barbour?', hard: true, answer: 'yes', clause: 'brands' }] }];
+    const result = await checker.evaluate(spec, items, { located: false, checklist, readPage, checkCache });
+    expect(result!.validCount).toBe(1);
+    expect(result!.items[0].valid).toBe(true);
+  });
+
+  it('item with hard no in pre-populated checks is not valid', async () => {
+    const readPage = async (url: string) => {
+      if (url === 'https://supplier.example.com/') {
+        return { status: 200, text: longText, links: [{ url: '/brands', text: 'Our brands' }] };
+      }
+      return { status: 404, text: '', links: [] };
+    };
+    const checkCache = {};
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
+    const items = [{ url: 'https://supplier.example.com/', checks: [{ id: 'brands|Does this carry Barbour?', hard: true, answer: 'no', clause: 'brands' }] }];
+    const result = await checker.evaluate(spec, items, { located: false, checklist, readPage, checkCache });
+    expect(result!.validCount).toBe(0);
+    expect(result!.items[0].valid).toBe(false);
+  });
+
+  it('item with hard unknown in pre-populated checks is not valid', async () => {
+    const readPage = async (url: string) => {
+      if (url === 'https://supplier.example.com/') {
+        return { status: 200, text: longText, links: [{ url: '/brands', text: 'Our brands' }] };
+      }
+      return { status: 404, text: '', links: [] };
+    };
+    const checkCache = {};
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
+    const items = [{ url: 'https://supplier.example.com/', checks: [{ id: 'brands|Does this carry Barbour?', hard: true, answer: 'unknown', clause: 'brands' }] }];
+    const result = await checker.evaluate(spec, items, { located: false, checklist, readPage, checkCache });
+    expect(result!.validCount).toBe(0);
+    expect(result!.items[0].valid).toBe(false);
+  });
+
+  it('caches deeper read results', async () => {
+    let readCount = 0;
+    const readPage = async (url: string) => {
+      readCount++;
+      if (url === 'https://supplier.example.com/') {
+        return { status: 200, text: longText, links: [{ url: '/brands', text: 'Our brands' }] };
+      }
+      if (url === 'https://supplier.example.com/brands') {
+        return { status: 200, text: 'We carry Barbour. '.repeat(10), links: [] };
+      }
+      return { status: 404, text: '', links: [] };
+    };
+    const checkCache = {};
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
+    const items = [{ url: 'https://supplier.example.com/' }];
+    await checker.evaluate(spec, items, { located: false, checklist, readPage, checkCache });
+    const firstReadCount = readCount;
+    await checker.evaluate(spec, items, { located: false, checklist, readPage, checkCache });
+    expect(readCount).toBe(firstReadCount + 1);
+  });
+});
+
+describe('acceptance summary K < N', () => {
+  it('reports validCount and totalAsked', async () => {
+    const readPage = async () => ({ status: 200, text: 'We sell wholesale Ralph Lauren clothing. '.repeat(10) });
+    const checklist = [
+      { clause: 'brands', items: [
+        { clause: 'brands', question: 'Does this carry Ralph Lauren?', hard: true, numeric: null },
+      ]},
+    ];
+    const checker = new AcceptanceChecker({ readPage });
+    const spec = normalizeAcceptance({ itemCount: 5, urlsLive: true });
+    const items = [{ url: 'https://example.com/supplier' }];
+    const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
+    expect(result!.validCount).toBe(1);
+    expect(result!.totalAsked).toBe(5);
+  });
+});

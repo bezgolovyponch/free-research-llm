@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, quoteFound, StrategyRetriever, strategyFor, unitsFor, foundationOf, foundationText, askedCriteria, asksSea, withoutOwningOf, WITHOUT_OWNING_GROUP } from '../../src/research/strategy.mjs';
+import { applyStrategy, areaM2, entryCost, GLAMPING_LOW_ENTRY, planFor, StrategyRetriever, strategyFor, unitsFor, foundationOf, foundationText, askedCriteria, asksSea, withoutOwningOf, WITHOUT_OWNING_GROUP } from '../../src/research/strategy.mjs';
+import { quoteFound } from '../../src/research/quote.mjs';
 
 const rules = GLAMPING_LOW_ENTRY.rules;
 const toEur = (value: number, from: string) => (from === 'GBP' ? value * 1.2 : value);
