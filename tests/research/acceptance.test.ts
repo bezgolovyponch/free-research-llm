@@ -672,4 +672,40 @@ describe('entityDeliverables with directory pages', () => {
     expect(deliverables[0].url).toBe('https://single.example/');
     expect(deliverables[0].evidence).toBe('https://single.example/');
   });
+
+  it('falls back to parsed listings when directory page has no JSON-LD', async () => {
+    const noJsonLdHtml = '<html><body>wholesale second hand clothing bales graded A <div class="listing">Company 1</div></body></html>';
+    const listings = Array.from({ length: 10 }, (_, i) => ({
+      url: `https://www.example-dir.com/company/entity-${i}`,
+      title: `Entity ${i + 1}`,
+    }));
+    const nodes = [
+      {
+        id: 'D1',
+        sources: [
+          {
+            url: 'https://www.example-dir.com/wholesale-clothing',
+            title: 'Wholesale Clothing Directory',
+            text: noJsonLdHtml,
+            listings,
+          },
+        ],
+      },
+    ];
+    const deliverables = await entityDeliverables(nodes as never, {
+      terms: ['wholesale second hand clothing', 'bales'],
+      kindLabel: 'wholesale clothing provider',
+      readPage: async () => ({ text: '', status: 404 }),
+    });
+    expect(deliverables).toHaveLength(10);
+    const titles = deliverables.map((d: { title: string }) => d.title).sort();
+    const expectedTitles = Array.from({ length: 10 }, (_, i) => `Entity ${i + 1}`).sort();
+    expect(titles).toEqual(expectedTitles);
+    const urls = deliverables.map((d: { url: string }) => d.url).sort();
+    expect(urls).toEqual(listings.map((l) => l.url).sort());
+    for (const d of deliverables) {
+      expect(d.evidence).toBe('https://www.example-dir.com/wholesale-clothing');
+      expect(d.nodeId).toBe('D1');
+    }
+  });
 });

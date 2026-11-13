@@ -416,12 +416,25 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
     const isListicle = LISTICLE_TITLE.test(String(page.source.title ?? ''));
     const isExcluded = isExcludedSurfaceUrl(page.url);
     if (!isDirectory && (isMarketplace || isReview || isListicle || isExcluded)) continue;
-    const { matched, ok } = matchedTerms(page.pageText, wanted);
+    let { matched, ok } = matchedTerms(page.pageText, wanted);
+    if (!ok && isDirectory && page.source.listings?.length) {
+      for (const listing of page.source.listings) {
+        if (listing.title && kindOnPage(listing.title, { terms: wanted })) {
+          const listingMatched = matchedTerms(listing.title, wanted);
+          if (listingMatched.ok) {
+            matched = listingMatched.matched;
+            ok = true;
+            break;
+          }
+        }
+      }
+    }
     if (!ok) continue;
     if (!anchoredTerm(matched, anchors)) continue;
     if (wordMatch(page.pageText, banned)) continue;
     if (isDirectory) {
       const entities = entitiesFromJsonLd(page.source.text ?? '', page.url);
+      let entitiesAdded = 0;
       for (const entity of entities) {
         const entityHost = entity.url ? hostOf(entity.url) : '';
         const entityKey = entityHost || normalizeName(entity.name);
@@ -452,6 +465,27 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
         const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
         if (region) deliverable.region = region.text;
         entityMap.set(entityKey, deliverable);
+        entitiesAdded++;
+      }
+      if (entitiesAdded === 0 && page.source.listings?.length) {
+        for (const listing of page.source.listings) {
+          if (!listing.url || !listing.title) continue;
+          const entityHost = hostOf(listing.url);
+          const entityKey = listing.url; // Use full URL as key for listings
+          if (entityMap.has(entityKey)) continue;
+          const deliverable = {
+            title: text(listing.title, 200),
+            url: listing.url.endsWith('/') ? listing.url : listing.url,
+            value: null,
+            unit: '',
+            nodeId: page.node.id,
+            evidence: page.url,
+            entity: { name: listing.title, country: '', city: '' }
+          };
+          const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
+          if (region) deliverable.region = region.text;
+          entityMap.set(entityKey, deliverable);
+        }
       }
     } else {
       const hits = matched.length;
