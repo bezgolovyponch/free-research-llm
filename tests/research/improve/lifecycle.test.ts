@@ -27,6 +27,7 @@ function loopEngine(project: ReturnType<typeof suppliers>) {
   const box = { saved: structuredClone(project), saves: 0, stops: [] as Array<{ reason: string; resume?: Record<string, unknown> }> };
   const engine = {
     quiet: new Set<string>(),
+    cancelled: new Set<string>(),
     running: new Set<string>(),
     siteWarm: new Map(),
     load: async () => structuredClone(box.saved),
