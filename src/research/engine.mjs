@@ -4,7 +4,7 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, entityDeliverables, hardCheckPassRate, hardChecksPass, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks, qualifies, softYesCount } from './acceptance.mjs';
 import { ChecklistJudge, checklistSummary, checklistFingerprint } from './checklist.mjs';
 import { runChecksOnItems } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
@@ -1498,22 +1498,18 @@ export class ResearchEngine {
     const checker = new AcceptanceChecker({ readPage, convert });
     const checklist = project.checklist;
     const checkCache = project.checkCache ?? {};
+
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist, readPage, checkCache });
-    if (checklist && readPage && project.acceptanceResult?.items?.length) {
-      await runChecksOnItems(project.acceptanceResult.items, readPage, checklist, checkCache);
-    }
-    project.checkCache = checkCache;
 
     if (project.acceptanceResult?.items?.length && this.modeler && readPage) {
       const newChecklist = project.checklist ?? (await this.modeler.build(project.question, project.guidance ?? ''));
       if (newChecklist) {
         project.checklist = newChecklist;
         const fingerprint = checklistFingerprint(newChecklist);
-        project.checkCache = project.checkCache ?? {};
         const itemsToJudge = project.acceptanceResult.items.slice(0, 30);
         for (const item of itemsToJudge) {
           const cacheKey = `${item.url}::${fingerprint}`;
-          const cached = project.checkCache[cacheKey];
+          const cached = checkCache[cacheKey];
           if (cached) {
             item.checks = cached.checks;
             item.checklist = cached.summary;
@@ -1524,18 +1520,54 @@ export class ResearchEngine {
           if (pageText) {
             item.checks = await this.checklistJudge.judge(item, pageText, newChecklist);
             item.checklist = checklistSummary([item])[0];
-            project.checkCache[cacheKey] = { checks: item.checks, summary: item.checklist };
-            const keys = Object.keys(project.checkCache);
+            checkCache[cacheKey] = { checks: item.checks, summary: item.checklist };
+            const keys = Object.keys(checkCache);
             if (keys.length > 500) {
-              delete project.checkCache[keys[0]];
+              delete checkCache[keys[0]];
             }
           }
         }
       }
     }
 
+    if (checklist && readPage && project.acceptanceResult?.items?.length) {
+      await runChecksOnItems(project.acceptanceResult.items, readPage, checklist, checkCache);
+    }
+
+    if (project.acceptanceResult) {
+      this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, checklist);
+    }
+
+    project.checkCache = checkCache;
+
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
+  }
+
+  recomputeAcceptanceValidity(result, spec, checklist) {
+    const { items, checks, ...rest } = result;
+    for (const item of items) {
+      item.valid = hardChecksPass(item) && qualifies(item, spec);
+      item.softYes = softYesCount(item);
+    }
+    const allHardCheckIds = [...new Set(items.flatMap((i) => (i.checks ?? []).filter((c) => c.hard === true).map((c) => c.id)))];
+    const newChecks = checks.filter((c) => !c.id.startsWith('checklist-'));
+    for (const checkId of allHardCheckIds) {
+      const rate = hardCheckPassRate(items, checkId);
+      const label = items[0]?.checks?.find((c) => c.id === checkId)?.clause ?? checkId;
+      newChecks.push({ id: `checklist-${checkId}`, label: `Checklist: ${label}`, value: Math.round(Math.min(1, rate) * 1000) / 1000, detail: `${Math.round(rate * items.length)} of ${items.length} checked items pass this hard check`, passed: rate >= 0.999 });
+    }
+    const score = newChecks.reduce((s, c) => s + Math.min(1, c.value), 0) / newChecks.length;
+    const sortedItems = [...items].sort((a, b) => {
+      if (a.valid !== b.valid) return a.valid ? -1 : 1;
+      return softYesCount(b) - softYesCount(a);
+    });
+    Object.assign(result, {
+      score: Math.round(score * 1000) / 1000,
+      checks: newChecks,
+      items: sortedItems,
+      validCount: sortedItems.filter((i) => i.valid).length,
+    });
   }
 
   checkSpecs(project) {
@@ -1679,12 +1711,15 @@ export class ResearchEngine {
       const asked = project.acceptanceResult?.totalAsked ?? 0;
       const valid = project.acceptanceResult?.validCount ?? 0;
       const short = asked > 0 && valid < asked;
-      project.phase = short ? 'short' : 'done';
+      project.phase = 'done';
       project.acceptanceSummary = short ? `${asked} asked, ${valid} valid` : `${valid} of ${asked} valid`;
+      if (project.report) {
+        project.report.status = { ...project.report.status, short };
+      }
       release();
-      this.emit(project, 'phase', short ? `short (${project.acceptanceSummary})` : 'done');
+      this.emit(project, 'phase', short ? `finished, short: ${project.acceptanceSummary}` : 'done');
       appendAppMessage(project, runSummary(project));
-      if (!this.quiet.has(id)) await this.onStop(project, { reason: short ? `research finished but short: ${project.acceptanceSummary}` : 'research finished' });
+      if (!this.quiet.has(id)) await this.onStop(project, { reason: short ? `research finished, short: ${project.acceptanceSummary}` : 'research finished' });
       return await this.store.save(project, { reason: short ? 'research finished but short of asked items' : 'research finished' });
     } catch (error) {
       if (project) {
@@ -1946,8 +1981,12 @@ export class ResearchEngine {
       const asked = project.acceptanceResult?.totalAsked ?? 0;
       const valid = project.acceptanceResult?.validCount ?? 0;
       const short = asked > 0 && valid < asked;
-      project.phase = short ? 'short' : (project.nodes.every((n) => DONE.has(n.status)) ? 'done' : project.phase);
-      this.emit(project, 'phase', short ? `short (${asked} asked, ${valid} valid)` : 'memo rewritten from the current pieces');
+      project.phase = 'done';
+      project.acceptanceSummary = short ? `${asked} asked, ${valid} valid` : `${valid} of ${asked} valid`;
+      if (project.report) {
+        project.report.status = { ...project.report.status, short };
+      }
+      this.emit(project, 'phase', short ? `finished, short: ${project.acceptanceSummary}` : 'memo rewritten from the current pieces');
       return await this.store.save(project, { reason: 'memo rewritten on request' });
     } finally {
       this.running.delete(id);

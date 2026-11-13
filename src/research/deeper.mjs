@@ -21,20 +21,17 @@ function sameHost(url1, url2) {
   }
 }
 
-async function findRelevantLinks(pageText, itemUrl, keyWords, max = 3) {
-  const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([^<]*)<\/a>/gi;
-  const links = [];
-  for (const m of pageText.matchAll(linkRegex)) {
-    const href = m[1];
-    const text = m[2];
-    const fullUrl = href.startsWith('http') ? href : new URL(href, itemUrl).href;
+async function findRelevantLinks(links, itemUrl, keyWords, max = 3) {
+  const relevant = [];
+  for (const link of links ?? []) {
+    const fullUrl = link.url.startsWith('http') ? link.url : new URL(link.url, itemUrl).href;
     if (!sameHost(fullUrl, itemUrl)) continue;
-    const combined = `${text} ${href}`.toLowerCase();
+    const combined = `${link.text} ${link.url}`.toLowerCase();
     if (keyWords.some((kw) => combined.includes(kw.toLowerCase()))) {
-      links.push(fullUrl);
+      relevant.push(fullUrl);
     }
   }
-  return [...new Set(links)].slice(0, max);
+  return [...new Set(relevant)].slice(0, max);
 }
 
 export async function readDeeperForUnknown(item, readPage, checklist, cache) {
@@ -43,9 +40,10 @@ export async function readDeeperForUnknown(item, readPage, checklist, cache) {
   if (unknownHard.length === 0) return item;
   const pageText = item.pageText ?? '';
   if (!pageText) return item;
+  const links = item.links ?? [];
   for (const check of unknownHard) {
     const keyWords = extractKeyWords(check.clause + ' ' + check.id.split('|').pop());
-    const relevantUrls = await findRelevantLinks(pageText, item.url, keyWords);
+    const relevantUrls = await findRelevantLinks(links, item.url, keyWords);
     let foundYes = false;
     for (const url of relevantUrls) {
       const cacheKey = `${url}::${check.id}`;

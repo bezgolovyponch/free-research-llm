@@ -133,7 +133,10 @@ export function appNoteFor(event, project) {
   const tail = project ? ` · ${(project.nodes ?? []).filter((n) => ['verified', 'supported'].includes(n.status)).length}/${(project.nodes ?? []).length} pieces pass` : '';
   if (event.type === 'created') return `New research: ${q}`;
   if (event.type === 'improve-state' && /loop (started|ended)/.test(event.message)) return `${event.message[0].toUpperCase()}${event.message.slice(1)} — ${q}`;
-  if (event.type === 'phase' && event.message === 'done') return `Research finished — ${q}${tail}`;
+  if (event.type === 'phase' && (event.message === 'done' || event.message.startsWith('finished, short:'))) {
+    const prefix = event.message.startsWith('finished, short:') ? `Research finished, short: ${event.message.slice('finished, short: '.length)}` : 'Research finished';
+    return `${prefix} — ${q}${tail}`;
+  }
   if (event.type === 'error') return `Research error — ${q}: ${String(event.message).slice(0, 200)}`;
   if (event.type === 'restore') return `Research restored — ${q}: ${String(event.message).slice(0, 200)}`;
   return null;

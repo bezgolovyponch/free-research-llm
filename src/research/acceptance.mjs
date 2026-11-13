@@ -617,36 +617,6 @@ export function hardCheckPassRate(items, checkId) {
   return pass / relevant.length;
 }
 
-function extractKeyWords(question) {
-  return plain(question).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
-}
-
-function sameHost(url1, url2) {
-  try {
-    const h1 = new URL(url1).hostname.replace(/^www\./, '');
-    const h2 = new URL(url2).hostname.replace(/^www\./, '');
-    return h1 === h2;
-  } catch {
-    return false;
-  }
-}
-
-async function findRelevantLinks(pageText, itemUrl, keyWords, max = 3) {
-  const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([^<]*)<\/a>/gi;
-  const links = [];
-  for (const m of pageText.matchAll(linkRegex)) {
-    const href = m[1];
-    const text = m[2];
-    const fullUrl = href.startsWith('http') ? href : new URL(href, itemUrl).href;
-    if (!sameHost(fullUrl, itemUrl)) continue;
-    const combined = `${text} ${href}`.toLowerCase();
-    if (keyWords.some((kw) => combined.includes(kw.toLowerCase()))) {
-      links.push(fullUrl);
-    }
-  }
-  return [...new Set(links)].slice(0, max);
-}
-
 function pageIsLive(page, item, located, allowRedirect = false) {
   const status = Number(page?.status ?? 0);
   const text = String(page?.text ?? '');
@@ -675,19 +645,22 @@ export class AcceptanceChecker {
 
   async inspect(item, spec, { located = true, kind = null, purpose = [] } = {}) {
     const entity = Boolean(item.evidence);
-    const root = this.readPage ? await this.readPage(item.url) : { text: '', status: 0 };
+    const root = this.readPage ? await this.readPage(item.url) : { text: '', status: 0, links: [] };
     const rootLive = pageIsLive(root, item, located, entity);
     let pageText = '';
+    let links = [];
     let live = false;
     if (entity && item.evidence && item.evidence !== item.url && this.readPage) {
       const evidence = await this.readPage(item.evidence).catch(() => null);
       if (pageIsLive(evidence, item, located, true)) {
         pageText = String(evidence.text ?? '');
+        links = evidence.links ?? [];
         live = true;
       }
     }
     if (!pageText && rootLive) {
       pageText = String(root.text ?? '');
+      links = root.links ?? [];
       live = true;
     }
     const amounts = parseAmounts(pageText);
@@ -695,6 +668,7 @@ export class AcceptanceChecker {
       ...item,
       live,
       pageText,
+      links,
       listing: located ? looksLikeListing(item.url) : !kind?.terms?.length || kindOnPage(pageText, kind),
       inRange: spec.valueRange ? live && inRange(amounts, spec, item.value, this.convert, item.unit) : null,
       mentions: spec.mustMention.length ? spec.mustMention.filter((m) => pageText.toLowerCase().includes(m.toLowerCase())).length / spec.mustMention.length : null,

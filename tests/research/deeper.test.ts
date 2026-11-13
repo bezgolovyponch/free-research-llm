@@ -17,6 +17,7 @@ describe('readDeeperForUnknown', () => {
     const item = {
       url: 'http://example.com/item',
       pageText: 'Some page text',
+      links: [{ url: '/wholesale', text: 'wholesale' }],
       checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
         { id: 'brands|Does this carry brand?', hard: false, answer: 'yes', clause: 'brands' },
@@ -35,6 +36,7 @@ describe('readDeeperForUnknown', () => {
     const item = {
       url: 'http://example.com/item',
       pageText: '',
+      links: [],
       checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' },
       ],
@@ -51,7 +53,8 @@ describe('readDeeperForUnknown', () => {
   it('reads deeper pages for unknown hard checks and updates to yes when found', async () => {
     const item = {
       url: 'http://example.com/item',
-      pageText: 'Main page with <a href="/wholesale-details">wholesale details</a> and <a href="/wholesale-more">wholesale more</a>',
+      pageText: 'Main page with wholesale details',
+      links: [{ url: '/wholesale-details', text: 'wholesale details' }, { url: '/wholesale-more', text: 'wholesale more' }],
       checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' },
       ],
@@ -68,12 +71,14 @@ describe('readDeeperForUnknown', () => {
     expect(result.checks[0].answer).toBe('yes');
     expect(result.checks[0].quote).toBe('confirmed on linked page');
     expect(mockReadPage).toHaveBeenCalledTimes(1);
+    expect(mockReadPage).toHaveBeenCalledWith('http://example.com/wholesale-details');
   });
 
   it('uses cache for deeper page checks', async () => {
     const item = {
       url: 'http://example.com/item',
-      pageText: 'Main page with <a href="/wholesale-details">wholesale details</a>',
+      pageText: 'Main page with wholesale details',
+      links: [{ url: '/wholesale-details', text: 'wholesale details' }],
       checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' },
       ],
@@ -96,7 +101,8 @@ describe('readDeeperForUnknown', () => {
   it('stops at first yes and does not check remaining urls', async () => {
     const item = {
       url: 'http://example.com/item',
-      pageText: 'Main page with <a href="/wholesale-details">wholesale details</a> and <a href="/wholesale-more">wholesale more</a>',
+      pageText: 'Main page with wholesale details',
+      links: [{ url: '/wholesale-details', text: 'wholesale details' }, { url: '/wholesale-more', text: 'wholesale more' }],
       checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' },
       ],
@@ -116,7 +122,8 @@ describe('readDeeperForUnknown', () => {
   it('keeps answer as unknown when no deeper page confirms', async () => {
     const item = {
       url: 'http://example.com/item',
-      pageText: 'Main page with <a href="/wholesale-details">wholesale details</a>',
+      pageText: 'Main page with wholesale details',
+      links: [{ url: '/wholesale-details', text: 'wholesale details' }],
       checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' },
       ],
@@ -142,9 +149,9 @@ describe('runChecksOnItems', () => {
 
   it('runs judgeItem on items without checks', async () => {
     const items = [
-      { url: 'http://example.com/item1', pageText: 'We sell wholesale clothing in bulk' },
-      { url: 'http://example.com/item2', pageText: 'We sell retail clothing only' },
-      { url: 'http://example.com/item3', pageText: '' },
+      { url: 'http://example.com/item1', pageText: 'We sell wholesale clothing in bulk', links: [] },
+      { url: 'http://example.com/item2', pageText: 'We sell retail clothing only', links: [] },
+      { url: 'http://example.com/item3', pageText: '', links: [] },
     ];
     const checklist = wholesaleChecklist;
     const checkCache = {};
@@ -160,8 +167,8 @@ describe('runChecksOnItems', () => {
 
   it('skips items that already have checks', async () => {
     const items = [
-      { url: 'http://example.com/item1', pageText: 'We sell wholesale clothing', checks: [{ id: 'wholesale|Does this sell wholesale?', answer: 'yes' }] },
-      { url: 'http://example.com/item2', pageText: 'We sell retail clothing only' },
+      { url: 'http://example.com/item1', pageText: 'We sell wholesale clothing', links: [], checks: [{ id: 'wholesale|Does this sell wholesale?', answer: 'yes' }] },
+      { url: 'http://example.com/item2', pageText: 'We sell retail clothing only', links: [] },
     ];
     const checklist = wholesaleChecklist;
     const checkCache = {};
@@ -175,8 +182,8 @@ describe('runChecksOnItems', () => {
 
   it('runs readDeeperForUnknown on items with checks', async () => {
     const items = [
-      { url: 'http://example.com/item1', pageText: 'Main page with <a href="/wholesale-details">wholesale details</a>', checks: [{ id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' }] },
-      { url: 'http://example.com/item2', pageText: 'We sell wholesale clothing', checks: [{ id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' }] },
+      { url: 'http://example.com/item1', pageText: 'Main page with wholesale details', links: [{ url: '/wholesale-details', text: 'wholesale details' }], checks: [{ id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'unknown', clause: 'wholesale' }] },
+      { url: 'http://example.com/item2', pageText: 'We sell wholesale clothing', links: [], checks: [{ id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' }] },
     ];
     const checklist = wholesaleChecklist;
     const checkCache = {};

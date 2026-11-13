@@ -785,12 +785,12 @@ describe('deeper read for unknown hard checks', () => {
   it('validates item with hard yes from pre-populated checks', async () => {
     const readPage = async (url: string) => {
       if (url === 'https://supplier.example.com/') {
-        return { status: 200, text: longText + '<a href="/brands">Our brands</a>' };
+        return { status: 200, text: longText, links: [{ url: '/brands', text: 'Our brands' }] };
       }
       if (url === 'https://supplier.example.com/brands') {
-        return { status: 200, text: 'We carry Barbour and other premium brands. '.repeat(10) };
+        return { status: 200, text: 'We carry Barbour and other premium brands. '.repeat(10), links: [] };
       }
-      return { status: 404, text: '' };
+      return { status: 404, text: '', links: [] };
     };
     const checkCache = {};
     const checker = new AcceptanceChecker({ readPage });
@@ -804,9 +804,9 @@ describe('deeper read for unknown hard checks', () => {
   it('item with hard no in pre-populated checks is not valid', async () => {
     const readPage = async (url: string) => {
       if (url === 'https://supplier.example.com/') {
-        return { status: 200, text: longText + '<a href="/brands">Our brands</a>' };
+        return { status: 200, text: longText, links: [{ url: '/brands', text: 'Our brands' }] };
       }
-      return { status: 404, text: '' };
+      return { status: 404, text: '', links: [] };
     };
     const checkCache = {};
     const checker = new AcceptanceChecker({ readPage });
@@ -820,9 +820,9 @@ describe('deeper read for unknown hard checks', () => {
   it('item with hard unknown in pre-populated checks is not valid', async () => {
     const readPage = async (url: string) => {
       if (url === 'https://supplier.example.com/') {
-        return { status: 200, text: longText + '<a href="/brands">Our brands</a>' };
+        return { status: 200, text: longText, links: [{ url: '/brands', text: 'Our brands' }] };
       }
-      return { status: 404, text: '' };
+      return { status: 404, text: '', links: [] };
     };
     const checkCache = {};
     const checker = new AcceptanceChecker({ readPage });
@@ -838,12 +838,12 @@ describe('deeper read for unknown hard checks', () => {
     const readPage = async (url: string) => {
       readCount++;
       if (url === 'https://supplier.example.com/') {
-        return { status: 200, text: longText + '<a href="/brands">Our brands</a>' };
+        return { status: 200, text: longText, links: [{ url: '/brands', text: 'Our brands' }] };
       }
       if (url === 'https://supplier.example.com/brands') {
-        return { status: 200, text: 'We carry Barbour. '.repeat(10) };
+        return { status: 200, text: 'We carry Barbour. '.repeat(10), links: [] };
       }
-      return { status: 404, text: '' };
+      return { status: 404, text: '', links: [] };
     };
     const checkCache = {};
     const checker = new AcceptanceChecker({ readPage });
