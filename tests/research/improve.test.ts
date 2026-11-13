@@ -973,6 +973,13 @@ describe('new data that serves the purpose is kept', () => {
     expect(target.nodes[0].finding.items.map((i: { url: string }) => i.url)).toEqual([knownRow.url, 'https://www.imovirtual.com/pt/anuncio/terreno-para-venda-ID1ibp8']);
   });
 
+  it('adds nothing when the research already holds the listing, so the trial is no data gain', () => {
+    const target = structuredClone(before);
+    const passing = dataGain(before, after, brief).passing;
+    mergeDataRows(target, passing, 'D8.3');
+    expect(mergeDataRows(target, passing, 'D8.3')).toEqual([]);
+  });
+
   it('keeps new passing rows on a reverted text change and logs them in plain words, counting the trial as a gain', async () => {
     const t0 = Date.parse('2026-11-12T10:00:00Z');
     const at = (min: number) => new Date(t0 + min * 60000).toISOString();

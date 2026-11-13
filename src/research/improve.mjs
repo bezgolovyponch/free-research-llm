@@ -868,7 +868,8 @@ export class ProjectImprover {
         }
         if ((GRADE_RANK[node.status] ?? 0) < (GRADE_RANK[oldNode.status] ?? 0)) {
           const gain = dataGain(snapshot, project, snapshot.brief);
-          if (gain.passing.length) return await this.keepData(id, base, change, snapshot, project, gain, state);
+          const keptData = gain.passing.length ? await this.keepData(id, base, change, snapshot, project, gain, state) : null;
+          if (keptData) return keptData;
           await note({ ...base, change, outcome: 'reverted-piece', score: state.best.score, detail: `${nodeId} fell from ${oldNode.status} to ${node.status}` });
           return { kept: false };
         }
@@ -879,7 +880,8 @@ export class ProjectImprover {
         }
         if (touched.length === 1 && !removed.length && cannotGain(oldNode, node)) {
           const gain = dataGain(snapshot, project, snapshot.brief);
-          if (gain.passing.length) return await this.keepData(id, base, change, snapshot, project, gain, state);
+          const keptData = gain.passing.length ? await this.keepData(id, base, change, snapshot, project, gain, state) : null;
+          if (keptData) return keptData;
           await note({ ...base, change, outcome: 'no-gain', score: state.best.score, detail: `${nodeId} kept its grade (${node.status}) and found nothing new, so the score could not rise; the whole research was not re-rolled` });
           return { kept: false };
         }
@@ -897,7 +899,8 @@ export class ProjectImprover {
     const current = await this.engine.load(id);
     const target = structuredClone(current);
     const keptRows = mergeDataRows(target, gain.passing, base.nodeId);
-    await this.engine.store.save({ ...target, chats: current.chats, log: current.log, improve: current.improve }, { reason: `loop: trial on ${base.nodeId} kept ${gain.passing.length} new listing(s) that pass every hard criterion`, userAction: 'loop' });
+    if (!keptRows.length) return null;
+    await this.engine.store.save({ ...target, chats: current.chats, log: current.log, improve: current.improve }, { reason: `loop: trial on ${base.nodeId} kept ${keptRows.length} new listing(s) that pass every hard criterion`, userAction: 'loop' });
     await this.record(id, {}, { ...base, before: state.best.score, change, outcome: 'kept-data', score: state.best.score, detail: gain.detail, keptRows });
     return { kept: true, data: true };
   }
@@ -907,10 +910,10 @@ export class ProjectImprover {
     const current = await this.engine.load(id);
     const before = structuredClone(current);
     const reject = async (outcome, detail, score = best.score, data = null) => {
-      if (data?.passing?.length) {
-        const restored = structuredClone(before);
-        const keptRows = mergeDataRows(restored, data.passing, nodeId);
-        await this.engine.store.save({ ...restored, chats: current.chats, log: current.log, improve: current.improve }, { reason: `loop: trial reverted on ${nodeId} but kept ${data.passing.length} new listing(s) that pass every hard criterion`, userAction: 'loop' });
+      const restored = structuredClone(before);
+      const keptRows = data?.passing?.length ? mergeDataRows(restored, data.passing, nodeId) : [];
+      if (keptRows.length) {
+        await this.engine.store.save({ ...restored, chats: current.chats, log: current.log, improve: current.improve }, { reason: `loop: trial reverted on ${nodeId} but kept ${keptRows.length} new listing(s) that pass every hard criterion`, userAction: 'loop' });
         await this.record(id, {}, { ...base, before: best.score, change, outcome: 'kept-data', score, detail: data.detail, keptRows });
         return { kept: true, data: true };
       }
