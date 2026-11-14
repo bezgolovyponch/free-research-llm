@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, filterCountItems } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems } from '../../src/research/checklist.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -567,53 +567,26 @@ describe('item-level checklist with a kind check and code-measured values', () =
 });
 
 describe('filterCountItems', () => {
-  const testClusters = [
-    { clause: 'kind', items: [{ clause: 'kind', question: 'Is this a hatchback?', hard: true, numeric: null }] },
-    { clause: 'price', items: [{ clause: 'price', question: 'Is the price <= 65000 CZK?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 2700, unit: 'EUR' } }] },
-    { clause: 'distance', items: [{ clause: 'distance', question: 'Is this within 300 km of Prague?', hard: true, numeric: null }] },
-    { clause: 'count', items: [{ clause: 'count', question: 'Does this listing include at least 20 cars?', hard: true, numeric: null }] },
-    { clause: 'count2', items: [{ clause: 'count2', question: 'Are there up to 80 cars as a trade-off?', hard: false, numeric: null }] },
-    { clause: 'per-item', items: [{ clause: 'per-item', question: 'Is this within 300 km?', hard: true, numeric: { measure: 'distanceKm', op: '<=', value: 300, unit: 'km' } }] },
+  const acceptance = { expected: 'The list of 20 best offers, 80 trade-offs to review', itemCount: 20, valueRange: [0, 65000] };
+  const clusters = [
+    { clause: 'shape', items: [{ clause: 'shape', question: 'Is this thing round?', hard: true, numeric: null }] },
+    { clause: 'count', items: [{ clause: 'count', question: 'Does this page include at least 20 things?', hard: true, numeric: null }] },
+    { clause: 'trade-off', items: [{ clause: 'trade-off', question: 'Are there up to 80 things as trade-offs?', hard: false, numeric: null }] },
+    { clause: 'age', items: [{ clause: 'age', question: 'Is this up to 5 years old?', hard: true, numeric: null }] },
+    { clause: 'near', items: [{ clause: 'within 20 km', question: 'Is this within 20 km of the town?', hard: true, numeric: { measure: 'distanceKm', op: '<=', value: 20, unit: 'km' } }] },
+    { clause: 'price', items: [{ clause: 'price', question: 'Is the price at most 65000?', hard: true, numeric: null }] },
   ];
+  const kept = (counts: number[]) => filterCountItems(clusters, counts)!.flatMap((c) => c.items.map((i) => i.question));
 
-  it('drops items asking for at least N items', () => {
-    const filtered = filterCountItems(testClusters, 20);
-    const questions = filtered.flatMap(c => c.items.map(i => i.question));
-    expect(questions).not.toContain('Does this listing include at least 20 cars?');
+  it('reads the asked counts from the acceptance spec, not its value range', () => {
+    expect(askedCounts(acceptance).sort((x: number, y: number) => x - y)).toEqual([20, 80]);
   });
 
-  it('drops items asking for up to M items as trade-off', () => {
-    const filtered = filterCountItems(testClusters, 20);
-    const questions = filtered.flatMap(c => c.items.map(i => i.question));
-    expect(questions).not.toContain('Are there up to 80 cars as a trade-off?');
+  it('drops a qualitative item that restates an asked count and keeps per-item limits', () => {
+    expect(kept(askedCounts(acceptance))).toEqual(['Is this thing round?', 'Is this up to 5 years old?', 'Is this within 20 km of the town?', 'Is the price at most 65000?']);
   });
 
-  it('keeps per-item numeric items (distanceKm)', () => {
-    const filtered = filterCountItems(testClusters, 20);
-    const questions = filtered.flatMap(c => c.items.map(i => i.question));
-    expect(questions).toContain('Is this within 300 km?');
-  });
-
-  it('keeps per-item numeric items (priceEur)', () => {
-    const filtered = filterCountItems(testClusters, 20);
-    const questions = filtered.flatMap(c => c.items.map(i => i.question));
-    expect(questions).toContain('Is the price <= 65000 CZK?');
-  });
-
-  it('keeps qualitative items (kind)', () => {
-    const filtered = filterCountItems(testClusters, 20);
-    const questions = filtered.flatMap(c => c.items.map(i => i.question));
-    expect(questions).toContain('Is this a hatchback?');
-  });
-
-  it('drops items matching the acceptance itemCount number', () => {
-    const clusters = [
-      { clause: 'count', items: [{ clause: 'count', question: 'Does this page list 20 items?', hard: true, numeric: null }] },
-      { clause: 'other', items: [{ clause: 'other', question: 'Is this a car?', hard: true, numeric: null }] },
-    ];
-    const filtered = filterCountItems(clusters, 20);
-    const questions = filtered.flatMap(c => c.items.map(i => i.question));
-    expect(questions).not.toContain('Does this page list 20 items?');
-    expect(questions).toContain('Is this a car?');
+  it('keeps every item when no count was asked', () => {
+    expect(kept([])).toHaveLength(clusters.length);
   });
 });

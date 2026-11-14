@@ -5,7 +5,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, hardCheckPassRate, hardChecksPass, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks, qualifies, softYesCount } from './acceptance.mjs';
-import { ChecklistJudge, checklistSummary, checklistFingerprint } from './checklist.mjs';
+import { ChecklistJudge, checklistSummary, checklistFingerprint, filterCountItems, askedCounts } from './checklist.mjs';
 import { DeeperReader } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
@@ -262,6 +262,7 @@ export function normalizeEstimate(raw) {
 }
 
 const MIN_JUDGED_TEXT = 300;
+const JUDGE_PAGE_BUDGET = 90;
 const SITE_MEASURES = new Set(['coastKm', 'beachKm', 'lakeKm', 'workableMonths', 'comfortableMonths', 'optimalDays', 'hotDays', 'hottestC', 'coldestC', 'explorePoints', 'staysNearby', 'realTrendVsEu']);
 
 export function needsSiteFit(strategy, decisionModel) {
@@ -550,7 +551,7 @@ export class ResearchEngine {
     await this.ensureArea(project);
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
     try {
-      const model = await this.modeler.build(project, project.guidance ?? '', project.acceptance.itemCount);
+      const model = await this.modeler.build(project);
       if (model) this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}`);
       return model;
     } catch (error) {
@@ -562,7 +563,7 @@ export class ResearchEngine {
   async rebuildDecisionModel(project) {
     if (!this.modeler || this.demo) return project.decisionModel ?? null;
     try {
-      return await this.modeler.build(project, project.guidance ?? '', project.acceptance?.itemCount ?? null, { force: true });
+      return await this.modeler.build(project, { force: true });
     } catch (error) {
       this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
       return project.decisionModel ?? null;
@@ -1505,18 +1506,17 @@ export class ResearchEngine {
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
 
     if (project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
-      const newChecklist = project.decisionModel.checklist;
+      const newChecklist = filterCountItems(project.decisionModel.checklist, askedCounts(project.acceptance));
       if (newChecklist) {
         project.checklist = newChecklist;
         const fingerprint = checklistFingerprint(newChecklist);
-        const targetCount = project.acceptance?.itemCount ?? 20;
-        const JUDGE_BUDGET = 90;
+        const targetCount = project.acceptance?.itemCount ?? project.acceptanceResult.items.length;
         let judgedCount = 0;
         let validCount = 0;
 
         for (const item of project.acceptanceResult.items) {
           if (validCount >= targetCount) break;
-          if (judgedCount >= JUDGE_BUDGET) break;
+          if (judgedCount >= JUDGE_PAGE_BUDGET) break;
 
           const cacheKey = `${item.url}::${fingerprint}`;
           const cached = checkCache[cacheKey];
