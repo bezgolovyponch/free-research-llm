@@ -388,5 +388,19 @@
     "signal": "live cars rerun ended phase error: replies.map is not a function, while 30 items were valid",
     "cause": "ChecklistJudge treated reply.data as an array; free models often wrap a JSON list in an object such as {answers:[...]}",
     "prevention": "replyList reads a bare list or the first list inside an object, and anything else as no answers; covered by tests/research/checklist.test.ts (answers wrapped in an object)"
+  },
+  {
+    "id": "F29",
+    "title": "checklist items tested collection clauses per item and missed code-measured values",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/decision.mjs",
+      "src/research/engine.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/decision.test.ts"
+    ],
+    "signal": "live cars 0c750f: per-item checklist asked 'Does the page list at least 20 cars?' and 'Does the page state cars are within 300 km?' (collection clauses a single page cannot answer) → all 'unknown' → every item failed hard checks; a spare-part page (headlight) passed as valid; price in CZK and distanceKm from Prague were on the row but went to page judge as unmodelled",
+    "cause": "checklist prompt generated whole-sentence clauses including count/collection clauses; no kind check was built from decisionModel.kind.label/not; MEASURES lacked priceInCurrency (asked currency) and distanceKm (asked place) so those clauses went to page judge or unmodelled",
+    "prevention": "checklist prompt now drops collection clauses (acceptance owns count), keeps only item-level questions with short-phrase clauses; ChecklistJudge adds one hard kind check from decisionModel.kind.label/not (generic wording, no domain words); MEASURES gains priceInCurrency and distanceKm read from row.value/row.distanceKm; ChecklistJudge answers matching numeric checks from row before calling page judge; CHECKLIST_VERSION bumped so stored checklists rebuild"
   }
 ]

@@ -16,7 +16,7 @@ export function applyQuoteCheck(replies, pageText) {
   });
 }
 
-export const CHECKLIST_VERSION = 1;
+export const CHECKLIST_VERSION = 2;
 
 export async function proposeChecklist({ router, question, guidance = '', samples = 3 }) {
   const messages = checklistPrompt({ question, guidance });
@@ -110,6 +110,8 @@ export function compare(value, op, limit) {
 
 export const MEASURES = {
   priceEur: { read: (row) => row.value !== null && row.value !== undefined ? Number(row.value) : undefined },
+  priceInCurrency: { read: (row) => row.value !== null && row.value !== undefined ? Number(row.value) : undefined },
+  distanceKm: { read: (row) => row.distanceKm },
   coastKm: { read: (row) => row.site?.coastKm },
   beachKm: { read: (row) => row.site?.beachKm },
   lakeKm: { read: (row) => row.site?.lakeKm },
@@ -146,7 +148,7 @@ export function checklistFingerprint(checklist) {
 }
 
 function checklistPrompt({ question, guidance = '' }) {
-  const sys = 'You turn a research question into a checklist of yes/no questions, one per clause of the question. Each clause can produce multiple items. Answer with JSON only: {"items": [{"clause": "the exact words of the clause from the question", "question": "Does this ...?", "hard": true/false, "numeric": {"measure": "priceEur|coastKm|...", "op": "<=|>=|<|>", "value": 123, "unit": "EUR|km|..."} | null}]}.\n\n- "clause" is a clause from the user\'s question (split by commas, semicolons, "but also", "and also", "so").\n- "question" is a yes/no question that a human could answer by reading the item page. Word it as "Does this <kind> ...?" or "Does the page state ...?".\n- "hard" = true when the user stated it as a requirement (must have, required, up to, at least, within). Soft = preference (highest, best, prefer, ratio).\n- "numeric" is present only when the question asks for a measurable quantity that code can verify (price, distance, months, area, etc.). Use only these measures: priceEur, coastKm, beachKm, lakeKm, workableMonths, comfortableMonths, optimalDays, hotDays, hottestC, coldestC, explorePoints, staysNearby, areaM2. When the question gives no number, set value to null. Never invent a number.\n- Each clause must yield at least one item. If a clause has no numeric measure, numeric is null and the question is qualitative.\n- The guidance field may add constraints; treat them as additional clauses.';
+  const sys = 'You turn a research question into a checklist of yes/no questions about ONE delivered item. Each clause of the question produces items that test that single item. Answer with JSON only: {"items": [{"clause": "short phrase from the question naming the property", "question": "Does this <kind> ...?", "hard": true/false, "numeric": {"measure": "priceInCurrency|distanceKm|priceEur|coastKm|...", "op": "<=|>=|<|>", "value": 123, "unit": "CZK|km|..."} | null}]}.\n\n- "clause" is a short phrase naming the property tested (e.g. "hatchback", "price up to 65000 CZK", "within 300 km of Prague"), NOT the whole sentence.\n- "question" is a yes/no question about ONE item: "Does this car ...?" or "Does this listing ...?".\n- "hard" = true when the user stated it as a requirement (must have, required, up to, at least, within). Soft = preference (highest, best, prefer, ratio).\n- "numeric" is present only when the question asks for a measurable quantity that code can verify. Use only these measures: priceInCurrency (price in the asked currency), distanceKm (distance from the asked place), priceEur, coastKm, beachKm, lakeKm, workableMonths, comfortableMonths, optimalDays, hotDays, hottestC, coldestC, explorePoints, staysNearby, areaM2. When the question gives no number, set value to null. Never invent a number.\n- DROP collection/count clauses ("at least N items", "up to M as trade-off", "list of X") — they are checked at acceptance level, not per item.\n- Each clause must yield at least one item. If a clause has no numeric measure, numeric is null and the question is qualitative.\n- The guidance field may add constraints; treat them as additional clauses.';
   return [
     { role: 'system', content: sys },
     { role: 'user', content: 'Question: ' + question + (guidance ? '\nGuidance: ' + guidance : '') }
@@ -171,7 +173,33 @@ export class ChecklistJudge {
     this.router = router;
   }
 
-  async judge(item, pageText, checklist) {
+  async judge(item, pageText, checklist, kind = null) {
+    const checks = [];
+
+    if (kind?.label) {
+      const label = kind.label;
+      const notTerms = kind.not ?? [];
+      const terms = kind.terms ?? [];
+      const id = `kind|Is this page one ${label} offered as asked (not a part, accessory, wanted ad or list)?`;
+      const question = `Is this page one ${label} offered as asked (not a part, accessory, wanted ad or list)?`;
+      let answer = 'unknown';
+      let quote = '';
+      const text = String(pageText ?? '');
+      const plainText = text.toLowerCase();
+      const hasNot = notTerms.some((t) => plainText.includes(t.toLowerCase()));
+      const hasTerm = terms.some((t) => plainText.includes(t.toLowerCase()));
+      if (hasTerm && !hasNot) {
+        answer = 'yes';
+        const matched = terms.find((t) => plainText.includes(t.toLowerCase()));
+        quote = `kind: ${matched}`;
+      } else if (hasNot) {
+        answer = 'no';
+        const matched = notTerms.find((t) => plainText.includes(t.toLowerCase()));
+        quote = `kind: excluded by "${matched}"`;
+      }
+      checks.push({ id, answer, quote, hard: true, clause: 'kind' });
+    }
+
     const numericItems = [];
     const qualitativeItems = [];
 
@@ -184,8 +212,6 @@ export class ChecklistJudge {
         }
       }
     }
-
-    const checks = [];
 
     for (const { cluster, item: ci } of numericItems) {
       const m = MEASURES[ci.numeric.measure];

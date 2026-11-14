@@ -6,6 +6,7 @@ import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mj
 import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 
+export { CHECKLIST_VERSION };
 export const DECISION_MODEL_VERSION = 3;
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
@@ -22,6 +23,8 @@ const contentWords = (text) => new Set(plain(text).split(/[^a-z0-9]+/).filter((w
 
 export const MEASURES = {
   priceEur: { label: 'asking price', unit: 'EUR', read: (row) => finite(row.value) },
+  priceInCurrency: { label: 'asking price in asked currency', unit: '', read: (row) => finite(row.value) },
+  distanceKm: { label: 'distance from asked place', unit: 'km', read: (row) => finite(row.distanceKm) },
   areaM2: { label: 'land area', unit: 'm²', read: (row) => areaM2(row) ?? undefined },
   coastKm: { label: 'distance to the sea', unit: 'km', read: (row) => (row.site ? row.site.coastKm ?? Infinity : undefined) },
   beachKm: { label: 'distance to a beach', unit: 'km', read: (row) => (row.site ? row.site.beachKm ?? Infinity : undefined) },
@@ -421,7 +424,7 @@ export class DecisionModeler {
 
   fresh(project) {
     const m = project.decisionModel;
-    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
+    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
   }
 
   async build(project, { force = false } = {}) {

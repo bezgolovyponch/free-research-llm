@@ -1518,7 +1518,7 @@ export class ResearchEngine {
           const page = await readPage(item.url).catch(() => null);
           const pageText = page?.text ?? '';
           if (pageText) {
-            item.checks = await this.checklistJudge.judge(item, pageText, newChecklist);
+            item.checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null);
             item.checklist = checklistSummary([item])[0];
             checkCache[cacheKey] = { checks: item.checks, summary: item.checklist };
             const keys = Object.keys(checkCache);

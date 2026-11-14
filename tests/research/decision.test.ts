@@ -328,17 +328,17 @@ describe('item kind calibrated on real listing titles', () => {
 
 describe('decision model version', () => {
   it('treats a model built under an older logic version as stale so it is rebuilt', async () => {
-    const { DecisionModeler, DECISION_MODEL_VERSION } = await import('../../src/research/decision.mjs');
+    const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
-    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] } } };
+    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] }, version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION - 1 } };
     expect(modeler.fresh(project)).toBe(false);
-    expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, version: DECISION_MODEL_VERSION } })).toBe(true);
+    expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, checklistVersion: CHECKLIST_VERSION } })).toBe(true);
   });
 
   it('treats a current model with no kind and no criteria as stale so the next run tries again', async () => {
-    const { DecisionModeler, DECISION_MODEL_VERSION } = await import('../../src/research/decision.mjs');
+    const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
-    const empty = { question: 'q', guidance: '', version: DECISION_MODEL_VERSION, agreement: { samples: 3 }, kind: { label: '', terms: [] }, criteria: [], noLimit: [] };
+    const empty = { question: 'q', guidance: '', version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION, agreement: { samples: 3 }, kind: { label: '', terms: [] }, criteria: [], noLimit: [] };
     expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: empty })).toBe(false);
     expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: { ...empty, criteria: [{ measure: 'priceEur', op: '<=', value: 1 }] } })).toBe(true);
   });

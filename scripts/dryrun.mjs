@@ -12,13 +12,14 @@ import { candidateDeliverables } from '../src/research/candidates.mjs';
 import { collectDeliverables as collectNodeDeliverables } from '../src/research/acceptance.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const MAIN_ROOT = '/Users/m/free-research-llm';
 const id = process.argv[2];
 if (!id) {
   console.log('usage: node scripts/dryrun.mjs <research id> [--sweep] [--sites <cache file>]   (read-only preview of start-of-loop repairs and gates; --sweep also reads portal pages live; --sites also measures site fit, reading listing pages and free map and weather data)');
   process.exit(1);
 }
 const sweep = process.argv.includes('--sweep');
-const project = JSON.parse(await fs.readFile(path.join(ROOT, 'data', 'projects', `${id}.json`), 'utf8'));
+const project = JSON.parse(await fs.readFile(path.join(MAIN_ROOT, 'data', 'projects', `${id}.json`), 'utf8'));
 const sitesAt = process.argv.indexOf('--sites');
 const sites = sitesAt > 0 && process.argv[sitesAt + 1] ? new SiteAssessor({ file: path.resolve(process.argv[sitesAt + 1]) }) : null;
 const engine = new ResearchEngine({ router: null, search: sweep || sites || process.argv.includes('--fetch') ? new SearchService({ backends: [], fetchPages: true }) : null, store: { cache: new Map(), save: async (p) => p }, rates: new ExchangeRates({ fetchImpl: fetch }), sites, onEvent: (_id, e) => { if (e.type === 'candidates') console.log(e.message); } });
