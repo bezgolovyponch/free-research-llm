@@ -216,6 +216,15 @@ describe('ChecklistJudge reply binding', () => {
     expect(checks.find(c => c.id === 'brand|Does this carry Ralph Lauren?')?.answer).toBe('yes');
   });
 
+  it('reads answers wrapped in an object, and an object with no list as no answers', async () => {
+    const wrapped = { complete: async () => ({ provider: 'test', data: { answers: [{ id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' }] } }) };
+    const checks = await new ChecklistJudge({ router: wrapped }).judge({ url: 'http://example.com' }, 'We carry Barbour', testChecklist);
+    expect(checks.find(c => c.id === 'brand|Does this carry Barbour?')?.answer).toBe('yes');
+    const bare = { complete: async () => ({ provider: 'test', data: { note: 'none' } }) };
+    const none = await new ChecklistJudge({ router: bare }).judge({ url: 'http://example.com' }, 'We carry Barbour', testChecklist);
+    expect(none.map(c => c.answer)).toEqual(['unknown', 'unknown']);
+  });
+
   it('treats asked id with no reply as unknown', async () => {
     const router = {
       complete: async () => ({

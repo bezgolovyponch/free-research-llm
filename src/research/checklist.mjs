@@ -1,6 +1,11 @@
 import { plain } from './itemgate.mjs';
 import { quoteFound } from './quote.mjs';
 
+export function replyList(data) {
+  if (Array.isArray(data)) return data;
+  return Object.values(data ?? {}).find(Array.isArray) ?? [];
+}
+
 export function applyQuoteCheck(replies, pageText) {
   return replies.map((r) => {
     if (!r || typeof r !== 'object') return { ...r, answer: 'unknown', quote: '' };
@@ -221,7 +226,7 @@ export class ChecklistJudge {
         reply = null;
       }
 
-      const replies = reply?.data ?? [];
+      const replies = replyList(reply?.data);
       const validated = applyQuoteCheck(replies, pageTextCut);
 
       for (const q of questions) {

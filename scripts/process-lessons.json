@@ -377,5 +377,16 @@
     "signal": "checkAcceptance called this.modeler.build(question, guidance) but the app injects a DecisionModeler whose build takes a project; rebuild with 0 criteria replaced a model that had criteria; decisionModel with no kind and no criteria recorded as a case and polluted future researches",
     "cause": "engine wired with ChecklistModeler in tests (build(question, guidance)) but app wires DecisionModeler (build(project, {force})); DecisionModeler.build did not guard against weaker rebuilds and did not filter degenerate models from cases.record",
     "prevention": "checkAcceptance uses project.decisionModel.checklist directly (single source); DecisionModeler.build carries stored kind/criteria when new aggregate has no kind or fewer kept criteria; isDegenerate guards cases.record; tests wire DecisionModeler-shaped modeler; covered by tests/research/engine.test.ts (checklist from decisionModel) and tests/research/decision.test.ts (rebuild keeps stored kind/criteria; degenerate not recorded)"
+  },
+  {
+    "id": "F28",
+    "title": "a model reply wrapped in an object crashed the checklist judge and ended a research in error",
+    "touches": [
+      "src/research/checklist.mjs",
+      "tests/research/checklist.test.ts"
+    ],
+    "signal": "live cars rerun ended phase error: replies.map is not a function, while 30 items were valid",
+    "cause": "ChecklistJudge treated reply.data as an array; free models often wrap a JSON list in an object such as {answers:[...]}",
+    "prevention": "replyList reads a bare list or the first list inside an object, and anything else as no answers; covered by tests/research/checklist.test.ts (answers wrapped in an object)"
   }
 ]
