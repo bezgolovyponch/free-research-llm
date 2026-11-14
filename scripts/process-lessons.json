@@ -388,5 +388,21 @@
     "signal": "live cars rerun ended phase error: replies.map is not a function, while 30 items were valid",
     "cause": "ChecklistJudge treated reply.data as an array; free models often wrap a JSON list in an object such as {answers:[...]}",
     "prevention": "replyList reads a bare list or the first list inside an object, and anything else as no answers; covered by tests/research/checklist.test.ts (answers wrapped in an object)"
+  },
+  {
+    "id": "F29",
+    "title": "checklist items tested collection clauses per item and missed code-measured values",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/decision.mjs",
+      "src/research/engine.mjs",
+      "src/research/candidates.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/candidates.test.ts",
+      "tests/research/decision.test.ts"
+    ],
+    "signal": "live cars 0c750f: per-item checklist asked 'Does the page list at least 20 cars?' and 'Does the page state cars are within 300 km?' (collection clauses a single page cannot answer) → all 'unknown' → every item failed hard checks; a spare-part page (headlight) passed as valid; price in CZK and distanceKm from Prague were on the row but went to page judge as unmodelled",
+    "cause": "checklist prompt generated whole-sentence and count clauses; no check asked whether the page is one item of the asked kind; the distance code measures per row never reached the delivered items or the checklist",
+    "prevention": "checklist prompt keeps only item-level questions with short-phrase clauses and drops count clauses and price limits (the acceptance value range converts currencies); ChecklistJudge asks the page judge one hard kind question built from decisionModel.kind label and exclusions; MEASURES gains distanceKm, carried from the table row to the delivered item and answered by code, never by the judge; CHECKLIST_VERSION bumped; covered by tests/research/checklist.test.ts (item-level checklist with a kind check) and tests/research/candidates.test.ts (distance handed to the expected-result check)"
   }
 ]

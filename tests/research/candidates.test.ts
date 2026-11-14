@@ -66,6 +66,9 @@ describe('candidate table', () => {
 
   it('hands the kept rows to the expected-result check and a short table to the memo', () => {
     expect(candidateDeliverables(table)[0]).toEqual({ title: 'Terreno rústico junto à praia', url: 'https://imo.example/pt/anuncio/terreno-praia-ID1aaaa', value: 14000, unit: 'EUR', nodeId: 'D1.1', harvested: true, candidate: true });
+    const withDistance = { ...table, kept: table.kept.map((row: object, i: number) => (i === 0 ? { ...row, distanceKm: 42 } : row)) };
+    expect(candidateDeliverables(withDistance)[0].distanceKm).toBe(42);
+    expect(candidateDeliverables(withDistance)[1]).not.toHaveProperty('distanceKm');
     const text = shortlistText(table, 1);
     expect(text.split('\n')).toEqual(['TABLE COUNTS (computed by code, final): found 9, kept 3 (the result list), to check 2, screened out 4 (price outside 0–20000 EUR 1, offered for rent, not for sale 1, not a plot of land 1, offered as a swap, not for sale 1, outside the asked regions 1)', 'First 1 of the 3 kept rows:', '- Terreno rústico junto à praia | 14000 EUR | 2500 m² | Aljezur | coast stated']);
     expect(shortlistText(null)).toBe('');

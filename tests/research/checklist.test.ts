@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster } from '../../src/research/checklist.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -396,5 +396,58 @@ describe('ChecklistJudge with fake router', () => {
     expect(priceCheck).toBeDefined();
     expect(priceCheck!.answer).toBe('no');
     expect(priceCheck!.quote).toContain('priceEur: 100');
+  });
+});
+
+describe('item-level checklist with a kind check and code-measured values', () => {
+  const checklist = [
+    { clause: 'shape', items: [{ clause: 'shape', question: 'Is this thing round?', hard: true, numeric: null }] },
+    { clause: 'within 50 km of the town', items: [{ clause: 'within 50 km of the town', question: 'Is this within 50 km of the town?', hard: true, numeric: { measure: 'distanceKm', op: '<=', value: 50, unit: 'km' } }] },
+  ];
+  const kind = { label: 'widget', terms: ['widget'], not: ['spare part'] };
+  const KIND_ID = `kind|${kindCluster(kind).items[0].question}`;
+
+  function recordingRouter(answers: (asked: { id: string }[]) => unknown[]) {
+    const asked: string[][] = [];
+    return {
+      asked,
+      complete: async (req: { messages: { content: string }[] }) => {
+        const ids = [KIND_ID, ...checklist.flatMap((c) => c.items.map((i) => `${c.clause}|${i.question}`))].filter((id) => req.messages[1].content.includes(`${id}: `));
+        asked.push(ids);
+        return { provider: 'test', data: answers(ids.map((id) => ({ id }))) };
+      },
+    };
+  }
+
+  it('asks the page judge one hard kind question built from the kind label and its exclusions', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'yes', quote: 'round widget' })));
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A round widget for sale', checklist, kind);
+    expect(kindCluster(kind).items[0].question).toContain('widget');
+    expect(kindCluster(kind).items[0].question).toContain('spare part');
+    expect(router.asked[0]).toContain(KIND_ID);
+    expect(checks.find((c) => c.id === KIND_ID)).toMatchObject({ answer: 'yes', hard: true, clause: 'kind' });
+  });
+
+  it('a page the judge says is not one item of the kind fails the kind check', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'no', quote: 'spare part' })));
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A spare part for a widget', checklist, kind);
+    expect(checks.find((c) => c.id === KIND_ID)?.answer).toBe('no');
+  });
+
+  it('a measured distance answers its check by code and is never sent to the page judge', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'unknown', quote: '' })));
+    const judge = new ChecklistJudge({ router });
+    const near = await judge.judge({ url: 'http://example.com', distanceKm: 40 }, 'page', checklist, kind);
+    const far = await judge.judge({ url: 'http://example.com', distanceKm: 80 }, 'page', checklist, kind);
+    const id = 'within 50 km of the town|Is this within 50 km of the town?';
+    expect(near.find((c) => c.id === id)).toMatchObject({ answer: 'yes', quote: 'distanceKm: 40 km' });
+    expect(far.find((c) => c.id === id)?.answer).toBe('no');
+    expect(router.asked.flat()).not.toContain(id);
+  });
+
+  it('an item with no measured distance leaves the distance check unknown', async () => {
+    const router = recordingRouter(() => []);
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'page', checklist);
+    expect(checks.find((c) => c.clause === 'within 50 km of the town')?.answer).toBe('unknown');
   });
 });
