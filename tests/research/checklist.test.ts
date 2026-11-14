@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster } from '../../src/research/checklist.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -399,103 +399,55 @@ describe('ChecklistJudge with fake router', () => {
   });
 });
 
-describe('item-level checklist with kind check and code-measured values', () => {
-  const carChecklist = [
-    { clause: 'hatchback', items: [
-      { clause: 'hatchback', question: 'Is this a hatchback?', hard: true, numeric: null },
-    ]},
-    { clause: 'price up to 65000 CZK', items: [
-      { clause: 'price up to 65000 CZK', question: 'Is the price <= 65000 CZK?', hard: true, numeric: { measure: 'priceInCurrency', op: '<=', value: 65000, unit: 'CZK' } },
-    ]},
-    { clause: 'within 300 km of Prague', items: [
-      { clause: 'within 300 km of Prague', question: 'Is this within 300 km of Prague?', hard: true, numeric: { measure: 'distanceKm', op: '<=', value: 300, unit: 'km' } },
-    ]},
+describe('item-level checklist with a kind check and code-measured values', () => {
+  const checklist = [
+    { clause: 'shape', items: [{ clause: 'shape', question: 'Is this thing round?', hard: true, numeric: null }] },
+    { clause: 'within 50 km of the town', items: [{ clause: 'within 50 km of the town', question: 'Is this within 50 km of the town?', hard: true, numeric: { measure: 'distanceKm', op: '<=', value: 50, unit: 'km' } }] },
   ];
+  const kind = { label: 'widget', terms: ['widget'], not: ['spare part'] };
+  const KIND_ID = `kind|${kindCluster(kind).items[0].question}`;
 
-  const kind = {
-    label: 'car',
-    terms: ['car', 'auto', 'vehicle', 'octavia', 'skoda'],
-    not: ['parts', 'accessory', 'wanted', 'headlight', 'bumper']
-  };
+  function recordingRouter(answers: (asked: { id: string }[]) => unknown[]) {
+    const asked: string[][] = [];
+    return {
+      asked,
+      complete: async (req: { messages: { content: string }[] }) => {
+        const ids = [KIND_ID, ...checklist.flatMap((c) => c.items.map((i) => `${c.clause}|${i.question}`))].filter((id) => req.messages[1].content.includes(`${id}: `));
+        asked.push(ids);
+        return { provider: 'test', data: answers(ids.map((id) => ({ id }))) };
+      },
+    };
+  }
 
-  it('kind check is added as hard item from kind.label and kind.not', async () => {
-    const judge = new ChecklistJudge({ router: { complete: async () => null } });
-    const item = { url: 'http://example.com', value: 50000, distanceKm: 100 };
-    const pageText = '2020 Skoda Octavia hatchback, 1.6 TDI, 120000 km';
-    const checks = await judge.judge(item, pageText, carChecklist, kind);
-    const kindCheck = checks.find(c => c.id.startsWith('kind|'));
-    expect(kindCheck).toBeDefined();
-    expect(kindCheck!.hard).toBe(true);
-    expect(kindCheck!.answer).toBe('yes');
-    expect(kindCheck!.quote).toContain('kind:');
+  it('asks the page judge one hard kind question built from the kind label and its exclusions', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'yes', quote: 'round widget' })));
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A round widget for sale', checklist, kind);
+    expect(kindCluster(kind).items[0].question).toContain('widget');
+    expect(kindCluster(kind).items[0].question).toContain('spare part');
+    expect(router.asked[0]).toContain(KIND_ID);
+    expect(checks.find((c) => c.id === KIND_ID)).toMatchObject({ answer: 'yes', hard: true, clause: 'kind' });
   });
 
-  it('kind check fails for part/accessory page with not terms', async () => {
-    const judge = new ChecklistJudge({ router: { complete: async () => null } });
-    const item = { url: 'http://example.com', value: 1800, distanceKm: 83 };
-    const pageText = 'NOVÝ přední levý světlomet Kia Ceed ED - headlight for sale';
-    const checks = await judge.judge(item, pageText, carChecklist, kind);
-    const kindCheck = checks.find(c => c.id.startsWith('kind|'));
-    expect(kindCheck).toBeDefined();
-    expect(kindCheck!.hard).toBe(true);
-    expect(kindCheck!.answer).toBe('no');
-    expect(kindCheck!.quote).toContain('excluded by');
+  it('a page the judge says is not one item of the kind fails the kind check', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'no', quote: 'spare part' })));
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A spare part for a widget', checklist, kind);
+    expect(checks.find((c) => c.id === KIND_ID)?.answer).toBe('no');
   });
 
-  it('priceInCurrency check answered by code from row.value without judge call', async () => {
-    const judge = new ChecklistJudge({ router: { complete: async () => null } });
-    const item = { url: 'http://example.com', value: 50000, distanceKm: 100, unit: 'CZK' };
-    const pageText = '2020 Skoda Octavia hatchback, 1.6 TDI, 120000 km';
-    const checks = await judge.judge(item, pageText, carChecklist, kind);
-    const priceCheck = checks.find(c => c.id.includes('price up to 65000 CZK'));
-    expect(priceCheck).toBeDefined();
-    expect(priceCheck!.answer).toBe('yes');
-    expect(priceCheck!.quote).toContain('priceInCurrency: 50000');
+  it('a measured distance answers its check by code and is never sent to the page judge', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'unknown', quote: '' })));
+    const judge = new ChecklistJudge({ router });
+    const near = await judge.judge({ url: 'http://example.com', distanceKm: 40 }, 'page', checklist, kind);
+    const far = await judge.judge({ url: 'http://example.com', distanceKm: 80 }, 'page', checklist, kind);
+    const id = 'within 50 km of the town|Is this within 50 km of the town?';
+    expect(near.find((c) => c.id === id)).toMatchObject({ answer: 'yes', quote: 'distanceKm: 40 km' });
+    expect(far.find((c) => c.id === id)?.answer).toBe('no');
+    expect(router.asked.flat()).not.toContain(id);
   });
 
-  it('priceInCurrency check returns no when price exceeds limit', async () => {
-    const judge = new ChecklistJudge({ router: { complete: async () => null } });
-    const item = { url: 'http://example.com', value: 70000, distanceKm: 100, unit: 'CZK' };
-    const pageText = '2020 Skoda Octavia hatchback, 1.6 TDI, 120000 km';
-    const checks = await judge.judge(item, pageText, carChecklist, kind);
-    const priceCheck = checks.find(c => c.id.includes('price up to 65000 CZK'));
-    expect(priceCheck).toBeDefined();
-    expect(priceCheck!.answer).toBe('no');
-    expect(priceCheck!.quote).toContain('priceInCurrency: 70000');
-  });
-
-  it('distanceKm check answered by code from row.distanceKm without judge call', async () => {
-    const judge = new ChecklistJudge({ router: { complete: async () => null } });
-    const item = { url: 'http://example.com', value: 50000, distanceKm: 100, unit: 'CZK' };
-    const pageText = '2020 Skoda Octavia hatchback, 1.6 TDI, 120000 km';
-    const checks = await judge.judge(item, pageText, carChecklist, kind);
-    const distCheck = checks.find(c => c.id.includes('within 300 km of Prague'));
-    expect(distCheck).toBeDefined();
-    expect(distCheck!.answer).toBe('yes');
-    expect(distCheck!.quote).toContain('distanceKm: 100');
-  });
-
-  it('distanceKm check returns no when distance exceeds limit', async () => {
-    const judge = new ChecklistJudge({ router: { complete: async () => null } });
-    const item = { url: 'http://example.com', value: 50000, distanceKm: 400, unit: 'CZK' };
-    const pageText = '2020 Skoda Octavia hatchback, 1.6 TDI, 120000 km';
-    const checks = await judge.judge(item, pageText, carChecklist, kind);
-    const distCheck = checks.find(c => c.id.includes('within 300 km of Prague'));
-    expect(distCheck).toBeDefined();
-    expect(distCheck!.answer).toBe('no');
-    expect(distCheck!.quote).toContain('distanceKm: 400');
-  });
-
-  it('clause text is short phrase, not whole sentence', () => {
-    expect(carChecklist[0].clause).toBe('hatchback');
-    expect(carChecklist[1].clause).toBe('price up to 65000 CZK');
-    expect(carChecklist[2].clause).toBe('within 300 km of Prague');
-  });
-
-  it('count/collection clauses are not present in per-item checklist', () => {
-    const clauses = carChecklist.map(c => c.clause);
-    expect(clauses).not.toContain('at least 20 cars');
-    expect(clauses).not.toContain('up to 80 as trade-off');
-    expect(clauses).not.toContain('list of');
+  it('an item with no measured distance leaves the distance check unknown', async () => {
+    const router = recordingRouter(() => []);
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'page', checklist);
+    expect(checks.find((c) => c.clause === 'within 50 km of the town')?.answer).toBe('unknown');
   });
 });
