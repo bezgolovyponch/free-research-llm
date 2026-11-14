@@ -182,6 +182,25 @@ function checklistPrompt({ question, guidance = '' }) {
   ];
 }
 
+export function askedCounts(acceptance) {
+  const bounds = new Set((acceptance?.valueRange ?? []).map(Number));
+  const stated = (String(acceptance?.expected ?? '').match(/\d+/g) ?? []).map(Number).filter((n) => !bounds.has(n));
+  return [...new Set([acceptance?.itemCount, ...stated].filter((n) => Number.isFinite(n) && n > 1))];
+}
+
+function statesCount(ci, counts) {
+  if (ci.numeric?.measure) return false;
+  const numbers = (`${ci.clause} ${ci.question}`.match(/\d+/g) ?? []).map(Number);
+  return numbers.some((n) => counts.includes(n));
+}
+
+export function filterCountItems(clusters, counts) {
+  if (!counts?.length) return clusters ?? null;
+  return (clusters ?? [])
+    .map((cluster) => ({ ...cluster, items: cluster.items.filter((ci) => !statesCount(ci, counts)) }))
+    .filter((cluster) => cluster.items.length > 0);
+}
+
 export class ChecklistModeler {
   constructor({ router, samples = 3 } = {}) {
     this.router = router;

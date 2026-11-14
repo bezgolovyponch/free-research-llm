@@ -5,7 +5,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, hardCheckPassRate, hardChecksPass, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks, qualifies, softYesCount } from './acceptance.mjs';
-import { ChecklistJudge, checklistSummary, checklistFingerprint } from './checklist.mjs';
+import { ChecklistJudge, checklistSummary, checklistFingerprint, filterCountItems, askedCounts } from './checklist.mjs';
 import { DeeperReader } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
@@ -262,6 +262,7 @@ export function normalizeEstimate(raw) {
 }
 
 const MIN_JUDGED_TEXT = 300;
+const JUDGE_PAGE_BUDGET = 90;
 const SITE_MEASURES = new Set(['coastKm', 'beachKm', 'lakeKm', 'workableMonths', 'comfortableMonths', 'optimalDays', 'hotDays', 'hottestC', 'coldestC', 'explorePoints', 'staysNearby', 'realTrendVsEu']);
 
 export function needsSiteFit(strategy, decisionModel) {
@@ -1490,9 +1491,12 @@ export class ResearchEngine {
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
     const readPage = this.cachedPageReader(pages);
+    project.kindRejected = project.kindRejected ?? [];
+    const kindRejectedSet = new Set(project.kindRejected);
     const deliverables = (brief.located === false
       ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, regions: brief.regions ?? [], readPage })
-      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))])).filter((d) => !isExcludedSurfaceUrl(d.url));
+      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
+      .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage, convert });
@@ -1502,29 +1506,58 @@ export class ResearchEngine {
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
 
     if (project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
-      const newChecklist = project.decisionModel.checklist;
+      const newChecklist = filterCountItems(project.decisionModel.checklist, askedCounts(project.acceptance));
       if (newChecklist) {
         project.checklist = newChecklist;
         const fingerprint = checklistFingerprint(newChecklist);
-        const itemsToJudge = project.acceptanceResult.items.slice(0, 30);
-        for (const item of itemsToJudge) {
+        const targetCount = project.acceptance?.itemCount ?? project.acceptanceResult.items.length;
+        let judgedCount = 0;
+        let validCount = 0;
+
+        for (const item of project.acceptanceResult.items) {
+          if (validCount >= targetCount) break;
+          if (judgedCount >= JUDGE_PAGE_BUDGET) break;
+
           const cacheKey = `${item.url}::${fingerprint}`;
           const cached = checkCache[cacheKey];
+          let checks;
+          let isCached = false;
+
           if (cached) {
-            item.checks = cached.checks;
+            checks = cached.checks;
             item.checklist = cached.summary;
-            continue;
-          }
-          const page = await readPage(item.url).catch(() => null);
-          const pageText = page?.text ?? '';
-          if (pageText) {
-            item.checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null);
+            isCached = true;
+          } else {
+            const page = await readPage(item.url).catch(() => null);
+            const pageText = page?.text ?? '';
+            if (!pageText) continue;
+            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null);
             item.checklist = checklistSummary([item])[0];
-            checkCache[cacheKey] = { checks: item.checks, summary: item.checklist };
+            checkCache[cacheKey] = { checks, summary: item.checklist };
             const keys = Object.keys(checkCache);
             if (keys.length > 500) {
               delete checkCache[keys[0]];
             }
+            judgedCount++;
+          }
+
+          item.checks = checks;
+
+          const kindCheck = checks.find(c => c.clause === 'kind' && c.id.startsWith('kind|'));
+          if (kindCheck && kindCheck.answer === 'no') {
+            if (!kindRejectedSet.has(item.url)) {
+              project.kindRejected.push(item.url);
+              kindRejectedSet.add(item.url);
+              if (project.kindRejected.length > 500) {
+                project.kindRejected.shift();
+              }
+            }
+          }
+
+          const hardChecks = checks.filter(c => c.hard === true);
+          const hardPass = hardChecks.length > 0 && hardChecks.every(c => c.answer === 'yes');
+          if (hardPass && qualifies(item, project.acceptance)) {
+            validCount++;
           }
         }
       }

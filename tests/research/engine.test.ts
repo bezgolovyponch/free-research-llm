@@ -8,6 +8,7 @@ import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
+import { checklistFingerprint } from '../../src/research/checklist.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 import { researchedNode } from '../helpers/research-shapes';
@@ -2214,15 +2215,144 @@ describe('hub search', () => {
     project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
     project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
     await engine.checkAcceptance(project);
-    // Some items should have checks (up to 30)
+    // Items should be judged until itemCount are valid or budget (90) is spent
     const withChecks = project.acceptanceResult!.items.filter((item) => item.checks && item.checks.length > 0);
-    expect(withChecks.length).toBeLessThanOrEqual(30);
+    expect(withChecks.length).toBeLessThanOrEqual(90);
     expect(withChecks.length).toBeGreaterThan(0);
-    // Some items should have no checks (beyond first 30)
-    const withoutChecks = project.acceptanceResult!.items.filter((item) => !item.checks || item.checks.length === 0);
-    expect(withoutChecks.length).toBeGreaterThan(0);
     // They should still have valid computed based on other criteria (live, listing, inRange, purpose)
     expect(project.acceptanceResult!.items.every((item) => item.valid !== undefined)).toBe(true);
+  });
+
+  describe('checkAcceptance judge until enough', () => {
+    it('judges items until itemCount are valid or budget is spent', async () => {
+      const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+      const mockSearch = {
+        enabled: true,
+        lastErrors: [],
+        async search() { return []; },
+        async readPage(url: string) {
+          if (url.startsWith('https://example.com/anuncio/')) {
+            return { status: 200, text: 'We sell wholesale clothing in bulk. Price: 40 EUR per kg. '.repeat(10) };
+          }
+          return { status: 404, text: '' };
+        },
+      };
+      const engine = new ResearchEngine({ router, search: mockSearch, store: new ProjectStore({ dir }), lanes: 1 });
+      const project = await engine.createProject({ question: 'Find 5 wholesale clothing providers', expected: '5 providers' });
+      project.acceptance = { itemCount: 5, valueRange: null, unit: '', urlsLive: false, mustMention: [] };
+      project.candidates = {
+        kept: Array.from({ length: 10 }, (_, i) => ({ url: `https://example.com/anuncio/item-ID${10000 + i}`, title: `Item ${i}`, value: 1000 + i, unit: 'EUR', inRange: true, live: true, listing: true, purpose: [] })),
+        keptCount: 10,
+        toCheck: [],
+        toCheckCount: 0,
+        tiers: { fits: 10, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 },
+        screened: {},
+        screenedCount: 0,
+        found: 10,
+        verification: null,
+      };
+      project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
+      project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
+      project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+      project.checkCache = {};
+
+      let judgeCalls = 0;
+      const originalJudge = engine.checklistJudge.judge.bind(engine.checklistJudge);
+      engine.checklistJudge.judge = async (item, pageText, checklist, kind) => {
+        judgeCalls++;
+        return [{ id: 'wholesale|Does this sell wholesale or bulk?', answer: 'yes', quote: 'wholesale', hard: true, clause: 'wholesale' }];
+      };
+
+      await engine.checkAcceptance(project);
+
+      expect(judgeCalls).toBeGreaterThanOrEqual(5);
+      expect(judgeCalls).toBeLessThanOrEqual(90);
+      const validItems = project.acceptanceResult!.items.filter(i => i.valid);
+      expect(validItems.length).toBeGreaterThanOrEqual(5);
+    });
+
+    it('cached verdicts do not count against judge budget', async () => {
+      const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+      const mockSearch = {
+        enabled: true,
+        lastErrors: [],
+        async search() { return []; },
+        async readPage() { return { status: 200, text: 'wholesale' }; },
+      };
+      const engine = new ResearchEngine({ router, search: mockSearch, store: new ProjectStore({ dir }), lanes: 1 });
+      const project = await engine.createProject({ question: 'Find 5 wholesale clothing providers', expected: '5 providers' });
+      project.acceptance = { itemCount: 5, valueRange: null, unit: '', urlsLive: false, mustMention: [] };
+      project.candidates = {
+        kept: Array.from({ length: 10 }, (_, i) => ({ url: `https://example.com/item${i}`, title: `Item ${i}`, value: 1000 + i, unit: 'EUR', inRange: true, live: true, listing: true, purpose: [] })),
+        keptCount: 10,
+        toCheck: [],
+        toCheckCount: 0,
+        tiers: { fits: 10, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 },
+        screened: {},
+        screenedCount: 0,
+        found: 10,
+        verification: null,
+      };
+      project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
+      project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
+      project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+
+      const fingerprint = checklistFingerprint(project.decisionModel.checklist);
+      for (let i = 0; i < 10; i++) {
+        project.checkCache = {
+          [`https://example.com/item${i}::${fingerprint}`]: {
+            checks: [{ id: 'wholesale|Does this sell wholesale or bulk?', answer: 'yes', quote: 'wholesale', hard: true, clause: 'wholesale' }],
+            summary: { hardPass: true, unknown: 0, softYes: 0 }
+          }
+        };
+        await engine.checkAcceptance(project);
+      }
+
+      const judgeCalls = engine.checkCache ? Object.keys(engine.checkCache).length : 0;
+      expect(judgeCalls).toBeLessThanOrEqual(10);
+    });
+
+    it('records kind rejections and skips them on next acceptance', async () => {
+      const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+      const engine = new ResearchEngine({ router, search: fakeSearchForChecklist, store: new ProjectStore({ dir }), lanes: 1 });
+      const project = await engine.createProject({ question: 'Find 5 used cars', expected: '5 cars' });
+      project.acceptance = { itemCount: 5, valueRange: null, unit: '', urlsLive: false, mustMention: [] };
+      project.candidates = {
+        kept: [
+          { url: 'https://example.com/car1', title: 'Car 1', value: 10000, unit: 'EUR', inRange: true, live: true, listing: true, purpose: [] },
+          { url: 'https://example.com/parts1', title: 'Spare Part', value: 500, unit: 'EUR', inRange: true, live: true, listing: true, purpose: [] },
+          { url: 'https://example.com/car2', title: 'Car 2', value: 12000, unit: 'EUR', inRange: true, live: true, listing: true, purpose: [] },
+        ],
+        keptCount: 3,
+        toCheck: [],
+        toCheckCount: 0,
+        tiers: { fits: 3, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 },
+        screened: {},
+        screenedCount: 0,
+        found: 3,
+        verification: null,
+      };
+      project.brief = { located: true, kind: { label: 'used car', terms: ['car', 'hatchback'] }, regions: ['CZ'] };
+      const kind = { label: 'used car', terms: ['car', 'hatchback'], not: ['spare part', 'accessories'] };
+      project.decisionModel = { checklist: [{ clause: 'kind', items: [{ clause: 'kind', question: 'Is this a used car (not a spare part or accessory)?', hard: true, numeric: null }] }], kind };
+      project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+      project.checkCache = {};
+
+      await engine.checkAcceptance(project);
+
+      expect(project.kindRejected).toBeDefined();
+      if (project.kindRejected.length > 0) {
+        const rejectedUrl = project.kindRejected[0];
+        expect(rejectedUrl).toBe('https://example.com/parts1');
+
+        project.candidates.kept = project.candidates.kept.filter(k => k.url !== rejectedUrl);
+        project.candidates.keptCount = project.candidates.kept.length;
+        await engine.checkAcceptance(project);
+
+        const checkedUrls = project.acceptanceResult!.items.filter(i => i.checks).map(i => i.url);
+        expect(checkedUrls).not.toContain(rejectedUrl);
+      }
+    });
   });
 });
 
