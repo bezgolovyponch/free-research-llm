@@ -33,15 +33,21 @@ describe('clusterChecklist', () => {
       { items: [{ clause: 'wholesale', question: 'Does this offer wholesale?', hard: true }, { clause: 'brands', question: 'Does this carry The North Face?', hard: true }] },
     ];
     const clusters = clusterChecklist(samples);
-    expect(clusters.length).toBe(2);
+    expect(clusters.length).toBe(1);
     const wholesale = clusters.find((c) => c.clause === 'wholesale');
     expect(wholesale).toBeDefined();
     expect(wholesale!.items.length).toBe(1);
     expect(wholesale!.items[0].question).toContain('wholesale');
-    const brands = clusters.find((c) => c.clause === 'brands');
-    expect(brands).toBeDefined();
-    expect(brands!.items.length).toBe(1);
-    expect(brands!.items[0].question).toContain('Ralph Lauren');
+    expect(clusters.find((c) => c.clause === 'brands')).toBeUndefined();
+  });
+
+  it('questions that share only question words are different questions', () => {
+    const samples = [0, 1, 2].map(() => ({ items: [
+      { clause: 'size', question: 'Does this listing state the engine size?', hard: true },
+      { clause: 'distance', question: 'Does this listing state the mileage?', hard: false },
+    ] }));
+    const questions = clusterChecklist(samples).flatMap((c) => c.items.map((i) => i.question));
+    expect(questions.sort()).toEqual(['Does this listing state the engine size?', 'Does this listing state the mileage?']);
   });
 
   it('keeps only groups with majority across samples', () => {

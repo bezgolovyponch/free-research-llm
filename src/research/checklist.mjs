@@ -116,8 +116,10 @@ function sameMeaning(a, b) {
   return jaccard(wa, wb) >= 0.3;
 }
 
+const QUESTION_SCAFFOLD = new Set(['does', 'this', 'that', 'these', 'have', 'with', 'from', 'page', 'state', 'stated', 'show', 'shows', 'list', 'listed', 'item', 'offer', 'offered', 'there', 'their', 'they', 'which', 'what', 'about', 'than', 'mention', 'mentions', 'include', 'includes', 'provide', 'provided']);
+
 function contentWords(text) {
-  return new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
+  return new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !QUESTION_SCAFFOLD.has(w)));
 }
 
 function jaccard(a, b) {
