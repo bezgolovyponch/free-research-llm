@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, INSPECT_PER_ASKED, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -94,7 +94,8 @@ describe('valid items only', () => {
     const result = await checker.evaluate({ itemCount: 1, urlsLive: false, valueRange: null, mustMention: [] }, urls.map((url) => ({ url, value: 18000, unit: 'EUR' })));
     const count = result.checks.find((c: { id: string }) => c.id === 'count');
     expect(count.value).toBe(1);
-    expect(count.detail).toMatch(/^2 of 10 delivered pass every check; first 2 inspected/);
+    expect(Math.ceil(1 * INSPECT_PER_ASKED)).toBe(5);
+    expect(count.detail).toMatch(/^5 of 10 delivered pass every check; first 5 inspected/);
   });
 });
 
@@ -136,7 +137,7 @@ describe('listing price on the page', () => {
     expect(looksLikeListing('https://www.imovirtual.com/pt/anuncio/terreno-535-m-quinta-do-anjo-ID1iA1X')).toBe(true);
   });
 
-  it('checks up to 75 items for 50 wanted, at most 6 pages at a time', async () => {
+  it('checks every delivered item up to the cap for 50 wanted, at most 6 pages at a time', async () => {
     let open = 0;
     let peak = 0;
     const reads: string[] = [];
@@ -145,10 +146,10 @@ describe('listing price on the page', () => {
     const checker = new AcceptanceChecker({ readPage });
     const result = await checker.evaluate({ itemCount: 50, valueRange: [0, 20000], unit: 'EUR', mustMention: [], urlsLive: false }, items);
     expect(MAX_ITEM_CHECKS).toBe(100);
-    expect(result!.items).toHaveLength(75);
+    expect(result!.items).toHaveLength(90);
     expect(result!.checks[0]).toMatchObject({ value: 1, passed: true });
     expect(peak).toBeLessThanOrEqual(PAGE_READS_AT_ONCE);
-    expect(reads).toHaveLength(75);
+    expect(reads).toHaveLength(90);
   });
 
   it('counts harvested listings from a weak piece, but not what a weak piece\'s model answer listed', () => {

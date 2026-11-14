@@ -17,6 +17,7 @@ const LOCAL_SCALE_TOKEN = '[ \\u00a0\\u202f]?(tỷ|triệu)(?![a-zà-ỹ])';
 const AMOUNT = new RegExp(`${CURRENCY_TOKEN}[ \\u00a0\\u202f]?${NUMBER_TOKEN}${SCALE_TOKEN}|${NUMBER_TOKEN}${SCALE_TOKEN}[ \\u00a0\\u202f]?(?:,-[ \\u00a0\\u202f]?)?${CURRENCY_TOKEN}|${NUMBER_TOKEN}${LOCAL_SCALE_TOKEN}`, 'gi');
 const SCALES = { thousand: 1e3, k: 1e3, million: 1e6, mil: 1e6, mln: 1e6, mn: 1e6, milyon: 1e6, 'triệu': 1e6, trieu: 1e6, billion: 1e9, bn: 1e9, bln: 1e9, milyar: 1e9, 'tỷ': 1e9, ty: 1e9, b: 1e9 };
 export const MAX_ITEM_CHECKS = 100;
+export const INSPECT_PER_ASKED = 4.5;
 export const PAGE_READS_AT_ONCE = 6;
 const MIN_LIVE_TEXT = 200;
 
@@ -679,7 +680,7 @@ export class AcceptanceChecker {
   async evaluate(spec, deliverables, { located = true, kind = null, purpose = [], checklist = null, readPage = null, checkCache = {} } = {}) {
     if (!hasCriteria(spec) && !purpose.length) return null;
     const wanted = spec.itemCount ?? MAX_ITEM_CHECKS;
-    const items = await this.inspectAll(deliverables.slice(0, Math.min(MAX_ITEM_CHECKS, Math.ceil(wanted * 1.5))), spec, { located, kind, purpose });
+    const items = await this.inspectAll(deliverables.slice(0, Math.min(MAX_ITEM_CHECKS, Math.ceil(wanted * INSPECT_PER_ASKED))), spec, { located, kind, purpose });
     const target = spec.itemCount ?? Math.max(1, items.length);
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
     const checks = [];
