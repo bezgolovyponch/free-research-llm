@@ -404,5 +404,18 @@
     "signal": "live cars 0c750f: per-item checklist asked 'Does the page list at least 20 cars?' and 'Does the page state cars are within 300 km?' (collection clauses a single page cannot answer) → all 'unknown' → every item failed hard checks; a spare-part page (headlight) passed as valid; price in CZK and distanceKm from Prague were on the row but went to page judge as unmodelled",
     "cause": "checklist prompt generated whole-sentence and count clauses; no check asked whether the page is one item of the asked kind; the distance code measures per row never reached the delivered items or the checklist",
     "prevention": "checklist prompt keeps only item-level questions with short-phrase clauses and drops count clauses and price limits (the acceptance value range converts currencies); ChecklistJudge asks the page judge one hard kind question built from decisionModel.kind label and exclusions; MEASURES gains distanceKm, carried from the table row to the delivered item and answered by code, never by the judge; CHECKLIST_VERSION bumped; covered by tests/research/checklist.test.ts (item-level checklist with a kind check) and tests/research/candidates.test.ts (distance handed to the expected-result check)"
+  },
+  {
+    "id": "F30",
+    "title": "judge replies did not bind; clustering by clause text lost meaning; count check used stale validCount",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/engine.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "cars 0c750f: 26 of 40 page-judge calls returned ok, every item check 'unknown'; checklist contained invented 'Does this <clause>?' fallbacks and duplicate questions with different wordings per sample never reached majority; acceptanceResult.validCount=0 but count check 'At least 20 valid items' said 100% passed",
+    "cause": "ChecklistJudge sent full 'clause|question' IDs to the model but the model rewrote them, so replies never matched; clusterChecklist grouped by exact clause text so short-phrase clauses worded differently per sample never reached majority and the fallback 'Does this <clause>?' was kept; recomputeAcceptanceValidity recomputed validCount but the count check used the stale value from before the checklist decided validity",
+    "prevention": "ChecklistJudge sends short IDs (q1, q2...) to the model and maps replies back by index, accepting id with/without spaces/quotes/case; clusterChecklist groups by question meaning (sameMeaning) across all samples, keeps a group only when a majority of samples proposed it, keeps one representative (most common wording, hard from majority, numeric from majority), deletes the fallback; recomputeAcceptanceValidity updates the count check value/passed/detail from the recomputed validCount and recomputes the score; CHECKLIST_VERSION bumped to 3; covered by tests/research/checklist.test.ts (q-id binding, clustering by meaning, no fallback) and tests/research/engine.test.ts (count check follows recomputed validCount)"
   }
 ]

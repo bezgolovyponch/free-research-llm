@@ -26,31 +26,94 @@ describe('normalizeSample', () => {
 });
 
 describe('clusterChecklist', () => {
-  it('groups items by clause and keeps majority clusters', () => {
+  it('groups items by question meaning across samples and keeps majority groups', () => {
     const samples = [
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }, { clause: 'brands', question: 'Does this carry Ralph Lauren?', hard: true }] },
-      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }, { clause: 'brands', question: 'Does this carry Moncler?', hard: true }] },
-      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }, { clause: 'brands', question: 'Does this carry The North Face?', hard: true }] },
+      { items: [{ clause: 'wholesale', question: 'Is this a wholesale supplier?', hard: true }, { clause: 'brands', question: 'Does this carry Moncler?', hard: true }] },
+      { items: [{ clause: 'wholesale', question: 'Does this offer wholesale?', hard: true }, { clause: 'brands', question: 'Does this carry The North Face?', hard: true }] },
     ];
     const clusters = clusterChecklist(samples);
-    expect(clusters.length).toBe(2);
+    expect(clusters.length).toBe(1);
     const wholesale = clusters.find((c) => c.clause === 'wholesale');
-    expect(wholesale?.items.length).toBe(3);
-    const brands = clusters.find((c) => c.clause === 'brands');
-    expect(brands?.items.length).toBe(3);
+    expect(wholesale).toBeDefined();
+    expect(wholesale!.items.length).toBe(1);
+    expect(wholesale!.items[0].question).toContain('wholesale');
+    expect(clusters.find((c) => c.clause === 'brands')).toBeUndefined();
   });
 
-  it('keeps a clause with no majority as soft fallback', () => {
+  it('questions that share only question words are different questions', () => {
+    const samples = [0, 1, 2].map(() => ({ items: [
+      { clause: 'size', question: 'Does this listing state the engine size?', hard: true },
+      { clause: 'distance', question: 'Does this listing state the mileage?', hard: false },
+    ] }));
+    const questions = clusterChecklist(samples).flatMap((c) => c.items.map((i) => i.question));
+    expect(questions.sort()).toEqual(['Does this listing state the engine size?', 'Does this listing state the mileage?']);
+  });
+
+  it('keeps only groups with majority across samples', () => {
     const samples = [
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
       { items: [{ clause: 'quality', question: 'Is quality proven?', hard: true }] },
       { items: [{ clause: 'assortment', question: 'Is assortment listed?', hard: false }] },
     ];
     const clusters = clusterChecklist(samples);
-    expect(clusters.length).toBe(3);
+    expect(clusters.length).toBe(0);
+  });
+
+  it('does not invent fallback questions', () => {
+    const samples = [
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
+      { items: [{ clause: 'quality', question: 'Is quality proven?', hard: true }] },
+      { items: [{ clause: 'assortment', question: 'Is assortment listed?', hard: false }] },
+    ];
+    const clusters = clusterChecklist(samples);
     for (const c of clusters) {
-      expect(c.items.length).toBeGreaterThanOrEqual(1);
+      for (const item of c.items) {
+        expect(item.question).not.toMatch(/^Does this .+\?$/);
+      }
     }
+  });
+
+  it('uses most common wording for question', () => {
+    const samples = [
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
+      { items: [{ clause: 'wholesale', question: 'Is this a wholesale supplier?', hard: true }] },
+    ];
+    const clusters = clusterChecklist(samples);
+    expect(clusters.length).toBe(1);
+    expect(clusters[0].items[0].question).toBe('Does this sell wholesale?');
+  });
+
+  it('hard is true when majority marked hard', () => {
+    const samples = [
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: false }] },
+    ];
+    const clusters = clusterChecklist(samples);
+    expect(clusters[0].items[0].hard).toBe(true);
+  });
+
+  it('hard is false when minority marked hard', () => {
+    const samples = [
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: false }] },
+      { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: false }] },
+    ];
+    const clusters = clusterChecklist(samples);
+    expect(clusters[0].items[0].hard).toBe(false);
+  });
+
+  it('numeric from majority', () => {
+    const samples = [
+      { items: [{ clause: 'price', question: 'Is price <= 50?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 50, unit: 'EUR' } }] },
+      { items: [{ clause: 'price', question: 'Is price <= 50?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 50, unit: 'EUR' } }] },
+      { items: [{ clause: 'price', question: 'Is price <= 100?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 100, unit: 'EUR' } }] },
+    ];
+    const clusters = clusterChecklist(samples);
+    expect(clusters.length).toBe(1);
+    expect(clusters[0].items[0].numeric).toMatchObject({ measure: 'priceEur', op: '<=', value: 50, unit: 'EUR' });
   });
 });
 
@@ -184,7 +247,7 @@ describe('applyQuoteCheck', () => {
   });
 });
 
-describe('ChecklistJudge reply binding', () => {
+describe('ChecklistJudge reply binding with short IDs', () => {
   const testChecklist = [
     { clause: 'brand', items: [
       { clause: 'brand', question: 'Does this carry Barbour?', hard: true, numeric: null },
@@ -192,20 +255,19 @@ describe('ChecklistJudge reply binding', () => {
     ]},
   ];
 
-  it('ignores invented reply id not in asked questions', async () => {
+  it('binds model replies with q1, q2... to the right questions by index', async () => {
     const router = {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' },
-          { id: 'brand|Does this carry Ralph Lauren?', answer: 'yes', quote: 'Ralph Lauren' },
-          { id: 'brand|Does this carry FakeBrand?', answer: 'yes', quote: 'FakeBrand' },
+          { id: 'q1', answer: 'yes', quote: 'Barbour' },
+          { id: 'q2', answer: 'no', quote: '' },
         ],
       }),
     };
     const judge = new ChecklistJudge({ router });
     const item = { url: 'http://example.com' };
-    const pageText = 'We carry Barbour and Ralph Lauren';
+    const pageText = 'We carry Barbour';
     const checks = await judge.judge(item, pageText, testChecklist);
     const ids = checks.map(c => c.id).sort();
     expect(ids).toEqual([
@@ -213,11 +275,52 @@ describe('ChecklistJudge reply binding', () => {
       'brand|Does this carry Ralph Lauren?',
     ]);
     expect(checks.find(c => c.id === 'brand|Does this carry Barbour?')?.answer).toBe('yes');
-    expect(checks.find(c => c.id === 'brand|Does this carry Ralph Lauren?')?.answer).toBe('yes');
+    expect(checks.find(c => c.id === 'brand|Does this carry Ralph Lauren?')?.answer).toBe('no');
+  });
+
+  it('ignores reply with unknown q-id', async () => {
+    const router = {
+      complete: async () => ({
+        provider: 'test',
+        data: [
+          { id: 'q1', answer: 'yes', quote: 'Barbour' },
+          { id: 'q5', answer: 'yes', quote: 'FakeBrand' },
+        ],
+      }),
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com' };
+    const pageText = 'We carry Barbour';
+    const checks = await judge.judge(item, pageText, testChecklist);
+    const ids = checks.map(c => c.id).sort();
+    expect(ids).toEqual([
+      'brand|Does this carry Barbour?',
+      'brand|Does this carry Ralph Lauren?',
+    ]);
+    expect(checks.find(c => c.id === 'brand|Does this carry Barbour?')?.answer).toBe('yes');
+    expect(checks.find(c => c.id === 'brand|Does this carry Ralph Lauren?')?.answer).toBe('unknown');
+  });
+
+  it('accepts reply id with surrounding spaces/quotes/case', async () => {
+    const router = {
+      complete: async () => ({
+        provider: 'test',
+        data: [
+          { id: '  Q1  ', answer: 'yes', quote: 'Barbour' },
+          { id: '"q2"', answer: 'no', quote: '' },
+        ],
+      }),
+    };
+    const judge = new ChecklistJudge({ router });
+    const item = { url: 'http://example.com' };
+    const pageText = 'We carry Barbour';
+    const checks = await judge.judge(item, pageText, testChecklist);
+    expect(checks.find(c => c.id === 'brand|Does this carry Barbour?')?.answer).toBe('yes');
+    expect(checks.find(c => c.id === 'brand|Does this carry Ralph Lauren?')?.answer).toBe('no');
   });
 
   it('reads answers wrapped in an object, and an object with no list as no answers', async () => {
-    const wrapped = { complete: async () => ({ provider: 'test', data: { answers: [{ id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' }] } }) };
+    const wrapped = { complete: async () => ({ provider: 'test', data: { answers: [{ id: 'q1', answer: 'yes', quote: 'Barbour' }] } }) };
     const checks = await new ChecklistJudge({ router: wrapped }).judge({ url: 'http://example.com' }, 'We carry Barbour', testChecklist);
     expect(checks.find(c => c.id === 'brand|Does this carry Barbour?')?.answer).toBe('yes');
     const bare = { complete: async () => ({ provider: 'test', data: { note: 'none' } }) };
@@ -230,7 +333,7 @@ describe('ChecklistJudge reply binding', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' },
+          { id: 'q1', answer: 'yes', quote: 'Barbour' },
         ],
       }),
     };
@@ -249,8 +352,8 @@ describe('ChecklistJudge reply binding', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'brand|Does this carry Barbour?', answer: 'maybe', quote: 'Barbour' },
-          { id: 'brand|Does this carry Ralph Lauren?', answer: 'yes', quote: 'Ralph Lauren' },
+          { id: 'q1', answer: 'maybe', quote: 'Barbour' },
+          { id: 'q2', answer: 'yes', quote: 'Ralph Lauren' },
         ],
       }),
     };
@@ -269,7 +372,7 @@ describe('ChecklistJudge reply binding', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'brand|Does this carry Barbour?', answer: 'yes', quote: 'Barbour' },
+          { id: 'q1', answer: 'yes', quote: 'Barbour' },
         ],
       }),
     };
@@ -335,8 +438,8 @@ describe('ChecklistJudge with fake router', () => {
         return {
           provider: 'test',
           data: [
-            { id: 'brands|Does this carry Barbour?', answer: 'no', quote: '' },
-            { id: 'brands|Does this carry Ralph Lauren?', answer: 'no', quote: '' },
+            { id: 'q1', answer: 'no', quote: '' },
+            { id: 'q2', answer: 'no', quote: '' },
           ],
         };
       },
@@ -359,7 +462,7 @@ describe('ChecklistJudge with fake router', () => {
         return {
           provider: 'test',
           data: [
-            { id: 'brands|Does this carry Barbour?', answer: 'yes', quote: 'Barbour jackets available' },
+            { id: 'q1', answer: 'yes', quote: 'Barbour jackets available' },
           ],
         };
       },
@@ -407,14 +510,25 @@ describe('item-level checklist with a kind check and code-measured values', () =
   const kind = { label: 'widget', terms: ['widget'], not: ['spare part'] };
   const KIND_ID = `kind|${kindCluster(kind).items[0].question}`;
 
-  function recordingRouter(answers: (asked: { id: string }[]) => unknown[]) {
+  function recordingRouter(answers: (asked: { id: string; question: string }[]) => unknown[]) {
     const asked: string[][] = [];
     return {
       asked,
       complete: async (req: { messages: { content: string }[] }) => {
-        const ids = [KIND_ID, ...checklist.flatMap((c) => c.items.map((i) => `${c.clause}|${i.question}`))].filter((id) => req.messages[1].content.includes(`${id}: `));
-        asked.push(ids);
-        return { provider: 'test', data: answers(ids.map((id) => ({ id }))) };
+        const userContent = req.messages[1].content ?? '';
+        const ids: { id: string; question: string }[] = [];
+        const lines = userContent.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          const match = line.match(/^(q\d+):\s*(.+)$/);
+          if (match) {
+            const shortId = match[1];
+            const question = match[2];
+            ids.push({ id: shortId, question });
+          }
+        }
+        asked.push(ids.map((x) => x.id));
+        return { provider: 'test', data: answers(ids) };
       },
     };
   }
@@ -424,7 +538,7 @@ describe('item-level checklist with a kind check and code-measured values', () =
     const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A round widget for sale', checklist, kind);
     expect(kindCluster(kind).items[0].question).toContain('widget');
     expect(kindCluster(kind).items[0].question).toContain('spare part');
-    expect(router.asked[0]).toContain(KIND_ID);
+    expect(router.asked[0].length).toBeGreaterThan(0);
     expect(checks.find((c) => c.id === KIND_ID)).toMatchObject({ answer: 'yes', hard: true, clause: 'kind' });
   });
 

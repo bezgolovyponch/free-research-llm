@@ -1560,16 +1560,24 @@ export class ResearchEngine {
       const label = items[0]?.checks?.find((c) => c.id === checkId)?.clause ?? checkId;
       newChecks.push({ id: `checklist-${checkId}`, label: `Checklist: ${label}`, value: Math.round(Math.min(1, rate) * 1000) / 1000, detail: `${Math.round(rate * items.length)} of ${items.length} checked items pass this hard check`, passed: rate >= 0.999 });
     }
-    const score = newChecks.reduce((s, c) => s + Math.min(1, c.value), 0) / newChecks.length;
     const sortedItems = [...items].sort((a, b) => {
       if (a.valid !== b.valid) return a.valid ? -1 : 1;
       return softYesCount(b) - softYesCount(a);
     });
+    const validCount = sortedItems.filter((i) => i.valid).length;
+    const target = spec.itemCount ?? Math.max(1, sortedItems.length);
+    const countCheck = newChecks.find((c) => c.id === 'count');
+    if (countCheck) {
+      countCheck.value = Math.min(1, validCount / target);
+      countCheck.passed = validCount >= target;
+      countCheck.detail = `${validCount} of ${target} delivered pass every check`;
+    }
+    const score = newChecks.reduce((s, c) => s + Math.min(1, c.value), 0) / newChecks.length;
     Object.assign(result, {
       score: Math.round(score * 1000) / 1000,
       checks: newChecks,
       items: sortedItems,
-      validCount: sortedItems.filter((i) => i.valid).length,
+      validCount,
     });
   }
 

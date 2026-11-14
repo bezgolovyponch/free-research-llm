@@ -2060,7 +2060,7 @@ describe('hub search', () => {
       ],
     };
     const judgeReplyNo = [
-      { id: 'wholesale|Does this sell wholesale or bulk?', answer: 'no', quote: '' },
+      { id: 'q1', answer: 'no', quote: '' },
     ];
     const provider = {
       id: 'demo',
@@ -2131,7 +2131,7 @@ describe('hub search', () => {
           return { content: JSON.stringify({ items: [{ clause: 'ships abroad', question: 'Does this ship to other countries?', hard: true, numeric: null }] }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
         }
         if (prompt.includes('Item page text:')) {
-          const reply = prompt.includes('We ship to 30 countries') ? { id: checkId, answer: 'yes', quote: 'We ship to 30 countries' } : { id: checkId, answer: 'unknown', quote: '' };
+          const reply = prompt.includes('We ship to 30 countries') ? { id: 'q1', answer: 'yes', quote: 'We ship to 30 countries' } : { id: 'q1', answer: 'unknown', quote: '' };
           return { content: JSON.stringify([reply]), model: 'demo-fast', provider: 'demo', usage: {} };
         }
         return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
@@ -2160,7 +2160,7 @@ describe('hub search', () => {
       ],
     };
     const judgeReplyYes = [
-      { id: 'wholesale|Does this sell wholesale or bulk?', answer: 'yes', quote: 'wholesale' },
+      { id: 'q1', answer: 'yes', quote: 'wholesale' },
     ];
     const provider = {
       id: 'demo',

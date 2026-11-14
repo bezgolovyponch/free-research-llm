@@ -16,7 +16,7 @@ export function applyQuoteCheck(replies, pageText) {
   });
 }
 
-export const CHECKLIST_VERSION = 2;
+export const CHECKLIST_VERSION = 3;
 
 export async function proposeChecklist({ router, question, guidance = '', samples = 3 }) {
   const messages = checklistPrompt({ question, guidance });
@@ -44,41 +44,67 @@ export function normalizeSample(raw) {
 }
 
 export function clusterChecklist(samples) {
-  const byClause = new Map();
-  for (const sample of samples) {
-    for (const item of sample.items) {
-      const key = item.clause.toLowerCase().trim();
-      if (!byClause.has(key)) byClause.set(key, []);
-      byClause.get(key).push(item);
+  const allItems = [];
+  for (let sampleIdx = 0; sampleIdx < samples.length; sampleIdx++) {
+    for (const item of samples[sampleIdx].items) {
+      allItems.push({ ...item, sampleIdx });
     }
+  }
+
+  const groups = [];
+  for (const item of allItems) {
+    let placed = false;
+    for (const group of groups) {
+      if (sameMeaning(group[0].question, item.question)) {
+        group.push(item);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) groups.push([item]);
   }
 
   const majority = Math.floor(samples.length / 2) + 1;
   const clusters = [];
 
-  for (const [clause, items] of byClause) {
-    const groups = [];
-    for (const item of items) {
-      let placed = false;
-      for (const group of groups) {
-        if (sameMeaning(group[0].question, item.question)) {
-          group.push(item);
-          placed = true;
-          break;
+  for (const group of groups) {
+    const sampleCount = new Set(group.map((i) => i.sampleIdx)).size;
+    if (sampleCount < majority) continue;
+
+    const questions = group.map((i) => i.question);
+    const questionCounts = new Map();
+    for (const q of questions) {
+      questionCounts.set(q, (questionCounts.get(q) ?? 0) + 1);
+    }
+    const mostCommonQuestion = [...questionCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+
+    const hardCount = group.filter((i) => i.hard).length;
+    const hard = hardCount >= majority;
+
+    let numeric = undefined;
+    const numericItems = group.filter((i) => i.numeric);
+    if (numericItems.length > 0) {
+      const measures = new Map();
+      const ops = new Map();
+      const values = new Map();
+      const units = new Map();
+      for (const ni of numericItems) {
+        measures.set(ni.numeric.measure, (measures.get(ni.numeric.measure) ?? 0) + 1);
+        ops.set(ni.numeric.op, (ops.get(ni.numeric.op) ?? 0) + 1);
+        if (ni.numeric.value !== null && ni.numeric.value !== undefined) {
+          values.set(ni.numeric.value, (values.get(ni.numeric.value) ?? 0) + 1);
         }
+        units.set(ni.numeric.unit, (units.get(ni.numeric.unit) ?? 0) + 1);
       }
-      if (!placed) groups.push([item]);
+      const measure = [...measures.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      const op = [...ops.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      const value = values.size ? [...values.entries()].sort((a, b) => b[1] - a[1])[0][0] : null;
+      const unit = [...units.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      numeric = { measure, op, value, unit };
     }
 
-    const best = groups
-      .filter((g) => g.length >= majority)
-      .sort((a, b) => b.length - a.length)[0];
-
-    if (best) {
-      clusters.push({ clause, items: best });
-    } else if (items.length > 0) {
-      clusters.push({ clause, items: [{ clause, question: 'Does this ' + clause + '?', hard: false }] });
-    }
+    const clause = group[0].clause.toLowerCase().trim();
+    clusters.push({ clause, items: [{ clause, question: mostCommonQuestion, hard, numeric }] });
   }
 
   return clusters;
@@ -90,8 +116,10 @@ function sameMeaning(a, b) {
   return jaccard(wa, wb) >= 0.3;
 }
 
+const QUESTION_SCAFFOLD = new Set(['does', 'this', 'that', 'these', 'have', 'with', 'from', 'page', 'state', 'stated', 'show', 'shows', 'list', 'listed', 'item', 'offer', 'offered', 'there', 'their', 'they', 'which', 'what', 'about', 'than', 'mention', 'mentions', 'include', 'includes', 'provide', 'provided']);
+
 function contentWords(text) {
-  return new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4));
+  return new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !QUESTION_SCAFFOLD.has(w)));
 }
 
 function jaccard(a, b) {
@@ -235,8 +263,13 @@ export class ChecklistJudge {
       const replies = replyList(reply?.data);
       const validated = applyQuoteCheck(replies, pageTextCut);
 
-      for (const q of questions) {
-        const reply = validated.find((r) => r.id === q.id);
+      for (let i = 0; i < questions.length; i++) {
+        const q = questions[i];
+        const shortId = `q${i + 1}`;
+        const reply = validated.find((r) => {
+          const rid = String(r?.id ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '');
+          return rid === shortId.toLowerCase();
+        });
         if (reply) {
           const answer = ['yes', 'no', 'unknown'].includes(reply.answer) ? reply.answer : 'unknown';
           checks.push({ id: q.id, answer, quote: reply.quote ?? '', hard: q.hard, clause: q.clause });
@@ -258,8 +291,8 @@ export class ChecklistJudge {
 }
 
 function judgePrompt({ questions, pageText }) {
-  const sys = 'You are a strict judge. For each question, answer whether the page text supports "yes", "no", or "unknown". Provide a short quote from the page text that directly supports your answer, or empty string if unknown. Answer with JSON only: [{"id": "...", "answer": "yes|no|unknown", "quote": "exact text from page"}]';
-  const qText = questions.map((q) => `${q.id}: ${q.question}`).join('\n');
+  const sys = 'You are a strict judge. For each question, answer whether the page text supports "yes", "no", or "unknown". Provide a short quote from the page text that directly supports your answer, or empty string if unknown. Answer with JSON only: [{"id": "q1", "answer": "yes|no|unknown", "quote": "exact text from page"}, {"id": "q2", "answer": "yes|no|unknown", "quote": "exact text from page"}]';
+  const qText = questions.map((q, i) => `q${i + 1}: ${q.question}`).join('\n');
   return [
     { role: 'system', content: sys },
     { role: 'user', content: `Item page text:\n${pageText}\n\nQuestions:\n${qText}` },
