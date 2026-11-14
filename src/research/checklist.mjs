@@ -182,16 +182,51 @@ function checklistPrompt({ question, guidance = '' }) {
   ];
 }
 
+const COUNT_PATTERNS = [
+  /\bat\s+least\s+\d+/i,
+  /\bup\s+to\s+\d+/i,
+  /\bhow\s+many\b/i,
+  /\bcount\b/i,
+  /\bnumber\s+of\b/i,
+  /\btotal\s+(?:items?|cars?|vehicles?|plots?|properties?|suppliers?|providers?|listings?|results?|offers?|ads?)\b/i,
+  /\b\d+\s+(?:items?|cars?|vehicles?|plots?|properties?|suppliers?|providers?|listings?|results?|offers?|ads?)\b/i,
+];
+
+function isCountItem(clause, question, acceptanceItemCount) {
+  const text = `${clause} ${question}`.toLowerCase();
+  for (const pattern of COUNT_PATTERNS) {
+    if (pattern.test(text)) return true;
+  }
+  if (acceptanceItemCount && /\b\d+\b/.test(text)) {
+    const nums = text.match(/\b(\d+)\b/g)?.map(Number) ?? [];
+    if (nums.some(n => n === acceptanceItemCount)) return true;
+  }
+  return false;
+}
+
+export function filterCountItems(clusters, acceptanceItemCount) {
+  return clusters
+    .map(cluster => ({
+      ...cluster,
+      items: cluster.items.filter(ci => !isCountItem(ci.clause, ci.question, acceptanceItemCount))
+    }))
+    .filter(cluster => cluster.items.length > 0);
+}
+
 export class ChecklistModeler {
   constructor({ router, samples = 3 } = {}) {
     this.router = router;
     this.samples = samples;
   }
 
-  async build(question, guidance = '') {
+  async build(question, guidance = '', acceptanceItemCount = null, options = {}) {
+    if (!options.force && this.lastChecklist) return this.lastChecklist;
     const samples = await proposeChecklist({ router: this.router, question, guidance, samples: this.samples });
     if (samples.length < 2) return null;
-    return clusterChecklist(samples);
+    const clusters = clusterChecklist(samples);
+    const filtered = filterCountItems(clusters, acceptanceItemCount);
+    this.lastChecklist = filtered;
+    return filtered;
   }
 }
 

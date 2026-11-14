@@ -417,5 +417,18 @@
     "signal": "cars 0c750f: 26 of 40 page-judge calls returned ok, every item check 'unknown'; checklist contained invented 'Does this <clause>?' fallbacks and duplicate questions with different wordings per sample never reached majority; acceptanceResult.validCount=0 but count check 'At least 20 valid items' said 100% passed",
     "cause": "ChecklistJudge sent full 'clause|question' IDs to the model but the model rewrote them, so replies never matched; clusterChecklist grouped by exact clause text so short-phrase clauses worded differently per sample never reached majority and the fallback 'Does this <clause>?' was kept; recomputeAcceptanceValidity recomputed validCount but the count check used the stale value from before the checklist decided validity",
     "prevention": "ChecklistJudge sends short IDs (q1, q2...) to the model and maps replies back by index, accepting id with/without spaces/quotes/case; clusterChecklist groups by question meaning (sameMeaning) across all samples, keeps a group only when a majority of samples proposed it, keeps one representative (most common wording, hard from majority, numeric from majority), deletes the fallback; recomputeAcceptanceValidity updates the count check value/passed/detail from the recomputed validCount and recomputes the score; CHECKLIST_VERSION bumped to 3; covered by tests/research/checklist.test.ts (q-id binding, clustering by meaning, no fallback) and tests/research/engine.test.ts (count check follows recomputed validCount)"
+  },
+  {
+    "id": "F31",
+    "title": "checklist items stated the asked count instead of per-item quantities; acceptance judged only first 30 items; kind rejections not remembered",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/engine.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "decisionModel.checklist still has a count item: 'Does this listing include at least 20 cars and up to 80 as a trade-off?' [hard] — models ignore the prompt rule; every page answers no/unknown, so no item can be valid. Only the first 30 delivered items are judged (engine.mjs checkAcceptance items.slice(0, 30)); 19 of those 30 failed the kind check (spare parts ranked first), while the table has 283 rows that fit. 0 valid of 20 asked.",
+    "cause": "1) Count items were not filtered by code after clustering; 2) checkAcceptance had a hard limit of 30 items judged regardless of itemCount; 3) When the kind check answered 'no', the URL was not recorded so it was re-judged on every acceptance pass.",
+    "prevention": "1) filterCountItems drops items whose clause/question states the asked item count or maximum (at least N, up to M, how many, or matches acceptance.itemCount) — keeps per-item numerics (distanceKm, priceEur, etc.). 2) checkAcceptance judges delivered items in ranked order until itemCount are valid (all hard checks yes and qualifies) or a judge budget (90 pages) is spent; cached verdicts do not count against the budget. 3) When the page judge answers the kind check 'no', the URL is added to project.kindRejected (capped at 500) and skipped in future table builds and acceptance without another call. Covered by tests/research/checklist.test.ts (filterCountItems) and tests/research/engine.test.ts (judge until enough, kind rejections remembered)."
   }
 ]

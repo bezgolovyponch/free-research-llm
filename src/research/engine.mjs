@@ -550,7 +550,7 @@ export class ResearchEngine {
     await this.ensureArea(project);
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
     try {
-      const model = await this.modeler.build(project);
+      const model = await this.modeler.build(project, project.guidance ?? '', project.acceptance.itemCount);
       if (model) this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}`);
       return model;
     } catch (error) {
@@ -562,7 +562,7 @@ export class ResearchEngine {
   async rebuildDecisionModel(project) {
     if (!this.modeler || this.demo) return project.decisionModel ?? null;
     try {
-      return await this.modeler.build(project, { force: true });
+      return await this.modeler.build(project, project.guidance ?? '', project.acceptance?.itemCount ?? null, { force: true });
     } catch (error) {
       this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
       return project.decisionModel ?? null;
@@ -1490,9 +1490,12 @@ export class ResearchEngine {
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
     const readPage = this.cachedPageReader(pages);
+    project.kindRejected = project.kindRejected ?? [];
+    const kindRejectedSet = new Set(project.kindRejected);
     const deliverables = (brief.located === false
       ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, regions: brief.regions ?? [], readPage })
-      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))])).filter((d) => !isExcludedSurfaceUrl(d.url));
+      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
+      .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
     project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage, convert });
@@ -1506,25 +1509,55 @@ export class ResearchEngine {
       if (newChecklist) {
         project.checklist = newChecklist;
         const fingerprint = checklistFingerprint(newChecklist);
-        const itemsToJudge = project.acceptanceResult.items.slice(0, 30);
-        for (const item of itemsToJudge) {
+        const targetCount = project.acceptance?.itemCount ?? 20;
+        const JUDGE_BUDGET = 90;
+        let judgedCount = 0;
+        let validCount = 0;
+
+        for (const item of project.acceptanceResult.items) {
+          if (validCount >= targetCount) break;
+          if (judgedCount >= JUDGE_BUDGET) break;
+
           const cacheKey = `${item.url}::${fingerprint}`;
           const cached = checkCache[cacheKey];
+          let checks;
+          let isCached = false;
+
           if (cached) {
-            item.checks = cached.checks;
+            checks = cached.checks;
             item.checklist = cached.summary;
-            continue;
-          }
-          const page = await readPage(item.url).catch(() => null);
-          const pageText = page?.text ?? '';
-          if (pageText) {
-            item.checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null);
+            isCached = true;
+          } else {
+            const page = await readPage(item.url).catch(() => null);
+            const pageText = page?.text ?? '';
+            if (!pageText) continue;
+            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null);
             item.checklist = checklistSummary([item])[0];
-            checkCache[cacheKey] = { checks: item.checks, summary: item.checklist };
+            checkCache[cacheKey] = { checks, summary: item.checklist };
             const keys = Object.keys(checkCache);
             if (keys.length > 500) {
               delete checkCache[keys[0]];
             }
+            judgedCount++;
+          }
+
+          item.checks = checks;
+
+          const kindCheck = checks.find(c => c.clause === 'kind' && c.id.startsWith('kind|'));
+          if (kindCheck && kindCheck.answer === 'no') {
+            if (!kindRejectedSet.has(item.url)) {
+              project.kindRejected.push(item.url);
+              kindRejectedSet.add(item.url);
+              if (project.kindRejected.length > 500) {
+                project.kindRejected.shift();
+              }
+            }
+          }
+
+          const hardChecks = checks.filter(c => c.hard === true);
+          const hardPass = hardChecks.length > 0 && hardChecks.every(c => c.answer === 'yes');
+          if (hardPass && qualifies(item, project.acceptance)) {
+            validCount++;
           }
         }
       }
