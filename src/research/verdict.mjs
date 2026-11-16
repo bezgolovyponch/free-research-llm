@@ -149,7 +149,7 @@ export function scoreOf(checks) {
   return checks.length ? checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length : 0;
 }
 
-export function verdictInvariants(project) {
+export function verdictInvariants(project, { memo = true } = {}) {
   const reasons = [];
   const acceptanceResult = project.acceptanceResult;
   const checklist = project.checklist;
@@ -198,10 +198,11 @@ export function verdictInvariants(project) {
     reasons.push("score mismatch: got " + acceptanceResult.score + " expected " + Math.round(expectedScore * 1000) / 1000);
   }
 
-  if (project.report?.verdict && project.acceptanceSummary) {
-    const memoMatch = project.report.verdict.match(/PROVISIONAL\s*\(acceptance:\s*([^)]+)\)/i);
-    if (memoMatch && memoMatch[1].trim() !== project.acceptanceSummary.trim()) {
-      reasons.push("memo acceptance text mismatch: memo says '" + memoMatch[1].trim() + "' but acceptanceSummary is '" + project.acceptanceSummary.trim() + "'");
+  const status = project.report?.status;
+  if (memo && status?.acceptanceContradictionKind === 'short') {
+    const summary = acceptanceSummaryOf(project);
+    if (status.acceptanceContradiction !== summary) {
+      reasons.push("memo acceptance text mismatch: memo says '" + status.acceptanceContradiction + "' but the verdict summary is '" + summary + "'");
     }
   }
 

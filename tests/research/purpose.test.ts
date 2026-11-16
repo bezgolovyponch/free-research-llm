@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CONFLICT_GOAL, CONFLICT_ROLE, PURPOSE, anchorsOf, applyOps, buildPurposeTree, conflictAsked, conflictGoalOf, critique, drawImplications, drawPurpose, ensureAskedConflict, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, refineGoal, thresholdsOf, traceGoal, traceables } from '../../src/research/purpose.mjs';
+import { CONFLICT_GOAL, CONFLICT_ROLE, PURPOSE, anchorsOf, applyOps, buildPurposeTree, conflictAsked, conflictGoalOf, critique, draftGoals, drawImplications, drawPurpose, ensureAskedConflict, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, refineGoal, thresholdsOf, traceGoal, traceables } from '../../src/research/purpose.mjs';
 import { CallBudget } from '../../src/research/semantic.mjs';
 import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
@@ -51,6 +51,22 @@ describe('whether cheap and valuable are asked at once is voted on clause ids', 
     const anchors = anchorsOf('Find the most valuable paintings, in the museum');
     expect((await conflictAsked({ router: fakeRouter({ conflict: { cost: null, worth: 'C1' } }) }, anchors)).asked).toBe(false);
     expect((await conflictAsked({ router: fakeRouter({ conflict: { cost: 'C9', worth: 'C1' } }) }, anchors)).asked).toBe(false);
+  });
+
+  it('counts a clause that asks for the most worth per unit of money as cost and worth at once, and a worth-only question stays no', async () => {
+    const byContract = (clause: string | null) => (request: { messages: { content: string }[] }) => {
+      const contract = request.messages[0].content;
+      const tradesOff = contract.includes('limits, minimises or trades off what is paid') && contract.includes('the most worth per unit of money is a cost clause') && contract.includes('One clause may be both cost and worth');
+      return { cost: tradesOff ? clause : null, worth: 'C2' };
+    };
+    const suppliers = anchorsOf('Find the wholesale branded second hand clothing providers, with highest price/value ratio, proven good quality');
+    expect(suppliers[1]).toMatchObject({ id: 'C2', text: 'with highest price/value ratio' });
+    const asked = await conflictAsked({ router: fakeRouter({ conflict: byContract('C2') }) }, suppliers);
+    expect(asked).toMatchObject({ asked: true, cost: 'C2', worth: 'C2', votes: { yes: 2 } });
+    const worthOnly = anchorsOf('Find second hand clothing providers, of proven good quality');
+    const no = await conflictAsked({ router: fakeRouter({ conflict: byContract(null) }) }, worthOnly);
+    expect(no).toMatchObject({ asked: false, cost: null, worth: null, votes: { no: 2 } });
+    expect(conflictGoalOf(ensureAskedConflict({ conflict: no, goals: [] }))).toBeNull();
   });
 
   it('is undecided without a majority, and an undecided vote adds no goal: the branch exists only when the question asks for it', async () => {
@@ -182,6 +198,97 @@ describe('numbers live in a structured field and are compared with the user numb
     expect(out.goals[0].questions[0].inventedNumber).toEqual([10]);
     expect(out.goals[0].questions[1].inventedNumber).toBeUndefined();
     expect(out.goals[0].obstacles).toBe('missing');
+  });
+});
+
+describe('a number nobody stated never stays in goal, question or obstacle text', () => {
+  const anchors = anchorsOf('Find plots to buy, price up to 65000CZK');
+  const purpose = { id: 'P', text: 'a buyer wants a plot' };
+  const said = 'Find plots to buy, price up to 65000CZK\nsea within 20 km\nat most 3 hours by car';
+  const withNumber = { refine: 'AND', questions: [{ q: 'Is the price in the top 10% of listings?', checker: 'code', threshold: null }], obstacles: [{ obstacle: 'Cost exceeds €5,000 per hectare', checker: 'page', threshold: { op: '>', value: 5000, unit: 'EUR/ha' } }] };
+  const fixed = { refine: 'AND', questions: [{ q: 'Is the price in the top share of listings?', checker: 'code', threshold: { op: '>=', value: 10, unit: '%' } }], obstacles: withNumber.obstacles };
+
+  it('asks once more with the number named, and takes a retry that moved it into the threshold', async () => {
+    const router = fakeRouter({ refine: seq(withNumber, fixed) });
+    const out = await refineGoal({ router }, { goal: 'Low price', said });
+    expect(router.count('refine')).toBe(2);
+    expect(router.userText('refine', 1)).toContain('holds a number nobody stated (10): move it into "threshold" and write the text without it');
+    expect(out.questions).toEqual([{ q: 'Is the price in the top share of listings?', checker: 'code', threshold: { op: '>=', value: 10, unit: '%' }, note: null }]);
+    expect(out.obstacles[0].obstacle).toBe('Cost exceeds €5,000 per hectare');
+    const goals = fakeRouter({ goals: seq({ goals: [{ goal: 'Grow 10 percent a year', anchor: 'C1' }] }, { goals: [{ goal: 'Grow every year', anchor: 'C1' }] }) });
+    expect(await draftGoals({ router: goals }, { anchors, purpose, said })).toEqual([{ goal: 'Grow every year', anchor: 'C1', notes: [] }]);
+    expect(goals.count('goals')).toBe(2);
+  });
+
+  it('moves a number that is still there after the retry into an assumption threshold, which is never hard', async () => {
+    const router = fakeRouter({ 'number-kind': { kind: 'A' }, refine: { ...withNumber, obstacles: [{ obstacle: 'Bale size is below 38 kg', checker: 'page', threshold: { op: '<', value: 12, unit: 'kg' } }] } });
+    const out = await refineGoal({ router }, { goal: 'Low price', said });
+    expect(router.count('refine')).toBe(2);
+    expect(out.questions).toEqual([{ q: 'Is the price in the top % of listings?', checker: 'code', threshold: { op: null, value: 10, unit: '', source: 'assumption', moved: true }, note: null, movedNumber: [10] }]);
+    expect(out.obstacles).toEqual([{ obstacle: 'Bale size is below kg', checker: 'page', threshold: { op: '<', value: 12, unit: 'kg' }, movedNumber: [38] }]);
+    expect(router.count('number-kind')).toBe(4);
+    expect(router.userText('number-kind')).toContain('Sentence: Is the price in the top [[10]]% of listings?');
+    const drafted = await draftGoals({ router: fakeRouter({ 'number-kind': { kind: 'A' }, goals: { goals: [{ goal: 'Grow 10 percent a year', anchor: 'C1' }] } }) }, { anchors, purpose, said });
+    expect(drafted).toEqual([{ goal: 'Grow percent a year', anchor: 'C1', notes: [], threshold: { op: null, value: 10, unit: '', source: 'assumption', moved: true }, movedNumber: [10] }]);
+    const tree = thresholdsOf({ goals: [{ id: 'G1', ...drafted[0], questions: out.questions.map((q: object, i: number) => ({ id: `Q${i + 1}`, ...q })), obstacles: out.obstacles.map((o: object, i: number) => ({ id: `O${i + 1}`, ...o })) }] }, { question: said }).tree;
+    expect(tree.thresholds.map((t: { node: string; value: number; source: string; hard: boolean }) => [t.node, t.value, t.source, t.hard])).toEqual([['G1', 10, 'assumption', false], ['Q1', 10, 'assumption', false], ['O1', 12, 'assumption', false]]);
+    expect([tree.goals[0], ...tree.goals[0].questions, ...tree.goals[0].obstacles].some((node: { inventedNumber?: number[] }) => node.inventedNumber)).toBe(false);
+    expect(openEntries(tree).map((e: { id: string; text: string }) => [e.id, e.text])).toEqual([['G1', '10'], ['Q1', '10'], ['O1', '< 12 kg']]);
+  });
+
+  it('keeps a number the user typed, in the question, a hint or an earlier answer, and a number of the cited quote', async () => {
+    const notes = [{ id: 'N1', url: 'https://stats.example.org/a', quote: 'Bales weigh 450 kg on average.', label: 'bale weight' }];
+    const reply = { refine: 'AND', questions: [{ q: 'Is the price at most 65 000 CZK?', checker: 'page', threshold: null }, { q: 'Is the sea within 20 km and 3 hours away?', checker: 'code', threshold: null }, { q: 'Is one bale of 450 kg the minimum order?', checker: 'page', threshold: null, note: 'N1' }], obstacles: [{ obstacle: 'A road is within 500 m', checker: 'official', threshold: { op: '<', value: 500, unit: 'm' } }] };
+    const router = fakeRouter({ refine: reply });
+    const out = await refineGoal({ router }, { goal: 'Low price', notes, said });
+    expect(router.count('refine')).toBe(1);
+    expect(out.questions.map((q: { q: string }) => q.q)).toEqual(reply.questions.map((q) => q.q));
+    expect(out.obstacles[0].obstacle).toBe('A road is within 500 m');
+    const uncited = await refineGoal({ router: fakeRouter({ refine: reply }) }, { goal: 'Low price', notes, said, cited: [] });
+    expect(uncited.questions[2].q).toBe('Is one bale of 450 kg the minimum order?');
+    const kept = await draftGoals({ router: fakeRouter({ goals: { goals: [{ goal: 'Stay under 65000 CZK', anchor: 'C2' }] } }) }, { anchors, purpose, said });
+    expect(kept).toEqual([{ goal: 'Stay under 65000 CZK', anchor: 'C2', notes: [] }]);
+    const answered = thresholdsOf({ goals: [{ id: 'G1', goal: 'Reach it in 3 hours', questions: [{ id: 'Q1', q: 'Does one bale weigh 450 kg?', checker: 'page', threshold: null, note: 'N1' }], obstacles: [] }] }, { question: 'plots', answers: ['at most 3 hours by car'], notes }).tree;
+    expect(answered.goals[0].inventedNumber).toBeUndefined();
+    expect(answered.goals[0].questions[0].inventedNumber).toBeUndefined();
+  });
+
+  it('moves only a quantity: a number in a name, a code or a year is voted to stay and is not counted as invented, and no majority leaves the text', async () => {
+    const marked = (request: { messages: { content: string }[] }) => request.messages[1].content.match(/\[\[(.+?)\]\]/)![1];
+    const kinds: Record<string, unknown> = { '9001': { kind: 'B' }, '1.2': { kind: 'B' }, '4': { kind: 'B' }, '2000': { kind: 'B' }, '2019': { kind: 'C' }, '5': { kind: 'A' } };
+    const byMeaning = (request: { messages: { content: string }[] }, index: number) => (marked(request) === '77' ? [{ kind: 'A' }, { kind: 'B' }, FAIL][index % 3] : kinds[marked(request)]);
+    const reply = { refine: 'AND', questions: [
+      { q: 'Is an ISO 9001 certificate listed?', checker: 'page', threshold: null },
+      { q: 'Is the 1.2 MPi engine of the Golf 4 reliable since 2019?', checker: 'consensus', threshold: null },
+      { q: 'Is a road within 5 km of the Natura 2000 area?', checker: 'official', threshold: null },
+    ], obstacles: [{ obstacle: 'Batch 77 was recalled', checker: 'page', threshold: null }] };
+    const router = fakeRouter({ refine: reply, 'number-kind': byMeaning });
+    const out = await refineGoal({ router }, { goal: 'Proven quality', said });
+    expect(router.count('refine')).toBe(2);
+    expect(router.calls.find((call: { task?: string }) => call.task === 'number-kind')).toMatchObject({ tier: 'fast', purpose: 'purpose-judge' });
+    expect(out.questions).toEqual([
+      { q: 'Is an ISO 9001 certificate listed?', checker: 'page', threshold: null, note: null, keptNumber: [9001] },
+      { q: 'Is the 1.2 MPi engine of the Golf 4 reliable since 2019?', checker: 'consensus', threshold: null, note: null, keptNumber: [1.2, 4, 2019] },
+      { q: 'Is a road within km of the Natura 2000 area?', checker: 'official', threshold: { op: null, value: 5, unit: '', source: 'assumption', moved: true }, note: null, movedNumber: [5], keptNumber: [2000] },
+    ]);
+    expect(out.obstacles).toEqual([{ obstacle: 'Batch 77 was recalled', checker: 'page', threshold: null }]);
+    const tree = thresholdsOf({ goals: [{ id: 'G1', goal: 'Proven quality', questions: out.questions.map((q: object, i: number) => ({ id: `Q${i + 1}`, ...q })), obstacles: out.obstacles.map((o: object, i: number) => ({ id: `O${i + 1}`, ...o })) }] }, { question: said }).tree;
+    expect(tree.goals[0].questions.map((q: { inventedNumber?: number[] }) => q.inventedNumber)).toEqual([undefined, undefined, undefined]);
+    expect(tree.goals[0].obstacles[0].inventedNumber).toEqual([77]);
+    expect(tree.thresholds.map((t: { node: string; value: number; source: string; hard: boolean }) => [t.node, t.value, t.source, t.hard])).toEqual([['Q3', 5, 'assumption', false]]);
+  });
+
+  it('reads a thousands-separated number as one number, and moves the number of a goal the critique adds', async () => {
+    const tree = { goals: [{ id: 'G1', goal: 'Low entry cost', questions: [{ id: 'Q1', q: 'Is the cost at most €5,000?', checker: 'page', threshold: { op: '<=', value: 5000, unit: 'EUR' } }], obstacles: [] }], ops: { applied: [], refused: [] } };
+    expect(thresholdsOf(tree, { question: 'plots' }).tree.goals[0].questions[0].inventedNumber).toBeUndefined();
+    const candidates = [{ id: 'C1', text: 'plots to buy' }];
+    const router = fakeRouter({ 'number-kind': { kind: 'A' }, critique: { ops: [{ op: 'add', goal: 'Visitors above 500,000 a year', anchor: 'C1' }] }, refine: refined, trace: { anchor: 'N' } });
+    const ops = await critique({ router }, tree, candidates, { said });
+    expect(router.count('critique')).toBe(2);
+    expect(ops).toEqual([{ op: 'add', goal: 'Visitors above a year', anchor: 'C1', threshold: { op: null, value: 500000, unit: '', source: 'assumption', moved: true }, movedNumber: [500000] }]);
+    const out = await applyOps({ router, embedder: fakeEmbedder() }, tree, ops, { candidates, said });
+    expect(out.goals[1]).toMatchObject({ id: 'G2', goal: 'Visitors above a year', threshold: { value: 500000, source: 'assumption' } });
+    expect(openEntries(thresholdsOf(out, { question: said }).tree).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['G2', 'goal'], ['Q1', 'threshold'], ['G2', 'threshold']]);
   });
 });
 

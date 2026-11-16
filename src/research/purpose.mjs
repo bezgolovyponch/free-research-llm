@@ -82,7 +82,7 @@ export async function drawImplications(ctx, anchors, purpose) {
 export async function conflictAsked(ctx, anchors) {
   const known = new Set(anchors.map((anchor) => anchor.id));
   const messages = [
-    { role: 'system', content: 'You read the clauses of a request, in any language. "cost": the id of the clause that asks for a low price or low cost, or null. "worth": the id of the clause that asks for worth beyond the minimum (value, quality, upside), or null. One clause may be both. Answer with JSON only: {"cost":"C<n>","worth":"C<n>"}.' },
+    { role: 'system', content: 'You read the clauses of a request, in any language. "cost": the id of the clause that limits, minimises or trades off what is paid, or null; a clause that asks for the most worth per unit of money is a cost clause, because it trades what is paid against what is received. "worth": the id of the clause that asks for worth beyond the minimum (value, quality, upside), or null. One clause may be both cost and worth: then give its id in both fields. Answer with JSON only: {"cost":"C<n>","worth":"C<n>"}.' },
     { role: 'user', content: `Clauses and hints:\n${lines(anchors)}` },
   ];
   const schema = (data) => (data && typeof data === 'object' && !Array.isArray(data) && ('cost' in data || 'worth' in data) ? { value: { cost: idOf(data.cost, known), worth: idOf(data.worth, known) } } : { error: 'answer with the two fields "cost" and "worth"' });
@@ -99,7 +99,7 @@ export function normalizeThreshold(threshold) {
   return { op: threshold.op, value, unit: String(threshold.unit ?? '').slice(0, 20) };
 }
 
-export async function draftGoals(ctx, { anchors, purpose, implications = [], notes = [] }) {
+export async function draftGoals(ctx, { anchors, purpose, implications = [], notes = [], said = '' }) {
   const shown = notes.slice(0, MAX_NOTES_SHOWN);
   const known = new Set([...anchors.map((anchor) => anchor.id), 'P', ...implications.map((entry) => entry.id)]);
   const noteIds = new Set(shown.map((note) => note.id));
@@ -107,12 +107,20 @@ export async function draftGoals(ctx, { anchors, purpose, implications = [], not
     { role: 'system', content: `You list the goals a result must reach (Goal-Question-Metric). At most ${MAX_GOALS} goals of at most 12 words, no numbers. "anchor" is the id the goal comes from: a clause (C), a hint (H), the purpose (P) or an implication (I). "notes" are the ids of scoping notes the goal uses. Do not add goals nobody asked for. Answer with JSON only: {"goals":[{"goal":"...","anchor":"C3","notes":["N2"]}]}.` },
     { role: 'user', content: `Clauses and hints:\n${lines(anchors)}\n\n[P] ${purpose.text}\n${implications.length ? `\nImplications:\n${lines(implications.map((entry) => ({ id: entry.id, text: `${entry.attribute}: ${entry.direction}` })))}\n` : ''}${shown.length ? `\nScoping notes:\n${lines(shown.map((note) => ({ id: note.id, text: `${note.label}: ${String(note.quote).slice(0, 160)}` })))}` : ''}` },
   ];
+  const userNumbers = numbersIn([said, ...anchors.map((anchor) => anchor.text)].join('\n'));
+  const allowedFor = (entry) => new Set([...userNumbers, ...shown.filter((note) => entry.notes.includes(note.id)).flatMap((note) => numbersIn(note.quote))]);
+  let rounds = 0;
   const schema = (data) => {
-    const goals = (Array.isArray(data?.goals) ? data.goals : []).slice(0, MAX_GOALS).map((entry) => ({ goal: shortText(entry?.goal, 12, 160), anchor: idOf(entry?.anchor, known), notes: [...new Set((Array.isArray(entry?.notes) ? entry.notes : []).map((id) => idOf(id, noteIds)).filter(Boolean))] })).filter((entry) => entry.goal && entry.anchor);
-    return goals.length ? { value: goals } : { error: 'every goal needs a "goal" text and an "anchor" id from the lists' };
+    rounds += 1;
+    const drafted = (Array.isArray(data?.goals) ? data.goals : []).slice(0, MAX_GOALS).map((entry) => ({ goal: shortText(entry?.goal, 12, 160), anchor: idOf(entry?.anchor, known), notes: [...new Set((Array.isArray(entry?.notes) ? entry.notes : []).map((id) => idOf(id, noteIds)).filter(Boolean))] })).filter((entry) => entry.goal && entry.anchor);
+    const stray = drafted.flatMap((entry) => strayNumbers(entry.goal, allowedFor(entry)));
+    if (stray.length && rounds < 2) return { error: numberError(stray, 'a goal') };
+    return drafted.length ? { value: drafted } : { error: 'every goal needs a "goal" text and an "anchor" id from the lists' };
   };
   const reply = await ask({ router: ctx.router, task: 'goals', tier: 'deep', messages, schema, budget: ctx.budget, stage: TREE_STAGE });
-  return reply?.value ?? [];
+  const goals = [];
+  for (const entry of reply?.value ?? []) goals.push(await settleNumbers(ctx, entry, 'goal', allowedFor(entry)));
+  return goals.filter((entry) => entry.goal);
 }
 
 function leafOf(entry, textField, noteIds) {
@@ -122,25 +130,49 @@ function leafOf(entry, textField, noteIds) {
   return { [textField]: text, checker, threshold: normalizeThreshold(entry?.threshold), ...(textField === 'q' ? { note: idOf(entry?.note, noteIds) } : {}) };
 }
 
-export async function refineGoal(ctx, { goal, anchorText = '', notes = [] }) {
+export async function refineGoal(ctx, { goal, anchorText = '', notes = [], said = '', cited = null }) {
   const noteIds = new Set(notes.map((note) => note.id));
   const system = `You refine one goal into questions a checker can answer. "refine": "AND" when every question must hold, "OR" when one is enough. At most 3 questions, each with exactly one checker: page (stated on the item's page), code (computed or compared across items), consensus (independent sources agree), statistic (a published figure), official (a registry or plan). At most 2 obstacles: conditions that defeat the goal. A number goes only in "threshold", never in the text; use null when no number was given. Answer with JSON only: {"refine":"AND|OR","questions":[{"q":"...","checker":"page","threshold":{"op":"<=","value":0,"unit":"..."},"note":"N2"}],"obstacles":[{"obstacle":"...","checker":"page","threshold":null}]}.`;
   const user = `Goal: ${goal}\nIt comes from: ${anchorText}${notes.length ? `\n\nNotes:\n${lines(notes.map((note) => ({ id: note.id, text: `${note.label}: ${String(note.quote).slice(0, 160)}` })))}` : ''}`;
-  const schema = (data) => {
-    const refine = oneOf(data?.refine, ['AND', 'OR']);
-    const questions = (Array.isArray(data?.questions) ? data.questions : []).slice(0, 3).map((entry) => leafOf(entry, 'q', noteIds)).filter(Boolean);
-    const obstacles = (Array.isArray(data?.obstacles) ? data.obstacles : []).slice(0, 2).map((entry) => leafOf(entry, 'obstacle', noteIds)).filter(Boolean);
-    if (!refine) return { error: '"refine" must be AND or OR' };
-    if (!questions.length) return { error: 'at least one question with a "q" text and one checker of page, code, consensus, statistic, official' };
-    return { value: { refine, questions, obstacles } };
+  const userNumbers = numbersIn(said);
+  const goalNotes = notes.filter((note) => (cited ?? [...noteIds]).includes(note.id));
+  const allowedFor = (leaf) => new Set([...userNumbers, ...[...goalNotes, ...notes.filter((note) => note.id === leaf.note)].flatMap((note) => numbersIn(note.quote)), ...(leaf.threshold ? [leaf.threshold.value] : [])]);
+  const noQuestion = { error: 'at least one question with a "q" text and one checker of page, code, consensus, statistic, official' };
+  const validator = () => {
+    let rounds = 0;
+    return (data) => {
+      rounds += 1;
+      const refine = oneOf(data?.refine, ['AND', 'OR']);
+      const drafted = {
+        q: (Array.isArray(data?.questions) ? data.questions : []).slice(0, 3).map((entry) => leafOf(entry, 'q', noteIds)).filter(Boolean),
+        obstacle: (Array.isArray(data?.obstacles) ? data.obstacles : []).slice(0, 2).map((entry) => leafOf(entry, 'obstacle', noteIds)).filter(Boolean),
+      };
+      if (!refine) return { error: '"refine" must be AND or OR' };
+      if (!drafted.q.length) return noQuestion;
+      const stray = Object.entries(drafted).flatMap(([field, leaves]) => leaves.flatMap((leaf) => strayNumbers(leaf[field], allowedFor(leaf))));
+      if (stray.length && rounds < 2) return { error: numberError(stray, 'a question or an obstacle') };
+      return { value: { refine, questions: drafted.q, obstacles: drafted.obstacle } };
+    };
   };
-  const request = { router: ctx.router, task: 'refine', tier: 'deep', schema, budget: ctx.budget, stage: TREE_STAGE };
-  const first = await ask({ ...request, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] });
+  const settle = async (reply) => {
+    if (!reply) return null;
+    const leaves = async (list, field) => {
+      const out = [];
+      for (const leaf of list) out.push(await settleNumbers(ctx, leaf, field, allowedFor(leaf)));
+      return out.filter((leaf) => leaf[field]);
+    };
+    const questions = await leaves(reply.value.questions, 'q');
+    return questions.length ? { refine: reply.value.refine, questions, obstacles: await leaves(reply.value.obstacles, 'obstacle') } : null;
+  };
+  const request = { router: ctx.router, task: 'refine', tier: 'deep', budget: ctx.budget, stage: TREE_STAGE };
+  const first = await ask({ ...request, schema: validator(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] });
   if (!first) return null;
-  if (first.value.obstacles.length) return first.value;
-  const again = await ask({ ...request, messages: [{ role: 'system', content: system }, { role: 'user', content: `${user}\n\nName at least one obstacle that would defeat this goal.` }] });
-  if (again?.value.obstacles.length) return again.value;
-  return { ...first.value, obstacles: 'missing' };
+  if (first.value.obstacles.length) return settle(first);
+  const again = await ask({ ...request, schema: validator(), messages: [{ role: 'system', content: system }, { role: 'user', content: `${user}\n\nName at least one obstacle that would defeat this goal.` }] });
+  const withObstacle = again?.value.obstacles.length ? await settle(again) : null;
+  if (withObstacle?.obstacles.length) return withObstacle;
+  const bare = await settle(first);
+  return bare ? { ...bare, obstacles: 'missing' } : null;
 }
 
 export function traceables(anchors, purpose, implications = []) {
@@ -264,30 +296,39 @@ export function treeLines(tree) {
   return out.join('\n');
 }
 
-export async function critique(ctx, tree, candidates) {
+export async function critique(ctx, tree, candidates, { said = '' } = {}) {
   const ids = new Set(nodesOf(tree).map((node) => node.id));
   const anchorIds = new Set(candidates.map((candidate) => candidate.id));
   const messages = [
     { role: 'system', content: `You review a goal tree (critique and revise). Return operations only, never a rewritten tree. Allowed: {"op":"merge","a":"G2","b":"G5"} two goals that are one objective; {"op":"drop","id":"G4","reason":"A|B|C"} with ${Object.entries(DROP_REASONS).map(([letter, text]) => `${letter} ${text}`).join(', ')}; {"op":"add","goal":"...","anchor":"C3"} a missing goal and the statement id it comes from; {"op":"checker","id":"Q3","checker":"page|code|consensus|statistic|official"} a question with the wrong checker. Answer with JSON only: {"ops":[...]}.` },
     { role: 'user', content: `Statements:\n${lines(candidates)}\n\nTree:\n${treeLines(tree)}` },
   ];
+  const allowed = new Set(numbersIn(said));
+  let rounds = 0;
   const schema = (data) => {
+    rounds += 1;
     if (!Array.isArray(data?.ops)) return { error: '"ops" must be a list of operations' };
     const ops = [];
+    const stray = data.ops.slice(0, 12).filter((entry) => String(entry?.op ?? '').trim().toLowerCase() === 'add').flatMap((entry) => strayNumbers(shortText(entry.goal, 12, 160), allowed));
+    if (stray.length && rounds < 2) return { error: numberError(stray, 'an added goal') };
     for (const entry of data.ops.slice(0, 12)) {
       const op = String(entry?.op ?? '').trim().toLowerCase();
       if (op === 'merge' && idOf(entry.a, ids) && idOf(entry.b, ids) && idOf(entry.a, ids) !== idOf(entry.b, ids)) ops.push({ op, a: idOf(entry.a, ids), b: idOf(entry.b, ids) });
       else if (op === 'drop' && idOf(entry.id, ids)) ops.push({ op, id: idOf(entry.id, ids), reason: oneOf(entry.reason, Object.keys(DROP_REASONS)) ?? 'B' });
-      else if (op === 'add' && shortText(entry.goal, 12, 160) && idOf(entry.anchor, anchorIds)) ops.push({ op, goal: shortText(entry.goal, 12, 160), anchor: idOf(entry.anchor, anchorIds) });
+      else if (op === 'add' && idOf(entry.anchor, anchorIds)) {
+        if (shortText(entry.goal, 12, 160)) ops.push({ op, goal: shortText(entry.goal, 12, 160), anchor: idOf(entry.anchor, anchorIds) });
+      }
       else if (op === 'checker' && idOf(entry.id, ids) && CHECKERS.includes(String(entry.checker ?? '').trim().toLowerCase())) ops.push({ op, id: idOf(entry.id, ids), checker: String(entry.checker).trim().toLowerCase() });
     }
     return { value: ops };
   };
   const reply = await ask({ router: ctx.router, task: 'critique', tier: 'deep', messages, schema, budget: ctx.budget, stage: TREE_STAGE });
-  return reply?.value ?? [];
+  const ops = [];
+  for (const op of reply?.value ?? []) ops.push(op.op === 'add' ? await settleNumbers(ctx, op, 'goal', allowed) : op);
+  return ops.filter((op) => op.op !== 'add' || op.goal);
 }
 
-export async function applyOps(ctx, tree, ops, { candidates = [], notes = [] } = {}) {
+export async function applyOps(ctx, tree, ops, { candidates = [], notes = [], said = '' } = {}) {
   let goals = [...(tree.goals ?? [])];
   const applied = [...(tree.ops?.applied ?? [])];
   const refused = [...(tree.ops?.refused ?? [])];
@@ -315,10 +356,10 @@ export async function applyOps(ctx, tree, ops, { candidates = [], notes = [] } =
       }
     } else if (op.op === 'add') {
       const anchor = candidates.find((candidate) => candidate.id === op.anchor);
-      const refined = await refineGoal(ctx, { goal: op.goal, anchorText: anchor?.text ?? '', notes });
+      const refined = await refineGoal(ctx, { goal: op.goal, anchorText: anchor?.text ?? '', notes, said, cited: [] });
       if (!refined) refused.push({ ...op, why: 'the goal could not be refined into questions' });
       else {
-        const traced = await traceGoal(ctx, { goal: op.goal, anchor: op.anchor, notes: [], ...refined }, candidates);
+        const traced = await traceGoal(ctx, { goal: op.goal, anchor: op.anchor, notes: [], ...(op.threshold ? { threshold: op.threshold, movedNumber: op.movedNumber } : {}), ...refined }, candidates);
         if (traced.state === 'dropped') refused.push({ ...op, why: traced.reason });
         else {
           goals = numberTree({ goals: [...goals, traced] }).goals;
@@ -360,22 +401,74 @@ export function ensureAskedConflict(tree) {
   return numberTree({ ...tree, goals: present ? goals.map((goal) => (goal === present ? completed : goal)) : [...goals, completed] });
 }
 
-export function numbersIn(text) {
+function numberRuns(text) {
   const out = [];
   for (const match of String(text ?? '').matchAll(/\d{1,3}(?:[   ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)*/g)) {
     const raw = match[0].replace(/[   ]/g, '');
-    out.push(Number(raw.replace(',', '.')));
-    if (/^\d{1,3}(?:[.,]\d{3})+$/.test(raw)) out.push(Number(raw.replace(/[.,]/g, '')));
+    const values = [Number(raw.replace(',', '.'))];
+    if (/^\d{1,3}(?:[.,]\d{3})+$/.test(raw)) values.push(Number(raw.replace(/[.,]/g, '')));
+    out.push({ raw: match[0], at: match.index, values: values.filter(Number.isFinite) });
   }
-  return out.filter(Number.isFinite);
+  return out;
 }
 
-export function thresholdsOf(tree, { question = '', guidance = '', notes = [] } = {}) {
-  const said = new Set(numbersIn(`${question}\n${guidance}`));
+export function numbersIn(text) {
+  return numberRuns(text).flatMap((run) => run.values);
+}
+
+export function strayNumbers(text, allowed) {
+  return numberRuns(text).filter((run) => !run.values.some((value) => allowed.has(value)));
+}
+
+function numberError(stray, where) {
+  return `the text of ${where} holds a number nobody stated (${[...new Set(stray.map((run) => run.raw))].join(', ')}): move it into "threshold" and write the text without it`;
+}
+
+export const NUMBER_KINDS = { A: 'a quantity used as a limit, target or amount', B: 'part of a name, model, code, standard or identifier', C: 'a date or year' };
+
+async function numberKind(ctx, text, run) {
+  const marked = `${text.slice(0, run.at)}[[${run.raw}]]${text.slice(run.at + run.raw.length)}`;
+  const messages = [
+    { role: 'system', content: `You read one sentence, in any language, with one number marked by [[ ]]. Say what the marked number is: ${Object.entries(NUMBER_KINDS).map(([letter, label]) => `${letter} ${label}`).join('; ')}. Answer with JSON only: {"kind":"A|B|C"}.` },
+    { role: 'user', content: `Sentence: ${marked}` },
+  ];
+  const schema = (data) => {
+    const kind = oneOf(data?.kind, Object.keys(NUMBER_KINDS));
+    return kind ? { value: kind } : { error: '"kind" must be A, B or C' };
+  };
+  const result = await vote({ router: ctx.router, task: 'number-kind', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: TREE_STAGE });
+  return result.value;
+}
+
+export async function settleNumbers(ctx, node, textField, allowed) {
+  const text = String(node[textField] ?? '');
+  const quantities = [];
+  const kept = [];
+  for (const run of strayNumbers(text, allowed)) {
+    const kind = await numberKind(ctx, text, run);
+    if (kind === 'A') quantities.push(run);
+    else if (kind) kept.push(...run.values);
+  }
+  const moved = moveNumbers(node, textField, quantities);
+  return kept.length ? { ...moved, keptNumber: [...new Set(kept)] } : moved;
+}
+
+export function moveNumbers(node, textField, stray) {
+  if (!stray.length) return node;
+  let text = String(node[textField]);
+  for (const run of [...stray].reverse()) text = `${text.slice(0, run.at)} ${text.slice(run.at + run.raw.length)}`;
+  const moved = [...new Set(stray.filter((run) => run.values.length).map((run) => run.values[run.values.length - 1]))];
+  const threshold = node.threshold ?? (moved.length ? { op: null, value: moved[0], unit: '', source: 'assumption', moved: true } : null);
+  return { ...node, [textField]: text.replace(/\s+/g, ' ').trim(), ...(threshold ? { threshold } : {}), ...(moved.length ? { movedNumber: moved } : {}) };
+}
+
+export function thresholdsOf(tree, { question = '', guidance = '', answers = [], notes = [] } = {}) {
+  const said = new Set(numbersIn([question, guidance, ...answers].join('\n')));
   const noteById = new Map(notes.map((note) => [note.id, note]));
   const thresholds = [];
   const settle = (node, goal, textField) => {
-    const invented = numbersIn(node[textField]).filter((value) => !said.has(value) && value !== node.threshold?.value);
+    const quoted = [noteById.get(node.note), ...(goal.notes ?? []).map((id) => noteById.get(id))].filter(Boolean).flatMap((note) => numbersIn(note.quote));
+    const invented = strayNumbers(node[textField], new Set([...said, ...quoted, ...(node.keptNumber ?? []), ...(node.threshold ? [node.threshold.value] : [])])).flatMap((run) => run.values);
     const out = { ...node };
     delete out.inventedNumber;
     if (invented.length) out.inventedNumber = [...new Set(invented)];
@@ -388,11 +481,8 @@ export function thresholdsOf(tree, { question = '', guidance = '', notes = [] } 
     return { ...out, threshold };
   };
   const goals = (tree.goals ?? []).map((goal) => {
-    const invented = numbersIn(goal.goal).filter((value) => !said.has(value));
-    const out = { ...goal, questions: (goal.questions ?? []).map((node) => settle(node, goal, 'q')), obstacles: Array.isArray(goal.obstacles) ? goal.obstacles.map((node) => settle(node, goal, 'obstacle')) : goal.obstacles };
-    delete out.inventedNumber;
-    if (invented.length) out.inventedNumber = [...new Set(invented)];
-    return out;
+    const own = settle(goal, goal, 'goal');
+    return { ...own, questions: (goal.questions ?? []).map((node) => settle(node, goal, 'q')), obstacles: Array.isArray(goal.obstacles) ? goal.obstacles.map((node) => settle(node, goal, 'obstacle')) : goal.obstacles };
   });
   return { tree: { ...tree, goals, thresholds }, thresholds };
 }
@@ -409,7 +499,7 @@ export function notModelledOf(tree, anchors) {
 export function openEntries(tree) {
   const open = [];
   for (const goal of tree?.goals ?? []) if (OPEN_STATES.includes(goal.state)) open.push({ id: goal.id, kind: 'goal', state: goal.state, text: goal.goal, reason: goal.reason ?? goal.state });
-  for (const threshold of tree?.thresholds ?? []) if (threshold.source === 'assumption' && !threshold.confirmed) open.push({ id: threshold.node, kind: 'threshold', text: `${threshold.op} ${threshold.value} ${threshold.unit}`.trim(), reason: 'a number the question, the hints and the cited note do not state' });
+  for (const threshold of tree?.thresholds ?? []) if (threshold.source === 'assumption' && !threshold.confirmed) open.push({ id: threshold.node, kind: 'threshold', text: `${threshold.op ?? ''} ${threshold.value} ${threshold.unit}`.trim(), reason: 'a number the question, the hints and the cited note do not state' });
   for (const entry of tree?.implications ?? []) if (entry.source === 'inferred') open.push({ id: entry.id, kind: 'implication', text: `${entry.attribute}: ${entry.direction}`, reason: 'inferred from the purpose, not stated' });
   return open;
 }
@@ -422,19 +512,20 @@ export function conflictGoalOf(tree) {
   return (tree?.goals ?? []).find((goal) => goal.role === CONFLICT_ROLE) ?? null;
 }
 
-export async function buildPurposeTree(ctx, { question, guidance = '', notes = [] }) {
+export async function buildPurposeTree(ctx, { question, guidance = '', answers = [], notes = [] }) {
+  const said = [question, guidance, ...answers].join('\n');
   const anchors = anchorsOf(question, guidance);
   const conflict = await conflictAsked(ctx, anchors);
   const purpose = await drawPurpose(ctx, anchors);
   if (!purpose) return { phase: 'needs-purpose', tree: null, anchors, conflict };
   const implications = await drawImplications(ctx, anchors, purpose);
   const candidates = traceables(anchors, purpose, implications);
-  const drafted = await draftGoals(ctx, { anchors, purpose, implications, notes });
+  const drafted = await draftGoals(ctx, { anchors, purpose, implications, notes, said });
   const goals = [];
   const dropped = [];
   for (const entry of drafted) {
     const anchor = candidates.find((candidate) => candidate.id === entry.anchor);
-    const refined = await refineGoal(ctx, { goal: entry.goal, anchorText: anchor?.text ?? '', notes: notes.filter((note) => entry.notes.includes(note.id)) });
+    const refined = await refineGoal(ctx, { goal: entry.goal, anchorText: anchor?.text ?? '', notes: notes.filter((note) => entry.notes.includes(note.id)), said });
     if (!refined) {
       dropped.push({ goal: entry.goal, reason: 'not refined into questions' });
       continue;
@@ -446,10 +537,10 @@ export async function buildPurposeTree(ctx, { question, guidance = '', notes = [
   let tree = numberTree({ version: TREE_VERSION, purpose, implications, conflict, goals, dropped, ops: { applied: [], refused: [] }, confirmedAt: null });
   tree = ensureAskedConflict(tree);
   tree = await mergeDuplicates(ctx, tree);
-  const ops = await critique(ctx, tree, candidates);
-  tree = await applyOps(ctx, tree, ops, { candidates, notes });
+  const ops = await critique(ctx, tree, candidates, { said });
+  tree = await applyOps(ctx, tree, ops, { candidates, notes, said });
   tree = ensureAskedConflict(tree);
-  tree = thresholdsOf(tree, { question, guidance, notes }).tree;
+  tree = thresholdsOf(tree, { question, guidance, answers, notes }).tree;
   tree.notModelled = notModelledOf(tree, anchors);
   const budgetNote = ctx.budget?.note?.() ?? '';
   if (budgetNote) ctx.log?.(budgetNote);

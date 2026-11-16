@@ -104,11 +104,24 @@ describe('DeeperReader', () => {
 });
 
 describe('deeperOrder', () => {
-  const item = (url: string, answers: string[]) => ({ url, checks: answers.map((answer, i) => ({ id: `c|q${i}`, hard: true, answer, clause: 'c' })) });
+  const hardList = [{ clause: 'c', items: [{ question: 'q0', hard: true }, { question: 'q1', hard: true }, { question: 'q2', hard: true }] }];
+  const item = (url: string, answers: string[], gate: Record<string, unknown> = {}) => ({ url, live: true, listing: true, ...gate, checks: answers.map((answer, i) => ({ id: `c|q${i}`, hard: true, answer, clause: 'c' })) });
 
   it('skips items a hard "no" already rejected and items with nothing unknown, closest to confirmation first', () => {
-    const order = deeperOrder([item('a', ['unknown', 'unknown', 'yes']), item('b', ['no', 'unknown']), item('c', ['yes', 'unknown']), item('d', ['yes', 'yes']), { url: 'e' }]);
+    const order = deeperOrder([item('a', ['unknown', 'unknown', 'yes']), item('b', ['no', 'unknown', 'yes']), item('c', ['yes', 'unknown', 'yes']), item('d', ['yes', 'yes', 'yes']), { url: 'e', live: true, listing: true }], { checklist: hardList });
     expect(order.map((i: { url: string }) => i.url)).toEqual(['c', 'a']);
+  });
+
+  it('never reads an item that fails the page gate: a dead link, a value out of range or a failed purpose check cannot be confirmed', () => {
+    const spec = { valueRange: { min: 0, max: 100 } };
+    const items = [
+      item('dead', ['yes', 'unknown', 'yes'], { live: false }),
+      item('out-of-range', ['yes', 'unknown', 'yes'], { inRange: false }),
+      item('off-purpose', ['yes', 'unknown', 'yes'], { inRange: true, purpose: [{ passed: false }] }),
+      item('open', ['unknown', 'unknown', 'yes'], { inRange: true, purpose: [{ passed: true }] }),
+    ];
+    expect(deeperOrder(items, { checklist: hardList, spec }).map((i: { url: string }) => i.url)).toEqual(['open']);
+    expect(deeperOrder(items, { checklist: hardList, spec, kind: { label: 'car' } }).map((i: { url: string }) => i.url)).toEqual(['open']);
   });
 });
 
