@@ -386,15 +386,18 @@ export class ResearchEngine {
     return this.store.save(project, { reason: `${nodeId}: file ${attachmentId} removed by the user` });
   }
 
+  ensureItemCount(project) {
+    if (project.acceptance?.locked || project.acceptance?.itemCount) return;
+    const asked = itemCountFromWords(project.acceptance?.expected, project.question);
+    if (typeof asked === 'number') project.acceptance = { ...project.acceptance, itemCount: asked };
+  }
+
   async decompose(project, phase = 'decomposing') {
     project.phase = phase;
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
     await this.store.save(project, { reason: 'decomposing the question' });
     const template = templateById(project.templateId);
-    if (!project.acceptance?.locked && !project.acceptance?.itemCount) {
-      const asked = itemCountFromWords(project.acceptance?.expected, project.question);
-      if (typeof asked === 'number') project.acceptance = { ...project.acceptance, itemCount: asked };
-    }
+    this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
     const ask = async (feedback) => {
       const reply = await this.router.complete({
@@ -612,6 +615,7 @@ export class ResearchEngine {
   async studyDomain(project) {
     if (!this.router || this.demo || !this.search?.search) return true;
     if (project.domain?.ready) return true;
+    this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
     const purpose = project.decisionModel?.purpose ?? '';
     const kind = project.decisionModel?.kind ?? null;

@@ -115,17 +115,31 @@ function pageSupport(pages) {
   return (phrase) => texts.filter((text) => mentionsPhrase(text, phrase)).length >= MIN_PAGES;
 }
 
+function siteOf(page, index) {
+  try {
+    return new URL(String(page.url ?? '')).hostname.replace(/^www\./, '');
+  } catch {
+    return `page ${index}`;
+  }
+}
+
+function sellerSupport(pages) {
+  const sites = pages.map((page, index) => ({ site: siteOf(page, index), text: plain(`${page.title ?? ''} ${page.text ?? ''}`) }));
+  return (phrase) => new Set(sites.filter((page) => mentionsPhrase(page.text, phrase)).map((page) => page.site)).size >= MIN_PAGES;
+}
+
 export function applyConceptCard(card, pages = []) {
   const supported = pageSupport(pages);
+  const named = sellerSupport(pages);
   const terms = (card?.terms ?? []).map((value) => plain(String(value)).trim()).filter((value) => value && supported(value));
   const not = (card?.not ?? []).map((value) => plain(String(value)).trim()).filter((value) => value && supported(value));
   const hubs = (card?.hubs ?? []).map((value) => plain(String(value)).trim()).filter((value) => value && supported(value));
-  const members = Array.isArray(card?.members) ? card.members.map((member) => ({ label: plain(String(member?.label ?? '')).trim(), terms: memberTerms(member).filter(supported) })).filter((member) => member.label && member.terms.length) : null;
+  const members = Array.isArray(card?.members) ? card.members.map((member) => ({ label: plain(String(member?.label ?? '')).trim(), terms: memberTerms(member).filter(named) })).filter((member) => member.label && member.terms.length) : null;
   return { terms: [...new Set(terms)], not: [...new Set(not)], hubs: [...new Set(hubs)], ...(members ? { members } : {}), pages: pages.length };
 }
 
 export function groundMembers(members = [], cardMembers = [], pages = []) {
-  const supported = pageSupport(pages);
+  const supported = sellerSupport(pages);
   const grounded = (members ?? []).map((member) => ({ label: String(member?.label ?? '').trim(), terms: memberTerms(member), grounded: memberTerms(member).filter(supported) })).filter((member) => member.label);
   for (const found of cardMembers ?? []) {
     const terms = memberTerms(found);

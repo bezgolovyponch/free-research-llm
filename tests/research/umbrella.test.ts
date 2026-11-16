@@ -96,6 +96,17 @@ describe('the concept card of a category', () => {
     expect(applyConceptCard({ terms: [], not: [], hubs: [] }, pages)).not.toHaveProperty('members');
   });
 
+  it('needs two sellers for a word of a kind, so a business name on two pages of its own site is not a kind word', () => {
+    const pages = [
+      { title: 'Porto Pipes plumbing', url: 'https://portopipes.example/', text: 'Porto Pipes: plumbing' },
+      { title: 'Porto Pipes boilers', url: 'https://www.portopipes.example/boilers', text: 'Porto Pipes boiler service' },
+      { title: 'Leak Fix', url: 'https://leakfix.example/', text: 'plumbing' },
+    ];
+    const card = applyConceptCard({ members: [{ label: 'plumber', terms: ['plumbing', 'porto pipes'] }] }, pages);
+    expect(card.members).toEqual([{ label: 'plumber', terms: ['plumbing'] }]);
+    expect(groundMembers([{ label: 'plumber', terms: ['porto pipes', 'plumbing'] }], [], pages)[0].grounded).toEqual(['plumbing']);
+  });
+
   it('grounds each proposed kind on the pages, adds the words and the kinds the pages name, and keeps the unconfirmed kinds', () => {
     const pages = [
       page('a.example', 'Roof repair in Porto', 'Roof repair and new tiles.'),
@@ -276,6 +287,45 @@ describe('the engine with a category', () => {
     expect(await engine.validateConcept(p as never)).toBe(false);
     expect(p.phase).toBe('needs-concept');
     expect(p.log.some((l) => l.type === 'phase' && l.message.includes('confirm only roofer — name the kinds you mean'))).toBe(true);
+  });
+
+  it('builds the decision model before the domain study, from the count the question states, so the study knows the kinds', async () => {
+    const prompts: string[] = [];
+    const scripted = new ScriptedProvider();
+    const domainProvider = {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        prompts.push(prompt);
+        if (prompt.includes('TASK=DOMAIN_QUERIES')) return { content: JSON.stringify({ queries: ['roofing contractor porto', 'plumbing porto'] }), model: 'm', provider: 'demo', usage: {} };
+        if (prompt.includes('TASK=DOMAIN_FINDINGS')) return { content: JSON.stringify({ findings: [{ aspect: 'object', statement: 'contractors repair homes', quote: 'Roofing contractor for tiles.', sourceId: 'D1' }] }), model: 'm', provider: 'demo', usage: {} };
+        return scripted.chat(args as never);
+      },
+    };
+    const sources = [
+      { title: 'Roofing contractor', url: 'https://a.example/', text: 'Roofing contractor for tiles. Plumbing too.' },
+      { title: 'Roofing contractor list', url: 'https://b.example/', text: 'A roofing contractor fixes roofs. Plumbing and boilers.' },
+    ];
+    const built: number[] = [];
+    const modeler = {
+      fresh: () => false,
+      async build(p: { acceptance: { itemCount: number }; decisionModel: object }) {
+        built.push(p.acceptance.itemCount);
+        p.decisionModel = { kind: structuredClone(contractors), criteria: [], noLimit: [], missing: [], caseIds: [], agreement: { samples: 3, majority: 2 } };
+        return p.decisionModel;
+      },
+    };
+    const router = new ModelRouter({ providers: [domainProvider] as never });
+    const engine = new ResearchEngine({ router, search: search(sources), store: new ProjectStore({ dir }), modeler } as never);
+    const p = await engine.createProject({ question: 'Find 30 home improvement companies in Porto with their own websites' });
+    expect(await engine.studyDomain(p)).toBe(true);
+    expect(built).toEqual([30]);
+    expect(prompts.find((prompt) => prompt.includes('TASK=DOMAIN_QUERIES'))).toContain('OBJECT TO STUDY:\nhome improvement contractor');
+    const domain = (p as unknown as { domain: { ready: boolean; basis: string } }).domain;
+    expect(domain.ready).toBe(true);
+    expect(domain.basis).toBe('kinds of the category named on 2+ sites: roofer, plumber');
   });
 
   it('pauses when fewer than two pages are found', async () => {
