@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, consumesVote, costSide, critique, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide } from '../../src/research/purpose.mjs';
+import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, consumesVote, costSide, critique, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, requirementsOf, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide } from '../../src/research/purpose.mjs';
 import { CallBudget, STAGE_CAPS } from '../../src/research/semantic.mjs';
 import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
@@ -55,7 +55,7 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
   });
 
   it('groups by consensus over the votes: three votes that differ in one piece still group the list', async () => {
-    const votes = seq({ groups: [['S1', 'S2', 'S3', 'S4'], ['S5']] }, { groups: [['S1', 'S2', 'S3'], ['S4', 'S5']] }, { groups: [['S2', 'S3', 'S4'], ['S1'], ['S5']] });
+    const votes = seq({ groups: [['S1', 'S2', 'S3', 'S4'], ['S5']] }, { groups: [['S1', 'S2', 'S3'], ['S4', 'S5']] }, { groups: [['S1', 'S2', 'S3', 'S4', 'S5']] });
     const router = fakeRouter({ requirements: votes });
     const log: string[] = [];
     const anchors = await anchorsOf({ router, log: (line: string) => log.push(line) }, question);
@@ -65,9 +65,34 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
     const pairOnly = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, { groups: [['S1'], ['S2', 'S3']] }, { groups: [['S1'], ['S2'], ['S3']] }) }) }, 'one, two, three');
     expect(pairOnly.map((anchor: { text: string }) => anchor.text)).toEqual(['one', 'two', 'three']);
     const chained = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, { groups: [['S1'], ['S2', 'S3']] }, { groups: [['S1', 'S2', 'S3']] }) }) }, 'one, two, three');
-    expect(chained.map((anchor: { text: string }) => anchor.text)).toEqual(['one, two, three']);
+    expect(chained.map((anchor: { text: string }) => anchor.text)).toEqual(['one, two', 'three']);
     const twoValid = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, FAIL, { groups: [['S1'], ['S2', 'S3']] }) }) }, 'one, two, three');
     expect(twoValid.map((anchor: { text: string }) => anchor.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('merges two groups only when every pair across them is voted together: no group forms through a chain', async () => {
+    const pieces = 'good providers, like A, B, C, lasting';
+    const grouped = async (...votes: string[][][]) => (await requirementsOf({ router: fakeRouter({ requirements: seq(...votes.map((groups) => ({ groups }))) }) }, pieces)).anchors.map((anchor: { spans: string[] }) => anchor.spans.join(''));
+    expect(await grouped([['S1', 'S2', 'S3', 'S4'], ['S5']], [['S1'], ['S2', 'S3', 'S4', 'S5']], [['S1', 'S2'], ['S3', 'S4', 'S5']])).toEqual(['S1', 'S2S3S4', 'S5']);
+    expect(await grouped([['S1', 'S2', 'S3', 'S4'], ['S5']], [['S1'], ['S2', 'S3', 'S4', 'S5']], [['S1'], ['S2', 'S3', 'S4'], ['S5']])).toEqual(['S1', 'S2S3S4', 'S5']);
+    expect(await grouped([['S1', 'S2'], ['S3'], ['S4'], ['S5']], [['S1'], ['S2', 'S3'], ['S4'], ['S5']], [['S1', 'S2', 'S3'], ['S4'], ['S5']])).toEqual(['S1S2', 'S3', 'S4', 'S5']);
+    expect(await grouped([['S1', 'S2'], ['S3', 'S4'], ['S5']], [['S1', 'S2', 'S3', 'S4'], ['S5']], [['S1', 'S2', 'S3', 'S4', 'S5']])).toEqual(['S1S2S3S4', 'S5']);
+    expect(await grouped([['S1', 'S2', 'S3', 'S4', 'S5']], [['S1', 'S2', 'S3', 'S4', 'S5']])).toEqual(['S1S2S3S4S5']);
+  });
+
+  it('stores what the split and the grouping did, so a produced tree shows it', async () => {
+    const router = fakeRouter({ 'requirement-split': (request: Ask) => (request.messages[1].content.includes('D with') ? { more: true, second: 'with highest price/value ratio' } : { more: false }), requirements: { groups: [['S1', 'S2', 'S3', 'S4'], ['S5'], ['S6']] }, purpose: FAIL });
+    const stored = await requirementsOf({ router }, question);
+    expect(stored.grouping).toEqual({ grouped: true, valid: 2 });
+    expect(stored.pieces).toEqual([
+      { text: 'similar to A', asked: true, split: false, votes: { 0: 2 }, spans: ['S1'] },
+      { text: 'B', asked: false, split: false, votes: {}, spans: ['S2'] },
+      { text: 'C', asked: false, split: false, votes: {}, spans: ['S3'] },
+      { text: 'D with highest price/value ratio', asked: true, split: true, votes: { 2: 2 }, spans: ['S4', 'S5'] },
+      { text: 'proven good quality', asked: true, split: false, votes: { 0: 2 }, spans: ['S6'] },
+    ]);
+    const built = await buildPurposeTree({ router }, { question });
+    expect(built.requirements).toEqual({ pieces: stored.pieces, grouping: stored.grouping });
   });
 
   it('keeps the punctuation split and logs it when fewer than two votes are valid', async () => {
@@ -739,6 +764,7 @@ describe('the whole tree', () => {
     expect(anchors.map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual(['C1 Find a tent to buy', 'C2 at a low entry price', 'C3 with a long service life']);
     expect(phase).toBe('needs-confirmation');
     expect(tree.version).toBe(2);
+    expect(tree.requirements).toMatchObject({ grouping: { grouped: true, valid: 2 }, pieces: [{ text: 'Find a tent to buy', split: false }, { text: 'at a low entry price', split: false }, { text: 'with a long service life', split: false }] });
     expect(tree.goals.map((g: { id: string; goal: string; state: string; role?: string }) => [g.id, g.goal, g.state, g.role ?? ''])).toEqual([
       ['G1', 'A long service life', 'kept', ''],
       ['G2', 'A low entry price', 'kept', ''],

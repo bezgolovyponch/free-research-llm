@@ -119,35 +119,55 @@ export async function groupSpans(ctx, spans) {
   if (valid < 2) return { groups: singles, grouped: false, valid };
   const together = new Map();
   for (const reply of result.replies) for (const group of reply.value) for (const a of group) for (const b of group) if (order.get(a) < order.get(b)) together.set(`${a}|${b}`, (together.get(`${a}|${b}`) ?? 0) + 1);
-  const root = new Map(spans.map((span) => [span.id, span.id]));
-  const find = (id) => (root.get(id) === id ? id : find(root.get(id)));
-  for (const [pair, count] of together) {
-    if (count * 2 <= valid) continue;
-    const [a, b] = pair.split('|').map(find);
-    if (a !== b) root.set(order.get(a) < order.get(b) ? b : a, order.get(a) < order.get(b) ? a : b);
+  const count = (a, b) => together.get(order.get(a) < order.get(b) ? `${a}|${b}` : `${b}|${a}`) ?? 0;
+  const link = (first, second) => {
+    const counts = first.flatMap((a) => second.map((b) => count(a, b)));
+    return { weakest: Math.min(...counts), sum: counts.reduce((sum, value) => sum + value, 0) };
+  };
+  let groups = singles;
+  for (;;) {
+    let best = null;
+    for (let i = 0; i < groups.length; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        const { weakest, sum } = link(groups[i], groups[j]);
+        if (weakest * 2 > valid && (!best || weakest > best.weakest || (weakest === best.weakest && sum > best.sum))) best = { i, j, weakest, sum };
+      }
+    }
+    if (!best) break;
+    const merged = [...groups[best.i], ...groups[best.j]].sort((a, b) => order.get(a) - order.get(b));
+    groups = groups.filter((_, index) => index !== best.i && index !== best.j).concat([merged]).sort((a, b) => order.get(a[0]) - order.get(b[0]));
   }
-  const components = new Map();
-  for (const span of spans) components.set(find(span.id), [...(components.get(find(span.id)) ?? []), span.id]);
-  return { groups: [...components.values()], grouped: true, valid };
+  return { groups, grouped: true, valid };
 }
 
-export async function anchorsOf(ctx, question, guidance = '') {
-  const pieces = clausesOf(question);
-  planPurpose(ctx, pieces.filter((piece) => wordCount(piece) >= SPLIT_MIN_WORDS).length);
+export async function requirementsOf(ctx, question, guidance = '') {
+  const texts = clausesOf(question);
+  planPurpose(ctx, texts.filter((piece) => wordCount(piece) >= SPLIT_MIN_WORDS).length);
   const spans = [];
-  for (const [index, piece] of pieces.entries()) {
-    const { parts } = await splitPiece(ctx, piece);
+  const pieces = [];
+  for (const [index, piece] of texts.entries()) {
+    const { parts, votes } = await splitPiece(ctx, piece);
     if (parts.length > 1) ctx.log?.(`requirements: the piece "${oneSpace(piece)}" holds two requirements; it is split before "${parts[1]}"`);
-    for (const text of parts.length > 1 ? parts : [piece]) spans.push({ id: `S${spans.length + 1}`, text, piece: index });
+    const ids = [];
+    for (const text of parts.length > 1 ? parts : [piece]) {
+      spans.push({ id: `S${spans.length + 1}`, text, piece: index });
+      ids.push(`S${spans.length}`);
+    }
+    pieces.push({ text: piece, asked: wordCount(piece) >= SPLIT_MIN_WORDS, split: parts.length > 1, votes, spans: ids });
   }
   const byId = new Map(spans.map((span) => [span.id, span]));
-  const { groups, grouped } = await groupSpans(ctx, spans);
+  const { groups, grouped, valid } = await groupSpans(ctx, spans);
   if (!grouped && spans.length > 1) ctx.log?.(`requirements: no majority on grouping the ${spans.length} pieces of the question by meaning; the punctuation split is kept`);
   const joined = (group) => group.map((id, at) => `${at === 0 ? '' : byId.get(id).piece === byId.get(group[at - 1]).piece ? ' ' : ', '}${byId.get(id).text}`).join('');
-  return [
+  const anchors = [
     ...groups.map((group, index) => ({ id: `C${index + 1}`, kind: 'clause', text: joined(group), spans: group })),
     ...clausesOf(guidance).map((text, index) => ({ id: `H${index + 1}`, kind: 'hint', text })),
   ];
+  return { anchors, pieces, grouping: { grouped, valid } };
+}
+
+export async function anchorsOf(ctx, question, guidance = '') {
+  return (await requirementsOf(ctx, question, guidance)).anchors;
 }
 
 export function purposeText(purpose) {
@@ -828,10 +848,10 @@ export function needsConfirmation(tree) {
 
 export async function buildPurposeTree(ctx, { question, guidance = '', answers = [], notes = [] }) {
   const said = [question, guidance, ...answers].join('\n');
-  const anchors = await anchorsOf(ctx, question, guidance);
+  const { anchors, ...requirements } = await requirementsOf(ctx, question, guidance);
   const tensions = await tensionsAsked(ctx, anchors);
   const purpose = await drawPurpose(ctx, anchors);
-  if (!purpose) return { phase: 'needs-purpose', tree: null, anchors, tensions };
+  if (!purpose) return { phase: 'needs-purpose', tree: null, anchors, requirements, tensions };
   const consumes = await consumesVote(ctx, purpose, anchors);
   if (!consumes.decided) ctx.log?.('value and cost sides: no majority on whether the result consumes resources of the asker; both sides are kept');
   const implications = await drawImplications(ctx, anchors, purpose);
@@ -846,7 +866,7 @@ export async function buildPurposeTree(ctx, { question, guidance = '', answers =
     else goals.push(built);
   }
   if (consumes.value) goals.push(await valueSide(ctx, { purpose, anchors, notes, said }), await costSide(ctx, { purpose, anchors, notes, said }));
-  let tree = numberTree({ version: TREE_VERSION, purpose, implications, consumes, tensions, goals, dropped, ops: { applied: [], refused: [] }, confirmedAt: null });
+  let tree = numberTree({ version: TREE_VERSION, requirements, purpose, implications, consumes, tensions, goals, dropped, ops: { applied: [], refused: [] }, confirmedAt: null });
   tree = await explainTensions(ctx, ensureTensions(tree), { notes, said });
   tree = await mergeDuplicates(ctx, tree);
   const ops = await critique(ctx, tree, candidates, { said });
