@@ -3,7 +3,7 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 import { hermeticEnv } from './scripts/hermetic-env.mjs';
 
-const PORT = 4610;
+const PORT = Number(process.env.FRL_E2E_PORT ?? 4610);
 const dataDir = process.env.FRL_E2E_DATA_DIR ?? path.join(os.tmpdir(), `frl-e2e-${process.pid}`);
 process.env.FRL_E2E_DATA_DIR = dataDir;
 

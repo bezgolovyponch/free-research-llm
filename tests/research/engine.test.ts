@@ -9,7 +9,7 @@ import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
-import { checklistFingerprint } from '../../src/research/checklist.mjs';
+import { LOW_PRICE_REASON, checklistFingerprint } from '../../src/research/checklist.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 import { researchedNode } from '../helpers/research-shapes';
@@ -2062,7 +2062,7 @@ describe('hub search', () => {
       ],
     };
     const judgeReplyNo = [
-      { id: 'q1', answer: 'no', quote: '' },
+      { id: 'q1', answer: 'no', spans: ['S1'] },
     ];
     const provider = {
       id: 'demo',
@@ -2133,7 +2133,7 @@ describe('hub search', () => {
           return { content: JSON.stringify({ items: [{ clause: 'ships abroad', question: 'Does this ship to other countries?', hard: true, numeric: null }] }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
         }
         if (prompt.includes('Item page text:')) {
-          const reply = prompt.includes('We ship to 30 countries') ? { id: 'q1', answer: 'yes', quote: 'We ship to 30 countries' } : { id: 'q1', answer: 'unknown', quote: '' };
+          const reply = prompt.includes('We ship to 30 countries') ? { id: 'q1', answer: 'yes', spans: ['S1'] } : { id: 'q1', answer: 'unknown', spans: [] };
           return { content: JSON.stringify([reply]), model: 'demo-fast', provider: 'demo', usage: {} };
         }
         return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
@@ -2149,7 +2149,7 @@ describe('hub search', () => {
     project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
     await engine.checkAcceptance(project);
     const item = project.acceptanceResult!.items[0];
-    expect(item.checks.find((c) => c.id === checkId)).toMatchObject({ answer: 'yes', quote: 'We ship to 30 countries', source: deepUrl });
+    expect(item.checks.find((c) => c.id === checkId)).toMatchObject({ answer: 'yes', quote: 'We ship to 30 countries across Europe', source: deepUrl });
     const hardIds = project.checklist.flatMap((cluster) => cluster.items.filter((ci) => ci.hard).map((ci) => cluster.clause + '|' + ci.question));
     expect(itemTier(item, hardIds, project.acceptance)).toBe('confirmed');
     expect(qualifies(item, project.acceptance)).toBe(true);
@@ -2164,7 +2164,7 @@ describe('hub search', () => {
       ],
     };
     const judgeReplyYes = [
-      { id: 'q1', answer: 'yes', quote: 'wholesale' },
+      { id: 'q1', answer: 'yes', spans: ['S1'] },
     ];
     const provider = {
       id: 'demo',
@@ -2375,3 +2375,71 @@ function netProvider(id: string, networkFailures = Number.POSITIVE_INFINITY) {
   };
 }
 
+describe('kind hardening and the migration of stored answers', () => {
+  const offer = 'Used goods offer: mixed second-hand clothing sorted by hand into cream and A grade, packed in pressed bales, sold by the kilogram to shops and market traders. Minimum order one bale; pallets loaded at our warehouse every weekday.';
+  const demo = (chat: (prompt: string) => unknown) => ({
+    id: 'demo',
+    ready: true,
+    describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo-fast', deep: 'demo-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
+    async chat({ messages }: { messages: { content: string }[] }) {
+      return { content: JSON.stringify(chat(messages.map((m) => m.content).join('\n'))), model: 'demo-fast', provider: 'demo', usage: {} };
+    },
+  });
+
+  it('passes the low price cut and the median of the candidate table to a second kind judgement, only for an item below the cut', async () => {
+    const secondPrompts: string[] = [];
+    const provider = demo((prompt) => {
+      if (prompt.includes('Median price of its comparable items:')) {
+        secondPrompts.push(prompt);
+        return { kind: 'B', span: 'S1' };
+      }
+      return prompt.includes('This page offers:') ? { kind: 'A', span: 'S1' } : prompt.includes('Item page text:') ? [{ id: 'q1', answer: 'yes', spans: ['S1'] }] : { answer: 'ok', claims: [], confidence: 'high' };
+    });
+    const search = { ...fakeSearch, async readPage() { return { status: 200, text: offer, links: [] }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Find used goods sellers that sell by the kilogram' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 21, valueRange: [0, 500], unit: 'EUR/kg' } });
+    const row = (i: number, value: number) => ({ title: `Seller ${i}`, url: `https://shop.example.org/offer/used-goods-ID${1000 + i}`, value, unit: 'EUR/kg', price: value, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits', why: [], risks: [] } });
+    const kept = [...Array.from({ length: 20 }, (_, i) => row(i, 200 + i * 5)), row(99, 20)];
+    project.candidates = { kept, keptCount: kept.length, toCheck: [], toCheckCount: 0, tiers: { fits: kept.length, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: kept.length, verification: null };
+    project.brief = { located: true, kind: { label: 'used goods seller', terms: ['used goods'] }, regions: [] };
+    project.decisionModel = { kind: { label: 'used goods seller', terms: ['used goods'] }, checklist: [{ clause: 'by the kilogram', items: [{ clause: 'by the kilogram', question: 'Does this sell by the kilogram?', hard: true, numeric: null }] }] };
+    project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    await engine.checkAcceptance(project);
+    const items = project.acceptanceResult!.items;
+    const cheap = items.find((item) => item.url.endsWith('ID1099'))!;
+    const usual = items.find((item) => item.url.endsWith('ID1000'))!;
+    expect(cheap.checks.find((c) => c.clause === 'kind')).toMatchObject({ answer: 'no', reason: LOW_PRICE_REASON });
+    expect([cheap.tier, cheap.valid]).toEqual(['rejected', false]);
+    expect(usual.checks.find((c) => c.clause === 'kind')).toMatchObject({ answer: 'yes', quote: offer.split('. ')[0] + '.' });
+    expect([usual.tier, usual.valid]).toEqual(['confirmed', true]);
+    expect(project.kindRejected).toEqual([cheap.url]);
+    expect(secondPrompts).toHaveLength(2);
+    expect(secondPrompts[0]).toContain('Price of this item: 20 EUR/kg');
+    expect(secondPrompts[0]).toMatch(/Median price of its comparable items: \d+ EUR\/kg/);
+    project.kindRejected = [];
+    await engine.checkAcceptance(project);
+    expect(secondPrompts).toHaveLength(2);
+    expect(project.acceptanceResult!.items.find((item) => item.url.endsWith('ID1099'))!.checks.find((c) => c.clause === 'kind')!.answer).toBe('no');
+  });
+
+  it('turns stored answers without a quote to unknown once in reground and logs how many', async () => {
+    const events: string[] = [];
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), lanes: 2, onEvent: (_id: string, event: { message: string }) => events.push(event.message) });
+    const project = await engine.createProject({ question: 'Find used goods sellers that sell by the kilogram' });
+    project.acceptance = { itemCount: 1, locked: true };
+    project.checklist = [{ clause: 'c', items: [{ clause: 'c', question: 'q', hard: true, numeric: null }] }];
+    project.acceptanceResult = { score: 1, validCount: 1, checks: [{ id: 'count', label: 'Count', value: 1, passed: true, detail: '' }], items: [{ url: 'https://shop.example.org/offer/a-ID1', live: true, listing: true, inRange: true, purpose: [], checks: [{ id: 'c|q', answer: 'yes', quote: '', hard: true, clause: 'c' }] }] };
+    expect(engine.reground(project)).toBe(true);
+    expect(project.acceptanceResult.items[0]).toMatchObject({ tier: 'to-confirm', valid: false });
+    expect(project.acceptanceResult.items[0].checks[0]).toMatchObject({ answer: 'unknown', quote: '' });
+    expect(project.acceptanceResult.validCount).toBe(0);
+    const note = '1 stored answer(s) had no quote from the page and now count as unknown';
+    expect(events.filter((message) => message === note)).toHaveLength(1);
+    project.acceptanceResult.items[0].checks[0] = { id: 'c|q', answer: 'yes', quote: '', hard: true, clause: 'c' };
+    expect(engine.reground(project)).toBe(false);
+    expect(events.filter((message) => message === note)).toHaveLength(1);
+  });
+});

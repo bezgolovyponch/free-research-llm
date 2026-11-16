@@ -6,7 +6,7 @@ import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf } from './verdict.mjs';
-import { ChecklistJudge, checklistSummary, checklistFingerprint, filterCountItems, askedCounts } from './checklist.mjs';
+import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind } from './checklist.mjs';
 import { DeeperReader } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
@@ -22,7 +22,7 @@ import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
-import { buildCandidates, candidateDeliverables, lowPriceCut, shortlistText, tableVerdict } from './candidates.mjs';
+import { buildCandidates, candidateDeliverables, lowPriceCut, lowPriceStats, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
 import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
@@ -1386,7 +1386,17 @@ export class ResearchEngine {
       });
     }
     if (dropped.length) this.emit(project, 'acceptance', `stored checks ${droppedNote(dropped)}`);
-    return dropped.length > 0;
+    return this.migrateStoredChecks(project) > 0 || dropped.length > 0;
+  }
+
+  migrateStoredChecks(project) {
+    if (project.judgeVersion === JUDGE_VERSION) return 0;
+    project.judgeVersion = JUDGE_VERSION;
+    const changed = migrateChecks(project);
+    if (!changed) return 0;
+    if (project.acceptanceResult?.checks && project.acceptance) this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, project.checklist, project.decisionModel?.kind ?? null);
+    this.emit(project, 'acceptance', `${changed} stored answer(s) had no quote from the page and now count as unknown`);
+    return changed;
   }
 
   async itemGateOptions(project) {
@@ -1544,6 +1554,7 @@ export class ResearchEngine {
     const checker = new AcceptanceChecker({ readPage, convert });
     project.checkCache = project.checkCache ?? {};
     const checkCache = project.checkCache;
+    const prices = lowPriceStats(project.candidates?.kept ?? []);
 
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
 
@@ -1586,6 +1597,15 @@ export class ResearchEngine {
             judgedCount++;
           }
 
+          if (prices && needsSecondKind(checks, item, prices.cut)) {
+            const entry = checkCache[cacheKey];
+            if (entry?.kindSecond?.cut === prices.cut && entry.kindSecond.median === prices.median) checks = entry.kindSecond.checks;
+            else {
+              const page = await readPage(item.url).catch(() => null);
+              checks = await hardenKind(checks, item, { cut: prices.cut, median: prices.median, judge: this.checklistJudge, pageText: page?.text ?? '', kind: project.decisionModel?.kind ?? null });
+              if (entry) entry.kindSecond = { cut: prices.cut, median: prices.median, checks };
+            }
+          }
           item.checks = checks;
 
           const kindCheck = checks.find(c => c.clause === 'kind' && c.id.startsWith('kind|'));

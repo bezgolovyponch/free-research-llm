@@ -262,8 +262,9 @@ The app clears its own temp files on start and then every 6 hours (`TempSweeper`
 | `data/logs/project-<id>.jsonl` of research that no longer exists | removed when untouched for 7 days |
 | Any `data/logs/*.jsonl` over 5 MB | trimmed to its newest 20,000 lines |
 | `data/logs/server.out` over 1 MB | trimmed to its newest 2,000 lines |
+| Embedding vectors in `data/embeddings/<model>.json` | one file per embedding model, capped at its newest 20,000 vectors when written (`EMBED_CACHE_SIZE` in `src/llm/embedder.mjs`); never swept by age, and a vector is only read under the model that made it |
 
-Never swept: `data/projects/` (snapshots included), `data/journal/`, `data/handoff/`, `data/changes/`, `data/chat/`, `data/llama/`, logs of existing research. `FRL_SWEEP_HOURS` sets the interval; `0` turns the sweep off. Tests: `tests/housekeeping.test.ts`, `tests/logs.test.ts`.
+Never swept: `data/projects/` (snapshots included), `data/journal/`, `data/handoff/`, `data/changes/`, `data/chat/`, `data/llama/`, `data/embeddings/`, `data/hosts.json` (the per-site record of confirmed and contradicted facts), logs of existing research. `FRL_SWEEP_HOURS` sets the interval; `0` turns the sweep off. Tests: `tests/housekeeping.test.ts`, `tests/logs.test.ts`.
 
 Agents working on this repo put their own scratch files in their session scratchpad, never in the repo or `data/`, and delete them when the task ends. `test-results/` is Playwright output and may be deleted at any time. Vitest removes every `frl-*` temp folder its run created (`tests/helpers/temp-cleanup.ts`); Playwright removes the e2e data folders of earlier runs before it starts (`e2e/setup.mjs`), so at most one is left.
 

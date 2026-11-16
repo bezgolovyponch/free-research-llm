@@ -1,23 +1,64 @@
 import { plain } from './itemgate.mjs';
-import { quoteFound } from './quote.mjs';
 import { isUmbrella } from './concept.mjs';
+import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
+import { vote } from './semantic.mjs';
 
 export function replyList(data) {
   if (Array.isArray(data)) return data;
   return Object.values(data ?? {}).find(Array.isArray) ?? [];
 }
 
-export function applyQuoteCheck(replies, pageText) {
+const ANSWERS = ['yes', 'no', 'unknown'];
+
+export function applyQuoteCheck(replies, spans) {
   return replies.map((r) => {
     if (!r || typeof r !== 'object') return { ...r, answer: 'unknown', quote: '' };
-    if (r.answer !== 'unknown' && r.quote && !quoteFound(pageText, r.quote)) {
-      return { ...r, answer: 'unknown', quote: '' };
-    }
-    return r;
+    const answer = ANSWERS.includes(r.answer) ? r.answer : 'unknown';
+    const quote = answer === 'unknown' ? '' : quoteFromSpans(r.spans, spans);
+    return quote ? { ...r, answer, quote } : { ...r, answer: 'unknown', quote: '' };
   });
 }
 
-export const CHECKLIST_VERSION = 3;
+export const CHECKLIST_VERSION = 4;
+export const JUDGE_VERSION = 2;
+export const JUDGE_QUESTIONS_PER_CALL = 4;
+export const JUDGE_BLOCK_CHARS = 6000;
+export const JUDGE_PAGE_CHARS = 40000;
+export const LOW_PRICE_REASON = 'priced far below comparable items: confirm it is the item itself';
+export const KIND_ANSWERS = { A: 'yes', B: 'no', C: 'no', D: 'no', E: 'no', U: 'unknown' };
+
+export const KIND_SECOND_VOTES = 3;
+
+const isKindYes = (check) => check?.clause === 'kind' && String(check.id).startsWith('kind|') && check.answer === 'yes';
+
+export function needsSecondKind(checks, item, cut) {
+  const value = item?.value === null || item?.value === undefined ? NaN : Number(item.value);
+  return typeof cut === 'number' && Number.isFinite(cut) && Number.isFinite(value) && value < cut && (checks ?? []).some(isKindYes);
+}
+
+export async function hardenKind(checks, item, { cut = null, median = null, judge = null, pageText = '', kind = null } = {}) {
+  if (!needsSecondKind(checks, item, cut)) return checks;
+  const second = judge && kind?.label ? await judge.judgeKindAgain(pageText, kind, { value: Number(item.value), unit: item.unit ?? '', median }) : { answer: 'unknown', quote: '', tally: {} };
+  return checks.map((check) => {
+    if (!isKindYes(check)) return check;
+    if (second.answer === 'yes') return { ...check, second: { answer: 'yes', tally: second.tally } };
+    if (second.answer === 'no') return { ...check, answer: 'no', quote: second.quote, reason: LOW_PRICE_REASON, second: { answer: 'no', tally: second.tally } };
+    return { ...check, answer: 'unknown', reason: LOW_PRICE_REASON, second: { answer: 'unknown', tally: second.tally } };
+  });
+}
+
+export function migrateChecks(project) {
+  let changed = 0;
+  for (const item of project?.acceptanceResult?.items ?? []) {
+    if (!Array.isArray(item.checks)) continue;
+    item.checks = item.checks.map((check) => {
+      if (!check || (check.answer !== 'yes' && check.answer !== 'no') || String(check.quote ?? '').trim()) return check;
+      changed += 1;
+      return { ...check, answer: 'unknown', quote: '' };
+    });
+  }
+  return changed;
+}
 
 export async function proposeChecklist({ router, question, guidance = '', samples = 3 }) {
   const messages = checklistPrompt({ question, guidance });
@@ -172,7 +213,7 @@ export function checklistFingerprint(checklist) {
       parts.push(`${cluster.clause}|${ci.question}|${ci.hard ? 1 : 0}|${ci.numeric ? `${ci.numeric.measure}:${ci.numeric.op}:${ci.numeric.value}:${ci.numeric.unit}` : 'none'}`);
     }
   }
-  return parts.sort().join('::');
+  return [...parts.sort(), `judge:${JUDGE_VERSION}`].join('::');
 }
 
 function checklistPrompt({ question, guidance = '' }) {
@@ -218,21 +259,76 @@ export class ChecklistModeler {
 export function kindCluster(kind) {
   const not = (kind.not ?? []).length ? ` and not ${kind.not.join(', ')}` : '';
   const kinds = isUmbrella(kind) ? `, of one of these kinds: ${kind.members.map((member) => member.label).join(', ')}` : '';
-  return { clause: 'kind', items: [{ question: `Is this page one ${kind.label} offered as asked${kinds} (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
+  const options = [
+    { letter: 'A', text: `one ${kind.label}, offered as asked${kinds}` },
+    { letter: 'B', text: `a part or an accessory of it${not}` },
+    { letter: 'C', text: 'several items or a list' },
+    { letter: 'D', text: 'a wanted ad or a service' },
+    { letter: 'E', text: 'something else' },
+    { letter: 'U', text: 'cannot tell from these sentences' },
+  ];
+  return { clause: 'kind', options, items: [{ question: `Is this page one ${kind.label} offered as asked${kinds} (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
+}
+
+async function shownSpans(spans, query, embedder) {
+  const lineCount = (list) => {
+    const block = spansBlock(list, JUDGE_BLOCK_CHARS);
+    return block ? block.split('\n').length : 0;
+  };
+  const opening = lineCount(spans);
+  if (opening >= spans.length) return spans;
+  const picked = await pickSpans(spans, query, embedder, opening);
+  return picked.slice(0, lineCount(picked));
 }
 
 export class ChecklistJudge {
-  constructor({ router } = {}) {
+  constructor({ router, embedder = null } = {}) {
     this.router = router;
+    this.embedder = embedder;
+  }
+
+  async complete(messages) {
+    try {
+      return await this.router.complete({ purpose: 'checklist', tier: 'fast', temperature: 0, messages });
+    } catch {
+      return null;
+    }
+  }
+
+  async judgeKind(spans, cluster) {
+    const question = cluster.items[0];
+    const check = { id: `${cluster.clause}|${question.question}`, answer: 'unknown', quote: '', hard: question.hard, clause: cluster.clause };
+    const shown = await shownSpans(spans, question.question, this.embedder);
+    if (!shown.length) return check;
+    const reply = await this.complete(kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
+    const letter = String(reply?.data?.kind ?? '').trim().toUpperCase();
+    const answer = KIND_ANSWERS[letter] ?? 'unknown';
+    const quote = answer === 'unknown' ? '' : quoteFromSpans(reply?.data?.span ?? reply?.data?.spans, shown);
+    return quote ? { ...check, answer, quote, option: letter } : check;
+  }
+
+  async judgeKindAgain(pageText, kind, { value, unit = '', median = null } = {}) {
+    const cluster = kindCluster(kind);
+    const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
+    const shown = spans.length ? await shownSpans(spans, cluster.items[0].question, this.embedder) : [];
+    if (!shown.length) return { answer: 'unknown', quote: '', tally: {} };
+    const price = { value, unit, median };
+    const schema = (data) => {
+      const letter = String(data?.kind ?? '').trim().toUpperCase();
+      if (!(letter in KIND_ANSWERS)) return { error: `"kind" must be one of ${Object.keys(KIND_ANSWERS).join(', ')}` };
+      const quote = KIND_ANSWERS[letter] === 'unknown' ? '' : quoteFromSpans(data?.span ?? data?.spans, shown);
+      return { value: { answer: quote ? KIND_ANSWERS[letter] : 'unknown', quote } };
+    };
+    const result = await vote({ router: this.router, task: 'kind-second', tier: 'fast', messages: kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS), price }), schema, n: KIND_SECOND_VOTES, quorum: 2, key: (reply) => reply.answer });
+    return { answer: result.value?.answer ?? 'unknown', quote: result.value?.quote ?? '', tally: result.tally };
   }
 
   async judge(item, pageText, checklist, kind = null) {
     const checks = [];
-    const asked = kind?.label ? [...checklist, kindCluster(kind)] : checklist;
     const numericItems = [];
     const qualitativeItems = [];
 
-    for (const cluster of asked) {
+    for (const cluster of checklist) {
       for (const ci of cluster.items) {
         if (ci.numeric?.measure && ci.numeric.op && ci.numeric.value !== null && MEASURES[ci.numeric.measure]) {
           numericItems.push({ cluster, item: ci });
@@ -248,74 +344,46 @@ export class ChecklistJudge {
       let answer = 'unknown';
       let quote = '';
       if (val !== undefined) {
-        if (compare(val, ci.numeric.op, ci.numeric.value)) {
-          answer = 'yes';
-        } else {
-          answer = 'no';
-        }
+        answer = compare(val, ci.numeric.op, ci.numeric.value) ? 'yes' : 'no';
         quote = `${ci.numeric.measure}: ${val} ${ci.numeric.unit}`;
       }
-      const id = cluster.clause + '|' + ci.question;
-      checks.push({ id, answer, quote, hard: ci.hard, clause: cluster.clause });
+      checks.push({ id: cluster.clause + '|' + ci.question, answer, quote, hard: ci.hard, clause: cluster.clause });
     }
 
-    if (qualitativeItems.length > 0 && this.router) {
-      const pageTextCut = String(pageText ?? '').slice(0, 6000);
-      const questions = qualitativeItems.map(({ cluster, item: ci }) => ({
-        id: cluster.clause + '|' + ci.question,
-        question: ci.question,
-        hard: ci.hard,
-        clause: cluster.clause,
-      }));
+    const questions = qualitativeItems.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, hard: ci.hard, clause: cluster.clause }));
+    const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
 
-      const prompt = judgePrompt({ questions, pageText: pageTextCut });
-      let reply = null;
-      try {
-        reply = await this.router.complete({
-          purpose: 'checklist',
-          tier: 'fast',
-          temperature: 0,
-          messages: prompt,
-        });
-      } catch {
-        reply = null;
-      }
-
-      const replies = replyList(reply?.data);
-      const validated = applyQuoteCheck(replies, pageTextCut);
-
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i];
-        const shortId = `q${i + 1}`;
-        const reply = validated.find((r) => {
-          const rid = String(r?.id ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '');
-          return rid === shortId.toLowerCase();
-        });
-        if (reply) {
-          const answer = ['yes', 'no', 'unknown'].includes(reply.answer) ? reply.answer : 'unknown';
-          checks.push({ id: q.id, answer, quote: reply.quote ?? '', hard: q.hard, clause: q.clause });
-        } else {
-          checks.push({ id: q.id, answer: 'unknown', quote: '', hard: q.hard, clause: q.clause });
-        }
+    for (let at = 0; at < questions.length; at += JUDGE_QUESTIONS_PER_CALL) {
+      const asked = questions.slice(at, at + JUDGE_QUESTIONS_PER_CALL);
+      const shown = spans.length ? await shownSpans(spans, asked.map((q) => q.question).join(' '), this.embedder) : [];
+      const reply = shown.length ? await this.complete(judgePrompt({ questions: asked, block: spansBlock(shown, JUDGE_BLOCK_CHARS) })) : null;
+      const validated = applyQuoteCheck(replyList(reply?.data), shown);
+      for (const q of asked) {
+        const found = validated.find((r) => String(r?.id ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '') === q.short);
+        checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause });
       }
     }
 
-    for (const { cluster, item: ci } of qualitativeItems) {
-      if (!this.router) {
-        const id = cluster.clause + '|' + ci.question;
-        checks.push({ id, answer: 'unknown', quote: '', hard: ci.hard, clause: cluster.clause });
-      }
-    }
+    if (kind?.label) checks.push(this.router ? await this.judgeKind(spans, kindCluster(kind)) : { id: `kind|${kindCluster(kind).items[0].question}`, answer: 'unknown', quote: '', hard: true, clause: 'kind' });
 
     return checks;
   }
 }
 
-function judgePrompt({ questions, pageText }) {
-  const sys = 'You are a strict judge. For each question, answer whether the page text supports "yes", "no", or "unknown". Provide a short quote from the page text that directly supports your answer, or empty string if unknown. Answer with JSON only: [{"id": "q1", "answer": "yes|no|unknown", "quote": "exact text from page"}, {"id": "q2", "answer": "yes|no|unknown", "quote": "exact text from page"}]';
-  const qText = questions.map((q, i) => `q${i + 1}: ${q.question}`).join('\n');
+export function judgePrompt({ questions, block }) {
+  const sys = 'You are a strict judge of one item page. The page is shown as numbered sentences. For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it. Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only: [{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]';
+  const qText = questions.map((q) => `${q.short}: ${q.question}`).join('\n');
   return [
     { role: 'system', content: sys },
-    { role: 'user', content: `Item page text:\n${pageText}\n\nQuestions:\n${qText}` },
+    { role: 'user', content: `Item page text:\n${block}\n\nQuestions:\n${qText}` },
+  ];
+}
+
+export function kindPrompt({ options, block, price = null }) {
+  const sys = `You are a strict judge of one item page. The page is shown as numbered sentences. Select the one option that says what this page offers, and give in "span" the id of the sentence that shows it. Never write the sentence itself.${price ? ' The price of this item is far below the usual price of such items: a low price alone proves nothing, so decide from what the sentences say is offered.' : ''} Answer with JSON only: {"kind":"<letter>","span":"S<n>"}`;
+  const prices = price ? `\n\nPrice of this item: ${price.value} ${price.unit}`.trimEnd() + (price.median !== null && price.median !== undefined ? `\nMedian price of its comparable items: ${price.median} ${price.unit}`.trimEnd() : '') : '';
+  return [
+    { role: 'system', content: sys },
+    { role: 'user', content: `Item page text:\n${block}${prices}\n\nThis page offers:\n${options.map((option) => `${option.letter}) ${option.text}`).join('\n')}` },
   ];
 }

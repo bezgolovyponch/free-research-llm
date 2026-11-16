@@ -18,7 +18,7 @@ export const TIER_TIMEOUT_MS = { fast: 45000, deep: 90000 };
 export function tierTimeoutMs(tier) {
   return TIER_TIMEOUT_MS[tier];
 }
-export const EXPECTED_OUTPUT_TOKENS = { synthesize: 1500, decompose: 1500, research: 800, improve: 500, suggest: 600, critique: 300, support: 150, 'support-second': 150, rollup: 400, 'decision-model': 700 };
+export const EXPECTED_OUTPUT_TOKENS = { synthesize: 1500, decompose: 1500, research: 800, improve: 500, suggest: 600, critique: 300, support: 150, 'support-second': 150, rollup: 400, 'decision-model': 700, 'purpose-judge': 120, 'purpose-draft': 900 };
 export const LOCAL_BUDGET_S = { synthesize: 300, decompose: 300 };
 export const LOCAL_DEFAULT_BUDGET_S = 100;
 export const TIMEOUTS_BEFORE_BENCH = 2;
@@ -91,6 +91,7 @@ const REPAIR_INSTRUCTION = 'Your previous reply was not valid JSON. Reply again 
 export class ModelRouter {
   constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {}, outcomes = null, paid = null, env = process.env, paidCap = null, offlineBackoff = OFFLINE_BACKOFF_MS, offlineWaitMs = OFFLINE_WAIT_MS }) {
     this.outcomes = outcomes;
+    this.env = env;
     this.providers = providers;
     this.routeOrder = routeOrder;
     this.cooldownMs = cooldownMs;
@@ -141,7 +142,7 @@ export class ModelRouter {
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
     const ranked = this.demoteDead(this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose));
-    const usable = this.demotePaid([...ranked, ...this.lastResortLocals(tier, purpose, tokens, time)]);
+    const usable = this.demotePaid([...ranked, ...this.lastResortLocals(tier, purpose, tokens, time)]).filter((p) => !this.isBanned(p, tier));
     const avoided = new Set((Array.isArray(avoid) ? avoid : [avoid]).filter(Boolean));
     if (!avoided.size) return usable;
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
@@ -150,6 +151,16 @@ export class ModelRouter {
     const sameFamily = usable.filter((p) => !avoided.has(p.id) && avoidedFamilies.has(family(p)));
     const preferred = [...this.demoteSlow(other, tier), ...this.demoteSlow(sameFamily, tier)];
     return preferred.length ? this.demotePaid([...preferred, ...usable.filter((p) => avoided.has(p.id))]) : usable;
+  }
+
+  bannedFamilies() {
+    return new Set(String(this.env?.FRL_BANNED_FAMILIES ?? '').split(',').map((name) => name.trim().toLowerCase()).filter(Boolean));
+  }
+
+  isBanned(provider, tier = 'fast') {
+    const banned = this.bannedFamilies();
+    if (!banned.size) return false;
+    return banned.has(familyOf(provider.describe?.()?.[tier] ?? provider.selected?.[tier] ?? provider.selected?.fast, provider.id));
   }
 
   isPaid(provider) {
@@ -526,7 +537,7 @@ export class ModelRouter {
       let repairs = 0;
       let switches = 0;
       while (repairs < 2) {
-        if ((this.cooldownUntil.get(provider.id) ?? 0) > this.now() || this.trialBusy(provider.id)) break;
+        if ((this.cooldownUntil.get(provider.id) ?? 0) > this.now() || this.trialBusy(provider.id) || this.isBanned(provider, tier)) break;
         const started = this.now();
         const trial = this.halfOpen(provider.id, started);
         const model = provider.selected?.[tier] ?? provider.selected?.fast;

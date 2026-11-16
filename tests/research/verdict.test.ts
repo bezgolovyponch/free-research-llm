@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf } from "../../src/research/verdict.mjs";
-import { kindCluster } from "../../src/research/checklist.mjs";
+import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
+import { lowPriceStats } from "../../src/research/candidates.mjs";
+import { fakeRouter } from "../helpers/fakes";
 import fixture from "../fixtures/verdict-0c750f.json";
 
 describe("verdict", () => {
@@ -278,5 +280,70 @@ describe("verdict", () => {
     const unread = { acceptanceResult: { totalAsked: 20, items: [baseItem({ url: "a", checks: [] })] }, acceptance: { itemCount: 20 }, checklist: [{ clause: "c", items: [{ hard: true, question: "q1" }] }] };
     expect(acceptanceSummaryOf(unread)).toBe("0 of 20 confirmed · 1 not read");
     expect(acceptanceSummaryOf({ acceptance: { itemCount: 3 } })).toBe("0 of 3 confirmed");
+  });
+});
+
+describe("stored answers of the 0c750f fixture under the quote rule and the price rule", () => {
+  const kind = { label: "car listing", terms: ["car"], not: ["wanted", "parts", "accessories", "retail"] };
+  const tyres = "https://auto.bazos.cz/inzerat/226132468/zimni-pneu-na-plechacich-kia-ceed.php";
+  const copy = () => JSON.parse(JSON.stringify(fixture));
+
+  it("had the tyres on rims with a kind yes at a twelfth of the median, rejected only by another check", () => {
+    const { acceptance, checklist, acceptanceResult } = copy();
+    const item = verdict(acceptanceResult.items, acceptance, checklist, kind).items.find((i: { url: string }) => i.url === tyres);
+    expect(item.checks.find((c: { clause: string }) => c.clause === "kind").answer).toBe("yes");
+    expect(item.value).toBe(2000);
+    expect(item.tier).toBe("rejected");
+  });
+
+  it("the item whose answer had an empty quote is to-confirm after the migration, and one item is still confirmed", () => {
+    const project = copy();
+    expect(migrateChecks(project)).toBe(1);
+    const result = verdict(project.acceptanceResult.items, project.acceptance, project.checklist);
+    expect(result.items.find((i: { url: string }) => i.url === tyres).tier).toBe("to-confirm");
+    expect(result.validCount).toBe(1);
+  });
+
+  const kindId = "kind|" + kindCluster(kind).items[0].question;
+  const hardened = async (project: ReturnType<typeof copy>, url: string, router: ReturnType<typeof fakeRouter>) => {
+    const prices = lowPriceStats(project.acceptanceResult.items);
+    const item = project.acceptanceResult.items.find((i: { url: string }) => i.url === url);
+    const pageText = item.checks.find((c: { clause: string }) => c.clause === "kind").quote || "Škoda Fabia 1.2 na prodej. Najeto 150 000 km a platná technická.";
+    item.checks = await hardenKind(item.checks, item, { cut: prices.cut, median: prices.median, judge: new ChecklistJudge({ router }), pageText, kind });
+    return { prices, item: verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind).items.find((i: { url: string }) => i.url === url), result: verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind) };
+  };
+
+  it("the tyres on rims, far below the cut, are judged a second time with the prices and answered B: kind no, not confirmed", async () => {
+    const project = copy();
+    migrateChecks(project);
+    const router = fakeRouter({ "kind-second": { kind: "B", span: "S1" } });
+    const { prices, item, result } = await hardened(project, tyres, router);
+    expect([prices.cut, prices.median]).toEqual([13100, 25000]);
+    expect(router.userText("kind-second")).toContain("Price of this item: 2000 CZK\nMedian price of its comparable items: 25000 CZK");
+    expect(item.checks.find((c: { clause: string }) => c.clause === "kind")).toMatchObject({ answer: "no", reason: LOW_PRICE_REASON });
+    expect(item.tier).toBe("rejected");
+    expect(result.validCount).toBe(1);
+  });
+
+  it("a real car at 10,000 CZK, below the cut, answered A stays a kind yes: the price alone decides nothing", async () => {
+    const project = copy();
+    const car = project.acceptanceResult.items.find((i: { value: number }) => i.value === 10000);
+    car.checks = car.checks.map((c: { clause: string }) => (c.clause === "kind" ? { ...c, id: kindId, answer: "yes", quote: "Škoda Fabia 1.2 na prodej." } : { ...c, answer: "yes", quote: "stated on the page" }));
+    const router = fakeRouter({ "kind-second": { kind: "A", span: "S1" } });
+    const { item } = await hardened(project, car.url, router);
+    expect(router.calls).toHaveLength(2);
+    expect(item.checks.find((c: { clause: string }) => c.clause === "kind")).toMatchObject({ answer: "yes", quote: "Škoda Fabia 1.2 na prodej." });
+    expect(item.tier).toBe("confirmed");
+  });
+
+  it("makes no extra call for an item at or above the cut", async () => {
+    const project = copy();
+    const router = fakeRouter({ "kind-second": { kind: "B", span: "S1" } });
+    const fabia = project.acceptanceResult.items[0];
+    const before = JSON.stringify(fabia.checks);
+    const { item } = await hardened(project, fabia.url, router);
+    expect(router.calls).toEqual([]);
+    expect(JSON.stringify(project.acceptanceResult.items[0].checks)).toBe(before);
+    expect(item.tier).toBe("confirmed");
   });
 });

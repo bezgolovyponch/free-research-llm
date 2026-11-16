@@ -175,7 +175,7 @@ describe('decision model from the user words', () => {
     const f = foundationOf(GLAMPING_LOW_ENTRY, project);
     expect(f.complete).toBe(true);
     expect(f.clauses.find((c: { text: string }) => c.text === '10 month a year')?.criteria).toEqual(['season']);
-    expect(f.clauses.find((c: { text: string }) => c.text.startsWith('with the strong price'))?.criteria).toEqual(['trend']);
+    expect(f.clauses.find((c: { text: string }) => c.text.includes('with the strong price'))?.criteria).toEqual(['trend']);
     expect(f.rules.minWorkableMonths).toEqual({ value: 10, source: 'question' });
     expect(f.rules.ebikeKm).toEqual({ value: 20, source: 'guidance' });
     expect(foundationText(f)).toContain('at least 10 camping months (Camping Climate Index above 3, acceptable or better, Ma 2021 Table 4)');

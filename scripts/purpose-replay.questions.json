@@ -1,0 +1,72 @@
+{
+  "car": {
+    "question": "Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent",
+    "guidance": "",
+    "kind": "car",
+    "not": [
+      "wanted",
+      "parts",
+      "accessories",
+      "retail"
+    ],
+    "regions": [
+      "CZ"
+    ],
+    "markets": [
+      "Czech Republic"
+    ],
+    "project": "0c750f",
+    "item": "https://auto.bazos.cz/inzerat/226126886/pekna-skoda-fabia-12-mpi-malo-najeto-velmi-dobry-stav.php",
+    "tyres": "https://auto.bazos.cz/inzerat/226132468/zimni-pneu-na-plechacich-kia-ceed.php"
+  },
+  "suppliers": {
+    "question": "Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio , proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic",
+    "guidance": "",
+    "kind": "wholesale second hand clothing provider",
+    "regions": [
+      "CZ"
+    ],
+    "markets": [
+      "Czech Republic"
+    ],
+    "project": "b2f5b7"
+  },
+  "plots": {
+    "question": "Find appropriate plots to buy for a low-entry glamping business in the EU: affordable and valuable, with a scenic location and future upside",
+    "guidance": "",
+    "kind": "plot of land",
+    "regions": [
+      "AT",
+      "BE",
+      "BG",
+      "HR",
+      "CY",
+      "CZ",
+      "DK",
+      "EE",
+      "FI",
+      "FR",
+      "DE",
+      "GR",
+      "HU",
+      "IE",
+      "IT",
+      "LV",
+      "LT",
+      "LU",
+      "MT",
+      "NL",
+      "PL",
+      "PT",
+      "RO",
+      "SK",
+      "SI",
+      "ES",
+      "SE"
+    ],
+    "markets": [
+      "European Union"
+    ],
+    "project": "b7772e"
+  }
+}

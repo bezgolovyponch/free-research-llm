@@ -1,0 +1,183 @@
+{
+ "hypotheses": [
+  "Hidden mechanical defect",
+  "High actual mileage/wear",
+  "Unfashionable model or low market demand",
+  "Seller urgency"
+ ],
+ "matrix": [
+  {
+   "evidence": "Make: Škoda",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Model: Fabia",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Engine code: 1.2 MPi",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Engine displacement: 1.2 L",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Engine power: 40 kW",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Year: 2002",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Mileage: 158000 km",
+   "marks": [
+    "N",
+    "C",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Price: 29000 CZK",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Fuel: benzín",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Service history: regular service, new rear axle, new brakes, geometry, all-season tyres, oil, filters",
+   "marks": [
+    "I",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Stated defects: only cosmetic, almost no rust",
+   "marks": [
+    "I",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Rear axle beam rust can cause lower shock mount break (critical issue)",
+   "marks": [
+    "C",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Current average market price in Spain is €1,800",
+   "marks": [
+    "N",
+    "N",
+    "C",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Steering angle sensor failures are a common defect",
+   "marks": [
+    "C",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Many SDI Fabias with over 200,000 km are listed for sale, indicating strong demand",
+   "marks": [
+    "N",
+    "N",
+    "N",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Owners report fuel economy of 8‑9 km/l (≈11‑12 L/100 km), considered poor",
+   "marks": [
+    "N",
+    "N",
+    "C",
+    "N"
+   ]
+  },
+  {
+   "evidence": "Tyre wear close to legal limit noted in MOT inspections",
+   "marks": [
+    "N",
+    "C",
+    "N",
+    "N"
+   ]
+  }
+ ],
+ "dropped": [],
+ "ranking": [
+  {
+   "h": "Hidden mechanical defect",
+   "inconsistent": 2
+  },
+  {
+   "h": "High actual mileage/wear",
+   "inconsistent": 0
+  },
+  {
+   "h": "Unfashionable model or low market demand",
+   "inconsistent": 0
+  },
+  {
+   "h": "Seller urgency",
+   "inconsistent": 0
+  }
+ ],
+ "discriminating_evidence_needed": "Verified service records confirming the actual odometer reading (mileage)"
+}
