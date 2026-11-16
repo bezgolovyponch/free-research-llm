@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON } from '../../src/research/checklist.mjs';
+import { sentenceSpans } from '../../src/research/spans.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -216,33 +217,25 @@ describe('ChecklistModeler with fake router', () => {
 });
 
 describe('applyQuoteCheck', () => {
-  it('keeps valid answer with quote found in page', () => {
-    const replies = [{ id: 'a|q', answer: 'yes', quote: 'wholesale' }];
-    const pageText = 'We sell wholesale clothing';
-    const result = applyQuoteCheck(replies, pageText);
-    expect(result[0].answer).toBe('yes');
-    expect(result[0].quote).toBe('wholesale');
+  const spans = sentenceSpans('We sell wholesale clothing. Minimum order is one bale.');
+
+  it('builds the quote from the sentence ids of a yes', () => {
+    const result = applyQuoteCheck([{ id: 'q1', answer: 'yes', spans: ['S2'] }], spans);
+    expect(result[0]).toMatchObject({ answer: 'yes', quote: 'Minimum order is one bale.' });
   });
 
-  it('sets answer to unknown when quote not found in page', () => {
-    const replies = [{ id: 'a|q', answer: 'yes', quote: 'Barbour' }];
-    const pageText = 'We sell wholesale clothing';
-    const result = applyQuoteCheck(replies, pageText);
-    expect(result[0].answer).toBe('unknown');
-    expect(result[0].quote).toBe('');
+  it('turns a yes or a no into unknown when its ids give no quote', () => {
+    const result = applyQuoteCheck([{ id: 'q1', answer: 'yes', spans: ['S9'] }, { id: 'q2', answer: 'no', spans: [] }, { id: 'q3', answer: 'yes', quote: 'We sell wholesale clothing.' }], spans);
+    expect(result.map((r: { answer: string; quote: string }) => [r.answer, r.quote])).toEqual([['unknown', ''], ['unknown', ''], ['unknown', '']]);
   });
 
   it('sets answer to unknown for invalid reply', () => {
-    const replies = [{ id: 'a|q', answer: 'maybe', quote: 'something' }];
-    const pageText = 'We sell wholesale clothing';
-    const result = applyQuoteCheck(replies, pageText);
+    const result = applyQuoteCheck([{ id: 'a|q', answer: 'maybe', spans: ['S1'] }], spans);
     expect(result[0].answer).toBe('unknown');
   });
 
   it('sets answer to unknown for missing reply', () => {
-    const replies = [null];
-    const pageText = 'We sell wholesale clothing';
-    const result = applyQuoteCheck(replies, pageText);
+    const result = applyQuoteCheck([null], spans);
     expect(result[0].answer).toBe('unknown');
   });
 });
@@ -260,8 +253,8 @@ describe('ChecklistJudge reply binding with short IDs', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'q1', answer: 'yes', quote: 'Barbour' },
-          { id: 'q2', answer: 'no', quote: '' },
+          { id: 'q1', answer: 'yes', spans: ['S1'] },
+          { id: 'q2', answer: 'no', spans: ['S1'] },
         ],
       }),
     };
@@ -283,8 +276,8 @@ describe('ChecklistJudge reply binding with short IDs', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'q1', answer: 'yes', quote: 'Barbour' },
-          { id: 'q5', answer: 'yes', quote: 'FakeBrand' },
+          { id: 'q1', answer: 'yes', spans: ['S1'] },
+          { id: 'q5', answer: 'yes', spans: ['S1'] },
         ],
       }),
     };
@@ -306,8 +299,8 @@ describe('ChecklistJudge reply binding with short IDs', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: '  Q1  ', answer: 'yes', quote: 'Barbour' },
-          { id: '"q2"', answer: 'no', quote: '' },
+          { id: '  Q1  ', answer: 'yes', spans: ['S1'] },
+          { id: '"q2"', answer: 'no', spans: ['S1'] },
         ],
       }),
     };
@@ -320,7 +313,7 @@ describe('ChecklistJudge reply binding with short IDs', () => {
   });
 
   it('reads answers wrapped in an object, and an object with no list as no answers', async () => {
-    const wrapped = { complete: async () => ({ provider: 'test', data: { answers: [{ id: 'q1', answer: 'yes', quote: 'Barbour' }] } }) };
+    const wrapped = { complete: async () => ({ provider: 'test', data: { answers: [{ id: 'q1', answer: 'yes', spans: ['S1'] }] } }) };
     const checks = await new ChecklistJudge({ router: wrapped }).judge({ url: 'http://example.com' }, 'We carry Barbour', testChecklist);
     expect(checks.find(c => c.id === 'brand|Does this carry Barbour?')?.answer).toBe('yes');
     const bare = { complete: async () => ({ provider: 'test', data: { note: 'none' } }) };
@@ -333,7 +326,7 @@ describe('ChecklistJudge reply binding with short IDs', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'q1', answer: 'yes', quote: 'Barbour' },
+          { id: 'q1', answer: 'yes', spans: ['S1'] },
         ],
       }),
     };
@@ -352,8 +345,8 @@ describe('ChecklistJudge reply binding with short IDs', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'q1', answer: 'maybe', quote: 'Barbour' },
-          { id: 'q2', answer: 'yes', quote: 'Ralph Lauren' },
+          { id: 'q1', answer: 'maybe', spans: ['S1'] },
+          { id: 'q2', answer: 'yes', spans: ['S1'] },
         ],
       }),
     };
@@ -372,7 +365,7 @@ describe('ChecklistJudge reply binding with short IDs', () => {
       complete: async () => ({
         provider: 'test',
         data: [
-          { id: 'q1', answer: 'yes', quote: 'Barbour' },
+          { id: 'q1', answer: 'yes', spans: ['S1'] },
         ],
       }),
     };
@@ -462,7 +455,7 @@ describe('ChecklistJudge with fake router', () => {
         return {
           provider: 'test',
           data: [
-            { id: 'q1', answer: 'yes', quote: 'Barbour jackets available' },
+            { id: 'q1', answer: 'yes', spans: ['S9'] },
           ],
         };
       },
@@ -533,19 +526,103 @@ describe('item-level checklist with a kind check and code-measured values', () =
     };
   }
 
-  it('asks the page judge one hard kind question built from the kind label and its exclusions', async () => {
-    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'yes', quote: 'round widget' })));
+  function kindRouter(kindReply: unknown) {
+    const kindPrompts: string[] = [];
+    const questionCalls: number[] = [];
+    return {
+      kindPrompts,
+      questionCalls,
+      complete: async (req: { messages: { content: string }[] }) => {
+        const content = req.messages[1].content ?? '';
+        if (content.includes('This page offers:')) {
+          kindPrompts.push(content);
+          return { provider: 'test', data: kindReply };
+        }
+        const ids = [...content.matchAll(/^(q\d+):/gm)].map((m) => m[1]);
+        questionCalls.push(ids.length);
+        return { provider: 'test', data: ids.map((id) => ({ id, answer: 'yes', spans: ['S1'] })) };
+      },
+    };
+  }
+
+  it('asks the kind in its own call as a selection among closed options, with a sentence id', async () => {
+    const router = kindRouter({ kind: 'A', span: 'S1' });
     const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A round widget for sale', checklist, kind);
     expect(kindCluster(kind).items[0].question).toContain('widget');
     expect(kindCluster(kind).items[0].question).toContain('spare part');
-    expect(router.asked[0].length).toBeGreaterThan(0);
-    expect(checks.find((c) => c.id === KIND_ID)).toMatchObject({ answer: 'yes', hard: true, clause: 'kind' });
+    expect(kindCluster(kind).options.map((o: { letter: string }) => o.letter)).toEqual(['A', 'B', 'C', 'D', 'E', 'U']);
+    expect(router.kindPrompts).toHaveLength(1);
+    expect(router.kindPrompts[0]).toContain('A) one widget, offered as asked');
+    expect(router.kindPrompts[0]).toContain('[S1] A round widget for sale');
+    expect(checks.find((c) => c.id === KIND_ID)).toMatchObject({ answer: 'yes', quote: 'A round widget for sale', hard: true, clause: 'kind' });
   });
 
-  it('a page the judge says is not one item of the kind fails the kind check', async () => {
-    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'no', quote: 'spare part' })));
-    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A spare part for a widget', checklist, kind);
-    expect(checks.find((c) => c.id === KIND_ID)?.answer).toBe('no');
+  it('a page selected as a part, a list, a wanted ad or something else fails the kind check', async () => {
+    for (const letter of ['B', 'C', 'D', 'E']) {
+      const checks = await new ChecklistJudge({ router: kindRouter({ kind: letter, span: 'S1' }) }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A spare part for a widget', checklist, kind);
+      expect(checks.find((c) => c.id === KIND_ID)?.answer).toBe('no');
+    }
+  });
+
+  it('a kind answer without a real sentence id, or the cannot-tell option, is unknown', async () => {
+    for (const reply of [{ kind: 'A', span: 'S7' }, { kind: 'A' }, { kind: 'U', span: 'S1' }, { kind: 'Z', span: 'S1' }, [{ id: 'q1', answer: 'yes', spans: ['S1'] }]]) {
+      const checks = await new ChecklistJudge({ router: kindRouter(reply) }).judge({ url: 'http://example.com', distanceKm: 10 }, 'A round widget for sale', checklist, kind);
+      expect(checks.find((c) => c.id === KIND_ID)).toMatchObject({ answer: 'unknown', quote: '' });
+    }
+  });
+
+  it('lists the member kinds under option A for an umbrella kind', () => {
+    const umbrella = { label: 'contractor', terms: ['contractor'], members: [{ label: 'roofer', terms: ['roofing'] }, { label: 'plumber', terms: ['plumbing'] }] };
+    expect(kindCluster(umbrella).options[0].text).toBe('one contractor, offered as asked, of one of these kinds: roofer, plumber');
+  });
+
+  it('asks at most 4 questions a call', async () => {
+    const many = [{ clause: 'c', items: Array.from({ length: 9 }, (_, i) => ({ clause: 'c', question: `Is property ${i + 1} stated?`, hard: false, numeric: null })) }];
+    const router = kindRouter({ kind: 'A', span: 'S1' });
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'A round widget for sale', many);
+    expect(router.questionCalls).toEqual([4, 4, 1]);
+    expect(checks.filter((c) => c.answer === 'yes')).toHaveLength(9);
+  });
+
+  it('shows the sentences an embedder ranks best when the page is longer than the block, in page order', async () => {
+    const page = Array.from({ length: 400 }, (_, i) => `Sentence number ${i + 1} talks about the thing.`).join(' ');
+    const single = [{ clause: 'c', items: [{ clause: 'c', question: 'Is it stated?', hard: true, numeric: null }] }];
+    const seen: string[] = [];
+    const router = { complete: async (req: { messages: { content: string }[] }) => { seen.push(req.messages[1].content); return { provider: 'test', data: [{ id: 'q1', answer: 'yes', spans: ['S300'] }] }; } };
+    const embedder = { rank: async (_q: string, texts: string[], k: number) => ({ model: 'fake', order: [299, 5, ...texts.map((_, i) => i).filter((i) => i !== 299 && i !== 5)].slice(0, k) }) };
+    const checks = await new ChecklistJudge({ router, embedder }).judge({ url: 'http://example.com' }, page, single);
+    expect(seen[0].indexOf('[S6]')).toBeLessThan(seen[0].indexOf('[S300]'));
+    expect(checks[0]).toMatchObject({ answer: 'yes', quote: 'Sentence number 300 talks about the thing.' });
+    const opening = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, page, single);
+    expect(opening[0].answer).toBe('unknown');
+  });
+
+  it('a kind yes on an item priced below the low cut of its comparables becomes unknown, and stays yes with no cut', () => {
+    const judged = [{ id: KIND_ID, answer: 'yes', quote: 'A round widget', hard: true, clause: 'kind' }, { id: 'shape|Is this thing round?', answer: 'yes', quote: 'round', hard: true, clause: 'shape' }];
+    const hardened = hardenKind(judged, { value: 2000 }, 9000);
+    expect(hardened[0]).toMatchObject({ answer: 'unknown', reason: LOW_PRICE_REASON });
+    expect(hardened[1].answer).toBe('yes');
+    expect(hardenKind(judged, { value: 2000 }, null)[0].answer).toBe('yes');
+    expect(hardenKind(judged, { value: 9000 }, 9000)[0].answer).toBe('yes');
+    expect(hardenKind(judged, { value: null }, 9000)[0].answer).toBe('yes');
+    expect(hardenKind([{ id: KIND_ID, answer: 'no', quote: 'x', hard: true, clause: 'kind' }], { value: 1 }, 9000)[0].answer).toBe('no');
+  });
+
+  it('the fingerprint carries the judge version, so answers of an older judge are not reused', () => {
+    expect(JUDGE_VERSION).toBe(2);
+    expect(CHECKLIST_VERSION).toBe(4);
+    expect(checklistFingerprint(checklist).endsWith(`judge:${JUDGE_VERSION}`)).toBe(true);
+  });
+
+  it('migrates stored yes and no answers without a quote to unknown and leaves numeric checks', () => {
+    const project = { acceptanceResult: { items: [
+      { url: 'a', checks: [{ id: 'x', answer: 'no', quote: '' }, { id: 'y', answer: 'yes', quote: 'distanceKm: 40 km' }, { id: KIND_ID, answer: 'yes', quote: '  ' }, { id: 'z', answer: 'unknown', quote: '' }] },
+      { url: 'b' },
+    ] } } as { acceptanceResult: { items: { url: string; checks?: { answer: string }[] }[] } };
+    expect(migrateChecks(project)).toBe(2);
+    expect(project.acceptanceResult.items[0].checks!.map((c) => c.answer)).toEqual(['unknown', 'yes', 'unknown', 'unknown']);
+    expect(migrateChecks(project)).toBe(0);
+    expect(migrateChecks({})).toBe(0);
   });
 
   it('a measured distance answers its check by code and is never sent to the page judge', async () => {

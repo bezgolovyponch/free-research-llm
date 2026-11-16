@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf } from "../../src/research/verdict.mjs";
-import { kindCluster } from "../../src/research/checklist.mjs";
+import { LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
+import { lowPriceCut } from "../../src/research/candidates.mjs";
 import fixture from "../fixtures/verdict-0c750f.json";
 
 describe("verdict", () => {
@@ -278,5 +279,42 @@ describe("verdict", () => {
     const unread = { acceptanceResult: { totalAsked: 20, items: [baseItem({ url: "a", checks: [] })] }, acceptance: { itemCount: 20 }, checklist: [{ clause: "c", items: [{ hard: true, question: "q1" }] }] };
     expect(acceptanceSummaryOf(unread)).toBe("0 of 20 confirmed · 1 not read");
     expect(acceptanceSummaryOf({ acceptance: { itemCount: 3 } })).toBe("0 of 3 confirmed");
+  });
+});
+
+describe("stored answers of the 0c750f fixture under the quote rule and the price rule", () => {
+  const kind = { label: "car listing", terms: ["car"], not: ["wanted", "parts", "accessories", "retail"] };
+  const tyres = "https://auto.bazos.cz/inzerat/226132468/zimni-pneu-na-plechacich-kia-ceed.php";
+  const copy = () => JSON.parse(JSON.stringify(fixture));
+
+  it("had the tyres on rims with a kind yes at a twelfth of the median, rejected only by another check", () => {
+    const { acceptance, checklist, acceptanceResult } = copy();
+    const item = verdict(acceptanceResult.items, acceptance, checklist, kind).items.find((i: { url: string }) => i.url === tyres);
+    expect(item.checks.find((c: { clause: string }) => c.clause === "kind").answer).toBe("yes");
+    expect(item.value).toBe(2000);
+    expect(item.tier).toBe("rejected");
+  });
+
+  it("the item whose answer had an empty quote is to-confirm after the migration, and one item is still confirmed", () => {
+    const project = copy();
+    expect(migrateChecks(project)).toBe(1);
+    const result = verdict(project.acceptanceResult.items, project.acceptance, project.checklist);
+    expect(result.items.find((i: { url: string }) => i.url === tyres).tier).toBe("to-confirm");
+    expect(result.validCount).toBe(1);
+  });
+
+  it("a kind yes below the low cut of the table is unknown, so the tyres are never confirmed", () => {
+    const project = copy();
+    migrateChecks(project);
+    const cut = lowPriceCut(project.acceptanceResult.items);
+    expect(cut).toBeGreaterThan(2000);
+    expect(cut).toBeLessThan(25000);
+    const items = project.acceptanceResult.items.map((item: { checks: unknown[] }) => ({ ...item, checks: hardenKind(item.checks, item, cut) }));
+    const result = verdict(items, project.acceptance, project.checklist, kind);
+    const item = result.items.find((i: { url: string }) => i.url === tyres);
+    expect(item.checks.find((c: { clause: string }) => c.clause === "kind")).toMatchObject({ answer: "unknown", reason: LOW_PRICE_REASON });
+    expect(item.tier).toBe("to-confirm");
+    expect(result.validCount).toBe(1);
+    expect(result.items.filter((i: { tier: string; value: number }) => i.tier === "confirmed" && i.value < cut)).toEqual([]);
   });
 });
