@@ -430,5 +430,21 @@
     "signal": "decisionModel.checklist still has a count item: 'Does this listing include at least 20 cars and up to 80 as a trade-off?' [hard] — models ignore the prompt rule; every page answers no/unknown, so no item can be valid. Only the first 30 delivered items are judged (engine.mjs checkAcceptance items.slice(0, 30)); 19 of those 30 failed the kind check (spare parts ranked first), while the table has 283 rows that fit. 0 valid of 20 asked.",
     "cause": "1) Count items were not filtered by code after clustering; 2) checkAcceptance had a hard limit of 30 items judged regardless of itemCount; 3) When the kind check answered 'no', the URL was not recorded so it was re-judged on every acceptance pass.",
     "prevention": "filterCountItems drops a qualitative checklist item that restates a count from the acceptance spec (askedCounts: itemCount and counts in the expected text, not the value range), applied when the checklist is used so stored checklists are cleaned too; checkAcceptance judges ranked items until itemCount are valid or JUDGE_PAGE_BUDGET pages are read, cached verdicts free; a kind \"no\" url is kept in project.kindRejected and skipped next time; covered by tests/research/checklist.test.ts (filterCountItems) and tests/research/engine.test.ts (judge budget, kind rejections)"
+  },
+  {
+    "id": "F32",
+    "title": "a question that asks for a category of kinds (activity providers, contractors) paused or narrowed to one kind",
+    "touches": [
+      "src/research/concept.mjs",
+      "src/research/decision.mjs",
+      "src/research/domain.mjs",
+      "src/research/engine.mjs",
+      "src/research/acceptance.mjs",
+      "src/research/checklist.mjs",
+      "tests/research/umbrella.test.ts"
+    ],
+    "signal": "Four entity researches that each asked for 40 providers of a category in one place (2026-11-13): two paused in needs-understanding (the domain pages each named a different kind, so no term was supported by two hosts), one paused in needs-concept (\"the 10 page(s) about \\\"activity provider\\\" do not call it the same thing\"), and one passed with the kind narrowed to the single kind its pages agreed on (\"item kind confirmed: atv tours\"), so every other kind was outside the research.",
+    "cause": "1) The decision model had one kind with one vocabulary and no way to say the item is a category of several kinds; 2) the domain study, the concept card and its two-page rule all looked for one name the pages share, which a category does not have; 3) the purpose kind check kept only the category words found in the question and entity delivery anchored terms on the category label, so a page of one kind (no category word on it) could never be delivered; 4) the item count was read from the question only when the tree was built, after the domain study, so on a first run the domain was studied with no decision model and no kind.",
+    "prevention": "kind.members: the decision model lists the kinds of a category, kept when most proposals name them (votedMembers, merged by a shared label or term), and their words join kind.terms; a category is grounded kind by kind (validateUmbrella: one query per kind, up to 24 pages, a kind is confirmed when two different sites carry one of its words, so a business name on two pages of its own site is not a kind word, kinds the pages name are added, at least two kinds must be confirmed, unconfirmed kinds are kept and named in the log); the item count is read from the question before the domain study so the decision model, with its kinds, exists when the domain is studied, and the study is ready when two sites name two kinds; the purpose kind check, entity anchors and the page judge accept any kind of the category; covered by tests/research/umbrella.test.ts"
   }
 ]

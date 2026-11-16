@@ -1,5 +1,6 @@
 import { plain } from './itemgate.mjs';
 import { quoteFound } from './quote.mjs';
+import { isUmbrella } from './concept.mjs';
 
 export function replyList(data) {
   if (Array.isArray(data)) return data;
@@ -216,7 +217,8 @@ export class ChecklistModeler {
 
 export function kindCluster(kind) {
   const not = (kind.not ?? []).length ? ` and not ${kind.not.join(', ')}` : '';
-  return { clause: 'kind', items: [{ question: `Is this page one ${kind.label} offered as asked (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
+  const kinds = isUmbrella(kind) ? `, of one of these kinds: ${kind.members.map((member) => member.label).join(', ')}` : '';
+  return { clause: 'kind', items: [{ question: `Is this page one ${kind.label} offered as asked${kinds} (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
 }
 
 export class ChecklistJudge {

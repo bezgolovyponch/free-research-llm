@@ -1,5 +1,6 @@
 import { plain } from './itemgate.mjs';
 import { regionVerdict } from './brief.mjs';
+import { isUmbrella, memberTerms } from './concept.mjs';
 import { entitiesFromJsonLd } from '../search/listings.mjs';
 const CURRENCIES = {
   EUR: ['€', 'eur', 'euro'],
@@ -182,6 +183,11 @@ export function purposeChecks(project) {
   const words = plain(question);
   const checks = nameLists(question).map((names, i) => ({ id: `purpose-names-${i + 1}`, type: 'any', names, label: `Page mentions one of: ${names.map((n) => `"${n}"`).join(', ')} (your words)` }));
   const kind = project?.decisionModel?.kind ?? project?.brief?.kind ?? null;
+  if (isUmbrella(kind)) {
+    const any = [...new Set([...(kind.terms ?? []), ...kind.members.flatMap(memberTerms)].map((term) => plain(String(term ?? '')).trim()).filter(Boolean))];
+    if (any.length) checks.push({ id: 'purpose-kind', type: 'kind', terms: any, label: `Page shows one of the kinds of the asked ${kind.label}: ${kind.members.map((member) => member.label).join(' / ')}` });
+    return checks;
+  }
   const subtype = project?.decisionModel?.subtype ?? project?.brief?.subtype ?? null;
   const terms = (kind?.terms ?? []).filter((term) => {
     const parts = plain(term).split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
@@ -408,10 +414,10 @@ async function readEntityWebsite(profileUrl, readPage) {
   return null;
 }
 
-export async function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '', regions = [], readPage = null } = {}) {
+export async function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '', members = [], regions = [], readPage = null } = {}) {
   const wanted = (terms ?? []).filter(Boolean);
   const banned = (not ?? []).map((phrase) => plain(phrase).trim()).filter(Boolean);
-  const anchors = anchorWords(kindLabel);
+  const anchors = new Set([anchorWords(kindLabel), ...(members ?? []).map((member) => anchorWords([member?.label ?? '', ...memberTerms(member)].join(' ')))].flatMap((set) => [...set]));
   const pages = [];
   for (const node of nodes ?? []) {
     for (const source of node.sources ?? []) {
