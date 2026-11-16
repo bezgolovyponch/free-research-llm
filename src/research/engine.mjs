@@ -5,7 +5,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
-import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf } from './verdict.mjs';
+import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind } from './checklist.mjs';
 import { DeeperReader } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
@@ -1684,7 +1684,7 @@ export class ResearchEngine {
       countCheck.passed = verdictResult.validCount >= (spec.itemCount ?? Math.max(1, result.items.length));
       countCheck.detail = `${verdictResult.validCount} of ${spec.itemCount ?? Math.max(1, result.items.length)} delivered pass every check`;
     }
-    const score = newChecks.reduce((s, c) => s + Math.min(1, c.value), 0) / newChecks.length;
+    const score = scoreOf(newChecks);
     Object.assign(result, {
       score: Math.round(score * 1000) / 1000,
       checks: newChecks,
@@ -1845,7 +1845,12 @@ export class ResearchEngine {
       if (!this.quiet.has(id)) await this.onStop(project, { reason: short ? `research finished, short: ${project.acceptanceSummary}` : 'research finished' });
       return await this.store.save(project, { reason: short ? 'research finished but short of asked items' : 'research finished' });
     } catch (error) {
-      if (project) {
+      if (project && error instanceof ResearchCancelled) {
+        project.phase = 'cancelled';
+        project.error = null;
+        this.emit(project, 'phase', 'research cancelled');
+        await this.store.save(project, { reason: 'research cancelled' });
+      } else if (project) {
         const offline = error instanceof OfflineError;
         project.phase = offline ? 'paused' : 'error';
         project.error = offline ? null : error.message;

@@ -2,7 +2,7 @@ import { plain } from './itemgate.mjs';
 import { regionVerdict } from './brief.mjs';
 import { isUmbrella, memberTerms } from './concept.mjs';
 import { entitiesFromJsonLd } from '../search/listings.mjs';
-import { verdict, itemTier, hardIdsOf } from './verdict.mjs';
+import { verdict, itemTier, hardIdsOf, scoreOf } from './verdict.mjs';
 export { qualifies } from './verdict.mjs';
 const CURRENCIES = {
   EUR: ['€', 'eur', 'euro'],
@@ -688,7 +688,7 @@ export class AcceptanceChecker {
       const rate = pc.yes / (pc.yes + pc.no + pc.unknown) || 0;
       checks.push({ id: `checklist-${pc.id}`, label: `Checklist: ${pc.clause}`, value: rate, detail: `${pc.yes} of ${pc.yes + pc.no + pc.unknown} checked items pass this hard check` });
     }
-    const score = checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length;
+    const score = scoreOf(checks);
     const sortedItems = [...verdictResult.items].sort((a, b) => {
       if (a.valid !== b.valid) return a.valid ? -1 : 1;
       return b.softYes - a.softYes;

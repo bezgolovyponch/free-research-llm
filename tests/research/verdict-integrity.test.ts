@@ -138,7 +138,6 @@ describe('verdict integrity fixes', () => {
         onStop: vi.fn(),
       });
 
-      // Add to quiet so cancel() works
       engine.quiet.add('test-1');
       const project = { id: 'test-1' };
       engine.cancel('test-1');
@@ -214,7 +213,6 @@ describe('verdict integrity fixes', () => {
 
       const project = await engine.load('test-3');
       project.report = { deliverables: [] };
-      // Provide candidates with kept items so deliverables are not empty
       project.candidates = {
         found: 30,
         keptCount: 30,
@@ -245,6 +243,60 @@ describe('verdict integrity fixes', () => {
       expect(acceptanceLogs.some(msg => msg.includes('judging pages: 10 judged'))).toBe(true);
       expect(acceptanceLogs.some(msg => msg.includes('judging pages: 20 judged'))).toBe(true);
       expect(acceptanceLogs.some(msg => msg.includes('judging pages: 30 judged'))).toBe(true);
+    });
+
+    it('a cancel during judging stops the loop before the remaining pages are judged', async () => {
+      const engine = new ResearchEngine({
+        router: null,
+        search: { readPage: vi.fn() },
+        store: {
+          get: vi.fn().mockResolvedValue({
+            id: 'test-3',
+            question: 'test question',
+            templateId: 'default',
+            acceptance: { itemCount: 30, urlsLive: true, valueRange: null, unit: '', mustMention: [] },
+            decisionModel: { kind: { label: 'used car', terms: ['hatchback'] }, checklist: [{ clause: 'c', items: [{ id: 'check1', hard: true, question: 'q1' }] }] },
+            checklist: [{ clause: 'c', items: [{ id: 'check1', hard: true, question: 'q1' }] }],
+            nodes: [],
+            log: [],
+          }),
+          save: vi.fn().mockResolvedValue({}),
+          newId: () => 'test-3',
+          cache: new Map(),
+        },
+        onEvent: vi.fn(),
+        onStop: vi.fn(),
+      });
+
+      const project = await engine.load('test-3');
+      project.report = { deliverables: [] };
+      project.candidates = {
+        found: 30,
+        keptCount: 30,
+        toCheckCount: 0,
+        screenedCount: 0,
+        kept: (() => { const arr = []; for (let i = 0; i < 30; i++) arr.push({ url: 'https://example.com/' + i, title: 'Item ' + i, value: 1000, unit: 'EUR' }); return arr; })(),
+        toCheck: [],
+        screened: {},
+        tiers: { fits: 0, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 },
+        verification: null,
+        sites: { trends: {} }
+      };
+      project.checklist = [{ clause: 'c', items: [{ id: 'check1', hard: true, question: 'q1' }] }];
+      project.decisionModel = { kind: { label: 'used car', terms: ['hatchback'] }, checklist: [{ clause: 'c', items: [{ id: 'check1', hard: true, question: 'q1' }] }] };
+
+      engine.search.readPage.mockResolvedValue({ text: 'page text', status: 200, links: [] });
+
+      let calls = 0;
+      engine.checklistJudge.judge = vi.fn().mockImplementation(async () => {
+        calls += 1;
+        if (calls === 5) engine.cancel(project.id);
+        return [{ id: 'c|q1', answer: 'yes', hard: true, clause: 'c' }];
+      });
+      engine.quiet.add(project.id);
+
+      await expect(engine.checkAcceptance(project, null)).rejects.toBeInstanceOf(ResearchCancelled);
+      expect(calls).toBe(5);
     });
   });
 });

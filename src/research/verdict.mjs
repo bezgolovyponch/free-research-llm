@@ -145,6 +145,10 @@ export function acceptanceSummaryOf(project) {
   return verdict(result?.items ?? [], spec, project.checklist, project.decisionModel?.kind ?? null).summary;
 }
 
+export function scoreOf(checks) {
+  return checks.length ? checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length : 0;
+}
+
 export function verdictInvariants(project) {
   const reasons = [];
   const acceptanceResult = project.acceptanceResult;
@@ -189,7 +193,7 @@ export function verdictInvariants(project) {
     const rate = total ? pc.yes / total : 0;
     newChecks.push({ id: `checklist-${pc.id}`, label: `Checklist: ${pc.clause}`, value: Math.round(Math.min(1, rate) * 1000) / 1000 });
   }
-  const expectedScore = newChecks.length ? newChecks.reduce((s, c) => s + Math.min(1, c.value), 0) / newChecks.length : 0;
+  const expectedScore = scoreOf(newChecks);
   if (Math.abs((acceptanceResult.score ?? 0) - expectedScore) > 0.001) {
     reasons.push("score mismatch: got " + acceptanceResult.score + " expected " + Math.round(expectedScore * 1000) / 1000);
   }
