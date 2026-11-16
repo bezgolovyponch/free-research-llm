@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, consumesVote, costSide, critique, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, refineGoal, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide } from '../../src/research/purpose.mjs';
+import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, consumesVote, costSide, critique, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide } from '../../src/research/purpose.mjs';
 import { CallBudget, STAGE_CAPS } from '../../src/research/semantic.mjs';
 import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
@@ -54,23 +54,111 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
     expect(router.userText('requirements')).not.toContain('sold by weight');
   });
 
-  it('keeps the punctuation split and logs it when no majority groups the pieces the same way', async () => {
+  it('groups by consensus over the votes: three votes that differ in one piece still group the list', async () => {
+    const votes = seq({ groups: [['S1', 'S2', 'S3', 'S4'], ['S5']] }, { groups: [['S1', 'S2', 'S3'], ['S4', 'S5']] }, { groups: [['S2', 'S3', 'S4'], ['S1'], ['S5']] });
+    const router = fakeRouter({ requirements: votes });
     const log: string[] = [];
-    const router = fakeRouter({ requirements: seq({ groups: [['S1', 'S2', 'S3', 'S4'], ['S5']] }, { groups: [['S1', 'S2'], ['S3', 'S4'], ['S5']] }, FAIL) });
+    const anchors = await anchorsOf({ router, log: (line: string) => log.push(line) }, question);
+    expect(router.count('requirements')).toBe(3);
+    expect(anchors.map((anchor: { id: string; text: string; spans: string[] }) => [anchor.id, anchor.text, anchor.spans])).toEqual([['C1', 'similar to A, B, C, D with highest price/value ratio', ['S1', 'S2', 'S3', 'S4']], ['C2', 'proven good quality', ['S5']]]);
+    expect(log).toEqual([]);
+    const pairOnly = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, { groups: [['S1'], ['S2', 'S3']] }, { groups: [['S1'], ['S2'], ['S3']] }) }) }, 'one, two, three');
+    expect(pairOnly.map((anchor: { text: string }) => anchor.text)).toEqual(['one', 'two', 'three']);
+    const chained = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, { groups: [['S1'], ['S2', 'S3']] }, { groups: [['S1', 'S2', 'S3']] }) }) }, 'one, two, three');
+    expect(chained.map((anchor: { text: string }) => anchor.text)).toEqual(['one, two, three']);
+    const twoValid = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, FAIL, { groups: [['S1'], ['S2', 'S3']] }) }) }, 'one, two, three');
+    expect(twoValid.map((anchor: { text: string }) => anchor.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('keeps the punctuation split and logs it when fewer than two votes are valid', async () => {
+    const log: string[] = [];
+    const router = fakeRouter({ requirements: seq({ groups: [['S1', 'S2', 'S3', 'S4'], ['S5']] }, FAIL, { groups: [['S1', 'S9']] }) });
     const anchors = await anchorsOf({ router, log: (line: string) => log.push(line) }, question);
     expect(anchors.map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual(['C1 similar to A', 'C2 B', 'C3 C', 'C4 D with highest price/value ratio', 'C5 proven good quality']);
     expect(log).toEqual(['requirements: no majority on grouping the 5 pieces of the question by meaning; the punctuation split is kept']);
   });
 
-  it('refuses a grouping that invents a piece or leaves one out, and asks nothing for a single piece', async () => {
+  it('refuses a grouping that invents a piece or leaves one out, and asks nothing for a single short piece', async () => {
     const router = fakeRouter({ requirements: seq({ groups: [['S1', 'S9'], ['S2']] }, { groups: [['S1']] }) });
     const anchors = await anchorsOf({ router }, 'first piece, second piece');
     expect(router.calls[1].messages[2].content).toContain('a group names an id that is not one of S1, S2');
     expect(router.calls[3].messages[2].content).toContain('every piece id must be in exactly one group');
     expect(anchors.map((anchor: { text: string }) => anchor.text)).toEqual(['first piece', 'second piece']);
     const single = fakeRouter({});
-    expect(await anchorsOf({ router: single }, 'one piece only')).toEqual([{ id: 'C1', kind: 'clause', text: 'one piece only', spans: ['S1'] }]);
+    expect(await anchorsOf({ router: single }, 'one piece')).toEqual([{ id: 'C1', kind: 'clause', text: 'one piece', spans: ['S1'] }]);
     expect(single.calls).toEqual([]);
+  });
+});
+
+describe('a piece that holds two requirements is split before grouping', () => {
+  const question = 'similar to A, B, C, D with highest price/value ratio, proven good quality';
+  const pieceOf = (request: Ask) => request.messages[1].content.replace('Piece: ', '');
+  const splitter = (request: Ask) => (pieceOf(request).startsWith('D with') ? { more: true, second: 'with highest price/value ratio' } : { more: false });
+
+  it('splits at the voted words, and the second part becomes its own requirement while the first stays with the list', async () => {
+    const log: string[] = [];
+    const router = fakeRouter({ 'requirement-split': splitter, requirements: { groups: [['S1', 'S2', 'S3', 'S4'], ['S5'], ['S6']] } });
+    const anchors = await anchorsOf({ router, log: (line: string) => log.push(line) }, question);
+    expect(anchors).toEqual([
+      { id: 'C1', kind: 'clause', text: 'similar to A, B, C, D', spans: ['S1', 'S2', 'S3', 'S4'] },
+      { id: 'C2', kind: 'clause', text: 'with highest price/value ratio', spans: ['S5'] },
+      { id: 'C3', kind: 'clause', text: 'proven good quality', spans: ['S6'] },
+    ]);
+    expect(log).toEqual(['requirements: the piece "D with highest price/value ratio" holds two requirements; it is split before "with highest price/value ratio"']);
+    expect(router.count('requirement-split')).toBe(6);
+    expect(router.calls[0]).toMatchObject({ task: 'requirement-split', tier: 'fast', purpose: 'purpose-judge' });
+    expect(router.calls.filter((call: { task?: string }) => call.task === 'requirement-split').map(pieceOf)).toEqual(['similar to A', 'similar to A', 'D with highest price/value ratio', 'D with highest price/value ratio', 'proven good quality', 'proven good quality']);
+    expect(router.userText('requirements')).toContain('[S4] D\n[S5] with highest price/value ratio\n[S6] proven good quality');
+    const rejoined = await anchorsOf({ router: fakeRouter({ 'requirement-split': splitter, requirements: { groups: [['S1', 'S2', 'S3'], ['S4', 'S5'], ['S6']] } }) }, question);
+    expect(rejoined.map((anchor: { text: string }) => anchor.text)).toEqual(['similar to A, B, C', 'D with highest price/value ratio', 'proven good quality']);
+  });
+
+  it('takes the split point a majority gives, and none without a majority or when the majority sees one requirement', async () => {
+    const piece = 'D with highest price/value ratio';
+    const majority = await splitPiece({ router: fakeRouter({ 'requirement-split': seq({ more: true, second: 'highest price/value ratio' }, { more: true, second: 'with highest' }, { more: true, second: 'with highest price/value ratio' }) }) }, piece);
+    expect(majority).toEqual({ parts: ['D', 'with highest price/value ratio'], votes: { 7: 1, 2: 2 } });
+    const none = await splitPiece({ router: fakeRouter({ 'requirement-split': seq({ more: true, second: 'highest price/value ratio' }, { more: true, second: 'with highest' }, { more: false }) }) }, piece);
+    expect(none.parts).toEqual([piece]);
+    const one = fakeRouter({ 'requirement-split': seq({ more: false }, { more: true, second: 'with highest' }, { more: false }) });
+    expect((await splitPiece({ router: one }, piece)).parts).toEqual([piece]);
+    expect(one.count('requirement-split')).toBe(3);
+    const short = fakeRouter({ 'requirement-split': { more: true, second: 'face' } });
+    expect((await splitPiece({ router: short }, 'North face')).parts).toEqual(['North face']);
+    expect(short.calls).toEqual([]);
+  });
+
+  it('refuses a split point that is not an exact substring at a word boundary', async () => {
+    expect(splitPoint('D with highest price/value ratio', 'with highest')).toBe(2);
+    expect(splitPoint('D  with   highest price/value ratio', ' with highest  price/value ratio ')).toBe(2);
+    expect(splitPoint('D with highest price/value ratio', 'with the highest ratio')).toBeNull();
+    expect(splitPoint('D with highest price/value ratio', 'With highest')).toBeNull();
+    expect(splitPoint('D with highest price/value ratio', 'ighest price/value ratio')).toBeNull();
+    expect(splitPoint('D with highest price/value ratio', 'with high')).toBeNull();
+    expect(splitPoint('D with highest price/value ratio', 'D with highest')).toBeNull();
+    expect(splitPoint('D with highest price/value ratio', '')).toBeNull();
+    expect(splitPoint('as good as new as can be', 'as new')).toBe(8);
+    const router = fakeRouter({ 'requirement-split': { more: true, second: 'and the best ratio' } });
+    const refused = await splitPiece({ router }, 'D with highest price/value ratio');
+    expect(refused.parts).toEqual(['D with highest price/value ratio']);
+    expect(router.count('requirement-split')).toBe(6);
+    expect(router.calls[1].messages[2].content).toContain('"second" must be words copied exactly from the piece, starting at one of its words after the first: D with highest price/value ratio');
+    const untyped = fakeRouter({ 'requirement-split': { second: 'with highest' } });
+    await splitPiece({ router: untyped }, 'D with highest price/value ratio');
+    expect(untyped.calls[1].messages[2].content).toContain('"more" must be true or false');
+  });
+});
+
+describe('the purpose stage budget is sized to the votes it makes', () => {
+  it('is 48 calls plus 3 for every piece of at least 3 words, set before the first vote and logged', async () => {
+    expect([purposeCap(0), purposeCap(4), purposeCap(10)]).toEqual([48, 60, 78]);
+    expect(STAGE_CAPS.purpose).toBe(48);
+    const budget = new CallBudget({ ...STAGE_CAPS, purpose: 2 });
+    const log: string[] = [];
+    const router = fakeRouter({ 'requirement-split': { more: false }, requirements: { groups: [['S1', 'S2', 'S3', 'S4'], ['S5']] } });
+    await anchorsOf({ router, budget, log: (line: string) => log.push(line) }, 'similar to A, B, C, D with highest price/value ratio, proven good quality');
+    expect(budget.caps.purpose).toBe(57);
+    expect(budget.report().purpose).toEqual({ used: 8, cap: 57, skipped: 0 });
+    expect(log).toEqual(['purpose budget: 57 calls (48 for grouping, tensions, purpose, consumes and implications, 3 for each of 3 piece(s) of at least 3 words)']);
   });
 });
 
@@ -594,11 +682,17 @@ describe('the whole tree', () => {
   };
   const phaseQuestion = (request: Ask) => ({ questions: [{ q: `What does the ${COST_PHASES.find((phase: { id: string }) => request.messages[0].content.includes(`ownership: ${phase.id} (`))!.id} phase take?`, paid: 'B', checker: 'consensus' }], obstacles: [] });
 
-  it('votes on requirements and tensions before the purpose samples can spend the stage budget', async () => {
-    const router = fakeRouter({ ...base, tensions: { pairs: [['C1', 'C2']] }, purpose: { who: 'a buyer', outcome: 'x', why: 'y', anchors: ['C1'] } });
-    const built = await buildPurposeTree({ router, embedder: fakeEmbedder(), budget: new CallBudget({ purpose: 4 }) }, { question: 'as light as possible, lasting many years' });
-    expect(router.calls.map((call: { task?: string }) => call.task)).toEqual(['requirements', 'requirements', 'tensions', 'tensions']);
+  it('splits, groups and votes on tensions before the purpose samples, and on consumes before the implications', async () => {
+    const order = (router: { calls: { task?: string }[] }) => router.calls.map((call) => call.task).filter((task, index, all) => task !== all[index - 1]);
+    const failed = fakeRouter({ ...base, 'requirement-split': { more: false }, tensions: { pairs: [['C1', 'C2']] }, purpose: FAIL });
+    const built = await buildPurposeTree({ router: failed, embedder: fakeEmbedder(), budget: new CallBudget() }, { question: 'as light as possible, lasting many years' });
+    expect(order(failed)).toEqual(['requirement-split', 'requirements', 'tensions', 'purpose']);
     expect(built).toMatchObject({ phase: 'needs-purpose', tree: null, tensions: { decided: true, pairs: [{ id: 'C1|C2' }] } });
+    const router = fakeRouter({ ...base, 'requirement-split': { more: false }, tensions: { pairs: [] }, purpose: { who: 'a buyer', outcome: 'x', why: 'y', anchors: ['C1'] }, consumes: { consumes: false }, goals: FAIL });
+    const budget = new CallBudget();
+    await buildPurposeTree({ router, embedder: fakeEmbedder(), budget }, { question: 'as light as possible, lasting many years' });
+    expect(order(router).slice(0, 6)).toEqual(['requirement-split', 'requirements', 'tensions', 'purpose', 'consumes', 'implications']);
+    expect(budget.report().purpose).toEqual({ used: 16, cap: 54, skipped: 0 });
   });
 
   it('keeps a restating goal refined, both sides and the tension goal after a critique that tried to delete them, and lists what is open', async () => {
@@ -716,7 +810,7 @@ describe('the whole tree', () => {
     expect(budget.caps.tree).toBe(96);
     expect(budget.report().tree).toMatchObject({ cap: 96, skipped: 0 });
     expect(budget.report().tree.used).toBeGreaterThan(10);
-    expect(log[0]).toBe('tree budget: 96 calls for 8 goal(s) (12 a goal, at least 60)');
+    expect(log).toContain('tree budget: 96 calls for 8 goal(s) (12 a goal, at least 60)');
     expect(tree.unrefined).toEqual([]);
     const missing: string[] = [];
     const partial = await buildPurposeTree({ router: fakeRouter(script((request: Ask) => (request.messages[1].content.includes('number three') ? FAIL : refined))), embedder: fakeEmbedder(), budget: new CallBudget(), log: (line: string) => missing.push(line) }, { question: 'eight things at once' });

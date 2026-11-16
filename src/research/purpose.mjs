@@ -32,6 +32,9 @@ export const DROP_REASONS = { A: 'redundant with another goal', B: 'not asked by
 export const MAX_GOALS = 8;
 export const MAX_NOTES_SHOWN = 14;
 export const PURPOSE_STAGE = 'purpose';
+export const PURPOSE_BASE_CAP = 48;
+export const PURPOSE_CALLS_PER_PIECE = 3;
+export const SPLIT_MIN_WORDS = 3;
 export const TREE_STAGE = 'tree';
 export const TREE_CALLS_PER_GOAL = 12;
 export const TREE_MIN_CAP = 60;
@@ -46,19 +49,61 @@ export function treeCap(goals) {
   return Math.max(TREE_MIN_CAP, Math.max(0, Number(goals) || 0) * TREE_CALLS_PER_GOAL);
 }
 
+export function purposeCap(pieces) {
+  return PURPOSE_BASE_CAP + Math.max(0, Number(pieces) || 0) * PURPOSE_CALLS_PER_PIECE;
+}
+
+function planPurpose(ctx, pieces) {
+  if (!ctx.budget?.caps) return;
+  ctx.budget.caps[PURPOSE_STAGE] = purposeCap(pieces);
+  ctx.log?.(`purpose budget: ${ctx.budget.caps[PURPOSE_STAGE]} calls (${PURPOSE_BASE_CAP} for grouping, tensions, purpose, consumes and implications, ${PURPOSE_CALLS_PER_PIECE} for each of ${pieces} piece(s) of at least ${SPLIT_MIN_WORDS} words)`);
+}
+
 function planTree(ctx, goals) {
   if (!ctx.budget?.caps) return;
   ctx.budget.caps[TREE_STAGE] = treeCap(goals);
   ctx.log?.(`tree budget: ${ctx.budget.caps[TREE_STAGE]} calls for ${goals} goal(s) (${TREE_CALLS_PER_GOAL} a goal, at least ${TREE_MIN_CAP})`);
 }
 
+const oneSpace = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
+const wordCount = (text) => oneSpace(text).split(' ').filter(Boolean).length;
+
+export function splitPoint(piece, second) {
+  const text = oneSpace(piece);
+  const wanted = oneSpace(second);
+  if (!wanted) return null;
+  for (let at = text.indexOf(wanted); at !== -1; at = text.indexOf(wanted, at + 1)) {
+    const end = at + wanted.length;
+    if (at > 0 && text[at - 1] === ' ' && (end === text.length || text[end] === ' ')) return at;
+  }
+  return null;
+}
+
+export async function splitPiece(ctx, piece) {
+  const text = oneSpace(piece);
+  if (wordCount(text) < SPLIT_MIN_WORDS) return { parts: [text], votes: {} };
+  const messages = [
+    { role: 'system', content: 'You read one piece of a request, in any language. Decide whether it holds more than one requirement: two things the asker wants, where one could be met while the other is missed. A thing together with its own description is one requirement. "more": true or false. When true, "second": the words of the piece where the second requirement starts, copied letter for letter from the piece. Answer with JSON only: {"more":true,"second":"..."} or {"more":false}.' },
+    { role: 'user', content: `Piece: ${text}` },
+  ];
+  const schema = (data) => {
+    if (typeof data?.more !== 'boolean') return { error: '"more" must be true or false' };
+    if (!data.more) return { value: { at: 0 } };
+    const at = splitPoint(text, data.second);
+    return at === null ? { error: `"second" must be words copied exactly from the piece, starting at one of its words after the first: ${text}` } : { value: { at } };
+  };
+  const result = await vote({ router: ctx.router, task: 'requirement-split', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => String(value.at), budget: ctx.budget, stage: PURPOSE_STAGE });
+  const at = result.value?.at ?? 0;
+  return { parts: at > 0 ? [text.slice(0, at).trim(), text.slice(at).trim()] : [text], votes: result.tally };
+}
+
 export async function groupSpans(ctx, spans) {
   const singles = spans.map((span) => [span.id]);
-  if (spans.length < 2) return { groups: singles, grouped: false, votes: {} };
+  if (spans.length < 2) return { groups: singles, grouped: false, valid: 0 };
   const known = new Set(spans.map((span) => span.id));
   const order = new Map(spans.map((span, index) => [span.id, index]));
   const messages = [
-    { role: 'system', content: 'You read one request that was cut into pieces at its punctuation, in any language. Group the pieces into requirements by meaning: pieces that only make sense together are one requirement, and a list of examples of one thing is one requirement. Every piece id goes into exactly one group. Answer with JSON only: {"groups":[["S1","S2"],["S3"]]}.' },
+    { role: 'system', content: 'You read one request that was cut into pieces, in any language. Group the pieces into requirements by meaning: pieces that only make sense together are one requirement, and a list of examples of one thing is one requirement. Every piece id goes into exactly one group. Answer with JSON only: {"groups":[["S1","S2"],["S3"]]}.' },
     { role: 'user', content: `Pieces:\n${lines(spans)}` },
   ];
   const schema = (data) => {
@@ -70,16 +115,37 @@ export async function groupSpans(ctx, spans) {
     return { value: groups.map((group) => [...group].sort((a, b) => order.get(a) - order.get(b))).sort((a, b) => order.get(a[0]) - order.get(b[0])) };
   };
   const result = await vote({ router: ctx.router, task: 'requirements', tier: 'fast', messages, schema, n: 3, quorum: 2, budget: ctx.budget, stage: PURPOSE_STAGE });
-  return result.value ? { groups: result.value, grouped: true, votes: result.tally } : { groups: singles, grouped: false, votes: result.tally };
+  const valid = result.replies.length;
+  if (valid < 2) return { groups: singles, grouped: false, valid };
+  const together = new Map();
+  for (const reply of result.replies) for (const group of reply.value) for (const a of group) for (const b of group) if (order.get(a) < order.get(b)) together.set(`${a}|${b}`, (together.get(`${a}|${b}`) ?? 0) + 1);
+  const root = new Map(spans.map((span) => [span.id, span.id]));
+  const find = (id) => (root.get(id) === id ? id : find(root.get(id)));
+  for (const [pair, count] of together) {
+    if (count * 2 <= valid) continue;
+    const [a, b] = pair.split('|').map(find);
+    if (a !== b) root.set(order.get(a) < order.get(b) ? b : a, order.get(a) < order.get(b) ? a : b);
+  }
+  const components = new Map();
+  for (const span of spans) components.set(find(span.id), [...(components.get(find(span.id)) ?? []), span.id]);
+  return { groups: [...components.values()], grouped: true, valid };
 }
 
 export async function anchorsOf(ctx, question, guidance = '') {
-  const spans = clausesOf(question).map((text, index) => ({ id: `S${index + 1}`, text }));
-  const textOf = new Map(spans.map((span) => [span.id, span.text]));
+  const pieces = clausesOf(question);
+  planPurpose(ctx, pieces.filter((piece) => wordCount(piece) >= SPLIT_MIN_WORDS).length);
+  const spans = [];
+  for (const [index, piece] of pieces.entries()) {
+    const { parts } = await splitPiece(ctx, piece);
+    if (parts.length > 1) ctx.log?.(`requirements: the piece "${oneSpace(piece)}" holds two requirements; it is split before "${parts[1]}"`);
+    for (const text of parts.length > 1 ? parts : [piece]) spans.push({ id: `S${spans.length + 1}`, text, piece: index });
+  }
+  const byId = new Map(spans.map((span) => [span.id, span]));
   const { groups, grouped } = await groupSpans(ctx, spans);
   if (!grouped && spans.length > 1) ctx.log?.(`requirements: no majority on grouping the ${spans.length} pieces of the question by meaning; the punctuation split is kept`);
+  const joined = (group) => group.map((id, at) => `${at === 0 ? '' : byId.get(id).piece === byId.get(group[at - 1]).piece ? ' ' : ', '}${byId.get(id).text}`).join('');
   return [
-    ...groups.map((group, index) => ({ id: `C${index + 1}`, kind: 'clause', text: group.map((id) => textOf.get(id)).join(', '), spans: group })),
+    ...groups.map((group, index) => ({ id: `C${index + 1}`, kind: 'clause', text: joined(group), spans: group })),
     ...clausesOf(guidance).map((text, index) => ({ id: `H${index + 1}`, kind: 'hint', text })),
   ];
 }
