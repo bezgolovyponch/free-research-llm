@@ -22,7 +22,7 @@
     "e2e": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "fast-check": "^4.10.2",
     "vitest": "^5.1.0",
     "yaml": "^2.9.1"
