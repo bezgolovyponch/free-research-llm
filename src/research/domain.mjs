@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { plain } from './itemgate.mjs';
 import { COUNTRIES, countryByCode, namedCountries } from './brief.mjs';
+import { MIN_MEMBERS, memberTerms } from './concept.mjs';
 
 const REGION_LANGUAGES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8')).regionLanguages ?? {};
 
@@ -321,7 +322,17 @@ export function supportedHintTerms(hint, sources = []) {
   return terms;
 }
 
-export function domainUnderstanding(findings, { hint = '', sources = [] } = {}) {
+export function supportedMembers(members = [], sources = []) {
+  const pages = (Array.isArray(sources) ? sources : []).map((source) => ({ host: hostOf(source?.url), text: `${source?.title ?? ''} ${source?.snippet ?? ''} ${source?.text ?? ''}` })).filter((page) => page.host);
+  const named = [];
+  for (const member of Array.isArray(members) ? members : []) {
+    const term = memberTerms(member).find((candidate) => new Set(pages.filter((page) => mentionsTerm(page.text, candidate)).map((page) => page.host)).size >= SUPPORT_HOSTS);
+    if (term) named.push({ label: String(member.label ?? term), term });
+  }
+  return named;
+}
+
+export function domainUnderstanding(findings, { hint = '', sources = [], members = [] } = {}) {
   const list = Array.isArray(findings) ? findings.filter(Boolean) : [];
   const byAspect = (aspect) => list.filter((finding) => String(finding?.aspect ?? '') === aspect);
   const statements = (aspect) => byAspect(aspect).map((finding) => keyPhrase(finding.statement)).filter(Boolean).slice(0, MAX_STATEMENTS);
@@ -336,6 +347,13 @@ export function domainUnderstanding(findings, { hint = '', sources = [] } = {}) 
     object: statements('object'),
     hosts: hostsOf(list),
   };
+  if (!understanding.terms.length && (members?.length ?? 0) >= MIN_MEMBERS) {
+    const named = supportedMembers(members, sources);
+    if (named.length >= MIN_MEMBERS) {
+      understanding.terms = [...new Set(named.map((member) => member.term))];
+      understanding.basis = `kinds of the category named on ${SUPPORT_HOSTS}+ sites: ${named.map((member) => member.label).join(', ')}`;
+    }
+  }
   understanding.ready = understanding.object.length > 0 && understanding.terms.length > 0;
   return understanding;
 }

@@ -19,7 +19,7 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
-import { CONCEPT_PAGES, CONCEPT_SAMPLES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase } from './concept.mjs';
+import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, lowPriceCut, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
@@ -612,6 +612,7 @@ export class ResearchEngine {
   async studyDomain(project) {
     if (!this.router || this.demo || !this.search?.search) return true;
     if (project.domain?.ready) return true;
+    await this.ensureDecisionModel(project);
     const purpose = project.decisionModel?.purpose ?? '';
     const kind = project.decisionModel?.kind ?? null;
     const object = kind ? [kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
@@ -630,7 +631,7 @@ export class ResearchEngine {
       replies.push(answer);
     }
     const findings = mergeFindings(replies, sources);
-    const understanding = domainUnderstanding(findings, { hint, sources });
+    const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [] });
     const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
     const matchedTitles = Number(project.decisionModel?.kind?.verified?.matched ?? 0);
     const sweptListings = (project.sweep?.pages ?? []).reduce((n, page) => n + (page.listings?.length ?? 0), 0);
@@ -690,8 +691,42 @@ export class ResearchEngine {
     const fallback = conceptQueries(kind, brief, languages);
     if (!this.router || this.demo) return fallback;
     const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: conceptQueryPrompt({ kind, question: project.question, languages }) }).catch(() => null);
-    const proposed = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 6).slice(0, 6);
+    const proposed = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 6).slice(0, conceptQueryCount(kind));
     return proposed.length >= 3 ? proposed : fallback;
+  }
+
+  async validateUmbrella(project, brief, kind) {
+    const queries = await this.conceptQueriesFor(project, brief, kind);
+    const limit = conceptPageLimit(kind);
+    const found = await this.search.search(queries, { maxSources: limit }).catch(() => []);
+    const pages = conceptPages(found, limit);
+    if (pages.length < MIN_PAGES) {
+      project.phase = 'needs-concept';
+      this.emit(project, 'phase', `research paused: ${pages.length ? 'one page' : 'no page'} about the kinds of "${kind.label}" was found — name the kinds you mean in the Hints field`);
+      return false;
+    }
+    const replies = await Promise.all(Array.from({ length: CONCEPT_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: conceptCardPrompt({ kind, question: project.question, pages }) }).catch(() => null)));
+    const card = applyConceptCard(mergeConceptCards(replies).data, pages);
+    const members = groundMembers(kind.members, card.members ?? [], pages);
+    const confirmed = members.filter((member) => member.grounded.length);
+    if (confirmed.length < MIN_MEMBERS) {
+      project.phase = 'needs-concept';
+      this.emit(project, 'phase', `research paused: the ${pages.length} page(s) about "${kind.label}" confirm ${confirmed.length ? `only ${confirmed.map((member) => member.label).join(', ')}` : 'none of its kinds'} — name the kinds you mean in the Hints field`);
+      return false;
+    }
+    const groundedTerms = [...new Set(confirmed.flatMap((member) => member.grounded))];
+    project.decisionModel.kind = {
+      ...kind,
+      terms: [...new Set([...groundedTerms, ...(kind.terms ?? []), ...members.flatMap((member) => member.terms)])],
+      members: members.map(({ label, terms, grounded }) => ({ label, terms, grounded: grounded.length > 0 })),
+      not: [...new Set([...(kind.not ?? []), ...card.not])],
+      hubs: [...new Set([...(kind.hubs ?? []), ...card.hubs])],
+      validated: { pages: pages.length, terms: groundedTerms, members: confirmed.map((member) => member.label), at: new Date().toISOString() },
+    };
+    const unconfirmed = members.filter((member) => !member.grounded.length).map((member) => member.label);
+    this.emit(project, 'decision', `item kind "${kind.label}" confirmed as a category on ${pages.length} page(s): ${confirmed.length} kind(s) named by sellers (${confirmed.map((member) => member.label).join(', ')})${unconfirmed.length ? `; kept without a page yet: ${unconfirmed.join(', ')}` : ''}; not ${card.not.join(', ') || 'none'}${card.hubs.length ? `; sellers concentrated in ${card.hubs.join(', ')}` : ''}`);
+    this.briefOf(project);
+    return true;
   }
 
   async validateConcept(project) {
@@ -701,6 +736,7 @@ export class ResearchEngine {
     if (!kind) return true;
     if (kind.validated?.terms?.length) return true;
     if (!this.router || !this.search?.search || this.demo) return true;
+    if (isUmbrella(kind)) return this.validateUmbrella(project, brief, kind);
     const queries = await this.conceptQueriesFor(project, brief, kind);
     const found = await this.search.search(queries, { maxSources: CONCEPT_PAGES }).catch(() => []);
     const pages = conceptPages(found);
@@ -1494,7 +1530,7 @@ export class ResearchEngine {
     project.kindRejected = project.kindRejected ?? [];
     const kindRejectedSet = new Set(project.kindRejected);
     const deliverables = (brief.located === false
-      ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, regions: brief.regions ?? [], readPage })
+      ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage })
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
       .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
     project.report.deliverables = deliverables;

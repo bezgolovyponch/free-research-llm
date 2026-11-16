@@ -5,9 +5,10 @@ import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
 import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
+import { MAX_MEMBERS, MIN_MEMBERS, memberTerms, sameMember } from './concept.mjs';
 
 export { CHECKLIST_VERSION };
-export const DECISION_MODEL_VERSION = 3;
+export const DECISION_MODEL_VERSION = 4;
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
 export const CASES_RETRIEVED = 2;
@@ -74,12 +75,16 @@ export function normalizeSample(raw) {
   })).filter((c) => MEASURES[c.measure] && c.op);
   const terms = (Array.isArray(raw?.kind?.terms) ? raw.kind.terms : []).map((t) => plain(String(t)).trim()).filter((t) => t && t.length <= 30).slice(0, 30);
   const not = (Array.isArray(raw?.kind?.not) ? raw.kind.not : []).map((t) => plain(String(t)).trim()).filter((t) => t && t.length <= 40).slice(0, 40);
+  const members = (Array.isArray(raw?.kind?.members) ? raw.kind.members : [])
+    .map((m) => ({ label: String(m?.label ?? '').trim().slice(0, 60), terms: memberTerms({ label: m?.label, terms: Array.isArray(m?.terms) ? m.terms : [] }).filter((t) => t.length <= 30).slice(0, 8) }))
+    .filter((m) => m.label && m.terms.length)
+    .slice(0, MAX_MEMBERS);
   return {
     concept: String(raw?.concept ?? '').slice(0, 300),
     purpose: words(raw?.purpose, 240),
     value: words(raw?.value, 240),
     needs,
-    kind: { label: String(raw?.kind?.label ?? '').slice(0, 60), terms, not },
+    kind: { label: String(raw?.kind?.label ?? '').slice(0, 60), terms, not, members },
     criteria,
     unmodelled: (Array.isArray(raw?.unmodelled) ? raw.unmodelled : []).map((u) => String(u).slice(0, 200)).filter(Boolean).slice(0, 12),
   };
@@ -90,6 +95,25 @@ const median = (values) => {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
+
+export function votedMembers(samples, majority) {
+  const umbrellas = samples.filter((sample) => (sample.kind.members?.length ?? 0) >= MIN_MEMBERS);
+  if (umbrellas.length < majority) return [];
+  const clusters = [];
+  samples.forEach((sample, index) => {
+    for (const member of sample.kind.members ?? []) {
+      const cluster = clusters.find((c) => sameMember(c, member));
+      if (cluster) {
+        cluster.terms = [...new Set([...cluster.terms, ...memberTerms(member)])];
+        cluster.voters.add(index);
+      } else {
+        clusters.push({ label: member.label, terms: memberTerms(member), voters: new Set([index]) });
+      }
+    }
+  });
+  const kept = clusters.filter((c) => c.voters.size >= majority).sort((a, b) => b.voters.size - a.voters.size).slice(0, MAX_MEMBERS);
+  return kept.length >= MIN_MEMBERS ? kept.map(({ label, terms }) => ({ label, terms })) : [];
+}
 
 const NOT_A_CASE_LIMIT = new Set(['assumption', 'question', 'guidance']);
 
@@ -142,6 +166,8 @@ export function aggregate(samples, { question = '', guidance = '', cases = [], i
   const not = [...notVotes].filter(([, v]) => v >= majority).map(([t]) => t);
   const labels = samples.map((s) => s.kind.label).filter(Boolean);
   const label = labels.sort((a, b) => labels.filter((x) => x === b).length - labels.filter((x) => x === a).length)[0] ?? '';
+  const members = votedMembers(samples, majority);
+  const kindTerms = [...new Set([...terms, ...members.flatMap((m) => m.terms)])];
   const clauses = clausesOf(question).map((text) => ({ text, criteria: criteria.filter((c) => (c.quote && quoteFound(text, c.quote)) || (c.clause && quoteFound(text, c.clause)) || (c.clause && quoteFound(c.clause, text))).map((c) => c.id) }));
   const wanted = contentWords(said);
   let chosen = null;
@@ -160,7 +186,7 @@ export function aggregate(samples, { question = '', guidance = '', cases = [], i
     value: chosen?.value || null,
     needs: chosen?.needs ?? [],
     purposeGrounded,
-    kind: terms.length ? { label: label || terms[0], terms, ...(not.length ? { not } : {}), verified: null } : null,
+    kind: kindTerms.length ? { label: label || kindTerms[0], terms: kindTerms, ...(not.length ? { not } : {}), ...(members.length ? { members } : {}), verified: null } : null,
     criteria,
     noLimit,
     clauses,
@@ -232,9 +258,9 @@ export function applyCalibration(kind, reply, titles, { itemTitles = [] } = {}) 
 
 export function decisionPrompt({ question, guidance = '', expected = '', examples = [] }) {
   const measures = Object.entries(MEASURES).map(([id, m]) => `- ${id}: ${m.label} (${m.unit})`).join('\n');
-  const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [] } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
+  const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [], ...(c.kind.members?.length ? { members: c.kind.members.map((m) => ({ label: m.label, terms: m.terms })) } : {}) } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
   return [
-    { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label, the words (in English and in the languages of the named countries) that listing titles use for it, and "not", the words (in English and in the languages of the named countries, and of the countries around a named place) that listing titles use for things sold alongside the item that are not the item itself (parts, accessories, wanted ads, services).\n"purpose" is one sentence "<who> wants <outcome> so that <value>" in the user's own terms, naming the decision the result serves. "value" is one sentence naming the result worth having and how it is judged (for example "a shortlist of <N> <items> within <distance> of <place>, each at or below <limit> and below the median price of comparable items"). "needs" is up to 8 items {"need": "...", "kind": "listings" | "knowledge" | "computed", "sources": ["a domain or a source type", up to 4]} where listings are read by code from portals, knowledge is researched by tree pieces, and computed is derived by code from the listings table. Answer with JSON only: {"concept": "...", "purpose": "...", "value": "...", "needs": [...], "kind": {"label": "...", "terms": ["..."], "not": ["..."]}, "criteria": [...], "unmodelled": ["..."]}` },
+    { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label, the words (in English and in the languages of the named countries) that listing titles use for it, and "not", the words (in English and in the languages of the named countries, and of the countries around a named place) that listing titles use for things sold alongside the item that are not the item itself (parts, accessories, wanted ads, services). When the item asked is a category that covers several distinct kinds of seller or item (one asks for "home improvement contractors" and means roofers, plumbers, electricians and the like), "kind" also lists in "members" every kind the question reasonably covers, each {"label": "...", "terms": ["..."]} with the words its own sellers use, and "terms" holds the words for the category as a whole; "members" is [] when the item is one kind.\n"purpose" is one sentence "<who> wants <outcome> so that <value>" in the user's own terms, naming the decision the result serves. "value" is one sentence naming the result worth having and how it is judged (for example "a shortlist of <N> <items> within <distance> of <place>, each at or below <limit> and below the median price of comparable items"). "needs" is up to 8 items {"need": "...", "kind": "listings" | "knowledge" | "computed", "sources": ["a domain or a source type", up to 4]} where listings are read by code from portals, knowledge is researched by tree pieces, and computed is derived by code from the listings table. Answer with JSON only: {"concept": "...", "purpose": "...", "value": "...", "needs": [...], "kind": {"label": "...", "terms": ["..."], "not": ["..."], "members": [{"label": "...", "terms": ["..."]}]}, "criteria": [...], "unmodelled": ["..."]}` },
     { role: 'user', content: `${shots ? `Approved examples:\n${shots}\n\n` : ''}Question: ${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
   ];
 }
@@ -410,7 +436,8 @@ function carried(before, model) {
   if (!was || !model.kind || plain(was.label).trim() !== plain(model.kind.label).trim()) return model;
   const not = [...new Set([...(model.kind.not ?? []), ...(was.not ?? [])])];
   const terms = [...new Set([...(was.validated?.terms ?? []), ...model.kind.terms])];
-  return { ...model, ...defined(before, MODEL_STATE), kind: { ...model.kind, terms, ...(not.length ? { not } : {}), ...defined(was, KIND_STATE) } };
+  const members = was.validated && was.members?.length ? { members: was.members } : {};
+  return { ...model, ...defined(before, MODEL_STATE), kind: { ...model.kind, terms, ...(not.length ? { not } : {}), ...members, ...defined(was, KIND_STATE) } };
 }
 
 export class DecisionModeler {
