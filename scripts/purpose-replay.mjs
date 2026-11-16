@@ -4,11 +4,12 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { familyOf } from '../src/llm/ranking.mjs';
 import { buildMatrix, diagnosticRows, pricedIn } from '../src/research/ach.mjs';
+import { buildBrief, countryByCode } from '../src/research/brief.mjs';
 import { lowPriceStats } from '../src/research/candidates.mjs';
 import { ChecklistJudge, hardenKind, migrateChecks } from '../src/research/checklist.mjs';
 import { HostBook, gatherEvidence, identify, subjectKey } from '../src/research/facts.mjs';
-import { COST_CHECKERS, COST_PHASES, COST_ROLE, METHOD_ID, MIN_EXPLANATIONS, PRICE_CHECKER, VALUE_ROLE, buildPurposeTree, openEntries, tensionGoalsOf } from '../src/research/purpose.mjs';
-import { MIN_KEPT_SOURCES, PAGE_CHARS, composeQueries, judgeSource, relevanceReason, runScoping, screenSources } from '../src/research/scoping.mjs';
+import { COST_CHECKERS, COST_PHASES, COST_ROLE, METHOD_ID, MIN_EXPLANATIONS, PRICE_CHECKER, VALUE_ROLE, buildPurposeTree, coverageOf, openEntries, tensionGoalsOf } from '../src/research/purpose.mjs';
+import { KNOWLEDGE, MIN_HOSTS, MIN_PERSPECTIVES, OFF_MARKET, PAGE_CHARS, composeQueries, diversityOf, judgeSource, relevanceReason, runScoping, screenSources } from '../src/research/scoping.mjs';
 import { CallBudget } from '../src/research/semantic.mjs';
 import { sentenceSpans } from '../src/research/spans.mjs';
 import { verdict } from '../src/research/verdict.mjs';
@@ -95,13 +96,53 @@ function treeQuestions(tree) {
   return (tree?.goals ?? []).filter((goal) => goal.state === 'kept').flatMap((goal) => goal.questions ?? []).map((question) => ({ id: question.id, q: question.q, checker: question.checker }));
 }
 
-async function secondOpinions(ctx, pages, input) {
-  let agreed = 0;
+export const SECOND = { agrees: 'agrees', disagrees: 'disagrees', unjudged: 'not judged', same: 'same provider' };
+
+export async function secondOpinions(ctx, pages, input) {
+  const rows = [];
   for (const page of pages) {
     const again = await judgeSource(ctx, { source: page, ...input, avoid: page.judgedBy ? [page.judgedBy] : undefined });
-    if (again.verdict && !relevanceReason(again.verdict)) agreed += 1;
+    const reason = again.verdict ? relevanceReason(again.verdict, page.role) : again.reason;
+    const state = !again.verdict ? SECOND.unjudged : !again.provider || again.provider === page.judgedBy ? SECOND.same : reason ? SECOND.disagrees : SECOND.agrees;
+    rows.push({ url: page.url, role: page.role ?? null, first: { about: page.about, market: page.market, span: page.span, by: page.judgedBy ?? null }, second: again.verdict ? { about: again.verdict.about, market: again.verdict.market, span: again.verdict.span, by: again.provider ?? null } : null, state, reason });
   }
-  return { agreed, total: pages.length };
+  const count = (state) => rows.filter((row) => row.state === state).length;
+  return { agreed: count(SECOND.agrees), disagreed: count(SECOND.disagrees), unjudged: count(SECOND.unjudged), same: count(SECOND.same), total: pages.length, rows };
+}
+
+export function offMarketDrops(scoping) {
+  const drops = (scoping?.dropped ?? []).filter((entry) => String(entry.reason ?? '').startsWith(OFF_MARKET));
+  return { total: drops.length, knowledge: drops.filter((entry) => entry.role === KNOWLEDGE).length, unrecorded: drops.filter((entry) => !entry.role).length };
+}
+
+export function coverageMetric(tree, anchors = []) {
+  if (!tree) return { value: 'no tree', pass: false };
+  const coverage = coverageOf(tree, anchors);
+  const textOf = new Map([...anchors, ...(tree.notModelled ?? [])].map((entry) => [entry.id, entry.text]));
+  const named = (ids) => ids.map((id) => `${id} ${textOf.get(id) ?? ''}`.trim()).join(' | ');
+  return {
+    value: `${coverage.covered.length} of ${coverage.anchors} requirement(s) in a kept goal; not modelled: ${named(coverage.notModelled) || 'none'}${coverage.silent.length ? `; neither covered nor listed: ${named(coverage.silent)}` : ''}`,
+    pass: coverage.notModelled.length === 0 && coverage.silent.length === 0,
+  };
+}
+
+export async function storedProject(dir, id) {
+  const file = (await fs.readdir(dir).catch(() => [])).find((name) => name.startsWith(id) && name.endsWith('.json'));
+  if (!file) return null;
+  return fs.readFile(path.join(dir, file), 'utf8').then(JSON.parse).catch(() => null);
+}
+
+export function storedEntry(entry, project) {
+  const brief = buildBrief({ question: project.question, acceptance: project.acceptance ?? {}, constraints: project.constraints ?? {} });
+  const regions = brief.regions.length ? brief.regions : project.area?.countries ?? [];
+  return { ...entry, question: project.question, guidance: String(project.guidance ?? ''), regions, markets: regions.map((code) => countryByCode(code)?.name ?? code), stored: true };
+}
+
+export async function replayInputs(entry, projects) {
+  if (!projects || !entry?.project) return { entry, rows: [] };
+  const project = await storedProject(projects, entry.project);
+  if (!project || typeof project.question !== 'string' || !project.question.trim()) return { error: `the stored research ${entry.project} is not readable in ${projects}: with --projects its question, hints and regions come only from the stored research, so it was not run` };
+  return { entry: storedEntry(entry, project), rows: project.candidates?.kept ?? [] };
 }
 
 async function rejudge(ctx, fixture, kind) {
@@ -183,11 +224,16 @@ export function metricRows(mode, run, baseline) {
   const goals = tree?.goals ?? [];
   const tensions = tensionMetric(tree, run.expect?.tensions);
   const sides = sidesMetric(tree);
-  add('sources', 'Kept scoping sources judged on subject and market', baseline.sources, `${run.scoping.sources.length} kept, ${run.scoping.dropped.length} dropped`, `>= ${MIN_KEPT_SOURCES} kept`, run.scoping.sources.length >= MIN_KEPT_SOURCES);
-  add('second-opinion', 'Kept sources another provider agrees with', 'not measured', percent(run.second.agreed, run.second.total), '>= 80%', run.second.total > 0 && share(run.second.agreed, run.second.total) >= 0.8);
+  const diversity = diversityOf(run.scoping.sources);
+  const offMarket = offMarketDrops(run.scoping);
+  const coverage = coverageMetric(tree, run.anchors);
+  add('sources', 'Kept scoping sources: distinct hosts across perspectives', baseline.sources, `${run.scoping.sources.length} kept from ${diversity.hosts} host(s) across ${diversity.perspectives} perspective(s), ${run.scoping.dropped.length} dropped`, `>= ${MIN_HOSTS} hosts across >= ${MIN_PERSPECTIVES} perspectives`, diversity.enough);
+  add('roles', 'Knowledge sources dropped as off-market', baseline.roles, `${offMarket.knowledge} knowledge, ${offMarket.unrecorded} without a voted role, of ${offMarket.total} off-market drop(s)`, '0 knowledge, 0 without a voted role', offMarket.knowledge === 0 && offMarket.unrecorded === 0);
+  add('second-opinion', 'Kept sources another provider agrees with, on the same sentences and the same role', 'not measured', `${percent(run.second.agreed, run.second.total)}; ${run.second.disagreed ?? 0} disagree, ${run.second.unjudged ?? 0} not judged, ${run.second.same ?? 0} answered by the same provider`, '>= 80%', run.second.total > 0 && share(run.second.agreed, run.second.total) >= 0.8);
   add('notes', 'Scoping notes with a quote on the page', baseline.notes, percent(run.notesOnPage, run.scoping.notes.length), '100%', run.notesOnPage === run.scoping.notes.length);
   add('tensions', 'Tension goals only for voted pairs of the stated requirements, every explanation cited from a scoping note', baseline.tensions, tensions.value, tensions.target, tensions.pass);
   add('value-cost', 'Value side and total-cost side present exactly when the result consumes resources', baseline.valueCost, sides.value, 'both sides with the three cost phases when it consumes, neither otherwise', sides.pass);
+  add('coverage', 'Requirements in a kept goal; none silently left out', baseline.coverage ?? 'not measured', coverage.value, 'every requirement in a kept goal', coverage.pass);
   const thresholds = tree?.thresholds ?? [];
   const invented = goals.flatMap((goal) => [goal, ...(goal.questions ?? []), ...(Array.isArray(goal.obstacles) ? goal.obstacles : [])]).reduce((sum, node) => sum + (node.inventedNumber?.length ?? 0), 0);
   const unlabelled = thresholds.filter((threshold) => !['asked', 'sourced', 'assumption'].includes(threshold.source)).length;
@@ -231,12 +277,12 @@ export async function runReplay({ mode, entry, out, router, search, embedder, fi
   const ctx = { router, search, embedder, budget, log };
   const ledgerStart = (router.ledger ?? []).length;
   const spoken = (entry.languages ?? languages ?? ['English']).slice(0, MAX_LANGUAGES);
-  const input = { purpose: entry.question, subject: entry.kind, markets: entry.markets ?? [], regions: entry.regions ?? [] };
   const { scoping, pages } = await runScoping(ctx, { question: entry.question, purpose: entry.question, kind: entry.kind, regions: entry.regions ?? [], markets: entry.markets ?? [], languages: spoken, rows, titles: rows.map((row) => row.title).filter(Boolean) });
   await write('0-scope-plan', { levels: scoping.levels, languages: scoping.languages, subjects: scoping.subjects, perspectives: scoping.perspectives, queries: scoping.queries, embedModel: scoping.embedModel });
-  await write('0-scope-sources', { kept: scoping.sources, dropped: scoping.dropped, enough: scoping.enough });
+  await write('0-scope-sources', { kept: scoping.sources, dropped: scoping.dropped, diversity: scoping.diversity, enough: scoping.enough });
   await write('0-scope-notes', scoping.notes);
-  const second = await secondOpinions(ctx, pages, input);
+  const second = await secondOpinions(ctx, pages, { ...scoping.screened, markets: entry.markets ?? [], regions: entry.regions ?? [] });
+  await write('0-scope-second', second);
   const notesOnPage = scoping.notes.filter((note) => quoteOfSpans(note.quote, sentenceSpans(pages.find((page) => page.url === note.url)?.text ?? '', { limit: PAGE_CHARS }))).length;
   const built = await buildPurposeTree(ctx, { question: entry.question, guidance: entry.guidance ?? '', notes: scoping.notes });
   await write('1-tree', { phase: built.phase, anchors: built.anchors, tree: built.tree, open: openEntries(built.tree) });
@@ -256,7 +302,7 @@ export async function runReplay({ mode, entry, out, router, search, embedder, fi
   }
   const ledger = (router.ledger ?? []).slice(ledgerStart);
   await write('ledger', ledger);
-  const run = { scoping, second, notesOnPage, tree: built.tree, phase: built.phase, car, expect: entry.expect ?? {}, banned: bannedCalls(ledger, env), budget: budget.report() };
+  const run = { scoping, second, notesOnPage, tree: built.tree, anchors: built.anchors, phase: built.phase, car, expect: entry.expect ?? {}, banned: bannedCalls(ledger, env), budget: budget.report() };
   const metrics = metricRows(mode, run, baseline);
   await write('metrics', { mode, phase: built.phase, enough: scoping.enough, metrics });
   return { run, metrics };
@@ -277,13 +323,14 @@ async function main(argv) {
   const embedder = new Embedder({ env: process.env, dir: path.join(args.out, 'embeddings') });
   let failed = 0;
   for (const mode of args.modes) {
-    const entry = questions[mode];
-    let rows = [];
-    if (args.projects && entry.project) {
-      const file = (await fs.readdir(args.projects).catch(() => [])).find((name) => name.startsWith(entry.project) && name.endsWith('.json'));
-      const project = file ? JSON.parse(await fs.readFile(path.join(args.projects, file), 'utf8')) : null;
-      rows = project?.candidates?.kept ?? [];
+    const inputs = await replayInputs(questions[mode], args.projects);
+    if (inputs.error) {
+      console.error(`\n== ${mode} ==\n${inputs.error}`);
+      failed += 1;
+      continue;
     }
+    const { entry, rows } = inputs;
+    if (entry.stored) console.log(`  ${mode}: question, hints (${entry.guidance.length} characters) and regions (${entry.regions.join(', ') || 'none'}) read from the stored research ${entry.project}`);
     const baseline = await readBaseline(args.baseline ?? SIM_OUT, mode);
     const { metrics } = await runReplay({ mode, entry, out: args.out, router: app.router, search: app.search, embedder, fixture, rows, languages: app.engine.conceptLanguages(entry.regions ?? []), baseline, log: (line) => console.log(`  ${line}`) });
     console.log(tableText(mode, metrics));

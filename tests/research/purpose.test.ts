@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, consumesVote, costSide, critique, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, requirementsOf, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide } from '../../src/research/purpose.mjs';
+import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, confirmTree, consumesVote, costSide, coverageOf, coveredAnchors, critique, dismissNotModelled, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, requirementsOf, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide } from '../../src/research/purpose.mjs';
 import { CallBudget, STAGE_CAPS } from '../../src/research/semantic.mjs';
 import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
@@ -605,9 +605,9 @@ describe('a number nobody stated never stays in goal, question or obstacle text'
 
 describe('the critique returns operations that code applies or refuses', () => {
   const goals = [
-    { id: 'G1', goal: 'A scenic location', state: 'kept', anchor: 'C1', questions: [{ id: 'Q1', q: 'a', checker: 'page' }], obstacles: [] },
-    { id: 'G2', goal: 'Beautiful surroundings', state: 'kept', anchor: 'C1', questions: [{ id: 'Q2', q: 'b', checker: 'official' }], obstacles: [] },
-    { id: 'G3', goal: 'Low entry cost', state: 'kept', anchor: 'C2', questions: [{ id: 'Q3', q: 'c', checker: 'page' }], obstacles: [] },
+    { id: 'G1', goal: 'A scenic location', state: 'kept', anchor: 'C1', trace: { id: 'C1', text: 'a scenic location' }, questions: [{ id: 'Q1', q: 'a', checker: 'page' }], obstacles: [] },
+    { id: 'G2', goal: 'Beautiful surroundings', state: 'kept', anchor: 'C1', trace: { id: 'C1', text: 'a scenic location' }, questions: [{ id: 'Q2', q: 'b', checker: 'official' }], obstacles: [] },
+    { id: 'G3', goal: 'Low entry cost', state: 'kept', anchor: 'C2', trace: { id: 'C2', text: 'low entry cost' }, questions: [{ id: 'Q3', q: 'c', checker: 'page' }], obstacles: [] },
   ];
   const tree = { goals, ops: { applied: [], refused: [] } };
 
@@ -636,7 +636,15 @@ describe('the critique returns operations that code applies or refuses', () => {
     expect(out.ops.applied).toEqual([{ op: 'drop', id: 'G3', reason: 'B', goal: 'Low entry cost', anchor: 'C2' }, { op: 'checker', id: 'Q1', checker: 'official' }]);
     expect(out.goals[0].questions[0].checker).toBe('official');
     expect(notModelledOf(tree, anchors)).toEqual([]);
-    expect(notModelledOf(out, anchors)).toEqual([{ id: 'C2', text: 'low entry cost' }]);
+    expect(notModelledOf(out, anchors)).toEqual([{ id: 'C2', kind: 'clause', text: 'low entry cost' }]);
+  });
+
+  it('keeps the requirement of a goal that was merged away covered by the goal that absorbed it', async () => {
+    const anchors = await split('a scenic location, low entry cost');
+    const merged = await applyOps({ router: fakeRouter({ 'same-goal': { same: 'A' } }) }, tree, [{ op: 'merge', a: 'G1', b: 'G3' }]);
+    expect(merged.goals.map((g: { id: string }) => g.id)).toEqual(['G1', 'G2']);
+    expect(merged.goals[0].anchors).toEqual(['C2']);
+    expect(notModelledOf(merged, anchors)).toEqual([]);
   });
 
   it('sends an added goal through refine and trace before it joins the tree', async () => {
@@ -646,6 +654,57 @@ describe('the critique returns operations that code applies or refuses', () => {
     expect(out.goals[3]).toMatchObject({ id: 'G4', goal: 'Marketing plan', state: 'proposed' });
     expect(out.goals[3].questions[0].id).toBe('Q4');
     expect(out.ops.applied).toEqual([{ op: 'add', goal: 'Marketing plan', anchor: 'C1', state: 'proposed' }]);
+  });
+});
+
+describe('coverage invariant: every requirement is in a kept goal or listed as not modelled', () => {
+  const anchors = [{ id: 'C1', kind: 'clause', text: 'find a tent' }, { id: 'C2', kind: 'clause', text: 'proven good quality' }, { id: 'C3', kind: 'clause', text: 'a low price' }, { id: 'C4', kind: 'clause', text: 'sellers in two countries' }, { id: 'H1', kind: 'hint', text: 'ask the forum' }];
+  const question = [{ id: 'Q1', q: 'a', checker: 'page' }];
+  const goal = (id: string, trace: string | null, more: object = {}) => ({ id, goal: id, state: 'kept', trace: trace ? { id: trace, text: trace } : null, questions: question, ...more });
+  const implications = [{ id: 'I1', attribute: 'quality', direction: 'high', anchor: 'C2' }];
+
+  it('counts a requirement as covered only by a kept goal with a question that a vote traced to it, also through an implication', () => {
+    const tree = { implications, goals: [goal('G1', 'C1'), goal('G2', 'I1'), goal('G3', 'C3', { state: 'proposed' }), goal('G4', 'C4', { questions: [] }), goal('G5', null, { role: 'tension', anchors: ['C3', 'C4'] }), goal('G6', 'P', { anchor: 'C3' })] };
+    expect([...coveredAnchors(tree)].sort()).toEqual(['C1', 'C2', 'I1', 'P']);
+    expect(notModelledOf(tree, anchors)).toEqual([{ id: 'C3', kind: 'clause', text: 'a low price' }, { id: 'C4', kind: 'clause', text: 'sellers in two countries' }]);
+    expect(notModelledOf({ ...tree, goals: [...tree.goals, goal('G7', 'C3'), goal('G8', 'C4')] }, anchors)).toEqual([]);
+  });
+
+  it('does not count a requirement as covered through an implication when its own goal could not be refined', () => {
+    const dropped = [{ goal: 'Proven quality', reason: UNREFINED, trace: { id: 'C2', text: 'proven good quality' } }, { goal: 'Other', reason: 'another reason', trace: { id: 'C1', text: 'find a tent' } }];
+    const tree = { implications, dropped, goals: [goal('G1', 'C1'), goal('G2', 'I1')] };
+    expect([...coveredAnchors(tree)].sort()).toEqual(['C1', 'I1']);
+    expect(notModelledOf(tree, anchors).map((entry: { id: string }) => entry.id)).toEqual(['C2', 'C3', 'C4']);
+    expect([...coveredAnchors({ ...tree, goals: [...tree.goals, goal('G3', 'C2')] })].sort()).toEqual(['C1', 'C2', 'I1']);
+  });
+
+  it('finds a requirement that is neither covered nor listed: the silent gap', () => {
+    const tree = { implications, goals: [goal('G1', 'C1'), goal('G2', 'I1')], notModelled: [{ id: 'C3', kind: 'clause', text: 'a low price' }] };
+    expect(coverageOf(tree, anchors)).toEqual({ anchors: 4, covered: ['C1', 'C2'], notModelled: ['C3'], silent: ['C4'] });
+    expect(coverageOf({ ...tree, notModelled: notModelledOf(tree, anchors) }, anchors).silent).toEqual([]);
+  });
+
+  it('blocks confirmation while an entry is not dismissed, and keeps a dismissal when the tree is rebuilt', () => {
+    const tree = { implications, goals: [goal('G1', 'C1'), goal('G2', 'I1')], thresholds: [], confirmedAt: null as string | null, notModelled: [] as { id: string; text: string; dismissedAt?: string }[] };
+    tree.notModelled = notModelledOf(tree, anchors);
+    expect(openEntries(tree)).toEqual([
+      { id: 'C3', kind: 'not-modelled', text: 'a low price', reason: 'no kept goal with a measurable question covers this requirement: dismiss it, or rebuild the tree' },
+      { id: 'C4', kind: 'not-modelled', text: 'sellers in two countries', reason: 'no kept goal with a measurable question covers this requirement: dismiss it, or rebuild the tree' },
+    ]);
+    const refused = confirmTree(tree, { at: '2026-11-16T10:00:00Z' });
+    expect(refused).toMatchObject({ ok: false, reason: '2 requirement(s) are not modelled by any kept goal and were not dismissed: C3 a low price | C4 sellers in two countries' });
+    expect(refused.tree.confirmedAt).toBeNull();
+    expect(needsConfirmation({ ...tree, confirmedAt: '2026-11-16T10:00:00Z' })).toBe(true);
+    const one = dismissNotModelled(tree, 'C3', { at: '2026-11-16T10:01:00Z' });
+    expect(confirmTree(one).blocked.map((entry: { id: string }) => entry.id)).toEqual(['C4']);
+    const both = dismissNotModelled(dismissNotModelled(one, 'C4', { at: '2026-11-16T10:02:00Z' }), 'C9');
+    expect(openEntries(both)).toEqual([]);
+    expect(needsConfirmation(both)).toBe(false);
+    const confirmed = confirmTree(both, { at: '2026-11-16T10:03:00Z' });
+    expect(confirmed).toMatchObject({ ok: true, blocked: [] });
+    expect(confirmed.tree.confirmedAt).toBe('2026-11-16T10:03:00Z');
+    expect(notModelledOf(both, anchors)).toEqual([{ id: 'C3', kind: 'clause', text: 'a low price', dismissedAt: '2026-11-16T10:01:00Z' }, { id: 'C4', kind: 'clause', text: 'sellers in two countries', dismissedAt: '2026-11-16T10:02:00Z' }]);
+    expect(notModelledOf(both, anchors.map((anchor) => (anchor.id === 'C3' ? { ...anchor, text: 'a low total price' } : anchor)))[0]).toEqual({ id: 'C3', kind: 'clause', text: 'a low total price' });
   });
 });
 
@@ -790,8 +849,9 @@ describe('the whole tree', () => {
     expect(tree.ops.refused.map((entry: { why: string }) => entry.why)).toEqual([`"${tension.goal}" is a protected tension goal`, `"${VALUE_GOAL}" is a protected value goal`, `"${COST_GOAL}" is a protected cost goal`]);
     expect(tree.goals.filter((g: { state: string; trace: unknown }) => g.state === 'kept' && !g.trace)).toEqual([]);
     expect(tree.thresholds).toEqual([{ node: 'Q1', goal: 'G1', op: '>=', value: 5, unit: 'years', source: 'assumption', hard: false }]);
-    expect(openEntries(tree).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['G3', 'goal'], ['Q1', 'threshold']]);
-    expect(tree.notModelled).toEqual([{ id: 'C1', text: 'Find a tent to buy' }]);
+    expect(openEntries(tree).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['C1', 'not-modelled'], ['G3', 'goal'], ['Q1', 'threshold']]);
+    expect(tree.notModelled).toEqual([{ id: 'C1', kind: 'clause', text: 'Find a tent to buy' }]);
+    expect(log).toContain('1 requirement(s) not modelled by any kept goal: C1 Find a tent to buy; the tree cannot be confirmed until each is dismissed');
     expect(tree.unrefined).toEqual([]);
     expect(tree.confirmedAt).toBeNull();
     expect(budget.caps.tree).toBe(72);
@@ -811,7 +871,14 @@ describe('the whole tree', () => {
     expect(without.tree.consumes).toMatchObject({ value: false, decided: true });
     expect(without.tree.valueForCost).toBeNull();
     expect(tensionGoalsOf(without.tree)).toEqual([]);
-    expect(without.phase).toBe('tree-ready');
+    expect(without.tree.notModelled.map((entry: { id: string }) => entry.id)).toEqual(['C1', 'C3']);
+    expect(without.phase).toBe('needs-confirmation');
+    const named = ['Libraries that read documents', 'Actively maintained', 'Well documented'];
+    const traceEach = (request: Ask) => ({ anchor: pickLetter(request, (text) => text.toLowerCase().endsWith(request.messages[1].content.split('\n')[0].toLowerCase().split(' ').pop()!)), relation: 'S' });
+    const covering = await buildPurposeTree({ router: fakeRouter({ ...script({ consumes: false }), goals: { goals: named.map((goal, index) => ({ goal, anchor: `C${index + 1}`, notes: [] })) }, trace: traceEach }), embedder: fakeEmbedder(), budget: new CallBudget() }, { question });
+    expect(covering.tree.goals.map((g: { trace: { id: string } }) => g.trace.id)).toEqual(['C1', 'C2', 'C3']);
+    expect(covering.tree.notModelled).toEqual([]);
+    expect(covering.phase).toBe('tree-ready');
     const router = fakeRouter(script({ consumes: true }));
     const withSides = await buildPurposeTree({ router, embedder: fakeEmbedder(), budget: new CallBudget() }, { question });
     expect(withSides.tree.goals.map((g: { goal: string; role?: string }) => [g.goal, g.role ?? ''])).toEqual([['Actively maintained', ''], [VALUE_GOAL, 'value'], [COST_GOAL, 'cost']]);

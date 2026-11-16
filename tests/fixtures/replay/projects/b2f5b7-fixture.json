@@ -1,0 +1,15 @@
+{
+ "id": "b2f5b7-fixture",
+ "question": "Find wholesale branded second hand clothing providers for a retail second hand shop in Czech Republic and Slovakia",
+ "guidance": "Supplier countries: NL, DE, UK, IT, PL, LT",
+ "acceptance": {},
+ "constraints": {},
+ "candidates": {
+  "kept": [
+   {
+    "url": "https://supplier.example.nl/offer",
+    "title": "Branded mix, sorted"
+   }
+  ]
+ }
+}

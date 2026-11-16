@@ -39,6 +39,7 @@ export const TREE_STAGE = 'tree';
 export const TREE_CALLS_PER_GOAL = 12;
 export const TREE_MIN_CAP = 60;
 export const UNREFINED = 'not refined into measurable questions';
+export const NOT_MODELLED = 'not-modelled';
 
 const OPEN_STATES = ['proposed', 'conflict'];
 const QUESTION_LETTERS = 'ABCDEFGH';
@@ -597,7 +598,8 @@ export async function sameGoal(ctx, a, b) {
 function absorb(into, other) {
   const questions = [...(into.questions ?? []), ...(other.questions ?? [])];
   const obstacles = [...(Array.isArray(into.obstacles) ? into.obstacles : []), ...(Array.isArray(other.obstacles) ? other.obstacles : [])];
-  return { ...into, questions, obstacles: obstacles.length ? obstacles : into.obstacles, notes: [...new Set([...(into.notes ?? []), ...(other.notes ?? [])])], merged: [...(into.merged ?? []), other.id] };
+  const anchors = [...new Set([...(into.anchors ?? []), other.trace?.id, ...(other.anchors ?? [])].filter(Boolean))];
+  return { ...into, questions, obstacles: obstacles.length ? obstacles : into.obstacles, notes: [...new Set([...(into.notes ?? []), ...(other.notes ?? [])])], merged: [...(into.merged ?? []), other.id], ...(anchors.length ? { anchors } : {}) };
 }
 
 export async function mergeDuplicates(ctx, tree) {
@@ -824,17 +826,59 @@ export function thresholdsOf(tree, { question = '', guidance = '', answers = [],
   return { tree: { ...tree, goals, thresholds }, thresholds };
 }
 
-export function notModelledOf(tree, anchors) {
-  const covered = new Set();
-  for (const goal of tree.goals ?? []) {
-    if (goal.state === 'dropped' || goal.role === TENSION_ROLE) continue;
-    for (const id of [goal.trace?.id, goal.anchor, ...(goal.anchors ?? [])]) if (id) covered.add(id);
+export function requirementAnchors(anchors) {
+  return (anchors ?? []).filter((anchor) => anchor.kind === 'clause');
+}
+
+export function coveredAnchors(tree) {
+  const anchorOf = new Map((tree?.implications ?? []).map((entry) => [entry.id, entry.anchor]));
+  const direct = new Set();
+  const derived = new Set();
+  for (const goal of tree?.goals ?? []) {
+    if (goal.state !== 'kept' || goal.role === TENSION_ROLE || !(goal.questions ?? []).length) continue;
+    for (const id of [goal.trace?.id, ...(goal.anchors ?? [])]) {
+      if (!id) continue;
+      direct.add(id);
+      if (anchorOf.get(id)) derived.add(anchorOf.get(id));
+    }
   }
-  return anchors.filter((anchor) => anchor.kind === 'clause' && !covered.has(anchor.id)).map((anchor) => ({ id: anchor.id, text: anchor.text }));
+  const unrefined = new Set((tree?.dropped ?? []).filter((entry) => entry.reason === UNREFINED).map((entry) => entry.trace?.id).filter(Boolean));
+  return new Set([...direct, ...[...derived].filter((id) => !unrefined.has(id))]);
+}
+
+export function notModelledOf(tree, anchors) {
+  const covered = coveredAnchors(tree);
+  const before = new Map((tree?.notModelled ?? []).map((entry) => [entry.id, entry]));
+  return requirementAnchors(anchors).filter((anchor) => !covered.has(anchor.id)).map((anchor) => {
+    const held = before.get(anchor.id);
+    return { id: anchor.id, kind: anchor.kind, text: anchor.text, ...(held?.dismissedAt && held.text === anchor.text ? { dismissedAt: held.dismissedAt } : {}) };
+  });
+}
+
+export function coverageOf(tree, anchors) {
+  const covered = coveredAnchors(tree);
+  const listed = new Set((tree?.notModelled ?? []).map((entry) => entry.id));
+  const ids = requirementAnchors(anchors).map((anchor) => anchor.id);
+  return { anchors: ids.length, covered: ids.filter((id) => covered.has(id)), notModelled: (tree?.notModelled ?? []).map((entry) => entry.id), silent: ids.filter((id) => !covered.has(id) && !listed.has(id)) };
+}
+
+export function coverageOpen(tree) {
+  return (tree?.notModelled ?? []).filter((entry) => !entry.dismissedAt);
+}
+
+export function dismissNotModelled(tree, id, { at = new Date().toISOString() } = {}) {
+  return { ...tree, notModelled: (tree?.notModelled ?? []).map((entry) => (entry.id === id && !entry.dismissedAt ? { ...entry, dismissedAt: at } : entry)) };
+}
+
+export function confirmTree(tree, { at = new Date().toISOString() } = {}) {
+  const blocked = coverageOpen(tree);
+  if (blocked.length) return { ok: false, tree, blocked, reason: `${blocked.length} requirement(s) are not modelled by any kept goal and were not dismissed: ${blocked.map((entry) => `${entry.id} ${entry.text}`).join(' | ')}` };
+  return { ok: true, tree: { ...tree, confirmedAt: at }, blocked: [] };
 }
 
 export function openEntries(tree) {
   const open = [];
+  for (const entry of coverageOpen(tree)) open.push({ id: entry.id, kind: NOT_MODELLED, text: entry.text, reason: 'no kept goal with a measurable question covers this requirement: dismiss it, or rebuild the tree' });
   for (const goal of tree?.goals ?? []) if (OPEN_STATES.includes(goal.state)) open.push({ id: goal.id, kind: 'goal', state: goal.state, text: goal.goal, reason: goal.reason ?? goal.state });
   for (const threshold of tree?.thresholds ?? []) if (threshold.source === 'assumption' && !threshold.confirmed) open.push({ id: threshold.node, kind: 'threshold', text: `${threshold.op ?? ''} ${threshold.value} ${threshold.unit}`.trim(), reason: 'a number the question, the hints and the cited note do not state' });
   for (const entry of tree?.implications ?? []) if (entry.source === 'inferred') open.push({ id: entry.id, kind: 'implication', text: `${entry.attribute}: ${entry.direction}`, reason: 'inferred from the purpose, not stated' });
@@ -843,7 +887,7 @@ export function openEntries(tree) {
 }
 
 export function needsConfirmation(tree) {
-  return Boolean(tree) && !tree.confirmedAt && openEntries(tree).length > 0;
+  return Boolean(tree) && (coverageOpen(tree).length > 0 || (!tree.confirmedAt && openEntries(tree).length > 0));
 }
 
 export async function buildPurposeTree(ctx, { question, guidance = '', answers = [], notes = [] }) {
@@ -875,6 +919,7 @@ export async function buildPurposeTree(ctx, { question, guidance = '', answers =
   tree = ensureTensions(tree);
   tree = thresholdsOf(tree, { question, guidance, answers, notes }).tree;
   tree.notModelled = notModelledOf(tree, anchors);
+  if (tree.notModelled.length) ctx.log?.(`${tree.notModelled.length} requirement(s) not modelled by any kept goal: ${tree.notModelled.map((entry) => `${entry.id} ${entry.text}`).join(' | ')}; the tree cannot be confirmed until each is dismissed`);
   tree.valueForCost = valueForCostOf(tree);
   tree.unrefined = [...dropped.filter((entry) => entry.reason === UNREFINED).map((entry) => entry.goal), ...tree.goals.filter((goal) => !(goal.questions ?? []).length && goal.role !== TENSION_ROLE).map((goal) => goal.goal)];
   if (tree.unrefined.length) ctx.log?.(`${tree.unrefined.length} goal(s) ${UNREFINED}: ${tree.unrefined.join(' | ')}`);

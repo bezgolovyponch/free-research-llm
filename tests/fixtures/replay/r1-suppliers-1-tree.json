@@ -1,0 +1,833 @@
+{
+ "phase": "needs-confirmation",
+ "anchors": [
+  {
+   "id": "C1",
+   "kind": "clause",
+   "text": "Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren",
+   "spans": [
+    "S1"
+   ]
+  },
+  {
+   "id": "C2",
+   "kind": "clause",
+   "text": "Monclair",
+   "spans": [
+    "S2"
+   ]
+  },
+  {
+   "id": "C3",
+   "kind": "clause",
+   "text": "North face",
+   "spans": [
+    "S3"
+   ]
+  },
+  {
+   "id": "C4",
+   "kind": "clause",
+   "text": "Barbour with highest price/value ratio",
+   "spans": [
+    "S4"
+   ]
+  },
+  {
+   "id": "C5",
+   "kind": "clause",
+   "text": "proven good quality",
+   "spans": [
+    "S5"
+   ]
+  },
+  {
+   "id": "C6",
+   "kind": "clause",
+   "text": "assortiment for the appropriate retail second hand shop business in Czech Republic",
+   "spans": [
+    "S6"
+   ]
+  }
+ ],
+ "tree": {
+  "version": 2,
+  "purpose": {
+   "id": "P",
+   "who": "second‑hand retail shop owner/manager in the Czech Republic",
+   "outcome": "identify wholesale branded second‑hand clothing suppliers offering brands like Ralph Lauren, Monclair, North Face, Barbour with the best price‑to‑value ratio, proven quality and a suitable assortment for the Czech market",
+   "why": "to secure high‑margin, quality inventory that meets local customer demand and maximises profitability",
+   "anchors": [
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+   ],
+   "text": "second‑hand retail shop owner/manager in the Czech Republic wants identify wholesale branded second‑hand clothing suppliers offering brands like Ralph Lauren, Monclair, North Face, Barbour with the best price‑to‑value ratio, proven quality and a suitable assortment for the Czech market, because to secure high‑margin, quality inventory that meets local customer demand and maximises profitability",
+   "samples": 3
+  },
+  "implications": [
+   {
+    "id": "I1",
+    "attribute": "suitable Czech market assortment",
+    "direction": "match",
+    "anchor": "C6",
+    "source": "inferred",
+    "samples": 2
+   },
+   {
+    "id": "I2",
+    "attribute": "high price-to-value ratio",
+    "direction": "high",
+    "anchor": "C4",
+    "source": "inferred",
+    "samples": 3
+   },
+   {
+    "id": "I3",
+    "attribute": "overall product quality",
+    "direction": "high",
+    "anchor": "C5",
+    "source": "inferred",
+    "samples": 2
+   },
+   {
+    "id": "I4",
+    "attribute": "Ralph Lauren brand availability",
+    "direction": "match",
+    "anchor": "C1",
+    "source": "inferred",
+    "samples": 2
+   }
+  ],
+  "consumes": {
+   "value": true,
+   "decided": true,
+   "votes": {
+    "true": 2
+   }
+  },
+  "tensions": {
+   "pairs": [],
+   "decided": true,
+   "replies": 3,
+   "votes": {
+    "C1|C2": 1,
+    "C1|C3": 1,
+    "C1|C4": 1,
+    "C2|C3": 1,
+    "C2|C4": 1,
+    "C3|C4": 1,
+    "C4|C5": 1
+   }
+  },
+  "goals": [
+   {
+    "goal": "Identify wholesale suppliers providing Ralph Lauren second‑hand clothing",
+    "anchor": "C1",
+    "notes": [
+     "N2",
+     "N4"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "P",
+     "text": "second‑hand retail shop owner/manager in the Czech Republic wants identify wholesale branded second‑hand clothing suppliers offering brands like Ralph Lauren, Monclair, North Face, Barbour with the best price‑to‑value ratio, proven quality and a suitable assortment for the Czech market, because to secure high‑margin, quality inventory that meets local customer demand and maximises profitability"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Does the supplier list Ralph Lauren among the brands of second‑hand clothing they wholesale?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q1"
+     },
+     {
+      "q": "Is the supplier described as offering bulk/wholesale quantities of second‑hand clothing?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q2"
+     },
+     {
+      "q": "Do independent sources confirm the supplier’s consistent quality and reliability for second‑hand branded apparel?",
+      "checker": "consensus",
+      "threshold": null,
+      "note": "N4",
+      "id": "Q3"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Supplier does not publicly disclose its brand list",
+      "checker": "page",
+      "threshold": null,
+      "id": "O1"
+     },
+     {
+      "obstacle": "Supplier lacks verified wholesale terms for second‑hand goods",
+      "checker": "page",
+      "threshold": null,
+      "id": "O2"
+     }
+    ],
+    "id": "G1"
+   },
+   {
+    "goal": "Find suppliers offering Monclair brand inventory",
+    "anchor": "C2",
+    "notes": [
+     "N2",
+     "N4"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "P",
+     "text": "second‑hand retail shop owner/manager in the Czech Republic wants identify wholesale branded second‑hand clothing suppliers offering brands like Ralph Lauren, Monclair, North Face, Barbour with the best price‑to‑value ratio, proven quality and a suitable assortment for the Czech market, because to secure high‑margin, quality inventory that meets local customer demand and maximises profitability"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Does the supplier list Monclair among the brands they wholesale?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q4"
+     },
+     {
+      "q": "Does the supplier offer wholesale second‑hand clothing inventory?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q5"
+     },
+     {
+      "q": "Does the supplier provide a price‑to‑value ratio for Monclair inventory that meets a high resale‑value standard?",
+      "checker": "statistic",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q6"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Supplier does not ship to the Czech Republic",
+      "checker": "page",
+      "threshold": null,
+      "id": "O3"
+     },
+     {
+      "obstacle": "Supplier cannot guarantee consistent bulk supply of Monclair items",
+      "checker": "page",
+      "threshold": null,
+      "id": "O4"
+     }
+    ],
+    "id": "G2"
+   },
+   {
+    "goal": "Locate suppliers with North Face products",
+    "anchor": "C3",
+    "notes": [
+     "N2",
+     "N4"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "P",
+     "text": "second‑hand retail shop owner/manager in the Czech Republic wants identify wholesale branded second‑hand clothing suppliers offering brands like Ralph Lauren, Monclair, North Face, Barbour with the best price‑to‑value ratio, proven quality and a suitable assortment for the Czech market, because to secure high‑margin, quality inventory that meets local customer demand and maximises profitability"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Does the supplier's product catalog page list North Face items?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q7"
+     },
+     {
+      "q": "Does the supplier offer wholesale second‑hand branded clothing including North Face with bulk supply?",
+      "checker": "page",
+      "threshold": null,
+      "note": null,
+      "id": "Q8"
+     },
+     {
+      "q": "Is the supplier's price‑to‑value ratio for North Face products >= 1.2?",
+      "checker": "statistic",
+      "threshold": {
+       "op": ">=",
+       "value": 1.2,
+       "unit": "ratio",
+       "source": "assumption",
+       "hard": false
+      },
+      "note": null,
+      "id": "Q9"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "No suppliers list North Face in their catalog",
+      "checker": "page",
+      "threshold": null,
+      "id": "O5"
+     },
+     {
+      "obstacle": "Suppliers only sell new North Face items, not second‑hand",
+      "checker": "page",
+      "threshold": null,
+      "id": "O6"
+     }
+    ],
+    "id": "G3"
+   },
+   {
+    "goal": "Discover Barbour suppliers with highest price‑to‑value ratio",
+    "anchor": "C4",
+    "notes": [
+     "N3",
+     "N2"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "C4",
+     "text": "Barbour with highest price/value ratio"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Which Barbour supplier has the highest price‑to‑value ratio based on listed wholesale price and estimated resale value?",
+      "checker": "code",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q10"
+     },
+     {
+      "q": "Does the identified supplier advertise competitive bulk pricing for Barbour items?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N3",
+      "id": "Q11"
+     },
+     {
+      "q": "Do independent market sources agree that the supplier’s Barbour products have high resale value?",
+      "checker": "consensus",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q12"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "The supplier does not disclose wholesale prices for Barbour products",
+      "checker": "page",
+      "threshold": null,
+      "id": "O7"
+     },
+     {
+      "obstacle": "No reliable resale‑value estimates are available for the supplier’s Barbour items",
+      "checker": "consensus",
+      "threshold": null,
+      "id": "O8"
+     }
+    ],
+    "id": "G4"
+   },
+   {
+    "goal": "Ensure all identified suppliers meet proven high quality standards",
+    "anchor": "C5",
+    "notes": [
+     "N1",
+     "N6"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "C5",
+     "text": "proven good quality"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Does the supplier have a documented quality grading system that rates items as high quality?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N6",
+      "id": "Q13"
+     },
+     {
+      "q": "Is the supplier listed in an official registry of approved high-quality suppliers?",
+      "checker": "official",
+      "threshold": null,
+      "note": "N1",
+      "id": "Q14"
+     },
+     {
+      "q": "Do independent sources consensus rate the supplier's quality as high?",
+      "checker": "consensus",
+      "threshold": null,
+      "note": "N1",
+      "id": "Q15"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Supplier lacks verifiable quality certification or grading documentation",
+      "checker": "page",
+      "threshold": null,
+      "id": "O9"
+     },
+     {
+      "obstacle": "Supplier is not recognized by any official high-quality supplier registry",
+      "checker": "official",
+      "threshold": null,
+      "id": "O10"
+     }
+    ],
+    "id": "G5"
+   },
+   {
+    "goal": "Verify supplier assortments match Czech market demand",
+    "anchor": "I1",
+    "notes": [
+     "N5",
+     "N8"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "I1",
+     "text": "suitable Czech market assortment: match is preferred"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Are the supplier's primary product categories among the top five categories by sales volume in the Czech wholesale clothing market?",
+      "checker": "code",
+      "threshold": null,
+      "note": "N5",
+      "id": "Q16"
+     },
+     {
+      "q": "Is the supplier's average price per garment within the price range reported for Czech wholesale clothing demand?",
+      "checker": "statistic",
+      "threshold": null,
+      "note": "N5",
+      "id": "Q17"
+     },
+     {
+      "q": "Does the supplier's seasonal inventory volume meet the projected growth rate for used clothing demand in the Czech market?",
+      "checker": "statistic",
+      "threshold": null,
+      "note": "N8",
+      "id": "Q18"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Supplier does not disclose detailed assortment data on its product page.",
+      "checker": "page",
+      "threshold": null,
+      "id": "O11"
+     },
+     {
+      "obstacle": "Available market demand figures for the Czech clothing sector are outdated or lack consensus.",
+      "checker": "consensus",
+      "threshold": null,
+      "id": "O12"
+     }
+    ],
+    "id": "G6"
+   },
+   {
+    "goal": "Assess suppliers for consistent bulk availability and fast delivery",
+    "anchor": "C6",
+    "notes": [
+     "N11",
+     "N12"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "C6",
+     "text": "assortiment for the appropriate retail second hand shop business in Czech Republic"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Does the supplier offer bulk purchase of used clothing, shoes, and toys?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N11",
+      "id": "Q19"
+     },
+     {
+      "q": "Is the supplier described as a trusted exporter with fast delivery?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N12",
+      "id": "Q20"
+     },
+     {
+      "q": "Does the supplier state a delivery time of 5 days or less for bulk orders?",
+      "checker": "page",
+      "threshold": {
+       "op": "<=",
+       "value": 5,
+       "unit": "days",
+       "source": "assumption",
+       "hard": false
+      },
+      "note": "N12",
+      "id": "Q21"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Supplier does not provide bulk availability",
+      "checker": "page",
+      "threshold": null,
+      "id": "O13"
+     },
+     {
+      "obstacle": "Supplier delivery time exceeds acceptable fast delivery threshold",
+      "checker": "page",
+      "threshold": null,
+      "id": "O14"
+     }
+    ],
+    "id": "G7"
+   },
+   {
+    "goal": "What the result must do for the purpose",
+    "role": "value",
+    "protected": true,
+    "state": "kept",
+    "trace": {
+     "kind": "rule",
+     "text": "value"
+    },
+    "basis": "EN 12973:2020 value management: value = satisfaction of needs / resources used; function analysis by \"how?\" and \"why?\" (FAST)",
+    "notes": [],
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Supplier lists on its page that it provides Ralph Lauren, Moncler, North Face, and Barbour products",
+      "checker": "page",
+      "threshold": null,
+      "note": "N1",
+      "id": "Q22"
+     },
+     {
+      "q": "Supplier’s price-to-value ratio, computed as average price per item divided by average quality grade, is less than or equal to a defined threshold",
+      "checker": "code",
+      "threshold": {
+       "op": "<=",
+       "value": 0.5,
+       "unit": "",
+       "source": "assumption",
+       "hard": false
+      },
+      "note": "N3",
+      "id": "Q23"
+     },
+     {
+      "q": "Independent buyer reviews (consensus) confirm the supplier’s goods meet high quality standards and suit the Czech market’s style preferences",
+      "checker": "consensus",
+      "threshold": null,
+      "note": "N5",
+      "id": "Q24"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Supplier does not ship to the Czech Republic",
+      "checker": "page",
+      "threshold": null,
+      "soft": true,
+      "id": "O15"
+     },
+     {
+      "obstacle": "Supplier cannot guarantee consistent bulk supply",
+      "checker": "page",
+      "threshold": null,
+      "soft": true,
+      "id": "O16"
+     }
+    ],
+    "id": "G8"
+   },
+   {
+    "goal": "Total cost to obtain and use it",
+    "role": "cost",
+    "protected": true,
+    "state": "kept",
+    "trace": {
+     "kind": "rule",
+     "text": "cost"
+    },
+    "basis": "Total cost of ownership (Ellram 1993, 1995): pre-transaction, transaction and post-transaction costs",
+    "notes": [],
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "What is the registration or membership fee required to join the wholesale second‑hand clothing platforms that supply brands such as Ralph Lauren, Moncler, The North Face and Barbour?",
+      "checker": "page",
+      "threshold": null,
+      "note": null,
+      "phase": "pre-transaction",
+      "price": false,
+      "id": "Q25"
+     },
+     {
+      "q": "What is the minimum order value or quantity that must be purchased to qualify for wholesale pricing from these suppliers?",
+      "checker": "consensus",
+      "threshold": null,
+      "note": null,
+      "phase": "pre-transaction",
+      "price": false,
+      "id": "Q26"
+     },
+     {
+      "q": "What is the wholesale price you charge per kilogram or per item for the branded second‑hand clothing (e.g., Ralph Lauren, Moncler, The North Face, Barbour)?",
+      "checker": "code",
+      "threshold": null,
+      "note": "N2",
+      "phase": "transaction",
+      "price": true,
+      "id": "Q27"
+     },
+     {
+      "q": "What are the estimated shipping, customs duties and any handling fees to deliver a bulk order to the Czech Republic?",
+      "checker": "official",
+      "threshold": null,
+      "note": "N2",
+      "phase": "transaction",
+      "price": false,
+      "id": "Q28"
+     },
+     {
+      "q": "What is the average cost per item for handling returns and defects after purchase?",
+      "checker": "consensus",
+      "threshold": null,
+      "note": "N2",
+      "phase": "post-transaction",
+      "price": false,
+      "id": "Q29"
+     },
+     {
+      "q": "What is the typical refurbishment expense per item required before resale?",
+      "checker": "official",
+      "threshold": null,
+      "note": "N2",
+      "phase": "post-transaction",
+      "price": false,
+      "id": "Q30"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "A high minimum order amount that exceeds the shop’s budget, making wholesale purchase unprofitable",
+      "checker": "page",
+      "threshold": null,
+      "phase": "pre-transaction",
+      "soft": true,
+      "id": "O17"
+     },
+     {
+      "obstacle": "Import duties or taxes on used clothing that raise the total landed cost above the target margin could defeat the purpose of sourcing high‑margin inventory.",
+      "checker": "page",
+      "threshold": null,
+      "phase": "transaction",
+      "soft": true,
+      "id": "O18"
+     },
+     {
+      "obstacle": "If the average disposal cost exceeds the purchase price",
+      "checker": "page",
+      "threshold": {
+       "op": ">",
+       "value": 0.2,
+       "unit": "ratio",
+       "source": "assumption",
+       "hard": false
+      },
+      "phase": "post-transaction",
+      "soft": true,
+      "id": "O19"
+     }
+    ],
+    "phases": [
+     {
+      "id": "pre-transaction",
+      "covers": "finding, qualifying, minimum order, registration",
+      "questions": 2
+     },
+     {
+      "id": "transaction",
+      "covers": "price, delivery, duties, payment",
+      "questions": 2
+     },
+     {
+      "id": "post-transaction",
+      "covers": "defects, returns, repairs, resale or disposal",
+      "questions": 2
+     }
+    ],
+    "id": "G9"
+   }
+  ],
+  "dropped": [],
+  "ops": {
+   "applied": [],
+   "refused": [
+    {
+     "op": "merge",
+     "a": "G1",
+     "b": "G2",
+     "why": "the two goals were not voted to be one objective"
+    },
+    {
+     "op": "drop",
+     "id": "G8",
+     "reason": "C",
+     "why": "\"What the result must do for the purpose\" is a protected value goal"
+    }
+   ]
+  },
+  "confirmedAt": null,
+  "thresholds": [
+   {
+    "node": "Q9",
+    "goal": "G3",
+    "op": ">=",
+    "value": 1.2,
+    "unit": "ratio",
+    "source": "assumption",
+    "hard": false
+   },
+   {
+    "node": "Q21",
+    "goal": "G7",
+    "op": "<=",
+    "value": 5,
+    "unit": "days",
+    "source": "assumption",
+    "hard": false
+   },
+   {
+    "node": "Q23",
+    "goal": "G8",
+    "op": "<=",
+    "value": 0.5,
+    "unit": "",
+    "source": "assumption",
+    "hard": false
+   },
+   {
+    "node": "O19",
+    "goal": "G9",
+    "op": ">",
+    "value": 0.2,
+    "unit": "ratio",
+    "source": "assumption",
+    "hard": false
+   }
+  ],
+  "notModelled": [],
+  "valueForCost": {
+   "measure": "value-for-cost",
+   "checker": "code",
+   "value": "G8",
+   "cost": "G9",
+   "satisfied": [
+    "Q22",
+    "Q23",
+    "Q24"
+   ],
+   "costs": [
+    "Q25",
+    "Q26",
+    "Q27",
+    "Q28",
+    "Q29",
+    "Q30"
+   ],
+   "basis": "EN 12973:2020 value management: value = satisfaction of needs / resources used; function analysis by \"how?\" and \"why?\" (FAST)"
+  },
+  "unrefined": []
+ },
+ "open": [
+  {
+   "id": "Q9",
+   "kind": "threshold",
+   "text": ">= 1.2 ratio",
+   "reason": "a number the question, the hints and the cited note do not state"
+  },
+  {
+   "id": "Q21",
+   "kind": "threshold",
+   "text": "<= 5 days",
+   "reason": "a number the question, the hints and the cited note do not state"
+  },
+  {
+   "id": "Q23",
+   "kind": "threshold",
+   "text": "<= 0.5",
+   "reason": "a number the question, the hints and the cited note do not state"
+  },
+  {
+   "id": "O19",
+   "kind": "threshold",
+   "text": "> 0.2 ratio",
+   "reason": "a number the question, the hints and the cited note do not state"
+  },
+  {
+   "id": "I1",
+   "kind": "implication",
+   "text": "suitable Czech market assortment: match",
+   "reason": "inferred from the purpose, not stated"
+  },
+  {
+   "id": "I2",
+   "kind": "implication",
+   "text": "high price-to-value ratio: high",
+   "reason": "inferred from the purpose, not stated"
+  },
+  {
+   "id": "I3",
+   "kind": "implication",
+   "text": "overall product quality: high",
+   "reason": "inferred from the purpose, not stated"
+  },
+  {
+   "id": "I4",
+   "kind": "implication",
+   "text": "Ralph Lauren brand availability: match",
+   "reason": "inferred from the purpose, not stated"
+  }
+ ]
+}
