@@ -460,5 +460,18 @@
     "signal": "hardChecksPass returned true when an item had no checks (live + listing + inRange + purpose), so an item the judge never read (past JUDGE_PAGE_BUDGET, or continue on empty page text at engine.mjs ~1528) counted as valid. Valid was computed in three places (acceptance.mjs:687, engine.mjs judge loop, engine.mjs recomputeAcceptanceValidity) and the summary text in three places (engine.mjs ~1316, ~1759, ~2029); they drifted: live memo said '20 asked, 0 valid' while acceptanceSummary said 1 valid.",
     "cause": "Validity was decided by hardChecksPass (yes on every hard check OR zero hard checks) and qualifies, without tracking whether the judge ever ran. Each place recomputed validity and summary independently instead of sharing one verdict module.",
     "prevention": "New src/research/verdict.mjs is the single owner of item validity and verdict text. Exports itemTier (confirmed/rejected/to-confirm/not-judged), itemEvidence (belief/plausibility/open), verdict (tiers, validCount, asked, short, perCheck, vague, summary, sorted items), verdictInvariants. Every place calls verdict (or itemTier) instead of its own logic; hardChecksPass removed. Judge loop stops on confirmed count from itemTier; empty page text marks not-judged. Vague requirements surfaced (EvalGen criteria drift): when verdict.vague non-empty, emit one line and store on acceptanceResult.vague. Invariants run at end of checkAcceptance: (a) acceptanceSummary count equals confirmed items; (b) no confirmed item lacks yes on every hard id; (c) acceptance.itemCount set but no checklist. Any failure → acceptanceResult.provisional and one emitted line; never throw."
+  },
+  {
+    "id": "F34",
+    "title": "all-yes hard checks rescued a dead or out-of-range item, and the verdict overwrote the entity evidence link",
+    "touches": [
+      "src/research/verdict.mjs",
+      "src/research/engine.mjs",
+      "tests/research/verdict.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "Review of the verdict branch (2026-11-16): qualifies() returned true whenever every hard check was yes, so a page that was not live, outside the value range or failing a purpose check became confirmed; one engine test passed only through it (its item page was shorter than MIN_LIVE_TEXT, so not live and never in range). verdict() stored belief and plausibility as item.evidence, the field that holds an entity's evidence URL: qualifies() then saw every item as an entity and the inspector would read the object as a URL on the next pass.",
+    "cause": "1) A worker fixed a failing test by widening the validity rule instead of the test page; 2) a new per-item field reused a name already carrying meaning elsewhere in acceptance.mjs; 3) the summary sentence was still built in three engine sites, two of them copies.",
+    "prevention": "qualifies() is the base gate only (live, listing or entity, in range, purpose checks) and itemTier() rejects on a failed gate or any hard no, with no override field; the verdict stores its numbers as item.support; acceptanceSummaryOf(project) in verdict.mjs is the one summary sentence used by planActions and both done paths; the engine test page is long enough to be live, and asserts qualifies and valid; covered by tests/research/verdict.test.ts and tests/research/engine.test.ts"
   }
 ]

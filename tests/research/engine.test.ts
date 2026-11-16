@@ -2118,7 +2118,7 @@ describe('hub search', () => {
     const search = {
       ...fakeSearch,
       async readPage(url: string) {
-        if (url === itemUrl) return { status: 200, text: 'Used goods offer, 40 EUR/kg', links: [{ url: deepUrl, text: 'Shipping countries' }, { url: 'https://elsewhere.example.net/ship', text: 'Shipping countries' }] };
+        if (url === itemUrl) return { status: 200, text: 'Used goods offer: mixed second-hand clothing sorted by hand into cream and A grade, packed in pressed bales, sold by the kilogram at 40 EUR/kg to shops and market traders. Minimum order one bale; pallets loaded at our warehouse every weekday.', links: [{ url: deepUrl, text: 'Shipping countries' }, { url: 'https://elsewhere.example.net/ship', text: 'Shipping countries' }] };
         if (url === deepUrl) return { status: 200, text: 'We ship to 30 countries across Europe', links: [] };
         return { status: 404, text: '', links: [] };
       },
@@ -2152,7 +2152,8 @@ describe('hub search', () => {
     expect(item.checks.find((c) => c.id === checkId)).toMatchObject({ answer: 'yes', quote: 'We ship to 30 countries', source: deepUrl });
     const hardIds = project.checklist.flatMap((cluster) => cluster.items.filter((ci) => ci.hard).map((ci) => cluster.clause + '|' + ci.question));
     expect(itemTier(item, hardIds, project.acceptance)).toBe('confirmed');
-    expect(item.valid).toBe(qualifies(item, project.acceptance));
+    expect(qualifies(item, project.acceptance)).toBe(true);
+    expect(item.valid).toBe(true);
   });
 
   it('an item beyond the first 30 / with no checks keeps today\'s validity', async () => {

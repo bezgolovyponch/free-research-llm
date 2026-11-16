@@ -5,7 +5,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
-import { verdict, itemTier, itemEvidence, verdictInvariants, qualifies, hardIdsOf } from './verdict.mjs';
+import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf } from './verdict.mjs';
 import { ChecklistJudge, checklistSummary, checklistFingerprint, filterCountItems, askedCounts } from './checklist.mjs';
 import { DeeperReader } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
@@ -1358,17 +1358,11 @@ export class ResearchEngine {
       const contradicts = short || failedHard.length > 0;
       if (contradicts) {
         const failedLabels = failedHard.map((c) => c.label).join('; ') || 'item count short';
-        const msg = short ? `only ${valid} of ${asked} confirmed` : `hard checks at 0%: ${failedLabels}`;
+        const msg = short ? acceptanceSummaryOf(project) : `hard checks at 0%: ${failedLabels}`;
         project.report.status = { ...project.report.status, provisional: true, acceptanceContradiction: msg };
         project.report.verdict = `PROVISIONAL (acceptance: ${msg}) — ${project.report.verdict.replace(/^PROVISIONAL\s*[—:-]?\s*/i, '')}`;
       }
-      if (project.acceptanceResult.verdict?.summary) {
-        project.acceptanceSummary = project.acceptanceResult.verdict.summary;
-      } else {
-        const kind = project.decisionModel?.kind ?? null;
-        const vr = verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind);
-        project.acceptanceSummary = vr.summary;
-      }
+      project.acceptanceSummary = acceptanceSummaryOf(project);
     }
     return status;
   }
@@ -1822,15 +1816,7 @@ export class ResearchEngine {
       const valid = project.acceptanceResult?.validCount ?? 0;
       const short = asked > 0 && valid < asked;
       project.phase = 'done';
-      if (project.acceptanceResult?.verdict?.summary) {
-        project.acceptanceSummary = project.acceptanceResult.verdict.summary;
-      } else if (project.acceptanceResult?.items) {
-        const kind = project.decisionModel?.kind ?? null;
-        const vr = verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind);
-        project.acceptanceSummary = vr.summary;
-      } else {
-        project.acceptanceSummary = short ? `only ${valid} of ${asked} confirmed` : `${valid} of ${asked} confirmed`;
-      }
+      project.acceptanceSummary = acceptanceSummaryOf(project);
       if (project.report) {
         project.report.status = { ...project.report.status, short };
       }
@@ -2100,15 +2086,7 @@ export class ResearchEngine {
       const valid = project.acceptanceResult?.validCount ?? 0;
       const short = asked > 0 && valid < asked;
       project.phase = 'done';
-      if (project.acceptanceResult?.verdict?.summary) {
-        project.acceptanceSummary = project.acceptanceResult.verdict.summary;
-      } else if (project.acceptanceResult?.items) {
-        const kind = project.decisionModel?.kind ?? null;
-        const vr = verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind);
-        project.acceptanceSummary = vr.summary;
-      } else {
-        project.acceptanceSummary = short ? `only ${valid} of ${asked} confirmed` : `${valid} of ${asked} confirmed`;
-      }
+      project.acceptanceSummary = acceptanceSummaryOf(project);
       if (project.report) {
         project.report.status = { ...project.report.status, short };
       }

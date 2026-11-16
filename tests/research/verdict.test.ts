@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf } from "../../src/research/verdict.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf } from "../../src/research/verdict.mjs";
+import { kindCluster } from "../../src/research/checklist.mjs";
 import fixture from "../fixtures/verdict-0c750f.json";
 
 describe("verdict", () => {
@@ -45,7 +46,7 @@ describe("verdict", () => {
         { id: "check2", answer: "yes", hard: true },
         { id: "check3", answer: "yes", hard: true },
       ],
-      qualifies: false,
+      live: false,
     });
     expect(itemTier(item, hardIds)).toBe("rejected");
   });
@@ -74,7 +75,7 @@ describe("verdict", () => {
     const item = baseItem({ qualifies: true, checks: [] });
     expect(itemTier(item, [])).toBe("confirmed");
     
-    const item2 = baseItem({ qualifies: false, checks: [] });
+    const item2 = baseItem({ live: false, checks: [] });
     expect(itemTier(item2, [])).toBe("rejected");
   });
 
@@ -238,5 +239,44 @@ describe("verdict", () => {
 
     const idsNoChecklist = hardIdsOf(null, kind1);
     expect(idsNoChecklist).not.toContainEqual(expect.stringMatching(/^kind\|/));
+  });
+
+  it("hardIdsOf: a category kind adds the one kind question the judge asks, naming its kinds", () => {
+    const checklist = [{ clause: "c", items: [{ hard: true, question: "q1" }] }];
+    const category = { label: "home improvement contractor", terms: ["home improvement contractor"], members: [{ label: "roofer", terms: ["roofing"] }, { label: "plumber", terms: ["plumbing"] }] };
+    const expectedId = "kind|" + kindCluster(category).items[0].question;
+    const ids = hardIdsOf(checklist, category);
+    expect(ids.filter((id) => id.startsWith("kind|"))).toEqual([expectedId]);
+    expect(expectedId).toContain("of one of these kinds: roofer, plumber");
+  });
+
+  it("all hard checks yes never rescue a dead link or a value out of range", () => {
+    const yes = [{ id: "check1", answer: "yes", hard: true }, { id: "check2", answer: "yes", hard: true }, { id: "check3", answer: "yes", hard: true }];
+    expect(qualifies(baseItem({ live: false, checks: yes }), {})).toBe(false);
+    expect(itemTier(baseItem({ live: false, checks: yes }), hardIds)).toBe("rejected");
+    expect(itemTier(baseItem({ inRange: false, checks: yes }), hardIds, { valueRange: [0, 10] })).toBe("rejected");
+    expect(itemTier(baseItem({ purpose: [{ passed: false }], checks: yes }), hardIds)).toBe("rejected");
+  });
+
+  it("keeps an entity's evidence link and stores belief and plausibility apart from it", () => {
+    const entity = baseItem({ url: "https://seller.example/", listing: false, evidence: "https://directory.example/seller", checks: [{ id: "check1", answer: "yes", hard: true }, { id: "check2", answer: "unknown", hard: true }] });
+    const [item] = verdict([entity], { itemCount: 1 }, [{ clause: "c", items: [] }]).items;
+    expect(item.evidence).toBe("https://directory.example/seller");
+    expect(item.support).toEqual({ belief: 1, plausibility: 1, open: [] });
+    const judged = verdict([entity], { itemCount: 1 }, null).items[0];
+    expect(judged.evidence).toBe("https://directory.example/seller");
+    expect(qualifies({ ...entity, evidence: undefined }, {})).toBe(false);
+  });
+
+  it("a project without an acceptance spec still gets a verdict", () => {
+    expect(verdict([baseItem()], undefined, null).summary).toBe("1 of 1 confirmed");
+  });
+
+  it("one summary sentence for every caller: the stored verdict, else computed from the items", () => {
+    const stored = { acceptanceResult: { verdict: { summary: "2 of 5 confirmed" }, items: [] }, acceptance: { itemCount: 5 } };
+    expect(acceptanceSummaryOf(stored)).toBe("2 of 5 confirmed");
+    const unread = { acceptanceResult: { totalAsked: 20, items: [baseItem({ url: "a", checks: [] })] }, acceptance: { itemCount: 20 }, checklist: [{ clause: "c", items: [{ hard: true, question: "q1" }] }] };
+    expect(acceptanceSummaryOf(unread)).toBe("0 of 20 confirmed · 1 not read");
+    expect(acceptanceSummaryOf({ acceptance: { itemCount: 3 } })).toBe("0 of 3 confirmed");
   });
 });

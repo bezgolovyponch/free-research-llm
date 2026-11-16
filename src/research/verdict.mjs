@@ -2,31 +2,23 @@ import { kindCluster } from './checklist.mjs';
 
 export function qualifies(item, spec) {
   const entity = Boolean(item.evidence);
-  const baseQualifies = Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
-  if (baseQualifies) return true;
-  const hardChecks = (item.checks ?? []).filter((c) => c.hard === true);
-  return hardChecks.length > 0 && hardChecks.every((c) => c.answer === 'yes');
+  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
 }
 
 export function itemTier(item, hardIds, spec) {
   const checks = item.checks ?? [];
   const hardChecks = checks.filter((c) => hardIds.includes(c.id));
-  const explicitQualifies = item.qualifies;
-  const computedQualifies = qualifies(item, spec);
-  const qualifiesResult = explicitQualifies ?? computedQualifies;
-  const qualifiesWasExplicit = explicitQualifies !== undefined;
+  const qualified = qualifies(item, spec);
 
   if (hardIds.length === 0) {
-    return qualifiesResult ? "confirmed" : "rejected";
+    return qualified ? "confirmed" : "rejected";
   }
 
   if (hardChecks.length === 0) {
     return "not-judged";
   }
 
-  const hasHardNo = hardChecks.some((c) => c.answer === "no");
-  const allHardYes = hardChecks.length > 0 && hardChecks.every((c) => c.answer === "yes");
-  if (hasHardNo || (!qualifiesResult && (qualifiesWasExplicit || !allHardYes))) {
+  if (!qualified || hardChecks.some((c) => c.answer === "no")) {
     return "rejected";
   }
 
@@ -75,8 +67,8 @@ export function verdict(items, spec, checklist, kind = null) {
 
   const itemsWithTier = items.map((item) => {
     const tier = itemTier(item, hardIds, spec);
-    const evidence = itemEvidence(item, hardIds, spec);
-    return { ...item, tier, evidence };
+    const support = itemEvidence(item, hardIds, spec);
+    return { ...item, tier, support };
   });
   
   const tiers = {
@@ -86,7 +78,7 @@ export function verdict(items, spec, checklist, kind = null) {
     "not-judged": itemsWithTier.filter((i) => i.tier === "not-judged"),
   };
   
-  const asked = spec.itemCount ?? Math.max(1, items.length);
+  const asked = spec?.itemCount ?? Math.max(1, items.length);
   const confirmedCount = tiers.confirmed.length;
   const short = asked > 0 && confirmedCount < asked;
   
@@ -97,7 +89,7 @@ export function verdict(items, spec, checklist, kind = null) {
     const softYesB = (b.checks ?? []).filter((c) => c.hard !== true && c.answer === "yes").length;
     const softYesA = (a.checks ?? []).filter((c) => c.hard !== true && c.answer === "yes").length;
     if (softYesB !== softYesA) return softYesB - softYesA;
-    return b.evidence.belief - a.evidence.belief;
+    return b.support.belief - a.support.belief;
   });
   
   const perCheck = hardIds.map((id) => {
@@ -114,7 +106,7 @@ export function verdict(items, spec, checklist, kind = null) {
     .filter((c) => judgedItems.length >= 5 && c.unknown / judgedItems.length >= 0.5)
     .map((c) => c.id);
   
-  const openClauses = [...new Set(tiers["to-confirm"].flatMap((i) => i.evidence.open))];
+  const openClauses = [...new Set(tiers["to-confirm"].flatMap((i) => i.support.open))];
   const openClauseText = openClauses.length ? openClauses.map((id) => {
     const check = perCheck.find((c) => c.id === id);
     return check?.clause ?? id;
@@ -143,6 +135,14 @@ export function verdict(items, spec, checklist, kind = null) {
     summary,
     items: sortedItems,
   };
+}
+
+export function acceptanceSummaryOf(project) {
+  const result = project.acceptanceResult;
+  if (result?.verdict?.summary) return result.verdict.summary;
+  const asked = result?.totalAsked || project.acceptance?.itemCount;
+  const spec = { ...(project.acceptance ?? {}), ...(asked ? { itemCount: asked } : {}) };
+  return verdict(result?.items ?? [], spec, project.checklist, project.decisionModel?.kind ?? null).summary;
 }
 
 export function verdictInvariants(project) {
