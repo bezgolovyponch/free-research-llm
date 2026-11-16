@@ -1,0 +1,95 @@
+{
+ "kept": [
+  {
+   "url": "https://cyclallc.com/product/second-hand-clothing-wholesale",
+   "title": "Second Hand Clothing Wholesale",
+   "host": "cyclallc.com",
+   "about": "A",
+   "market": "B",
+   "span": "S10",
+   "judgedBy": "llamacpp"
+  },
+  {
+   "url": "https://www.bankvogue.com/blog/global-wholesale-used-clothing-statistics-information-for-2023/",
+   "title": "Global Wholesale Used Clothing Statistics &amp; Information For 2024 - Bank &amp; Vogue",
+   "host": "bankvogue.com",
+   "about": "A",
+   "market": "B",
+   "span": "S45",
+   "judgedBy": "llamacpp"
+  },
+  {
+   "url": "https://seller.alibaba.com/blogs/2026/southeast-asia/used-clothing/wholesale-quality-compliance-guide-alibaba-b2b",
+   "title": "Used Clothing Wholesale on Alibaba.com: Quality, Compliance & Global Market Guide 2026 - Alibaba.com Seller Blog",
+   "host": "seller.alibaba.com",
+   "about": "A",
+   "market": "B",
+   "span": "S1",
+   "judgedBy": "llamacpp"
+  },
+  {
+   "url": "https://msgroup-secondhandclothes.com/",
+   "title": "Second Hand Clothes Wholesale Supplier | MS Group",
+   "host": "msgroup-secondhandclothes.com",
+   "about": "A",
+   "market": "B",
+   "span": "S3",
+   "judgedBy": "llamacpp"
+  },
+  {
+   "url": "https://www.mdpi.com/2071-1050/17/18/8397",
+   "title": "The International Second-Hand Clothing Trade",
+   "host": "mdpi.com",
+   "about": "B",
+   "market": "B",
+   "span": "S2",
+   "judgedBy": "llamacpp"
+  },
+  {
+   "url": "https://writeupcafe.com/wholesale-clothing--everything-you-need-to-know-to-start-and-succeed",
+   "title": "Wholesale Clothing: Everything You Need to Know to Start and Succeed",
+   "host": "writeupcafe.com",
+   "about": "B",
+   "market": "B",
+   "span": "S5",
+   "judgedBy": "llamacpp"
+  },
+  {
+   "url": "https://wiltex.eu/second-hand-clothing",
+   "title": "Second-hand clothing | Wiltex Wholesale - Clothing, Shoes, Accessories",
+   "host": "wiltex.eu",
+   "about": "A",
+   "market": "B",
+   "span": "S95",
+   "judgedBy": "llamacpp"
+  },
+  {
+   "url": "https://apparel.alibaba.com/supplier/wholesale-second-hand-clothes",
+   "title": "Top Verified Wholesale Second-Hand Clothes Suppliers",
+   "host": "apparel.alibaba.com",
+   "about": "A",
+   "market": "B",
+   "span": "S1",
+   "judgedBy": "llamacpp"
+  }
+ ],
+ "dropped": [
+  {
+   "url": "https://www.sciencedirect.com/science/article/pii/S2667325826006187",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://aeclothing.net",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://sortedclothes.eu/",
+   "reason": "no sentence on the page shows it"
+  },
+  {
+   "url": "https://www.fashionatingworld.com/new1-2/inventory-intelligence-replaces-discounts-in-new-secondhand-wholesale-trade",
+   "reason": "off-market: describes another market"
+  }
+ ],
+ "enough": true
+}

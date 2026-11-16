@@ -1,0 +1,70 @@
+{
+ "kept": [
+  {
+   "url": "https://www.kudyznudy.cz/aktuality/detska-hriste-v-lesich-a-parcich-volne-dostupna-i",
+   "title": "Lesoparky, zážitkové areály a dětská hřiště v lesích a parcích: volně dostupná i placená – Kudy z nudy",
+   "host": "kudyznudy.cz",
+   "about": "A",
+   "market": "A",
+   "span": "S4",
+   "judgedBy": "groq"
+  },
+  {
+   "url": "https://www.ceskehory.cz/krusne-hory/turisticke-trasy.html",
+   "title": "Krušné hory - Turistické trasy",
+   "host": "ceskehory.cz",
+   "about": "A",
+   "market": "A",
+   "span": "S11",
+   "judgedBy": "groq"
+  },
+  {
+   "url": "https://hrad-houska.cz/lipno-s-detmi-kam-vyrazit-na-vylet-v-kazdem-pocasi/",
+   "title": "Lipno s dětmi: kam vyrazit na výlet v každém počasí < hrad-houska.cz",
+   "host": "hrad-houska.cz",
+   "about": "B",
+   "market": "A",
+   "span": "S4",
+   "judgedBy": "groq"
+  }
+ ],
+ "dropped": [
+  {
+   "url": "https://www.nps.gov/apco/planyourvisit/hiking-trails.htm",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.westchestercountyny.gov/all-press-releases/westchester-county-trailway-users-have-a-new-way-of-contacting-emergency-services-on-the-trails",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://dep.nj.gov/wp-content/uploads/parksandforests/docs/sps/trails-maps/2026-trails_brochure_cheesequake_4_24_26finalweb.pdf",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "http://www.bikearena-vsetin.cz/trail-mraznice",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.thermalbeltrailtrail.com/trail-info",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.imba.com/resource/trail_management_and_wildlife",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://cs.wikipedia.org/wiki/D%C3%A1lkov%C3%A1_turistick%C3%A1_trasa",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://www.onxmaps.com/hiking/ndzdpj5elzkv/old-wagon-trail",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://www.experienceouradirondacks.com/nature-and-historic-walks/sacandaga-pathway",
+   "reason": "off-subject: a different subject"
+  }
+ ],
+ "enough": false
+}

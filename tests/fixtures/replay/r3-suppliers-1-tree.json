@@ -1,0 +1,686 @@
+{
+ "phase": "needs-confirmation",
+ "anchors": [
+  {
+   "id": "C1",
+   "kind": "clause",
+   "text": "Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio",
+   "spans": [
+    "S1",
+    "S2",
+    "S3",
+    "S4"
+   ]
+  },
+  {
+   "id": "C2",
+   "kind": "clause",
+   "text": "proven good quality",
+   "spans": [
+    "S5"
+   ]
+  },
+  {
+   "id": "C3",
+   "kind": "clause",
+   "text": "assortiment for the appropriate retail second hand shop business in Czech Republic",
+   "spans": [
+    "S6"
+   ]
+  }
+ ],
+ "tree": {
+  "version": 2,
+  "requirements": {
+   "pieces": [
+    {
+     "text": "Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren",
+     "asked": true,
+     "split": false,
+     "votes": {
+      "0": 2
+     },
+     "spans": [
+      "S1"
+     ]
+    },
+    {
+     "text": "Monclair",
+     "asked": false,
+     "split": false,
+     "votes": {},
+     "spans": [
+      "S2"
+     ]
+    },
+    {
+     "text": "North face",
+     "asked": false,
+     "split": false,
+     "votes": {},
+     "spans": [
+      "S3"
+     ]
+    },
+    {
+     "text": "Barbour with highest price/value ratio",
+     "asked": true,
+     "split": false,
+     "votes": {
+      "0": 2
+     },
+     "spans": [
+      "S4"
+     ]
+    },
+    {
+     "text": "proven good quality",
+     "asked": true,
+     "split": false,
+     "votes": {
+      "0": 2
+     },
+     "spans": [
+      "S5"
+     ]
+    },
+    {
+     "text": "assortiment for the appropriate retail second hand shop business in Czech Republic",
+     "asked": true,
+     "split": false,
+     "votes": {
+      "0": 2
+     },
+     "spans": [
+      "S6"
+     ]
+    }
+   ],
+   "grouping": {
+    "grouped": true,
+    "valid": 3
+   }
+  },
+  "purpose": {
+   "id": "P",
+   "who": "the appropriate retail second hand shop business in Czech Republic",
+   "outcome": "proven good quality wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio",
+   "why": "for the appropriate retail second hand shop business in Czech Republic",
+   "anchors": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "text": "the appropriate retail second hand shop business in Czech Republic wants proven good quality wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, because for the appropriate retail second hand shop business in Czech Republic",
+   "samples": 3
+  },
+  "implications": [
+   {
+    "id": "I1",
+    "attribute": "Product quality and reliability",
+    "direction": "high",
+    "anchor": "C2",
+    "source": "inferred",
+    "samples": 3
+   },
+   {
+    "id": "I2",
+    "attribute": "Price to value ratio",
+    "direction": "high",
+    "anchor": "C1",
+    "source": "inferred",
+    "samples": 3
+   },
+   {
+    "id": "I3",
+    "attribute": "Supplier reliability and track record",
+    "direction": "high",
+    "anchor": "C2",
+    "source": "inferred",
+    "samples": 2
+   }
+  ],
+  "consumes": {
+   "value": true,
+   "decided": true,
+   "votes": {
+    "true": 2
+   }
+  },
+  "tensions": {
+   "pairs": [],
+   "decided": true,
+   "replies": 3,
+   "votes": {
+    "C1|C2": 1,
+    "C1|C3": 1,
+    "C2|C3": 1
+   }
+  },
+  "goals": [
+   {
+    "goal": "Achieve high price to value ratio for clothing",
+    "anchor": "I2",
+    "notes": [
+     "N5"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "I2",
+     "text": "Price to value ratio: high is preferred"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Does the item grade correspond to the retail price point based on rarity and condition?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N5",
+      "id": "Q1"
+     },
+     {
+      "q": "Is the cost per wear lower than the average for similar clothing categories?",
+      "checker": "statistic",
+      "threshold": {
+       "op": "<=",
+       "value": 0,
+       "unit": "currency",
+       "source": "assumption",
+       "hard": false
+      },
+      "note": "N5",
+      "id": "Q2"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "The item is priced at a premium due to rarity rather than functional utility.",
+      "checker": "page",
+      "threshold": null,
+      "id": "O1"
+     }
+    ],
+    "id": "G1"
+   },
+   {
+    "goal": "Ensure high product quality and reliability",
+    "anchor": "I1",
+    "notes": [
+     "N4",
+     "N6"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "I1",
+     "text": "Product quality and reliability: high is preferred"
+    },
+    "votes": {
+     "S": 2,
+     "R": 1
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Does the product receive an A Class flawless quality grade",
+      "checker": "page",
+      "threshold": null,
+      "note": "N4",
+      "id": "Q3"
+     },
+     {
+      "q": "Are company registration and export credentials verified along with sample lots obtained",
+      "checker": "consensus",
+      "threshold": null,
+      "note": "N6",
+      "id": "Q4"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Product fails to meet A Class flawless grading standards",
+      "checker": "page",
+      "threshold": null,
+      "id": "O2"
+     },
+     {
+      "obstacle": "Verification of credentials or sample lots fails",
+      "checker": "consensus",
+      "threshold": null,
+      "id": "O3"
+     }
+    ],
+    "id": "G2"
+   },
+   {
+    "goal": "Match assortment to Czech Republic retail market needs",
+    "anchor": "C3",
+    "notes": [
+     "N1"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "C3",
+     "text": "assortiment for the appropriate retail second hand shop business in Czech Republic"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Does the supplier explicitly include the Czech Republic in their target delivery markets",
+      "checker": "page",
+      "threshold": null,
+      "note": "N1",
+      "id": "Q5"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "The target markets list excludes the Czech Republic",
+      "checker": "page",
+      "threshold": null,
+      "id": "O4"
+     }
+    ],
+    "id": "G3"
+   },
+   {
+    "goal": "Verify supplier reliability and professional track record",
+    "anchor": "I3",
+    "notes": [
+     "N6",
+     "N7"
+    ],
+    "state": "kept",
+    "trace": {
+     "id": "I3",
+     "text": "Supplier reliability and track record: high is preferred"
+    },
+    "votes": {
+     "S": 2
+    },
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Are the company registration and export credentials verified as valid?",
+      "checker": "official",
+      "threshold": null,
+      "note": "N6",
+      "id": "Q6"
+     },
+     {
+      "q": "Do the recent photos and video walk-through confirm the operational sorting area?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N6",
+      "id": "Q7"
+     },
+     {
+      "q": "Do the obtained sample lots meet the required quality standards?",
+      "checker": "official",
+      "threshold": null,
+      "note": "N6",
+      "id": "Q8"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Company registration or export credentials cannot be authenticated.",
+      "checker": "official",
+      "threshold": null,
+      "id": "O5"
+     },
+     {
+      "obstacle": "Sample lots fail to meet quality standards.",
+      "checker": "code",
+      "threshold": null,
+      "id": "O6"
+     }
+    ],
+    "id": "G4"
+   },
+   {
+    "goal": "What the result must do for the purpose",
+    "role": "value",
+    "protected": true,
+    "state": "kept",
+    "trace": {
+     "kind": "rule",
+     "text": "value"
+    },
+    "basis": "EN 12973:2020 value management: value = satisfaction of needs / resources used; function analysis by \"how?\" and \"why?\" (FAST)",
+    "notes": [],
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "Provider lists branded second‑hand clothing from brands comparable to Ralph Lauren, Moncler, The North Face or Barbour",
+      "checker": "page",
+      "threshold": null,
+      "note": "N2",
+      "id": "Q9"
+     },
+     {
+      "q": "Provider states a quality grading system (e.g., Class A/Flawless) confirming proven good quality",
+      "checker": "page",
+      "threshold": null,
+      "note": "N5",
+      "id": "Q10"
+     },
+     {
+      "q": "Provider publishes a price‑to‑value ratio that is among the highest in the wholesale second‑hand market",
+      "checker": "statistic",
+      "threshold": null,
+      "note": "N6",
+      "id": "Q11"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "Provider’s sourcing originates from unsorted Chinese bales, which may compromise brand authenticity and quality",
+      "checker": "page",
+      "threshold": null,
+      "soft": true,
+      "id": "O7"
+     },
+     {
+      "obstacle": "Provider’s target markets exclude the Czech Republic, making supply unavailable for the intended retail shop",
+      "checker": "page",
+      "threshold": null,
+      "soft": true,
+      "id": "O8"
+     }
+    ],
+    "id": "G5"
+   },
+   {
+    "goal": "Total cost to obtain and use it",
+    "role": "cost",
+    "protected": true,
+    "state": "kept",
+    "trace": {
+     "kind": "rule",
+     "text": "cost"
+    },
+    "basis": "Total cost of ownership (Ellram 1993, 1995): pre-transaction, transaction and post-transaction costs",
+    "notes": [],
+    "refine": "AND",
+    "questions": [
+     {
+      "q": "What registration or membership fee is required to qualify as a buyer with the wholesale second‑hand clothing provider?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N2",
+      "phase": "pre-transaction",
+      "price": false,
+      "id": "Q12"
+     },
+     {
+      "q": "What is the minimum order value or cost for an initial sample lot from the provider?",
+      "checker": "page",
+      "threshold": null,
+      "note": "N2",
+      "phase": "pre-transaction",
+      "price": false,
+      "id": "Q13"
+     },
+     {
+      "q": "What is the unit price per garment for wholesale second‑hand items from the requested brands?",
+      "checker": "code",
+      "threshold": null,
+      "note": null,
+      "phase": "transaction",
+      "price": true,
+      "id": "Q14"
+     },
+     {
+      "q": "What are the typical shipping and handling fees per container from the supplier to the Czech Republic?",
+      "checker": "consensus",
+      "threshold": null,
+      "note": null,
+      "phase": "transaction",
+      "price": false,
+      "id": "Q15"
+     },
+     {
+      "q": "What is the average cost per item for handling returns or defects after purchase from these wholesale second‑hand clothing providers?",
+      "checker": "consensus",
+      "threshold": {
+       "op": "<=",
+       "value": 5,
+       "unit": "%",
+       "source": "assumption",
+       "hard": false
+      },
+      "note": "N2",
+      "phase": "post-transaction",
+      "price": false,
+      "id": "Q16"
+     },
+     {
+      "q": "What typical repair or refurbishment expense is incurred per defective garment in the post‑transaction phase?",
+      "checker": "consensus",
+      "threshold": {
+       "op": "<=",
+       "value": 3,
+       "unit": "%",
+       "source": "assumption",
+       "hard": false
+      },
+      "note": "N2",
+      "phase": "post-transaction",
+      "price": false,
+      "id": "Q17"
+     }
+    ],
+    "obstacles": [
+     {
+      "obstacle": "A minimum order cost that exceeds the typical budget of Czech second‑hand retailers would defeat the purpose of sourcing from this provider",
+      "checker": "page",
+      "threshold": null,
+      "phase": "pre-transaction",
+      "soft": true,
+      "id": "O9"
+     },
+     {
+      "obstacle": "Import duties that exceed the acceptable limit make the sourcing uneconomical",
+      "checker": "page",
+      "threshold": {
+       "op": ">=",
+       "value": 30,
+       "unit": "%",
+       "source": "assumption",
+       "hard": false
+      },
+      "phase": "transaction",
+      "soft": true,
+      "id": "O10"
+     },
+     {
+      "obstacle": "Disposal or environmentally‑regulated waste fees that exceed a reasonable share of the garment’s resale value, potentially making the sourcing uneconomical",
+      "checker": "page",
+      "threshold": null,
+      "phase": "post-transaction",
+      "soft": true,
+      "id": "O11"
+     }
+    ],
+    "phases": [
+     {
+      "id": "pre-transaction",
+      "covers": "finding, qualifying, minimum order, registration",
+      "questions": 2
+     },
+     {
+      "id": "transaction",
+      "covers": "price, delivery, duties, payment",
+      "questions": 2
+     },
+     {
+      "id": "post-transaction",
+      "covers": "defects, returns, repairs, resale or disposal",
+      "questions": 2
+     }
+    ],
+    "id": "G6"
+   }
+  ],
+  "dropped": [
+   {
+    "goal": "Identify providers offering specific luxury and outdoor brands",
+    "reason": "not refined into measurable questions",
+    "trace": {
+     "id": "C1",
+     "text": "Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio"
+    }
+   }
+  ],
+  "ops": {
+   "applied": [
+    {
+     "op": "checker",
+     "id": "Q2",
+     "checker": "statistic"
+    },
+    {
+     "op": "checker",
+     "id": "Q8",
+     "checker": "official"
+    }
+   ],
+   "refused": [
+    {
+     "op": "drop",
+     "id": "G5",
+     "reason": "C",
+     "why": "\"What the result must do for the purpose\" is a protected value goal"
+    },
+    {
+     "op": "checker",
+     "id": "Q14",
+     "checker": "statistic",
+     "why": "\"Total cost to obtain and use it\" is a protected cost goal"
+    }
+   ]
+  },
+  "confirmedAt": null,
+  "thresholds": [
+   {
+    "node": "Q2",
+    "goal": "G1",
+    "op": "<=",
+    "value": 0,
+    "unit": "currency",
+    "source": "assumption",
+    "hard": false
+   },
+   {
+    "node": "Q16",
+    "goal": "G6",
+    "op": "<=",
+    "value": 5,
+    "unit": "%",
+    "source": "assumption",
+    "hard": false
+   },
+   {
+    "node": "Q17",
+    "goal": "G6",
+    "op": "<=",
+    "value": 3,
+    "unit": "%",
+    "source": "assumption",
+    "hard": false
+   },
+   {
+    "node": "O10",
+    "goal": "G6",
+    "op": ">=",
+    "value": 30,
+    "unit": "%",
+    "source": "assumption",
+    "hard": false
+   }
+  ],
+  "notModelled": [
+   {
+    "id": "C1",
+    "text": "Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio"
+   },
+   {
+    "id": "C2",
+    "text": "proven good quality"
+   }
+  ],
+  "valueForCost": {
+   "measure": "value-for-cost",
+   "checker": "code",
+   "value": "G5",
+   "cost": "G6",
+   "satisfied": [
+    "Q9",
+    "Q10",
+    "Q11"
+   ],
+   "costs": [
+    "Q12",
+    "Q13",
+    "Q14",
+    "Q15",
+    "Q16",
+    "Q17"
+   ],
+   "basis": "EN 12973:2020 value management: value = satisfaction of needs / resources used; function analysis by \"how?\" and \"why?\" (FAST)"
+  },
+  "unrefined": [
+   "Identify providers offering specific luxury and outdoor brands"
+  ]
+ },
+ "open": [
+  {
+   "id": "Q2",
+   "kind": "threshold",
+   "text": "<= 0 currency",
+   "reason": "a number the question, the hints and the cited note do not state"
+  },
+  {
+   "id": "Q16",
+   "kind": "threshold",
+   "text": "<= 5 %",
+   "reason": "a number the question, the hints and the cited note do not state"
+  },
+  {
+   "id": "Q17",
+   "kind": "threshold",
+   "text": "<= 3 %",
+   "reason": "a number the question, the hints and the cited note do not state"
+  },
+  {
+   "id": "O10",
+   "kind": "threshold",
+   "text": ">= 30 %",
+   "reason": "a number the question, the hints and the cited note do not state"
+  },
+  {
+   "id": "I1",
+   "kind": "implication",
+   "text": "Product quality and reliability: high",
+   "reason": "inferred from the purpose, not stated"
+  },
+  {
+   "id": "I2",
+   "kind": "implication",
+   "text": "Price to value ratio: high",
+   "reason": "inferred from the purpose, not stated"
+  },
+  {
+   "id": "I3",
+   "kind": "implication",
+   "text": "Supplier reliability and track record: high",
+   "reason": "inferred from the purpose, not stated"
+  }
+ ]
+}

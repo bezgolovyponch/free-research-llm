@@ -1,0 +1,70 @@
+{
+ "kept": [
+  {
+   "url": "https://msgroup-secondhandclothes.com/",
+   "title": "Second Hand Clothes Wholesale Supplier | MS Group",
+   "host": "msgroup-secondhandclothes.com",
+   "about": "A",
+   "market": "B",
+   "span": "S45",
+   "judgedBy": "groq"
+  },
+  {
+   "url": "https://theses.cz/id/t3q7eu/Symovonyk_DP.pdf",
+   "title": "Distribuční příležitosti vybraného podnikatelského subjektu - Theses",
+   "host": "theses.cz",
+   "about": "B",
+   "market": "B",
+   "span": "S2",
+   "judgedBy": "groq"
+  },
+  {
+   "url": "https://www.bankvogue.com/",
+   "title": "Second Hand Wholesale Global Supplier | Bank & Vogue",
+   "host": "bankvogue.com",
+   "about": "B",
+   "market": "B",
+   "span": "S1",
+   "judgedBy": "groq"
+  }
+ ],
+ "dropped": [
+  {
+   "url": "https://cyclallc.com/product/second-hand-clothing-wholesale",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://aeclothing.net",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.garsonshaw.com/",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.wholesalesecondhandclothing.com/",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://trustmerchants.org.uk/",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.ismap.com/pz64ded5d-cz5e8b3d1-used-women-s-clothing-ladies-cotton-dress-top-grade-second-hand-clothes-for-africa.html",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://sinaitex.com/",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.youtube.com/watch?v=cwZVx75TIpo",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.indetexx.com/wholesale-used-clothing-by-the-pound-kg-container/",
+   "reason": "off-market: describes another market"
+  }
+ ],
+ "enough": false
+}

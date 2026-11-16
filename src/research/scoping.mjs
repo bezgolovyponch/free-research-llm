@@ -1,19 +1,36 @@
 import { regionVerdict } from './brief.mjs';
+import { COST_BASIS, COST_GOAL, COST_ROLE, VALUE_BASIS, VALUE_GOAL, VALUE_ROLE } from './purpose.mjs';
 import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
-import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, matchPrompt, oneOf, shortText } from './semantic.mjs';
+import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, shortText, vote } from './semantic.mjs';
 
 export const STAGE = 'scoping';
 export const MAX_SOURCES = 12;
 export const MAX_QUERIES = 12;
 export const MAX_NOTES_PER_SOURCE = 4;
-export const MIN_KEPT_SOURCES = 4;
+export const MIN_HOSTS = 4;
+export const MIN_PERSPECTIVES = 2;
+export const SCOPING_BASE_CAP = 20;
+export const SCOPING_CALLS_PER_SOURCE = 5;
+export const THIN = 'scoping thin';
 export const SUBJECT_LABELS = 5;
+export const SUBJECT_CHARS = 400;
+export const SUBJECT_WORDS = 6;
 export const RELEVANCE_SPANS = 8;
 export const NOTE_SPANS = 40;
 export const BLOCK_CHARS = 4000;
 export const PAGE_CHARS = 40000;
 export const ABOUT = { A: 'the asked subject', B: 'the wider class it belongs to', C: 'a different subject', D: 'not informative' };
 export const MARKET = { A: 'describes the asked market', B: 'holds in any market', C: 'describes another market' };
+export const KNOWLEDGE = 'knowledge';
+export const MARKET_ROLE = 'market';
+export const UNDECIDED = 'undecided';
+export const OFF_MARKET = 'off-market';
+export const ROLES = { A: KNOWLEDGE, B: MARKET_ROLE };
+export const ROLE_TEXT = { A: 'explains how to judge or choose such a thing: what decides, methods, criteria, risks, whatever place it describes', B: 'describes a market: offers, prices, availability or local rules' };
+export const FIXED_VIEWS = [
+  { role: VALUE_ROLE, name: VALUE_GOAL, basis: VALUE_BASIS, asks: 'what the result must do for the purpose, and how a careful decision-maker tells a good one from a poor one', fallback: 'how to choose' },
+  { role: COST_ROLE, name: COST_GOAL, basis: COST_BASIS, asks: 'everything it takes to obtain and use the result, from finding it to living with it', fallback: 'total cost' },
+];
 
 const hostOf = (url) => {
   try {
@@ -24,6 +41,15 @@ const hostOf = (url) => {
 };
 
 export { hostOf };
+
+export function pageKey(url) {
+  try {
+    const parsed = new URL(url);
+    return `${hostOf(url).toLowerCase()}${parsed.pathname.replace(/\/+$/, '')}${parsed.search}`;
+  } catch {
+    return String(url ?? '');
+  }
+}
 
 export async function subjectLevels(ctx, { question, kind, titles = [] }) {
   if (!titles.length) return [kind];
@@ -44,24 +70,62 @@ export async function subjectLevels(ctx, { question, kind, titles = [] }) {
   return agreed.length ? agreed.map((entry) => entry.item) : [kind];
 }
 
-export async function perspectives(ctx, { question, purpose = '', languages = ['English'] }) {
+export function scopingCap(sources = MAX_SOURCES) {
+  return SCOPING_BASE_CAP + Math.max(0, Number(sources) || 0) * SCOPING_CALLS_PER_SOURCE;
+}
+
+function planScoping(ctx) {
+  if (!ctx.budget?.caps) return;
+  ctx.budget.caps[STAGE] = scopingCap();
+  ctx.log?.(`scoping budget: ${ctx.budget.caps[STAGE]} calls (${SCOPING_BASE_CAP} for levels and perspectives, ${SCOPING_CALLS_PER_SOURCE} for each of ${MAX_SOURCES} source(s): one judgement, up to 3 role votes, one set of notes)`);
+}
+
+function sourcesAffordable(ctx) {
+  if (!ctx.budget?.caps) return MAX_SOURCES;
+  const left = (ctx.budget.caps[STAGE] ?? Infinity) - (ctx.budget.used?.[STAGE] ?? 0);
+  return Math.max(0, Math.min(MAX_SOURCES, Math.floor(left / SCOPING_CALLS_PER_SOURCE)));
+}
+
+function aspectsOf(list, languages) {
+  const perLanguage = {};
+  const aspects = [];
+  for (const aspect of Array.isArray(list) ? list : []) {
+    const lang = languages.find((language) => language.toLowerCase() === String(aspect?.lang ?? '').trim().toLowerCase());
+    const phrase = shortText(aspect?.phrase, 6, 80);
+    if (!lang || !phrase || (perLanguage[lang] ?? 0) >= 2) continue;
+    perLanguage[lang] = (perLanguage[lang] ?? 0) + 1;
+    aspects.push({ lang, phrase });
+  }
+  return aspects;
+}
+
+export async function fixedPerspectives(ctx, { question, purpose = '', languages = ['English'] }) {
   const messages = [
-    { role: 'system', content: `You plan a scoping review. List at most 4 distinct expert perspectives a careful decision-maker would consult for the question. For each perspective give short aspect phrases (at most 6 words, no subject name, no place name) in the listed languages, at most 2 per language, each written in that language. Every listed language needs at least one phrase. Answer with JSON only: {"perspectives":[{"name":"...","aspects":[{"lang":"<one of the languages>","phrase":"..."}]}]}.` },
+    { role: 'system', content: `You plan a scoping review. Two perspectives are fixed: ${FIXED_VIEWS.map((view) => `"${view.role}": ${view.asks}`).join('; ')}. For each of the two give short aspect phrases (at most 6 words, no subject name, no place name) in the listed languages, at most 2 per language, each written in that language. Every listed language needs at least one phrase for each perspective. Answer with JSON only: {${FIXED_VIEWS.map((view) => `"${view.role}":[{"lang":"<one of the languages>","phrase":"..."}]`).join(',')}}.` },
     { role: 'user', content: `Question: ${question}\nPurpose: ${purpose || question}\nLanguages: ${languages.join(', ')}` },
   ];
   const schema = (data) => {
-    const list = (Array.isArray(data?.perspectives) ? data.perspectives : []).slice(0, 4).map((entry) => {
-      const perLanguage = {};
-      const aspects = [];
-      for (const aspect of Array.isArray(entry?.aspects) ? entry.aspects : []) {
-        const lang = languages.find((language) => language.toLowerCase() === String(aspect?.lang ?? '').trim().toLowerCase());
-        const phrase = shortText(aspect?.phrase, 6, 80);
-        if (!lang || !phrase || (perLanguage[lang] ?? 0) >= 2) continue;
-        perLanguage[lang] = (perLanguage[lang] ?? 0) + 1;
-        aspects.push({ lang, phrase });
-      }
-      return { name: shortText(entry?.name, 6, 60), aspects };
-    }).filter((entry) => entry.name && entry.aspects.length);
+    const value = {};
+    for (const view of FIXED_VIEWS) {
+      value[view.role] = aspectsOf(data?.[view.role], languages);
+      const covered = new Set(value[view.role].map((aspect) => aspect.lang));
+      const missing = languages.filter((language) => !covered.has(language));
+      if (missing.length) return { error: `"${view.role}" has no aspect phrase in: ${missing.join(', ')}` };
+    }
+    return { value };
+  };
+  const reply = await ask({ router: ctx.router, task: 'fixed-perspectives', tier: 'deep', messages, schema, budget: ctx.budget, stage: STAGE });
+  if (!reply) ctx.log?.(`scoping: no model phrased the ${FIXED_VIEWS.map((view) => view.role).join(' and ')} perspectives; each keeps one phrase set by code`);
+  return FIXED_VIEWS.map((view) => ({ name: view.name, role: view.role, basis: view.basis, aspects: reply?.value[view.role] ?? [{ lang: languages[0] ?? 'English', phrase: view.fallback }], ...(reply ? {} : { fallback: true }) }));
+}
+
+export async function perspectives(ctx, { question, purpose = '', languages = ['English'], tried = [] }) {
+  const messages = [
+    { role: 'system', content: `You plan a scoping review. List at most 4 distinct expert perspectives a careful decision-maker would consult for the question. For each perspective give short aspect phrases (at most 6 words, no subject name, no place name) in the listed languages, at most 2 per language, each written in that language. Every listed language needs at least one phrase. Answer with JSON only: {"perspectives":[{"name":"...","aspects":[{"lang":"<one of the languages>","phrase":"..."}]}]}.` },
+    { role: 'user', content: `Question: ${question}\nPurpose: ${purpose || question}\nLanguages: ${languages.join(', ')}${tried.length ? `\nPhrases already searched, give different ones: ${tried.join('; ')}` : ''}` },
+  ];
+  const schema = (data) => {
+    const list = (Array.isArray(data?.perspectives) ? data.perspectives : []).slice(0, 4).map((entry) => ({ name: shortText(entry?.name, 6, 60), aspects: aspectsOf(entry?.aspects, languages) })).filter((entry) => entry.name && entry.aspects.length);
     const covered = new Set(list.flatMap((entry) => entry.aspects.map((aspect) => aspect.lang)));
     const missing = languages.filter((language) => !covered.has(language));
     if (!list.length) return { error: '"perspectives" is empty' };
@@ -69,6 +133,20 @@ export async function perspectives(ctx, { question, purpose = '', languages = ['
   };
   const reply = await ask({ router: ctx.router, task: 'perspectives', tier: 'deep', messages, schema, budget: ctx.budget, stage: STAGE });
   return reply?.value ?? [];
+}
+
+export function moreAspects(views, fresh) {
+  const tried = new Set((views ?? []).flatMap((view) => view.aspects.map((aspect) => aspect.phrase.toLowerCase())));
+  const out = (views ?? []).map((view) => ({ ...view }));
+  for (const view of fresh ?? []) {
+    const aspects = view.aspects.filter((aspect) => !tried.has(aspect.phrase.toLowerCase()));
+    if (!aspects.length) continue;
+    for (const aspect of aspects) tried.add(aspect.phrase.toLowerCase());
+    const held = out.find((entry) => entry.name === view.name);
+    if (held) held.aspects = [...held.aspects, ...aspects];
+    else out.push({ name: view.name, aspects, round: 2 });
+  }
+  return out;
 }
 
 export function subjectLabels(rows, levels, kind) {
@@ -86,23 +164,89 @@ export function subjectLabels(rows, levels, kind) {
   return labels.length ? [...new Set(labels)] : [kind].filter(Boolean);
 }
 
-export function screeningSubject(subjects, kind) {
+export function askedSubject(kind, requirements) {
+  const asked = (requirements ?? []).filter((anchor) => anchor?.kind === 'clause' && anchor.text).map((anchor) => String(anchor.text).replace(/\s+/g, ' ').trim()).join('; ').slice(0, SUBJECT_CHARS);
+  if (!asked) return kind;
+  return kind ? `${kind}, as asked: ${asked}` : asked;
+}
+
+const wordsOf = (text) => String(text ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+
+export async function requirementSubjects(ctx, { requirements, languages = ['English'] }) {
+  const clauses = (requirements ?? []).filter((anchor) => anchor?.kind === 'clause' && anchor.text).slice(0, SUBJECT_LABELS);
+  if (!clauses.length) return { subjects: [], rejected: [] };
+  const known = new Set(clauses.map((clause) => clause.id));
+  const said = new Set(clauses.flatMap((clause) => wordsOf(clause.text)));
+  const own = new Map(clauses.map((clause) => [clause.id, new Set(wordsOf(clause.text))]));
+  const messages = [
+    { role: 'system', content: `You name what to search for. For each requirement of one request write "phrase": the thing asked, as this requirement describes it, in at most ${SUBJECT_WORDS} words, using only words that stand in the requirements, in their language and spelling. In "translations" give the same phrase, faithfully translated, for each listed language other than the language of the requirements. Answer with JSON only: {"subjects":[{"anchor":"C1","phrase":"...","translations":[{"lang":"<one of the languages>","phrase":"..."}]}]}.` },
+    { role: 'user', content: `Requirements:\n${clauses.map((clause) => `[${clause.id}] ${clause.text}`).join('\n')}\nLanguages: ${languages.join(', ')}` },
+  ];
+  let rounds = 0;
+  const schema = (data) => {
+    rounds += 1;
+    if (!Array.isArray(data?.subjects)) return { error: '"subjects" must be a list' };
+    const accepted = [];
+    const rejected = [];
+    for (const entry of data.subjects) {
+      const anchor = idOf(entry?.anchor, known);
+      const phrase = shortText(entry?.phrase, SUBJECT_WORDS, 80);
+      if (!anchor || !phrase || accepted.some((held) => held.anchor === anchor)) continue;
+      const words = wordsOf(phrase);
+      const stray = words.filter((word) => !said.has(word));
+      if (stray.length) rejected.push({ anchor, phrase, reason: `words that are not in the requirements: ${[...new Set(stray)].join(', ')}` });
+      else if (!words.some((word) => own.get(anchor).has(word))) rejected.push({ anchor, phrase, reason: 'no word of its own requirement' });
+      else accepted.push({ anchor, label: phrase, offered: aspectsOf(entry?.translations, languages) });
+    }
+    if (rejected.length && rounds < 2) return { error: rejected.map((entry) => `the phrase for ${entry.anchor} has ${entry.reason}`).join('; ') };
+    return accepted.length ? { value: { accepted, rejected } } : { error: 'every requirement needs a "phrase" made only of words of the requirements' };
+  };
+  const reply = await ask({ router: ctx.router, task: 'requirement-subjects', tier: 'deep', messages, schema, budget: ctx.budget, stage: STAGE });
+  if (!reply) return { subjects: [], rejected: [], failed: true };
+  const labels = reply.value.accepted.map((entry) => entry.label);
+  const rejected = [...reply.value.rejected];
+  const subjects = [];
+  for (const [index, entry] of reply.value.accepted.entries()) {
+    const translations = {};
+    for (const offer of entry.offered) {
+      if (translations[offer.lang] || offer.phrase.toLowerCase() === entry.label.toLowerCase()) continue;
+      const ranked = labels.length > 1 && ctx.embedder ? await ctx.embedder.rank(offer.phrase, labels, 1) : null;
+      if (ranked?.order?.[0] === index) translations[offer.lang] = offer.phrase;
+      else rejected.push({ anchor: entry.anchor, lang: offer.lang, phrase: offer.phrase, reason: ranked ? 'nearer in meaning to another requirement than to its own' : 'a translation that code could not check' });
+    }
+    if (!subjects.some((held) => held.label.toLowerCase() === entry.label.toLowerCase())) subjects.push({ anchor: entry.anchor, label: entry.label, translations });
+  }
+  return { subjects, rejected };
+}
+
+export function screeningSubject(subjects, kind, requirements = []) {
   const labels = (subjects ?? []).filter((label) => label && label !== kind);
-  if (!labels.length) return kind;
+  if (!labels.length) return askedSubject(kind, requirements);
   return labels.length === 1 && !kind ? labels[0] : `${kind} (any of: ${labels.join('; ')})`;
 }
 
-export function composeQueries(subjects, perspectiveList, max = MAX_QUERIES) {
-  const aspects = (perspectiveList ?? []).flatMap((perspective) => perspective.aspects.map((aspect) => ({ ...aspect, perspective: perspective.name })));
+export function composeQueries(subjects, perspectiveList, max = MAX_QUERIES, { used = [], first = [], shift = 0 } = {}) {
+  const views = [...(perspectiveList ?? [])].sort((a, b) => Number(first.includes(b.name)) - Number(first.includes(a.name)));
   const byLanguage = new Map();
-  for (const aspect of aspects) byLanguage.set(aspect.lang, [...(byLanguage.get(aspect.lang) ?? []), aspect]);
+  let total = 0;
+  for (const [order, view] of views.entries()) {
+    const turnOf = {};
+    for (const aspect of view.aspects) {
+      const turn = turnOf[aspect.lang] ?? 0;
+      turnOf[aspect.lang] = turn + 1;
+      byLanguage.set(aspect.lang, [...(byLanguage.get(aspect.lang) ?? []), { ...aspect, perspective: view.name, turn, order }]);
+      total += 1;
+    }
+  }
+  for (const list of byLanguage.values()) list.sort((a, b) => a.turn - b.turn || a.order - b.order);
   const turns = [];
-  for (let round = 0; turns.length < aspects.length; round++) for (const list of byLanguage.values()) if (list[round]) turns.push(list[round]);
+  for (let round = 0; turns.length < total; round++) for (const list of byLanguage.values()) if (list[round]) turns.push(list[round]);
   const queries = [];
-  const seen = new Set();
+  const seen = new Set(used);
   for (const [index, aspect] of turns.entries()) {
     if (queries.length >= max || !subjects?.length) break;
-    const subject = subjects[index % subjects.length];
+    const chosen = subjects[(index + shift) % subjects.length];
+    const subject = typeof chosen === 'string' ? chosen : chosen.translations?.[aspect.lang] ?? chosen.label;
     const query = `${subject} ${aspect.phrase}`;
     if (seen.has(query)) continue;
     seen.add(query);
@@ -111,10 +255,49 @@ export function composeQueries(subjects, perspectiveList, max = MAX_QUERIES) {
   return queries;
 }
 
+export async function findSources(ctx, queries, { max = MAX_SOURCES, seen = [] } = {}) {
+  const groups = new Map();
+  for (const entry of queries ?? []) groups.set(entry.perspective, [...(groups.get(entry.perspective) ?? []), entry.query]);
+  if (!groups.size || !ctx.search) return [];
+  const share = Math.ceil(max / groups.size) + 1;
+  const lists = [];
+  for (const [perspective, list] of groups) {
+    const found = await ctx.search.search(list, { maxSources: share }).catch(() => []);
+    lists.push((Array.isArray(found) ? found : []).filter((source) => source?.url).map((source) => ({ source, perspective })));
+  }
+  const known = new Set([...seen].map(pageKey));
+  const byUrl = new Map();
+  for (let turn = 0; lists.some((list) => list[turn]); turn++) {
+    for (const list of lists) {
+      const hit = list[turn];
+      const key = hit ? pageKey(hit.source.url) : '';
+      if (!hit || known.has(key)) continue;
+      const held = byUrl.get(key);
+      if (held) held.perspectives = [...new Set([...held.perspectives, hit.perspective])];
+      else byUrl.set(key, { ...hit.source, perspectives: [hit.perspective] });
+    }
+  }
+  const hosts = new Set();
+  const firstOfHost = [];
+  const repeats = [];
+  for (const source of byUrl.values()) {
+    const host = hostOf(source.url);
+    (hosts.has(host) ? repeats : firstOfHost).push(source);
+    hosts.add(host);
+  }
+  return [...firstOfHost, ...repeats].slice(0, max);
+}
+
+export function diversityOf(sources) {
+  const hosts = new Set((sources ?? []).map((source) => source.host ?? hostOf(source.url)));
+  const views = new Set((sources ?? []).flatMap((source) => source.perspectives ?? []));
+  return { hosts: hosts.size, perspectives: views.size, perspectiveNames: [...views], enough: hosts.size >= MIN_HOSTS && views.size >= MIN_PERSPECTIVES };
+}
+
 export async function judgeSource(ctx, { source, purpose, subject, markets = [], regions = [], avoid = undefined }) {
   const spans = sentenceSpans(source.text ?? source.snippet ?? '', { limit: PAGE_CHARS });
   const shown = await pickSpans(spans, `${purpose} ${subject}`, ctx.embedder, RELEVANCE_SPANS);
-  if (!shown.length) return { verdict: null, reason: 'the page has no readable sentence' };
+  if (!shown.length) return { verdict: null, reason: 'the page has no readable sentence', shown };
   const signal = regionVerdict(source, regions);
   const messages = [
     { role: 'system', content: `You screen one source for a research. Judge only from the sentences shown. "about": ${Object.entries(ABOUT).map(([letter, text]) => `${letter} ${text}`).join(', ')}. "market": ${Object.entries(MARKET).map(([letter, text]) => `${letter} ${text}`).join(', ')}. "span": the id of the one sentence that best shows it, or null. Answer with JSON only: {"about":"A|B|C|D","market":"A|B|C","span":"S<n>"}.` },
@@ -127,31 +310,51 @@ export async function judgeSource(ctx, { source, purpose, subject, markets = [],
     return { value: { about, market, span: data?.span ?? null } };
   };
   const reply = await ask({ router: ctx.router, task: 'source-relevance', tier: 'fast', messages, schema, avoid, budget: ctx.budget, stage: STAGE });
-  if (!reply) return { verdict: null, reason: 'not judged' };
+  if (!reply) return { verdict: null, reason: 'not judged', shown };
   const quote = quoteFromSpans(reply.value.span, shown);
-  return { verdict: { about: reply.value.about, market: reply.value.market, span: quote ? String(reply.value.span).trim().replace(/^\[|\]$/g, '').toUpperCase() : null, quote }, provider: reply.provider };
+  return { verdict: { about: reply.value.about, market: reply.value.market, span: quote ? String(reply.value.span).trim().replace(/^\[|\]$/g, '').toUpperCase() : null, quote }, provider: reply.provider, shown };
 }
 
-export function relevanceReason(verdict) {
+export async function sourceRole(ctx, { source, shown, purpose, subject }) {
+  const letters = Object.keys(ROLES);
+  const messages = [
+    { role: 'system', content: `You classify one source for a research, in any language. Judge only from the sentences shown. "role": ${letters.map((letter) => `${letter} when the source ${ROLE_TEXT[letter]}`).join('; ')}. Answer with JSON only: {"role":"${letters.join('|')}"}.` },
+    { role: 'user', content: `Purpose: ${purpose}\nAsked subject: ${subject}\nSource title: ${String(source.title ?? '').slice(0, 160)}\n\nSentences:\n${spansBlock(shown, BLOCK_CHARS)}` },
+  ];
+  const schema = (data) => {
+    const role = oneOf(data?.role, letters);
+    return role ? { value: role } : { error: `"role" must be ${letters.join(' or ')}` };
+  };
+  const result = await vote({ router: ctx.router, task: 'source-role', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: STAGE });
+  return { role: result.value ? ROLES[result.value] : UNDECIDED, votes: result.tally };
+}
+
+export function relevanceReason(verdict, role = MARKET_ROLE) {
   if (!verdict) return 'not judged';
   if (!['A', 'B'].includes(verdict.about)) return `off-subject: ${ABOUT[verdict.about]}`;
-  if (!['A', 'B'].includes(verdict.market)) return `off-market: ${MARKET[verdict.market]}`;
+  if (role === MARKET_ROLE && !['A', 'B'].includes(verdict.market)) return `${OFF_MARKET}: ${MARKET[verdict.market]}`;
   if (!verdict.span) return 'no sentence on the page shows it';
   return '';
 }
 
-export async function screenSources(ctx, { sources, purpose, subject, markets = [], regions = [] }) {
+export async function screenSources(ctx, { sources, purpose, subject, markets = [], regions = [], limit = MAX_SOURCES }) {
   const kept = [];
   const dropped = [];
   for (const [index, source] of (sources ?? []).entries()) {
-    if (index >= MAX_SOURCES) {
-      dropped.push({ url: source.url, reason: `not screened: over the limit of ${MAX_SOURCES} sources` });
+    if (index >= limit) {
+      dropped.push({ url: source.url, reason: `not screened: over the limit of ${limit} sources` });
       continue;
     }
     const judged = await judgeSource(ctx, { source, purpose, subject, markets, regions });
-    const reason = judged.verdict ? relevanceReason(judged.verdict) : judged.reason;
-    if (reason) dropped.push({ url: source.url, reason });
-    else kept.push({ ...source, host: hostOf(source.url), about: judged.verdict.about, market: judged.verdict.market, span: judged.verdict.span, spanQuote: judged.verdict.quote, judgedBy: judged.provider ?? null });
+    const early = judged.verdict ? relevanceReason(judged.verdict, KNOWLEDGE) : judged.reason;
+    if (early) {
+      dropped.push({ url: source.url, reason: early });
+      continue;
+    }
+    const { role, votes } = await sourceRole(ctx, { source, shown: judged.shown, purpose, subject });
+    const reason = relevanceReason(judged.verdict, role);
+    if (reason) dropped.push({ url: source.url, reason, role, roleVotes: votes });
+    else kept.push({ ...source, host: hostOf(source.url), about: judged.verdict.about, market: judged.verdict.market, span: judged.verdict.span, spanQuote: judged.verdict.quote, judgedBy: judged.provider ?? null, role, roleVotes: votes });
   }
   return { kept, dropped };
 }
@@ -179,29 +382,69 @@ export async function scopeNotes(ctx, { sources, purpose }) {
   return { notes, rejected };
 }
 
-export async function runScoping(ctx, { question, purpose = '', kind, regions = [], markets = [], languages = ['English'], rows = [], titles = [] }) {
+export async function runScoping(ctx, { question, purpose = '', kind, regions = [], markets = [], languages = ['English'], rows = [], titles = [], requirements = [] }) {
+  planScoping(ctx);
   const levels = await subjectLevels(ctx, { question, kind, titles });
-  const subjects = subjectLabels(rows, levels, kind);
-  const views = await perspectives(ctx, { question, purpose, languages });
-  const queries = composeQueries(subjects, views);
-  const found = queries.length && ctx.search ? await ctx.search.search(queries.map((entry) => entry.query), { maxSources: MAX_SOURCES }).catch(() => []) : [];
-  const screened = await screenSources(ctx, { sources: found, purpose: purpose || question, subject: screeningSubject(subjects, kind), markets, regions });
-  const noted = await scopeNotes(ctx, { sources: screened.kept, purpose: purpose || question });
+  const tableLabels = subjectLabels(rows, levels, kind);
+  const fromTable = tableLabels.some((label) => label !== kind);
+  const asked = fromTable ? null : await requirementSubjects(ctx, { requirements, languages });
+  if (asked?.failed) ctx.log?.(`scoping: no subject phrase was drawn from the requirements; the queries use the kind label "${kind}"`);
+  for (const entry of asked?.rejected ?? []) ctx.log?.(`scoping: subject phrase "${entry.phrase}" for ${entry.anchor}${entry.lang ? ` in ${entry.lang}` : ''} is not used: ${entry.reason}`);
+  const querySubjects = asked?.subjects.length ? asked.subjects : tableLabels;
+  const subjects = querySubjects.map((subject) => (typeof subject === 'string' ? subject : subject.label));
+  const subjectsFrom = fromTable ? 'table' : asked?.subjects.length ? 'requirements' : 'kind';
+  let views = [...(await fixedPerspectives(ctx, { question, purpose, languages })), ...(await perspectives(ctx, { question, purpose, languages }))];
+  const queries = composeQueries(querySubjects, views).map((entry) => ({ ...entry, round: 1 }));
+  const screening = { purpose: purpose || question, subject: screeningSubject(tableLabels, kind, requirements), markets, regions };
+  const found = await findSources(ctx, queries);
+  const first = await screenSources(ctx, { sources: found, ...screening });
+  const kept = [...first.kept];
+  const dropped = [...first.dropped];
+  let diversity = diversityOf(kept);
+  let rounds = 1;
+  if (!diversity.enough) {
+    const state = `${THIN}: ${diversity.hosts} hosts across ${diversity.perspectives} perspectives (at least ${MIN_HOSTS} hosts across ${MIN_PERSPECTIVES} perspectives are needed)`;
+    const compose = () => composeQueries(querySubjects, views, MAX_QUERIES, { used: queries.map((entry) => entry.query), first: views.map((view) => view.name).filter((name) => !diversity.perspectiveNames.includes(name)), shift: 1 }).map((entry) => ({ ...entry, round: 2 }));
+    let more = compose();
+    if (!more.length && sourcesAffordable(ctx)) {
+      views = moreAspects(views, await perspectives(ctx, { question, purpose, languages, tried: views.flatMap((view) => view.aspects.map((aspect) => aspect.phrase)) }));
+      more = compose();
+    }
+    const room = sourcesAffordable(ctx);
+    if (!room) ctx.log?.(`${state}; no call budget is left for one more round of queries`);
+    else if (!more.length) ctx.log?.(`${state}; no further query can be composed from the perspectives`);
+    else {
+      ctx.log?.(`${state}; one more round of ${more.length} queries, up to ${room} sources`);
+      rounds = 2;
+      queries.push(...more);
+      const extra = await findSources(ctx, more, { max: room, seen: found.map((source) => source.url) });
+      const again = await screenSources(ctx, { sources: extra, ...screening, limit: room });
+      kept.push(...again.kept);
+      dropped.push(...again.dropped);
+      diversity = diversityOf(kept);
+      if (!diversity.enough) ctx.log?.(`${THIN}: ${diversity.hosts} hosts across ${diversity.perspectives} perspectives after one more round of queries`);
+    }
+  }
+  const noted = await scopeNotes(ctx, { sources: kept, purpose: purpose || question });
   const embedNote = ctx.embedder?.failureNote?.() ?? '';
   if (embedNote) ctx.log?.(embedNote);
   const scoping = {
     levels,
     languages,
     subjects,
+    subjectsFrom,
+    ...(asked ? { askedSubjects: { subjects: asked.subjects, rejected: asked.rejected } } : {}),
     perspectives: views,
     queries,
-    sources: screened.kept.map((source) => ({ url: source.url, title: source.title ?? '', host: source.host, about: source.about, market: source.market, span: source.span, judgedBy: source.judgedBy })),
-    dropped: screened.dropped,
+    screened: { purpose: screening.purpose, subject: screening.subject },
+    sources: kept.map((source) => ({ url: source.url, title: source.title ?? '', host: source.host, about: source.about, market: source.market, span: source.span, judgedBy: source.judgedBy, role: source.role, roleVotes: source.roleVotes, perspectives: source.perspectives ?? [] })),
+    dropped,
     notes: noted.notes,
     rejectedNotes: noted.rejected,
-    enough: screened.kept.length >= MIN_KEPT_SOURCES,
+    diversity: { hosts: diversity.hosts, perspectives: diversity.perspectives, minHosts: MIN_HOSTS, minPerspectives: MIN_PERSPECTIVES, rounds },
+    enough: diversity.enough,
     embedModel: ctx.embedder?.lastModel ?? null,
     at: new Date().toISOString(),
   };
-  return { scoping, pages: screened.kept };
+  return { scoping, pages: kept };
 }

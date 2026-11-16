@@ -1,0 +1,75 @@
+{
+ "kept": [
+  {
+   "url": "https://www.sharetribe.com/how-to-build/marketplace-for-selling-second-hand-clothing",
+   "title": "How to build a marketplace for buying and selling second-hand clothing",
+   "host": "sharetribe.com",
+   "about": "B",
+   "market": "B",
+   "span": "S32",
+   "judgedBy": "groq"
+  },
+  {
+   "url": "https://www.indetexx.com/why-sorting-and-grading-are-key-to-quality-in-wholesale-second-hand-clothing/",
+   "title": "Sorting & Grading of Wholesale Second-Hand Clothing | Indetexx",
+   "host": "indetexx.com",
+   "about": "A",
+   "market": "B",
+   "span": "S11",
+   "judgedBy": "groq"
+  },
+  {
+   "url": "https://vintagewholesalesupplyltd.com/blogs/news/why-you-should-start-a-vintage-clothing-business-today?srsltid=AYCX9vJDc3X59EhzZyGn83dH5XgS9Bx3EKXHre7ymyJL1Dh5tUTFth-i",
+   "title": "Why You Should Start a Vintage Clothing Business Today",
+   "host": "vintagewholesalesupplyltd.com",
+   "about": "B",
+   "market": "B",
+   "span": "S1",
+   "judgedBy": "groq"
+  },
+  {
+   "url": "https://vintagesupplier.com/vintage-wholesale-clothing-definition-supplier-selection-pricing-import-checklist/",
+   "title": "Vintage Wholesale Clothing: Sourcing, Grading & Profit Playbook",
+   "host": "vintagesupplier.com",
+   "about": "B",
+   "market": "B",
+   "span": "S1",
+   "judgedBy": "groq"
+  }
+ ],
+ "dropped": [
+  {
+   "url": "https://hissenglobal.com/used-clothing-wholesale-complete-b2b-guide-importers-2026/",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://cryptorank.io/news/feed/1ab47-uk-second-hand-market-set-to-surge-to-4-8b",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.garsonshaw.com/",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://cs.dhgate.com/product/luxury-brand-designer-clothes-high-end-new/1096766030.html",
+   "reason": "off-subject: not informative"
+  },
+  {
+   "url": "https://www.bizcommunity.com/Print.aspx?ci=235658&ct=1",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://finance.yahoo.com/news/data-us-leads-global-second-101513185.html",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://vintagebulk.eu/en",
+   "reason": "off-market: describes another market"
+  },
+  {
+   "url": "https://www.bankvogue.com/",
+   "reason": "off-market: describes another market"
+  }
+ ],
+ "enough": true
+}

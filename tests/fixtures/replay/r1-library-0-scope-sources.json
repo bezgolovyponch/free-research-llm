@@ -1,0 +1,65 @@
+{
+ "kept": [
+  {
+   "url": "https://github.com/rustsec/advisory-db/discussions/1349",
+   "title": "Clarify what it means for libraries to have a security ...",
+   "host": "github.com",
+   "about": "B",
+   "market": "B",
+   "span": "S31",
+   "judgedBy": "groq"
+  },
+  {
+   "url": "https://gist.github.com/vurtun/192cac1f1818417d7b4067d60e4fe921",
+   "title": "API Design:Coroutine-APIs.md · GitHub",
+   "host": "gist.github.com",
+   "about": "B",
+   "market": "B",
+   "span": "S275",
+   "judgedBy": "groq"
+  }
+ ],
+ "dropped": [
+  {
+   "url": "https://siit.co/guestposts/practical-tips-for-successful-library-management",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://www.ala.org/tools/librariestransform/libraries-transforming-communities/engagement",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://libguides.uthscsa.edu/policies/complaints",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://limbd.org/documentation-process-for-libraries/",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://edukatesg.com/2026/10/25/why-vocabulary-is-important-in-21st-century-library-available-on-loan-reserved/",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://users.rust-lang.org/t/best-practices-to-design-a-c-api-that-can-be-ergonomically-used-in-rust/133151",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://www.tines.com/library/vulnerability-management/",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://dev.to/kreuzerk/improve-spa-performance-by-splitting-your-angular-libraries-in-multiple-chunks-17ph",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://www.coloradovirtuallibrary.org/resource-sharing/community-project-ideas-for-libraries/",
+   "reason": "off-subject: a different subject"
+  },
+  {
+   "url": "https://www.bfi.org.uk/bfi-reuben-library/library-policies/collection-enquiries-policy",
+   "reason": "off-subject: a different subject"
+  }
+ ],
+ "enough": false
+}
