@@ -1,6 +1,7 @@
 import { plain } from './itemgate.mjs';
 import { isUmbrella } from './concept.mjs';
 import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
+import { vote } from './semantic.mjs';
 
 export function replyList(data) {
   if (Array.isArray(data)) return data;
@@ -26,10 +27,24 @@ export const JUDGE_PAGE_CHARS = 40000;
 export const LOW_PRICE_REASON = 'priced far below comparable items: confirm it is the item itself';
 export const KIND_ANSWERS = { A: 'yes', B: 'no', C: 'no', D: 'no', E: 'no', U: 'unknown' };
 
-export function hardenKind(checks, item, cut) {
+export const KIND_SECOND_VOTES = 3;
+
+const isKindYes = (check) => check?.clause === 'kind' && String(check.id).startsWith('kind|') && check.answer === 'yes';
+
+export function needsSecondKind(checks, item, cut) {
   const value = item?.value === null || item?.value === undefined ? NaN : Number(item.value);
-  if (typeof cut !== 'number' || !Number.isFinite(cut) || !Number.isFinite(value) || value >= cut) return checks;
-  return (checks ?? []).map((check) => (check.clause === 'kind' && String(check.id).startsWith('kind|') && check.answer === 'yes' ? { ...check, answer: 'unknown', reason: LOW_PRICE_REASON } : check));
+  return typeof cut === 'number' && Number.isFinite(cut) && Number.isFinite(value) && value < cut && (checks ?? []).some(isKindYes);
+}
+
+export async function hardenKind(checks, item, { cut = null, median = null, judge = null, pageText = '', kind = null } = {}) {
+  if (!needsSecondKind(checks, item, cut)) return checks;
+  const second = judge && kind?.label ? await judge.judgeKindAgain(pageText, kind, { value: Number(item.value), unit: item.unit ?? '', median }) : { answer: 'unknown', quote: '', tally: {} };
+  return checks.map((check) => {
+    if (!isKindYes(check)) return check;
+    if (second.answer === 'yes') return { ...check, second: { answer: 'yes', tally: second.tally } };
+    if (second.answer === 'no') return { ...check, answer: 'no', quote: second.quote, reason: LOW_PRICE_REASON, second: { answer: 'no', tally: second.tally } };
+    return { ...check, answer: 'unknown', reason: LOW_PRICE_REASON, second: { answer: 'unknown', tally: second.tally } };
+  });
 }
 
 export function migrateChecks(project) {
@@ -292,6 +307,22 @@ export class ChecklistJudge {
     return quote ? { ...check, answer, quote, option: letter } : check;
   }
 
+  async judgeKindAgain(pageText, kind, { value, unit = '', median = null } = {}) {
+    const cluster = kindCluster(kind);
+    const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
+    const shown = spans.length ? await shownSpans(spans, cluster.items[0].question, this.embedder) : [];
+    if (!shown.length) return { answer: 'unknown', quote: '', tally: {} };
+    const price = { value, unit, median };
+    const schema = (data) => {
+      const letter = String(data?.kind ?? '').trim().toUpperCase();
+      if (!(letter in KIND_ANSWERS)) return { error: `"kind" must be one of ${Object.keys(KIND_ANSWERS).join(', ')}` };
+      const quote = KIND_ANSWERS[letter] === 'unknown' ? '' : quoteFromSpans(data?.span ?? data?.spans, shown);
+      return { value: { answer: quote ? KIND_ANSWERS[letter] : 'unknown', quote } };
+    };
+    const result = await vote({ router: this.router, task: 'kind-second', tier: 'fast', messages: kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS), price }), schema, n: KIND_SECOND_VOTES, quorum: 2, key: (reply) => reply.answer });
+    return { answer: result.value?.answer ?? 'unknown', quote: result.value?.quote ?? '', tally: result.tally };
+  }
+
   async judge(item, pageText, checklist, kind = null) {
     const checks = [];
     const numericItems = [];
@@ -348,10 +379,11 @@ export function judgePrompt({ questions, block }) {
   ];
 }
 
-export function kindPrompt({ options, block }) {
-  const sys = 'You are a strict judge of one item page. The page is shown as numbered sentences. Select the one option that says what this page offers, and give in "span" the id of the sentence that shows it. Never write the sentence itself. Answer with JSON only: {"kind":"<letter>","span":"S<n>"}';
+export function kindPrompt({ options, block, price = null }) {
+  const sys = `You are a strict judge of one item page. The page is shown as numbered sentences. Select the one option that says what this page offers, and give in "span" the id of the sentence that shows it. Never write the sentence itself.${price ? ' The price of this item is far below the usual price of such items: a low price alone proves nothing, so decide from what the sentences say is offered.' : ''} Answer with JSON only: {"kind":"<letter>","span":"S<n>"}`;
+  const prices = price ? `\n\nPrice of this item: ${price.value} ${price.unit}`.trimEnd() + (price.median !== null && price.median !== undefined ? `\nMedian price of its comparable items: ${price.median} ${price.unit}`.trimEnd() : '') : '';
   return [
     { role: 'system', content: sys },
-    { role: 'user', content: `Item page text:\n${block}\n\nThis page offers:\n${options.map((option) => `${option.letter}) ${option.text}`).join('\n')}` },
+    { role: 'user', content: `Item page text:\n${block}${prices}\n\nThis page offers:\n${options.map((option) => `${option.letter}) ${option.text}`).join('\n')}` },
   ];
 }

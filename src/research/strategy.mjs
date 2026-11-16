@@ -154,7 +154,7 @@ export function criteriaOfText(strategy, text) {
 }
 
 export function clausesOf(question) {
-  return String(question ?? '').split(/,|;/).map((c) => c.trim()).filter((c) => c.split(/\s+/).length >= 2);
+  return String(question ?? '').split(/,|;/).map((c) => c.trim()).filter(Boolean);
 }
 
 export function foundationOf(strategy, project, { exclude = [] } = {}) {

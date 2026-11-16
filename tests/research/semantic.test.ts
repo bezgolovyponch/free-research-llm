@@ -140,4 +140,19 @@ describe('agreeAcrossSamples', () => {
     const agreed = await agreeAcrossSamples({ samples: [['make', 'engine'], ['Make', 'motor'], ['colour']], textOf: (text: string) => text, embedder: fakeEmbedder(), router, prompt: matchPrompt('attribute'), task: 'match' });
     expect(agreed.map((entry: { item: string; samples: number }) => [entry.item, entry.samples])).toEqual([['make', 2], ['engine', 2]]);
   });
+
+  it('never joins two items on the same key alone: the same anchor and direction with another meaning stays a second cluster', async () => {
+    const low = (attribute: string) => ({ attribute, direction: 'low', anchor: 'C2' });
+    const sameKey = (entry: { anchor: string; direction: string }) => `${entry.anchor}|${entry.direction}`;
+    const textOf = (entry: { attribute: string }) => entry.attribute;
+    const different = fakeRouter({ match: { pick: 'N' } });
+    const apart = await agreeAcrossSamples({ samples: [[low('minimum order size')], [low('delivery time')]], textOf, sameKey, minSamples: 1, embedder: fakeEmbedder(), router: different, prompt: matchPrompt('attribute'), task: 'match' });
+    expect(apart.map((entry: { item: { attribute: string }; samples: number }) => [entry.item.attribute, entry.samples])).toEqual([['minimum order size', 1], ['delivery time', 1]]);
+    expect(different.calls).toHaveLength(2);
+    expect(await agreeAcrossSamples({ samples: [[low('minimum order size')], [low('delivery time')]], textOf, sameKey, embedder: fakeEmbedder(), router: fakeRouter({ match: { pick: 'N' } }), prompt: matchPrompt('attribute'), task: 'match' })).toEqual([]);
+    const same = fakeRouter({ match: { pick: 'A' } });
+    const joined = await agreeAcrossSamples({ samples: [[low('minimum order size')], [low('smallest order')], [low('Minimum order size')]], textOf, sameKey, embedder: fakeEmbedder(), router: same, prompt: matchPrompt('attribute'), task: 'match' });
+    expect(joined.map((entry: { samples: number }) => entry.samples)).toEqual([3]);
+    expect(same.calls).toHaveLength(2);
+  });
 });

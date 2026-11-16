@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { familyOf } from '../src/llm/ranking.mjs';
 import { buildMatrix, diagnosticRows, pricedIn } from '../src/research/ach.mjs';
-import { lowPriceCut } from '../src/research/candidates.mjs';
+import { lowPriceStats } from '../src/research/candidates.mjs';
 import { ChecklistJudge, hardenKind, migrateChecks } from '../src/research/checklist.mjs';
 import { HostBook, gatherEvidence, identify, subjectKey } from '../src/research/facts.mjs';
 import { PURPOSE, buildPurposeTree, conflictGoalOf, openEntries } from '../src/research/purpose.mjs';
@@ -117,13 +117,19 @@ async function rejudge(ctx, fixture, kind) {
   return { judged, empty };
 }
 
-function storedItemCheck(fixture, kind, url) {
+async function storedItemCheck(ctx, fixture, kind, url) {
   const project = JSON.parse(JSON.stringify(fixture));
   migrateChecks(project);
-  const cut = lowPriceCut(project.acceptanceResult.items);
-  const items = project.acceptanceResult.items.map((item) => ({ ...item, checks: hardenKind(item.checks, item, cut) }));
-  const item = verdict(items, project.acceptance, project.checklist, kind).items.find((entry) => entry.url === url);
-  return { url, value: item?.value ?? null, cut, kind: item?.checks?.find((check) => check.clause === 'kind')?.answer ?? null, tier: item?.tier ?? null };
+  const prices = lowPriceStats(project.acceptanceResult.items);
+  const stored = project.acceptanceResult.items.find((entry) => entry.url === url);
+  if (stored && prices) {
+    const page = await ctx.search.readPage(url).catch(() => null);
+    const pageText = page?.text || stored.checks.find((check) => check.clause === 'kind')?.quote || '';
+    stored.checks = await hardenKind(stored.checks, stored, { cut: prices.cut, median: prices.median, judge: new ChecklistJudge({ router: ctx.router, embedder: ctx.embedder }), pageText, kind });
+  }
+  const item = verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind).items.find((entry) => entry.url === url);
+  const check = item?.checks?.find((entry) => entry.clause === 'kind');
+  return { url, value: item?.value ?? null, cut: prices?.cut ?? null, median: prices?.median ?? null, kind: check?.answer ?? null, second: check?.second ?? null, tier: item?.tier ?? null };
 }
 
 async function carEvidence(ctx, { entry, scoping, tree, fixture, rows, hosts }) {
@@ -213,7 +219,7 @@ export async function runReplay({ mode, entry, out, router, search, embedder, fi
     car = await carEvidence(ctx, { entry, scoping, tree: built.tree, fixture, rows: table, hosts });
     await hosts.save();
     car.rejudged = await rejudge(ctx, fixture, kind);
-    car.tyres = storedItemCheck(fixture, { label: 'car listing', terms: ['car'], not: ['wanted', 'parts', 'accessories', 'retail'] }, entry.tyres);
+    car.tyres = await storedItemCheck(ctx, fixture, { label: 'car listing', terms: ['car'], not: ['wanted', 'parts', 'accessories', 'retail'] }, entry.tyres);
     await write('2-identity', { item: car.item, identity: car.identity, subject: car.subject });
     await write('3-facts', { queries: car.queries, dropped: car.dropped, ...car.evidence });
     await write('4-ach', { priced: car.priced, ...car.matrix, rejudged: car.rejudged, tyres: car.tyres });

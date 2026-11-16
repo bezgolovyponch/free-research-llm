@@ -533,5 +533,20 @@
     "signal": "Simulation (2026-11-16): thresholds nobody asked for (10 %, 30 days, 95 %, 500 m, 3 %), goals outside the request (financing, a marketing plan, certification), and a reversed purpose: a small shop needs a small minimum order, the tree asked for large capacity.",
     "cause": "The tree was free text from one model call, so an invented number looked like an asked one, and nothing compared a goal with the clauses of the question.",
     "prevention": "thresholdsOf: a number lives only in the structured threshold field and is 'asked' when the user's words state it, 'sourced' when the cited note's quote states it, otherwise an 'assumption' that is never a hard check; any other digit in a goal or question text is recorded as inventedNumber. traceGoal: each goal is selected against the retrieved clauses, hints, purpose and implications with a relation; no trace means 'proposed', a contradiction means 'conflict'. Implications are stored as inferred. openEntries lists all of these for the user; engine.confirmTree (next pull request) is the only way past them."
+  },
+  {
+    "id": "F39",
+    "title": "a price outlier decided the kind by itself and hid the bargains the research looks for",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/candidates.mjs",
+      "src/research/engine.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/verdict.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "Lead review of the purpose branch (2026-11-16): hardenKind turned every kind 'yes' below lowPriceCut into unknown. On the 0c750f fixture the cut is 13,100 CZK with a median of 25,000 CZK, so real cars offered at 10,000 to 12,000 CZK could never be confirmed, and those are exactly the cheap and valuable items the owner asked for.",
+    "cause": "A statistic that only says 'unusual' was used as a verdict. It was written against one case (tyres on rims at 2,000 CZK) and never checked against the low-priced real items in the same table.",
+    "prevention": "A statistic may trigger a judgement, never replace it: below the cut, hardenKind runs a second kind judgement (judgeKindAgain: 3 votes, fast tier, the closed options A to E and U, sentence ids) whose prompt shows the item's price and the median of its comparables; A keeps the yes and its quote, B to E give no, U or no majority gives unknown; at or above the cut, or with no cut, nothing changes and no call is made. lowPriceStats is the one place that computes the cut and the median, and the engine caches the second judgement per item, cut and median. Tests: the tyre item answered B is no and rejected, a car at 10,000 CZK answered A stays yes and confirmed, no call above the cut (tests/research/verdict.test.ts, tests/research/checklist.test.ts, tests/research/engine.test.ts)."
   }
 ]

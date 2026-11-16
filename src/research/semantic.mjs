@@ -188,7 +188,6 @@ export async function agreeAcrossSamples({ samples, textOf, sameKey = null, minS
       const open = clusters.filter((cluster) => !cluster.samples.has(sample) && (!sameKey || sameKey(cluster.items[0]) === sameKey(item)));
       const exact = open.find((cluster) => cluster.items.some((other) => textOf(other).trim().toLowerCase() === textOf(item).trim().toLowerCase()));
       let home = exact ?? null;
-      if (!home && open.length === 1 && sameKey) home = open[0];
       if (!home && open.length) {
         const match = await retrieveThenVerify({ query: textOf(item), candidates: open.map((cluster, id) => ({ id, text: textOf(cluster.items[0]) })), embedder, router, prompt, task, budget, stage });
         home = match.picked ? open[match.picked.id] : null;

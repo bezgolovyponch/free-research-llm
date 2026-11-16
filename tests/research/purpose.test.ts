@@ -19,6 +19,8 @@ describe('the stored knowledge holds mechanisms, not word lists', () => {
 
   it('splits a question into clauses at punctuation only, with stable ids', () => {
     expect(clausesOf('plots but also cheap, so no air condition; near the sea')).toEqual(['plots but also cheap', 'so no air condition', 'near the sea']);
+    expect(clausesOf('cars near the city, hatchback, , cheap;')).toEqual(['cars near the city', 'hatchback', 'cheap']);
+    expect(anchorsOf('cars near the city, hatchback').map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual(['C1 cars near the city', 'C2 hatchback']);
     expect(anchorsOf('cheap plots, near the sea', 'sea within 20 km')).toEqual([
       { id: 'C1', kind: 'clause', text: 'cheap plots' },
       { id: 'C2', kind: 'clause', text: 'near the sea' },
@@ -267,7 +269,7 @@ describe('the purpose is the sample nearest to the others', () => {
 
   it('keeps an implication 2 of 3 samples give with the same anchor and direction, as inferred', async () => {
     const low = { attribute: 'minimum order size', direction: 'low', anchor: 'C2' };
-    const router = fakeRouter({ implications: seq({ implications: [low, { attribute: 'brand range', direction: 'high', anchor: 'C1' }] }, { implications: [{ ...low, attribute: 'smallest order' }] }, { implications: [{ attribute: 'capacity', direction: 'high', anchor: 'C2' }, { attribute: 'x', direction: 'sideways', anchor: 'C1' }] }) });
+    const router = fakeRouter({ implications: seq({ implications: [low, { attribute: 'brand range', direction: 'high', anchor: 'C1' }] }, { implications: [{ ...low, attribute: 'smallest order' }] }, { implications: [{ attribute: 'capacity', direction: 'high', anchor: 'C2' }, { attribute: 'x', direction: 'sideways', anchor: 'C1' }] }), 'implications-match': { pick: 'A' } });
     const kept = await drawImplications({ router, embedder: fakeEmbedder() }, anchors, { text: 'p' });
     expect(kept).toEqual([{ id: 'I1', attribute: 'minimum order size', direction: 'low', anchor: 'C2', source: 'inferred', samples: 2 }]);
     expect(openEntries({ implications: kept }).map((e: { kind: string }) => e.kind)).toEqual(['implication']);

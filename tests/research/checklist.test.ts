@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON } from '../../src/research/checklist.mjs';
+import { FAIL, fakeRouter, seq } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
@@ -597,15 +598,53 @@ describe('item-level checklist with a kind check and code-measured values', () =
     expect(opening[0].answer).toBe('unknown');
   });
 
-  it('a kind yes on an item priced below the low cut of its comparables becomes unknown, and stays yes with no cut', () => {
+  describe('a low price triggers a second kind judgement, it never decides the kind by itself', () => {
     const judged = [{ id: KIND_ID, answer: 'yes', quote: 'A round widget', hard: true, clause: 'kind' }, { id: 'shape|Is this thing round?', answer: 'yes', quote: 'round', hard: true, clause: 'shape' }];
-    const hardened = hardenKind(judged, { value: 2000 }, 9000);
-    expect(hardened[0]).toMatchObject({ answer: 'unknown', reason: LOW_PRICE_REASON });
-    expect(hardened[1].answer).toBe('yes');
-    expect(hardenKind(judged, { value: 2000 }, null)[0].answer).toBe('yes');
-    expect(hardenKind(judged, { value: 9000 }, 9000)[0].answer).toBe('yes');
-    expect(hardenKind(judged, { value: null }, 9000)[0].answer).toBe('yes');
-    expect(hardenKind([{ id: KIND_ID, answer: 'no', quote: 'x', hard: true, clause: 'kind' }], { value: 1 }, 9000)[0].answer).toBe('no');
+    const pageText = 'A round widget for sale. Four spare wheels of a widget.';
+    const second = (replies: unknown) => {
+      const router = fakeRouter({ 'kind-second': replies });
+      return { router, options: { cut: 9000, median: 25000, judge: new ChecklistJudge({ router }), pageText, kind } };
+    };
+
+    it('asks 3 voters with the price and the median of the comparables, and keeps the yes and its quote on A', async () => {
+      const { router, options } = second({ kind: 'A', span: 'S1' });
+      const hardened = await hardenKind(judged, { value: 2000, unit: 'CZK' }, options);
+      expect(hardened[0]).toMatchObject({ answer: 'yes', quote: 'A round widget', second: { answer: 'yes' } });
+      expect(hardened[0].reason).toBeUndefined();
+      expect(hardened[1]).toEqual(judged[1]);
+      expect(router.calls).toHaveLength(2);
+      expect(router.calls[0]).toMatchObject({ tier: 'fast', task: 'kind-second' });
+      expect(router.userText('kind-second')).toContain('Price of this item: 2000 CZK\nMedian price of its comparable items: 25000 CZK');
+      expect(router.userText('kind-second')).toContain('B) a part or an accessory of it and not spare part');
+      expect(router.calls[1].avoid).toEqual(['p1']);
+    });
+
+    it('answers no on a majority of B to E, with the sentence the voters picked', async () => {
+      const { router, options } = second(seq({ kind: 'B', span: 'S2' }, { kind: 'A', span: 'S1' }, { kind: 'C', span: 'S2' }));
+      const hardened = await hardenKind(judged, { value: 2000 }, options);
+      expect(hardened[0]).toMatchObject({ answer: 'no', quote: 'Four spare wheels of a widget.', reason: LOW_PRICE_REASON });
+      expect(router.calls).toHaveLength(3);
+    });
+
+    it('is unknown on U, on no majority, on an answer without a real sentence id, and without a judge', async () => {
+      for (const replies of [{ kind: 'U', span: 'S1' }, seq({ kind: 'A', span: 'S1' }, { kind: 'B', span: 'S2' }, { kind: 'U' }), { kind: 'B', span: 'S9' }, FAIL]) {
+        const hardened = await hardenKind(judged, { value: 2000 }, second(replies).options);
+        expect(hardened[0]).toMatchObject({ answer: 'unknown', quote: 'A round widget', reason: LOW_PRICE_REASON });
+      }
+      expect((await hardenKind(judged, { value: 2000 }, { cut: 9000 }))[0].answer).toBe('unknown');
+    });
+
+    it('changes nothing and makes no call with no cut, at or above the cut, without a price, or when the kind is not yes', async () => {
+      const { router, options } = second({ kind: 'B', span: 'S2' });
+      expect(await hardenKind(judged, { value: 2000 }, { ...options, cut: null })).toBe(judged);
+      expect(await hardenKind(judged, { value: 9000 }, options)).toBe(judged);
+      expect(await hardenKind(judged, { value: 30000 }, options)).toBe(judged);
+      expect(await hardenKind(judged, { value: null }, options)).toBe(judged);
+      const no = [{ id: KIND_ID, answer: 'no', quote: 'x', hard: true, clause: 'kind' }];
+      expect(await hardenKind(no, { value: 1 }, options)).toBe(no);
+      expect(router.calls).toEqual([]);
+      expect(needsSecondKind(judged, { value: 2000 }, 9000)).toBe(true);
+    });
   });
 
   it('the fingerprint carries the judge version, so answers of an older judge are not reused', () => {

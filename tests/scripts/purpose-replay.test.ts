@@ -36,6 +36,7 @@ function script() {
     'subject-match': { applies: 'B' },
     'claim-pair': { relation: 'A' },
     'ach-row': (request: { messages: { content: string }[] }) => ({ marks: Object.fromEntries(['M1', 'M2', 'M3', 'M4', 'M5'].map((id) => [id, id === 'M5' && request.messages[1].content.includes('rusts') ? 'C' : 'N'])) }),
+    'kind-second': { kind: 'B', span: 'S1' },
     '': (request: { messages: { content: string }[] }) => (request.messages[1].content.includes('This page offers:') ? { kind: 'A', span: 'S1' } : [{ id: 'q1', answer: 'yes', spans: ['S1'] }, { id: 'q2', answer: 'no', spans: [] }]),
   };
 }
@@ -132,7 +133,8 @@ describe('purpose replay: one run with fakes', () => {
     expect(byId.grades).toMatchObject({ value: '0', pass: true });
     expect(byId.prices.value).toMatch(/^0; comparables: (below|within|above)$/);
     expect(byId.judge).toMatchObject({ value: '0', pass: true });
-    expect(byId.kind).toMatchObject({ value: 'kind unknown, tier to-confirm', pass: true });
+    expect(byId.kind).toMatchObject({ value: 'kind no, tier rejected', pass: true });
+    expect(router.userText('kind-second')).toContain('Price of this item: 2000 CZK');
     expect(byId.banned.pass).toBe(true);
     expect(byId.calls.pass).toBe(true);
     const text = tableText('car', metrics);

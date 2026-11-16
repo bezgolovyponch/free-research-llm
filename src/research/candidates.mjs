@@ -233,15 +233,19 @@ function lowPriceNote(cut, unit) {
 
 const pricedRows = (rows) => rows.filter((r) => Number.isFinite(r.value) && r.value > 0);
 
-export function lowPriceCut(rows) {
-  const priced = pricedRows(rows);
+export function lowPriceStats(rows) {
+  const priced = pricedRows(rows ?? []);
   if (priced.length < MIN_PRICE_SAMPLE) return null;
   const logs = priced.map((r) => Math.log(r.value)).sort((a, b) => a - b);
   const middle = (list) => list[Math.floor(list.length / 2)];
   const median = middle(logs);
   const mad = middle(logs.map((v) => Math.abs(v - median)).sort((a, b) => a - b));
   if (!(mad > 0)) return null;
-  return Math.round(Math.exp(median - LOW_PRICE_MADS * MAD_SCALE * mad));
+  return { cut: Math.round(Math.exp(median - LOW_PRICE_MADS * MAD_SCALE * mad)), median: Math.round(Math.exp(median)), sample: priced.length };
+}
+
+export function lowPriceCut(rows) {
+  return lowPriceStats(rows)?.cut ?? null;
 }
 
 export function implausiblyLow(rows) {

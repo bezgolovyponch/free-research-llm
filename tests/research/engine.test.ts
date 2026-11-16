@@ -2386,8 +2386,15 @@ describe('kind hardening and the migration of stored answers', () => {
     },
   });
 
-  it('passes the low price cut of the candidate table to the kind check, so a far cheaper item is not confirmed', async () => {
-    const provider = demo((prompt) => (prompt.includes('This page offers:') ? { kind: 'A', span: 'S1' } : prompt.includes('Item page text:') ? [{ id: 'q1', answer: 'yes', spans: ['S1'] }] : { answer: 'ok', claims: [], confidence: 'high' }));
+  it('passes the low price cut and the median of the candidate table to a second kind judgement, only for an item below the cut', async () => {
+    const secondPrompts: string[] = [];
+    const provider = demo((prompt) => {
+      if (prompt.includes('Median price of its comparable items:')) {
+        secondPrompts.push(prompt);
+        return { kind: 'B', span: 'S1' };
+      }
+      return prompt.includes('This page offers:') ? { kind: 'A', span: 'S1' } : prompt.includes('Item page text:') ? [{ id: 'q1', answer: 'yes', spans: ['S1'] }] : { answer: 'ok', claims: [], confidence: 'high' };
+    });
     const search = { ...fakeSearch, async readPage() { return { status: 200, text: offer, links: [] }; } };
     const router = new ModelRouter({ providers: [provider] });
     const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
@@ -2403,11 +2410,18 @@ describe('kind hardening and the migration of stored answers', () => {
     const items = project.acceptanceResult!.items;
     const cheap = items.find((item) => item.url.endsWith('ID1099'))!;
     const usual = items.find((item) => item.url.endsWith('ID1000'))!;
-    expect(cheap.checks.find((c) => c.clause === 'kind')).toMatchObject({ answer: 'unknown', reason: LOW_PRICE_REASON });
-    expect([cheap.tier, cheap.valid]).toEqual(['to-confirm', false]);
+    expect(cheap.checks.find((c) => c.clause === 'kind')).toMatchObject({ answer: 'no', reason: LOW_PRICE_REASON });
+    expect([cheap.tier, cheap.valid]).toEqual(['rejected', false]);
     expect(usual.checks.find((c) => c.clause === 'kind')).toMatchObject({ answer: 'yes', quote: offer.split('. ')[0] + '.' });
     expect([usual.tier, usual.valid]).toEqual(['confirmed', true]);
-    expect(project.kindRejected).toEqual([]);
+    expect(project.kindRejected).toEqual([cheap.url]);
+    expect(secondPrompts).toHaveLength(2);
+    expect(secondPrompts[0]).toContain('Price of this item: 20 EUR/kg');
+    expect(secondPrompts[0]).toMatch(/Median price of its comparable items: \d+ EUR\/kg/);
+    project.kindRejected = [];
+    await engine.checkAcceptance(project);
+    expect(secondPrompts).toHaveLength(2);
+    expect(project.acceptanceResult!.items.find((item) => item.url.endsWith('ID1099'))!.checks.find((c) => c.clause === 'kind')!.answer).toBe('no');
   });
 
   it('turns stored answers without a quote to unknown once in reground and logs how many', async () => {

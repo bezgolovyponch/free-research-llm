@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf } from "../../src/research/verdict.mjs";
-import { LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
-import { lowPriceCut } from "../../src/research/candidates.mjs";
+import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
+import { lowPriceStats } from "../../src/research/candidates.mjs";
+import { fakeRouter } from "../helpers/fakes";
 import fixture from "../fixtures/verdict-0c750f.json";
 
 describe("verdict", () => {
@@ -303,18 +304,46 @@ describe("stored answers of the 0c750f fixture under the quote rule and the pric
     expect(result.validCount).toBe(1);
   });
 
-  it("a kind yes below the low cut of the table is unknown, so the tyres are never confirmed", () => {
+  const kindId = "kind|" + kindCluster(kind).items[0].question;
+  const hardened = async (project: ReturnType<typeof copy>, url: string, router: ReturnType<typeof fakeRouter>) => {
+    const prices = lowPriceStats(project.acceptanceResult.items);
+    const item = project.acceptanceResult.items.find((i: { url: string }) => i.url === url);
+    const pageText = item.checks.find((c: { clause: string }) => c.clause === "kind").quote || "Škoda Fabia 1.2 na prodej. Najeto 150 000 km a platná technická.";
+    item.checks = await hardenKind(item.checks, item, { cut: prices.cut, median: prices.median, judge: new ChecklistJudge({ router }), pageText, kind });
+    return { prices, item: verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind).items.find((i: { url: string }) => i.url === url), result: verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind) };
+  };
+
+  it("the tyres on rims, far below the cut, are judged a second time with the prices and answered B: kind no, not confirmed", async () => {
     const project = copy();
     migrateChecks(project);
-    const cut = lowPriceCut(project.acceptanceResult.items);
-    expect(cut).toBeGreaterThan(2000);
-    expect(cut).toBeLessThan(25000);
-    const items = project.acceptanceResult.items.map((item: { checks: unknown[] }) => ({ ...item, checks: hardenKind(item.checks, item, cut) }));
-    const result = verdict(items, project.acceptance, project.checklist, kind);
-    const item = result.items.find((i: { url: string }) => i.url === tyres);
-    expect(item.checks.find((c: { clause: string }) => c.clause === "kind")).toMatchObject({ answer: "unknown", reason: LOW_PRICE_REASON });
-    expect(item.tier).toBe("to-confirm");
+    const router = fakeRouter({ "kind-second": { kind: "B", span: "S1" } });
+    const { prices, item, result } = await hardened(project, tyres, router);
+    expect([prices.cut, prices.median]).toEqual([13100, 25000]);
+    expect(router.userText("kind-second")).toContain("Price of this item: 2000 CZK\nMedian price of its comparable items: 25000 CZK");
+    expect(item.checks.find((c: { clause: string }) => c.clause === "kind")).toMatchObject({ answer: "no", reason: LOW_PRICE_REASON });
+    expect(item.tier).toBe("rejected");
     expect(result.validCount).toBe(1);
-    expect(result.items.filter((i: { tier: string; value: number }) => i.tier === "confirmed" && i.value < cut)).toEqual([]);
+  });
+
+  it("a real car at 10,000 CZK, below the cut, answered A stays a kind yes: the price alone decides nothing", async () => {
+    const project = copy();
+    const car = project.acceptanceResult.items.find((i: { value: number }) => i.value === 10000);
+    car.checks = car.checks.map((c: { clause: string }) => (c.clause === "kind" ? { ...c, id: kindId, answer: "yes", quote: "Škoda Fabia 1.2 na prodej." } : { ...c, answer: "yes", quote: "stated on the page" }));
+    const router = fakeRouter({ "kind-second": { kind: "A", span: "S1" } });
+    const { item } = await hardened(project, car.url, router);
+    expect(router.calls).toHaveLength(2);
+    expect(item.checks.find((c: { clause: string }) => c.clause === "kind")).toMatchObject({ answer: "yes", quote: "Škoda Fabia 1.2 na prodej." });
+    expect(item.tier).toBe("confirmed");
+  });
+
+  it("makes no extra call for an item at or above the cut", async () => {
+    const project = copy();
+    const router = fakeRouter({ "kind-second": { kind: "B", span: "S1" } });
+    const fabia = project.acceptanceResult.items[0];
+    const before = JSON.stringify(fabia.checks);
+    const { item } = await hardened(project, fabia.url, router);
+    expect(router.calls).toEqual([]);
+    expect(JSON.stringify(project.acceptanceResult.items[0].checks)).toBe(before);
+    expect(item.tier).toBe("confirmed");
   });
 });
