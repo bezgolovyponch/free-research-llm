@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { PURPOSE_CLASS } from './ranking.mjs';
 import { extractJson } from '../research/json.mjs';
 import { ProviderError } from './provider.mjs';
@@ -31,7 +32,8 @@ function isNetworkError(message) {
 }
 const BAD_KEY_MS = 6 * 3600 * 1000;
 export const PAYMENT_REST_MS = 24 * 3600 * 1000;
-const PAYMENT_REQUIRED = /payment required|subscription (?:is )?required|requires? a (?:paid|subscription)|upgrade your plan/i;
+export const WAIT_NOTICE_MS = 60000;
+const PAYMENT_REQUIRED = /payment required|needs payment|subscription (?:is )?required|requires? a (?:paid|subscription)|upgrade your plan/i;
 const CREDIT_EXHAUSTED = /balance_units|billing_portal|insufficient (?:credit|funds|balance)|out of credits?/i;
 const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
@@ -49,6 +51,11 @@ export const MODEL_GONE_REST_MS = 24 * 3600 * 1000;
 export const TRIAL_POLL_MS = 1000;
 const MODEL_NOT_FOUND = /no longer available|not found|does not exist|unknown model/i;
 const MODEL_RETIRED = /model\b[^\n]{0,120}\b(?:deprecated|decommissioned|retired)\b|\b(?:deprecated|decommissioned|retired)\b[^\n]{0,40}\bmodel\b/i;
+
+export function paymentRequired(error) {
+  const message = String(error?.message ?? '');
+  return PAYMENT_REQUIRED.test(message) || (error?.status === 402 && !SHORT_LIMIT.test(message) && !CREDIT_EXHAUSTED.test(message));
+}
 
 export function modelGone(error) {
   const message = String(error?.message ?? '');
@@ -89,7 +96,7 @@ const MAX_WAIT_ROUNDS = 3;
 const REPAIR_INSTRUCTION = 'Your previous reply was not valid JSON. Reply again with ONLY the JSON object, no prose, no code fences.';
 
 export class ModelRouter {
-  constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {}, outcomes = null, paid = null, env = process.env, paidCap = null, offlineBackoff = OFFLINE_BACKOFF_MS, offlineWaitMs = OFFLINE_WAIT_MS }) {
+  constructor({ providers = [], routeOrder = null, cooldownMs = DEFAULT_COOLDOWN_MS, maxWaitMs = 65000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onLedger = () => {}, onWait = () => {}, outcomes = null, paid = null, env = process.env, paidCap = null, offlineBackoff = OFFLINE_BACKOFF_MS, offlineWaitMs = OFFLINE_WAIT_MS }) {
     this.outcomes = outcomes;
     this.env = env;
     this.providers = providers;
@@ -99,6 +106,9 @@ export class ModelRouter {
     this.now = now;
     this.sleep = sleep;
     this.onLedger = onLedger;
+    this.onWait = onWait;
+    this.scopes = new AsyncLocalStorage();
+    this.paymentUntil = new Map();
     this.cooldownUntil = new Map();
     this.inflight = new Map();
     this.timeoutStreak = new Map();
@@ -119,6 +129,28 @@ export class ModelRouter {
     return this.providers.some((p) => p.ready);
   }
 
+  scoped(scope, work) {
+    return this.scopes.run(scope, work);
+  }
+
+  notify(event) {
+    this.onWait(event);
+    this.scopes.getStore()?.onWait?.(event);
+  }
+
+  needsPayment(providerId, time = this.now()) {
+    return (this.paymentUntil.get(providerId) ?? 0) > time;
+  }
+
+  excludeForPayment(providerId, until, announce = true) {
+    const known = this.needsPayment(providerId);
+    this.paymentUntil.set(providerId, Math.max(this.paymentUntil.get(providerId) ?? 0, until));
+    if (known || !announce) return;
+    const message = `${providerId} needs payment: excluded from the free route`;
+    this.record({ purpose: 'router', tier: '', provider: providerId, ok: false, ms: 0, error: message });
+    this.notify({ kind: 'excluded', provider: providerId, message });
+  }
+
   setProviders(providers) {
     this.providers = providers;
   }
@@ -137,7 +169,7 @@ export class ModelRouter {
   available({ avoid, tier = 'fast', purpose, tokens = 0 } = {}) {
     const time = this.now();
     this.restPaidProviders(time);
-    const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.trialBusy(p.id, time));
+    const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.trialBusy(p.id, time) && !this.needsPayment(p.id, time));
     const roomy = open.filter((p) => !p.maxPromptTokens || tokens <= p.maxPromptTokens);
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
@@ -206,7 +238,7 @@ export class ModelRouter {
 
   lastResortLocals(tier, purpose, tokens, time) {
     if (tier === 'vision') return [];
-    return this.ordered(tier, purpose).filter((p) => p.preset?.local && p.state === 'too-slow' && Boolean(p.selected?.fast || p.selected?.deep) && (!p.maxPromptTokens || tokens <= p.maxPromptTokens) && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.trialBusy(p.id, time));
+    return this.ordered(tier, purpose).filter((p) => p.preset?.local && p.state === 'too-slow' && Boolean(p.selected?.fast || p.selected?.deep) && (!p.maxPromptTokens || tokens <= p.maxPromptTokens) && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.trialBusy(p.id, time) && !this.needsPayment(p.id, time));
   }
 
   halfOpen(providerId, time = this.now()) {
@@ -223,6 +255,7 @@ export class ModelRouter {
 
   closeBreaker(providerId) {
     if (!this.halfOpen(providerId)) return;
+    this.paymentUntil.delete(providerId);
     this.cooldownUntil.delete(providerId);
     this.cooldownReason.delete(providerId);
   }
@@ -303,7 +336,8 @@ export class ModelRouter {
   }
 
   record(entry) {
-    const row = { ts: new Date(this.now()).toISOString(), ...entry };
+    const scope = this.scopes.getStore();
+    const row = { ts: new Date(this.now()).toISOString(), ...entry, ...(scope?.project ? { project: scope.project } : {}) };
     if (!row.ok && row.provider && row.provider !== 'router') {
       const provider = this.providers.find((p) => p.id === row.provider);
       if (provider?.keyCount !== undefined) row.keys = provider.keyCount;
@@ -320,6 +354,7 @@ export class ModelRouter {
       }
     }
     this.onLedger(row);
+    scope?.onCall?.(row);
   }
 
   switchModel(provider, model, error) {
@@ -363,8 +398,9 @@ export class ModelRouter {
       const at = Date.parse(row.ts);
       const badKey = (status === 401 || status === 403) && this.now() - at < BAD_KEY_MS;
       const text = String(row.error ?? '');
-      const paid = PAYMENT_REQUIRED.test(text) || (status === 402 && !SHORT_LIMIT.test(text) && !CREDIT_EXHAUSTED.test(text));
+      const paid = paymentRequired({ status, message: text });
       if (paid && Number.isFinite(at) && this.now() - at < PAYMENT_REST_MS) {
+        this.excludeForPayment(id, this.now() + PAYMENT_REST_MS, false);
         this.coolDown({ id }, { status, message: text });
         restored.push(id);
         continue;
@@ -418,8 +454,7 @@ export class ModelRouter {
     const now = this.now();
     if (error.status === 401 || error.status === 403) return { until: now + BAD_KEY_MS, reason: 'key rejected; check it on Models & router' };
     const message = String(error.message ?? '');
-    const paid = PAYMENT_REQUIRED.test(message) || (error.status === 402 && !SHORT_LIMIT.test(message) && !CREDIT_EXHAUSTED.test(message));
-    if (paid) return { until: now + PAYMENT_REST_MS, reason: 'needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key' };
+    if (paymentRequired(error)) return { until: now + PAYMENT_REST_MS, reason: 'needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key' };
     const until = now + (error.retryAfterMs || this.cooldownMs);
     if (!SHORT_LIMIT.test(message) && (error.status === 402 || DAILY.test(message))) return { until: Math.max(until, quotaResetAt(provider, now)), reason: 'daily quota or credit used up; waits for the daily reset' };
     return { until, reason: 'rate limit' };
@@ -429,6 +464,7 @@ export class ModelRouter {
     const { until, reason } = this.cooldownFor(provider, error);
     const keyBack = provider.nextKeyAt?.() ?? 0;
     const proposed = keyBack > this.now() && keyBack < until ? keyBack : until;
+    if (proposed === until && paymentRequired(error)) this.excludeForPayment(provider.id, until);
     const back = Math.max(this.cooldownUntil.get(provider.id) ?? 0, proposed);
     this.cooldownUntil.set(provider.id, back);
     if (back === proposed) this.cooldownReason.set(provider.id, proposed < until ? `every key rests; the first is back in ${Math.ceil((back - this.now()) / 60000)} min` : reason);
@@ -493,6 +529,7 @@ export class ModelRouter {
     this.streakBenches.delete(providerId);
     this.cooldownUntil.delete(providerId);
     this.cooldownReason.delete(providerId);
+    this.paymentUntil.delete(providerId);
   }
 
   restoreProviderState(snapshot) {
@@ -516,13 +553,36 @@ export class ModelRouter {
     return true;
   }
 
-  async waitForCooldown({ avoid, tier, purpose, tokens }) {
+  resting(time = this.now()) {
+    return this.providers
+      .filter((p) => p.ready && (this.cooldownUntil.get(p.id) ?? 0) > time)
+      .map((p) => ({ provider: p.id, ms: this.cooldownUntil.get(p.id) - time, reason: this.cooldownReason.get(p.id) ?? 'rate limit', payment: this.needsPayment(p.id, time) }))
+      .sort((a, b) => a.ms - b.ms);
+  }
+
+  noticeWaiting(notice, { ms, purpose, tier }) {
+    const time = this.now();
+    if (notice.at !== null && time - notice.at < WAIT_NOTICE_MS) return;
+    notice.at = time;
+    const resting = this.resting(time).filter((r) => !r.payment).map(({ provider, ms: rest, reason }) => ({ provider, ms: rest, reason }));
+    this.notify({ kind: 'waiting', ms, purpose, tier, resting });
+  }
+
+  noticeGaveUp({ purpose, tier }, errors) {
+    const failed = [...new Set(errors.map((error) => String(error).slice(0, 160)))].slice(-4);
+    const rests = this.resting().map((r) => `${r.provider}: ${r.reason}`);
+    const reasons = failed.length ? failed : rests.length ? rests : [this.ready ? 'no provider can serve this call' : 'no model provider is configured'];
+    this.notify({ kind: 'gave-up', purpose, tier, reasons });
+  }
+
+  async waitForCooldown({ avoid, tier, purpose, tokens }, notice = { at: null }) {
     let waited = 0;
     let first = true;
     for (;;) {
       const wait = first ? this.shortestCooldownMs() : Math.max(this.shortestCooldownMs(), TRIAL_POLL_MS);
       if (waited + wait > this.maxWaitMs) return [];
       if (first) this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
+      this.noticeWaiting(notice, { ms: wait, purpose, tier });
       await this.sleep(wait);
       waited += wait;
       first = false;
@@ -594,11 +654,12 @@ export class ModelRouter {
     const errors = [];
     const tokens = estimateTokens(messages);
     const offline = { step: 0, waited: 0 };
+    const notice = { at: null };
     let candidates = this.available({ avoid, tier, purpose, tokens });
     let round = 0;
     let offlineExhausted = false;
     while (round < MAX_WAIT_ROUNDS) {
-      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose, tokens });
+      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose, tokens }, notice);
       if (!candidates.length) break;
       const stateBefore = this.snapshotProviderState(candidates);
       const reply = await this.tryProviders(candidates, request, errors);
@@ -616,6 +677,7 @@ export class ModelRouter {
       candidates = [];
       round++;
     }
+    this.noticeGaveUp({ purpose, tier }, errors);
     if (!errors.length) {
       throw new NoModelAvailableError(this.ready ? 'all free model quotas are cooling down after rate limits; retry in a minute' : 'no model provider is configured — open Setup');
     }
@@ -626,7 +688,8 @@ export class ModelRouter {
   }
 
   route() {
-    const ids = (tier) => this.ordered(tier).filter((p) => (p.canServe ? p.canServe(tier) : p.ready)).map((p) => p.id);
+    const time = this.now();
+    const ids = (tier) => this.ordered(tier).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && !this.needsPayment(p.id, time)).map((p) => p.id);
     return { fast: ids('fast'), deep: ids('deep'), vision: ids('vision') };
   }
 

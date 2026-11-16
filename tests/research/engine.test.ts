@@ -2454,3 +2454,130 @@ describe('kind hardening and the migration of stored answers', () => {
     expect(events.filter((message) => message === note)).toHaveLength(1);
   });
 });
+
+describe('ResearchEngine router lines', () => {
+  const limited = (id: string, retryAfterMs = 10000) => ({
+    id,
+    ready: true,
+    describe: () => ({ id }),
+    async chat() {
+      throw new ProviderError(`${id} HTTP 429 [quota window: per minute]: slow down`, { status: 429, retryAfterMs });
+    },
+  });
+  type Line = { type: string; message: string };
+  type Row = { project?: string; provider: string; purpose: string; ok: boolean };
+  const routerLines = (project: { log: Line[] }) => project.log.filter((event) => event.type === 'router').map((event) => event.message);
+
+  function clockedEngine(providers: object[]) {
+    const clock = { now: Date.parse('2026-11-16T10:00:00Z') };
+    const ledger: Row[] = [];
+    const sleep = async (ms: number) => {
+      clock.now += ms;
+    };
+    const router = new ModelRouter({ providers, now: () => clock.now, sleep, onLedger: (row: Row) => ledger.push(row) });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), now: () => clock.now });
+    return { router, engine, clock, ledger };
+  }
+
+  it('writes waits and give-ups into the log of the project that made the call, never into another one', async () => {
+    const shared = limited('lim');
+    const { router, engine } = clockedEngine([shared]);
+    router.coolDown(shared, new ProviderError('lim HTTP 429: slow down', { status: 429, retryAfterMs: 10000 }));
+    const a = await engine.createProject({ question: 'Which of two suppliers is cheaper per unit?' });
+    const b = await engine.createProject({ question: 'Which of two trails is shorter?' });
+    await Promise.allSettled([
+      engine.inScope(a.id, () => router.complete({ messages: [], purpose: 'research' })),
+      engine.inScope(b.id, () => router.complete({ messages: [], purpose: 'synthesize' })),
+    ]);
+    for (const [project, own, other] of [[a, 'research', 'synthesize'], [b, 'synthesize', 'research']] as const) {
+      const lines = routerLines(project);
+      expect(lines[0]).toBe('waiting for model quota: lim rests 10s (rate limit)');
+      expect(lines.filter((line) => line.startsWith('waiting for model quota'))).toHaveLength(1);
+      expect(lines.filter((line) => line.startsWith(`no model answered ${own}: `))).toHaveLength(1);
+      expect(lines.filter((line) => line.includes(other))).toEqual([]);
+    }
+    expect(routerLines(b).at(-1)).toMatch(/^model calls this phase: 0 ok, \d+ failed \(top: lim 429 per minute x\d+\)$/);
+  });
+
+  it('writes one waiting line per project per 60 s however many lanes wait', async () => {
+    const { router, engine, clock } = clockedEngine([limited('lim', 20000)]);
+    const a = await engine.createProject({ question: 'Which of two suppliers is cheaper per unit?' });
+    const waits = () => routerLines(a).filter((line) => line.startsWith('waiting for model quota'));
+    await engine.inScope(a.id, async () => {
+      const first = clock.now;
+      await Promise.allSettled([1, 2, 3].map(() => router.complete({ messages: [], purpose: 'research' })));
+      expect(clock.now - first).toBeLessThan(60000);
+      expect(waits()).toHaveLength(1);
+      expect(routerLines(a).filter((line) => line.startsWith('no model answered research'))).toHaveLength(3);
+      router.forgetBench('lim');
+      clock.now = first + 59000;
+      await Promise.allSettled([router.complete({ messages: [], purpose: 'research' })]);
+      expect(waits()).toHaveLength(1);
+      router.forgetBench('lim');
+      clock.now = first + 60000;
+      await Promise.allSettled([router.complete({ messages: [], purpose: 'research' })]);
+      expect(waits()).toHaveLength(2);
+    });
+  });
+
+  it('writes that a provider needs payment once, into the project whose call found it', async () => {
+    const pay = {
+      id: 'pay',
+      ready: true,
+      describe: () => ({ id: 'pay' }),
+      async chat() {
+        throw new ProviderError('pay HTTP 402: Payment required', { status: 402 });
+      },
+    };
+    const { router, engine } = clockedEngine([pay, new ScriptedProvider()]);
+    const a = await engine.createProject({ question: 'Which of two suppliers is cheaper per unit?' });
+    const b = await engine.createProject({ question: 'Which of two trails is shorter?' });
+    await engine.inScope(a.id, () => router.complete({ messages: [], purpose: 'research' }));
+    await engine.inScope(a.id, () => router.complete({ messages: [], purpose: 'research' }));
+    await engine.inScope(b.id, () => router.complete({ messages: [], purpose: 'research' }));
+    expect(routerLines(a)).toEqual(['pay needs payment: excluded from the free route', 'model calls this phase: 1 ok, 1 failed (top: pay 402 x1)', 'model calls this phase: 1 ok, 0 failed']);
+    expect(routerLines(b)).toEqual(['model calls this phase: 1 ok, 0 failed']);
+  });
+
+  it('summarises at each phase change only the calls this project made in that phase', async () => {
+    const { router, engine } = clockedEngine([new ScriptedProvider()]);
+    const a = await engine.createProject({ question: 'Which of two suppliers is cheaper per unit?' });
+    const b = await engine.createProject({ question: 'Which of two trails is shorter?' });
+    await Promise.all([
+      engine.inScope(a.id, async () => {
+        await router.complete({ messages: [], purpose: 'research' });
+        await router.complete({ messages: [], purpose: 'research' });
+        engine.setPhase(a, 'researching');
+        await router.complete({ messages: [], purpose: 'synthesize' });
+        engine.setPhase(a, 'researching');
+        engine.setPhase(a, 'synthesizing');
+        engine.setPhase(a, 'done');
+      }),
+      engine.inScope(b.id, async () => {
+        await router.complete({ messages: [], purpose: 'research' });
+        engine.setPhase(b, 'done');
+      }),
+    ]);
+    await router.complete({ messages: [], purpose: 'chat' });
+    expect(routerLines(a)).toEqual(['model calls this phase: 2 ok, 0 failed', 'model calls this phase: 1 ok, 0 failed']);
+    expect(routerLines(b)).toEqual(['model calls this phase: 1 ok, 0 failed']);
+    expect(a.phase).toBe('done');
+  });
+
+  it('adds up, over two researches run side by side, to exactly the calls each one made', async () => {
+    const { engine, ledger } = clockedEngine([new ScriptedProvider()]);
+    const a = await engine.createProject({ question: 'Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland?' });
+    const b = await engine.createProject({ question: 'Is it cheaper to rent or to buy a flat in Brno over ten years?' });
+    const [doneA, doneB] = await Promise.all([engine.run(a.id), engine.run(b.id)]);
+    for (const done of [doneA, doneB]) {
+      const lines = routerLines(done).filter((line) => line.startsWith('model calls this phase:'));
+      const counted = lines.map((line) => /(\d+) ok, (\d+) failed/.exec(line)).reduce((sum, match) => sum + Number(match?.[1]) + Number(match?.[2]), 0);
+      const made = ledger.filter((row) => row.project === done.id && row.provider !== 'router' && row.purpose !== 'router').length;
+      expect(done.phase).toBe('done');
+      expect(lines.length).toBeGreaterThan(1);
+      expect(made).toBeGreaterThan(0);
+      expect(counted).toBe(made);
+    }
+    expect(ledger.filter((row) => row.provider !== 'router' && !row.project)).toEqual([]);
+  });
+});

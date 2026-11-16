@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { WAIT_LINE_MS, callSummary, routerLine } from './routerlog.mjs';
 import { withProposals } from './proposal.mjs';
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
@@ -274,7 +275,10 @@ export const FACT_PAGES = 400;
 export const FACT_READS_AT_ONCE = 6;
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null }) {
+  constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null, now = () => Date.now() }) {
+    this.now = now;
+    this.phaseCalls = new Map();
+    this.waitLines = new Map();
     this.verifier = verifier;
     this.modeler = modeler;
     this.cases = cases;
@@ -310,6 +314,51 @@ export class ResearchEngine {
     project.log = [...(project.log ?? []), event].slice(-LOG_LIMIT);
     this.onEvent(project.id, event, project);
     for (const listener of this.listeners.get(project.id) ?? []) listener(event, project);
+  }
+
+  setPhase(project, phase) {
+    if (project.phase !== phase) this.summarizeCalls(project);
+    project.phase = phase;
+  }
+
+  summarizeCalls(project) {
+    const rows = this.phaseCalls.get(project.id) ?? [];
+    this.phaseCalls.delete(project.id);
+    const { line } = callSummary(rows);
+    if (line) this.emit(project, 'router', line);
+  }
+
+  onRouterEvent(id, event) {
+    const project = this.store.cache.get(id);
+    if (!project) return;
+    if (event.kind === 'waiting') {
+      const time = this.now();
+      const last = this.waitLines.get(id);
+      if (last !== undefined && time - last < WAIT_LINE_MS) return;
+      this.waitLines.set(id, time);
+    }
+    const line = routerLine(event);
+    if (line) this.emit(project, 'router', line);
+  }
+
+  async inScope(id, work) {
+    if (typeof this.router?.scoped !== 'function') return work();
+    let open = true;
+    const scope = {
+      project: id,
+      onWait: (event) => this.onRouterEvent(id, event),
+      onCall: (row) => {
+        if (open) this.phaseCalls.set(id, [...(this.phaseCalls.get(id) ?? []), row]);
+      },
+    };
+    try {
+      return await this.router.scoped(scope, work);
+    } finally {
+      open = false;
+      const project = this.store.cache.get(id);
+      if (project) this.summarizeCalls(project);
+      this.waitLines.delete(id);
+    }
   }
 
   async load(id) {
@@ -394,7 +443,7 @@ export class ResearchEngine {
   }
 
   async decompose(project, phase = 'decomposing') {
-    project.phase = phase;
+    this.setPhase(project, phase);
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
     await this.store.save(project, { reason: 'decomposing the question' });
     const template = templateById(project.templateId);
@@ -441,13 +490,17 @@ export class ResearchEngine {
     await this.store.save(project, { reason: 'issue tree decomposed' });
   }
 
-  async buildTree(id) {
+  buildTree(id) {
+    return this.inScope(id, () => this.buildTreeScoped(id));
+  }
+
+  async buildTreeScoped(id) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
     try {
       const project = await this.load(id);
       if (!project.nodes.length) await this.decompose(project, 'building-tree');
-      project.phase = 'tree-ready';
+      this.setPhase(project, 'tree-ready');
       this.emit(project, 'phase', 'tree ready — review it, then press Run or start the self-improving loop');
       return await this.store.save(project, { reason: 'tree built' });
     } finally {
@@ -663,7 +716,7 @@ export class ResearchEngine {
     ].join(' · ');
     this.emit(project, 'decision', `understood before searching: ${summary}`);
     if (!understanding.ready) {
-      project.phase = 'needs-understanding';
+      this.setPhase(project, 'needs-understanding');
       this.emit(project, 'phase', 'research paused: not enough sources explain what the item is and what it is called — add a hint');
       return false;
     }
@@ -677,7 +730,7 @@ export class ResearchEngine {
     await this.rebuildDecisionModel(project);
     if (String(project.decisionModel?.purpose ?? '').trim()) return true;
     if (String(project.guidance ?? '').trim()) return true;
-    project.phase = 'needs-purpose';
+    this.setPhase(project, 'needs-purpose');
     this.emit(project, 'phase', 'research paused: the purpose is not clear — state why you ask and what result is worth having (Hints field)');
     return false;
   }
@@ -706,7 +759,7 @@ export class ResearchEngine {
     const found = await this.search.search(queries, { maxSources: limit }).catch(() => []);
     const pages = conceptPages(found, limit);
     if (pages.length < MIN_PAGES) {
-      project.phase = 'needs-concept';
+      this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: ${pages.length ? 'one page' : 'no page'} about the kinds of "${kind.label}" was found — name the kinds you mean in the Hints field`);
       return false;
     }
@@ -715,7 +768,7 @@ export class ResearchEngine {
     const members = groundMembers(kind.members, card.members ?? [], pages);
     const confirmed = members.filter((member) => member.grounded.length);
     if (confirmed.length < MIN_MEMBERS) {
-      project.phase = 'needs-concept';
+      this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: the ${pages.length} page(s) about "${kind.label}" confirm ${confirmed.length ? `only ${confirmed.map((member) => member.label).join(', ')}` : 'none of its kinds'} — name the kinds you mean in the Hints field`);
       return false;
     }
@@ -746,7 +799,7 @@ export class ResearchEngine {
     const found = await this.search.search(queries, { maxSources: CONCEPT_PAGES }).catch(() => []);
     const pages = conceptPages(found);
     if (!pages.length) {
-      project.phase = 'needs-concept';
+      this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: no page about "${kind.label}" was found — say what the item is in the Hints field`);
       return false;
     }
@@ -754,7 +807,7 @@ export class ResearchEngine {
     const merged = mergeConceptCards(replies);
     const card = applyConceptCard(merged.data, pages);
     if (!card.terms.length) {
-      project.phase = 'needs-concept';
+      this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: the ${pages.length} page(s) about "${kind.label}" do not call it the same thing — say what the item is in the Hints field`);
       return false;
     }
@@ -1298,7 +1351,7 @@ export class ResearchEngine {
   }
 
   async synthesize(project, pages = null) {
-    project.phase = 'synthesizing';
+    this.setPhase(project, 'synthesizing');
     this.emit(project, 'phase', 'writing the decision memo');
     await this.store.save(project, { reason: 'memo started' });
     const template = templateById(project.templateId);
@@ -1707,14 +1760,18 @@ export class ResearchEngine {
   async stopIfCancelled(project, id, release) {
     if (!this.cancelled.has(id)) return null;
     this.cancelled.delete(id);
-    project.phase = 'cancelled';
+    this.setPhase(project, 'cancelled');
     release();
     this.emit(project, 'phase', 'stopped by user');
     if (!this.quiet.has(id)) await this.onStop(project, { reason: 'stopped by user' });
     return await this.store.save(project, { reason: 'run stopped by the user' });
   }
 
-  async run(id, { hints = {}, memo = true, sweep = null, pieces = null, reuse = false, pages = null } = {}) {
+  run(id, options = {}) {
+    return this.inScope(id, () => this.runScoped(id, options));
+  }
+
+  async runScoped(id, { hints = {}, memo = true, sweep = null, pieces = null, reuse = false, pages = null } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
     this.cancelled.delete(id);
@@ -1733,7 +1790,7 @@ export class ResearchEngine {
         return project;
       }
       if (project.phase === 'needs-understanding') {
-        project.phase = 'created';
+        this.setPhase(project, 'created');
       }
       await this.searchHubs(project);
       if (!project.nodes.length) await this.decompose(project);
@@ -1746,7 +1803,7 @@ export class ResearchEngine {
         await this.store.save(project, { reason: 'run paused: the concept did not validate' });
         return project;
       }
-      project.phase = 'researching';
+      this.setPhase(project, 'researching');
       project.error = null;
       for (const node of project.nodes) {
         if (node.status !== 'failed' && node.status !== 'researching') continue;
@@ -1837,7 +1894,7 @@ export class ResearchEngine {
       const asked = project.acceptanceResult?.totalAsked ?? 0;
       const valid = project.acceptanceResult?.validCount ?? 0;
       const short = asked > 0 && valid < asked;
-      project.phase = 'done';
+      this.setPhase(project, 'done');
       project.acceptanceSummary = acceptanceSummaryOf(project);
       if (project.report) {
         project.report.status = { ...project.report.status, short };
@@ -1849,13 +1906,13 @@ export class ResearchEngine {
       return await this.store.save(project, { reason: short ? 'research finished but short of asked items' : 'research finished' });
     } catch (error) {
       if (project && error instanceof ResearchCancelled) {
-        project.phase = 'cancelled';
+        this.setPhase(project, 'cancelled');
         project.error = null;
         this.emit(project, 'phase', 'research cancelled');
         await this.store.save(project, { reason: 'research cancelled' });
       } else if (project) {
         const offline = error instanceof OfflineError;
-        project.phase = offline ? 'paused' : 'error';
+        this.setPhase(project, offline ? 'paused' : 'error');
         project.error = offline ? null : error.message;
         appendAppMessage(project, offline ? `The network was down and every model provider was unreachable. Press Run to resume; finished nodes are kept.` : `Research stopped with an error: ${error.message}. Press Run to resume; finished nodes are kept.`);
         if (!this.quiet.has(id)) await this.onStop(project, { reason: offline ? 'offline: network down' : `error: ${error.message}` }).catch(() => {});
@@ -1925,7 +1982,7 @@ export class ResearchEngine {
         if (error instanceof ResearchCancelled) return;
         const project = await this.load(id).catch(() => null);
         if (project) {
-          project.phase = 'failed';
+          this.setPhase(project, 'failed');
           project.error = error.message;
           this.emit(project, 'phase', `research failed: ${error.message}`);
           await this.store.save(project, { reason: `run ended with an error: ${String(error.message).slice(0, 120)}` });
@@ -1955,7 +2012,7 @@ export class ResearchEngine {
     for (const n of project.nodes) {
       if (n.dependsOn.includes(nodeId) && n.status !== 'pending') this.resetWithAncestors(project, n.id);
     }
-    if (project.phase === 'done') project.phase = 'tree-ready';
+    if (project.phase === 'done') this.setPhase(project, 'tree-ready');
   }
 
   regrade(project) {
@@ -2107,7 +2164,11 @@ export class ResearchEngine {
     return this.store.save(project, { reason: `delete: ${nodeId} removed by the user with ${doomed.size - 1} sub-node(s)`, userAction: 'delete' });
   }
 
-  async resynthesize(id, { pages = null } = {}) {
+  resynthesize(id, options = {}) {
+    return this.inScope(id, () => this.resynthesizeScoped(id, options));
+  }
+
+  async resynthesizeScoped(id, { pages = null } = {}) {
     if (this.running.has(id)) throw new ProjectBusyError('this project is already running');
     this.running.add(id);
     try {
@@ -2119,7 +2180,7 @@ export class ResearchEngine {
       const asked = project.acceptanceResult?.totalAsked ?? 0;
       const valid = project.acceptanceResult?.validCount ?? 0;
       const short = asked > 0 && valid < asked;
-      project.phase = 'done';
+      this.setPhase(project, 'done');
       project.acceptanceSummary = acceptanceSummaryOf(project);
       if (project.report) {
         project.report.status = { ...project.report.status, short };

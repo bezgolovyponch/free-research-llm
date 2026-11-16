@@ -3,7 +3,7 @@ import { OutcomeBook } from '../../src/llm/outcomes.mjs';
 import { ProviderError } from '../../src/llm/provider.mjs';
 import { PROVIDER_PRESETS } from '../../src/llm/presets.mjs';
 import { PURPOSE_CLASS } from '../../src/llm/ranking.mjs';
-import { EXPECTED_OUTPUT_TOKENS, COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { EXPECTED_OUTPUT_TOKENS, COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, WAIT_NOTICE_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, overloaded, paymentRequired, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -1298,5 +1298,163 @@ describe('ModelRouter banned model families', () => {
     expect(EXPECTED_OUTPUT_TOKENS['purpose-judge']).toBe(120);
     expect(EXPECTED_OUTPUT_TOKENS['purpose-draft']).toBe(900);
     expect([PURPOSE_CLASS['purpose-judge'], PURPOSE_CLASS['purpose-draft']]).toEqual(['volume', 'top']);
+  });
+});
+
+describe('ModelRouter wait, give-up and payment events', () => {
+  const limited = (id: string, retryAfterMs: number) => ({
+    id,
+    ready: true,
+    describe: () => ({ id }),
+    async chat() {
+      throw new ProviderError(`${id} HTTP 429 [quota window: per minute]: slow down`, { status: 429, retryAfterMs });
+    },
+  });
+  type Seen = { at: number; kind: string; purpose?: string; reasons?: string[] };
+  type Row = { provider: string; error?: string; project?: string; purpose?: string };
+  const clocked = (providers: object[], options: object = {}) => {
+    const clock = { now: Date.parse('2026-11-16T10:00:00Z') };
+    const events: Seen[] = [];
+    const ledger: Row[] = [];
+    const sleep = async (ms: number) => {
+      clock.now += ms;
+    };
+    const router = new ModelRouter({ providers, now: () => clock.now, sleep, onWait: (event: { kind: string }) => events.push({ at: clock.now, ...event }), onLedger: (row: Row) => ledger.push(row), ...options });
+    return { router, clock, events, ledger, start: clock.now };
+  };
+
+  it('reports a wait once when it starts, with the purpose, the tier and every resting provider', async () => {
+    const { router, events, start } = clocked([limited('a', 30000)]);
+    await expect(router.complete({ messages: [], purpose: 'research', tier: 'deep' })).rejects.toThrow(NoModelAvailableError);
+    const waiting = events.filter((event) => event.kind === 'waiting');
+    expect(waiting).toEqual([{ at: start, kind: 'waiting', ms: 30000, purpose: 'research', tier: 'deep', resting: [{ provider: 'a', ms: 30000, reason: 'rate limit' }] }]);
+  });
+
+  it('reports a longer wait again, never sooner than 60 s after the last report', async () => {
+    expect(WAIT_NOTICE_MS).toBe(60000);
+    const { router, events, start } = clocked([limited('a', 61000)]);
+    await expect(router.complete({ messages: [], purpose: 'research' })).rejects.toThrow(NoModelAvailableError);
+    expect(events.filter((event) => event.kind === 'waiting').map((event) => event.at - start)).toEqual([0, 61000]);
+    const short = clocked([limited('a', 20000)]);
+    await expect(short.router.complete({ messages: [], purpose: 'research' })).rejects.toThrow(NoModelAvailableError);
+    expect(short.events.filter((event) => event.kind === 'waiting').map((event) => event.at - short.start)).toEqual([0]);
+    expect(short.clock.now - short.start).toBe(40000);
+  });
+
+  it('reports a give-up with the failures when the rest is longer than maxWaitMs, and with who rests when nobody was tried', async () => {
+    const { router, events, clock, start } = clocked([limited('a', 120000)], { maxWaitMs: 65000 });
+    await expect(router.complete({ messages: [], purpose: 'synthesize', tier: 'deep' })).rejects.toThrow(/every provider failed for synthesize/);
+    expect(events).toEqual([{ at: start, kind: 'gave-up', purpose: 'synthesize', tier: 'deep', reasons: ['a HTTP 429 [quota window: per minute]: slow down'] }]);
+    expect(clock.now).toBe(start);
+    await expect(router.complete({ messages: [], purpose: 'research' })).rejects.toThrow(/cooling down/);
+    expect(events[1]).toEqual({ at: start, kind: 'gave-up', purpose: 'research', tier: 'fast', reasons: ['a: rate limit'] });
+    const none = clocked([]);
+    await expect(none.router.complete({ messages: [], purpose: 'research' })).rejects.toThrow(/no model provider is configured/);
+    expect(none.events.map((event) => event.reasons)).toEqual([['no model provider is configured']]);
+  });
+
+  it('reports no give-up when a provider answers after the wait', async () => {
+    const slow = provider('slow', [new ProviderError('slow HTTP 429: retry', { status: 429, retryAfterMs: 5000 }), '{"ok":true}']);
+    const { router, events } = clocked([slow]);
+    const reply = await router.complete({ messages: [], purpose: 'research' });
+    expect(reply.data).toEqual({ ok: true });
+    expect(events.map((event) => event.kind)).toEqual(['waiting']);
+  });
+
+  it('gives each scope only its own events and marks its ledger rows with its project', async () => {
+    const shared = limited('a', 10000);
+    const { router, ledger } = clocked([shared]);
+    router.coolDown(shared, new ProviderError('a HTTP 429: slow down', { status: 429, retryAfterMs: 10000 }));
+    const seen: Record<string, { events: Seen[]; rows: Row[] }> = { A: { events: [], rows: [] }, B: { events: [], rows: [] } };
+    const scope = (project: string) => ({ project, onWait: (event: Seen) => seen[project].events.push(event), onCall: (row: Row) => seen[project].rows.push(row) });
+    await Promise.allSettled([
+      router.scoped(scope('A'), () => router.complete({ messages: [], purpose: 'research' })),
+      router.scoped(scope('B'), () => router.complete({ messages: [], purpose: 'synthesize' })),
+    ]);
+    for (const [project, own, other] of [['A', 'research', 'synthesize'], ['B', 'synthesize', 'research']]) {
+      const { events, rows } = seen[project];
+      expect(events[0].kind).toBe('waiting');
+      expect(events.filter((event) => event.kind === 'gave-up')).toHaveLength(1);
+      expect(new Set(events.map((event) => event.purpose))).toEqual(new Set([own]));
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((row) => row.project === project && row.purpose !== other)).toBe(true);
+      expect(ledger.filter((row) => row.project === project)).toEqual(rows);
+    }
+    const before = [seen.A.events.length, seen.B.events.length, seen.A.rows.length, seen.B.rows.length];
+    await expect(router.complete({ messages: [], purpose: 'chat' })).rejects.toThrow(NoModelAvailableError);
+    expect(ledger.at(-1)?.project).toBeUndefined();
+    expect([seen.A.events.length, seen.B.events.length, seen.A.rows.length, seen.B.rows.length]).toEqual(before);
+  });
+
+  it('excludes a provider that needs payment from the free route for 24 h and says so once', async () => {
+    const pay = provider('pay', [new ProviderError('pay HTTP 402: Payment required', { status: 402 }), new ProviderError('pay HTTP 402: Payment required', { status: 402 })]);
+    const free = provider('free', []);
+    const { router, events, ledger, clock } = clocked([pay, free]);
+    expect(router.route().fast).toEqual(['pay', 'free']);
+    await router.complete({ messages: [] });
+    await router.complete({ messages: [] });
+    const said = () => ledger.filter((row) => row.error === 'pay needs payment: excluded from the free route');
+    expect(said()).toHaveLength(1);
+    expect(said()[0]).toMatchObject({ provider: 'pay', purpose: 'router', ok: false });
+    expect(events.filter((event) => event.kind === 'excluded')).toEqual([{ at: clock.now, kind: 'excluded', provider: 'pay', message: 'pay needs payment: excluded from the free route' }]);
+    expect(router.needsPayment('pay')).toBe(true);
+    expect(router.route().fast).toEqual(['free']);
+    expect(router.available().map((p: { id: string }) => p.id)).toEqual(['free']);
+    router.cooldownUntil.delete('pay');
+    expect(router.available().map((p: { id: string }) => p.id)).toEqual(['free']);
+    expect(pay.calls).toHaveLength(1);
+    clock.now += PAYMENT_REST_MS - 1000;
+    expect(router.needsPayment('pay')).toBe(true);
+    clock.now += 2000;
+    expect(router.needsPayment('pay')).toBe(false);
+    expect(router.route().fast).toEqual(['pay', 'free']);
+    await router.complete({ messages: [] });
+    expect(pay.calls).toHaveLength(2);
+    expect(said()).toHaveLength(2);
+  });
+
+  it('never falls back to a paid provider that answered payment required', async () => {
+    const pay = provider('pay', [new ProviderError('pay HTTP 402: Payment required', { status: 402 }), '{"paid":true}']);
+    const free = provider('free', [new ProviderError('free HTTP 500: boom', { status: 500 }), new ProviderError('free HTTP 500: boom', { status: 500 })]);
+    const { router, clock } = clocked([pay, free], { paid: ['pay'], maxWaitMs: 0 });
+    await expect(router.complete({ messages: [] })).rejects.toThrow(NoModelAvailableError);
+    expect([free.calls.length, pay.calls.length]).toEqual([1, 1]);
+    clock.now += 2 * 60 * 1000;
+    await expect(router.complete({ messages: [] })).rejects.toThrow(NoModelAvailableError);
+    expect([free.calls.length, pay.calls.length]).toEqual([2, 1]);
+  });
+
+  it('keeps a provider with another key coming back on the free route', () => {
+    const { router, clock, ledger } = clocked([]);
+    router.coolDown({ id: 'keys', nextKeyAt: () => clock.now + 60000 }, new ProviderError('keys HTTP 402: Payment required', { status: 402 }));
+    expect(router.needsPayment('keys')).toBe(false);
+    expect(router.cooldownUntil.get('keys')).toBe(clock.now + 60000);
+    expect(ledger).toEqual([]);
+  });
+
+  it('restores the exclusion after a restart without saying it again, also when its own notice is the last ledger row', () => {
+    const p = (id: string) => ({ id, ready: true, describe: () => ({ id }), chat: async () => ({}) });
+    const { router, ledger, events, clock } = clocked([p('pay'), p('free')]);
+    const restored = router.restoreCooldowns([
+      { ts: '2026-11-16T09:00:00Z', provider: 'pay', ok: false, error: 'pay HTTP 402: Payment required' },
+      { ts: '2026-11-16T09:00:00Z', provider: 'pay', purpose: 'router', ok: false, error: 'pay needs payment: excluded from the free route' },
+    ]);
+    expect(restored).toEqual(['pay']);
+    expect(router.needsPayment('pay')).toBe(true);
+    expect(router.cooldownUntil.get('pay')).toBe(clock.now + PAYMENT_REST_MS);
+    expect(router.route().fast).toEqual(['free']);
+    expect(ledger).toEqual([]);
+    expect(events).toEqual([]);
+    router.forgetBench('pay');
+    expect(router.needsPayment('pay')).toBe(false);
+    expect(router.route().fast).toEqual(['pay', 'free']);
+  });
+
+  it('tells payment required from a short limit and from used-up credit', () => {
+    expect(paymentRequired({ status: 402, message: 'x HTTP 402: Payment required' })).toBe(true);
+    expect(paymentRequired({ status: 429, message: 'x HTTP 429: A subscription is required' })).toBe(true);
+    expect(paymentRequired({ status: 402, message: 'Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s' })).toBe(false);
+    expect(paymentRequired({ status: 402, message: 'x HTTP 402: insufficient credit' })).toBe(false);
+    expect(paymentRequired({ status: 429, message: 'x HTTP 429: slow down' })).toBe(false);
   });
 });
