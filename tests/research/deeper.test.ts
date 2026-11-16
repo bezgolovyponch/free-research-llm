@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DeeperReader } from '../../src/research/deeper.mjs';
+import { DeeperReader, deeperOrder } from '../../src/research/deeper.mjs';
 
 const CHECK_ID = 'ships abroad|Does this ship to other countries?';
 const checklist = [
@@ -87,4 +87,28 @@ describe('DeeperReader', () => {
     await reader.readDeeperForUnknown(unknownItem(), checklist, {});
     expect(readPage.mock.calls.map((c) => c[0])).toEqual([ITEM_URL, 'https://shop.example.org/shipping-1', 'https://shop.example.org/shipping-2']);
   });
+
+  it('stops reading deeper pages at its budget and reports progress every 10 pages', async () => {
+    const links = Array.from({ length: 3 }, (_, i) => ({ url: `https://shop.example.org/shipping-${i}`, text: 'Shipping countries' }));
+    const pages = Object.fromEntries(links.map((l) => [l.url, { text: 'No countries named', status: 200, links: [] }]));
+    const readPage = vi.fn(async (url) => pages[url] ?? itemPage(links));
+    const judge = { judge: vi.fn(async () => []) };
+    const progress: number[] = [];
+    const reader = new DeeperReader({ judge, readPage, budget: 10, onProgress: (r: { read: number }) => progress.push(r.read) });
+    for (let i = 0; i < 6; i++) await reader.readDeeperForUnknown({ ...unknownItem(), url: `https://shop.example.org/item-${i}` }, checklist, {});
+    expect(reader.read).toBe(10);
+    expect(reader.spent()).toBe(true);
+    expect(judge.judge).toHaveBeenCalledTimes(10);
+    expect(progress).toEqual([10]);
+  });
 });
+
+describe('deeperOrder', () => {
+  const item = (url: string, answers: string[]) => ({ url, checks: answers.map((answer, i) => ({ id: `c|q${i}`, hard: true, answer, clause: 'c' })) });
+
+  it('skips items a hard "no" already rejected and items with nothing unknown, closest to confirmation first', () => {
+    const order = deeperOrder([item('a', ['unknown', 'unknown', 'yes']), item('b', ['no', 'unknown']), item('c', ['yes', 'unknown']), item('d', ['yes', 'yes']), { url: 'e' }]);
+    expect(order.map((i: { url: string }) => i.url)).toEqual(['c', 'a']);
+  });
+});
+
