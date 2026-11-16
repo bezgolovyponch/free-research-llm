@@ -739,7 +739,11 @@ describe('checklist-based acceptance', () => {
     const readPage = async () => ({ status: 200, text: longText });
     const checker = new AcceptanceChecker({ readPage });
     const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
-    const items = [{ url: 'https://example.com/supplier' }];
+    const items = [{ url: 'https://example.com/supplier', checks: [
+      { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
+      { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+      { id: 'quality|Is quality proven?', hard: false, answer: 'yes', clause: 'quality' },
+    ] }];
     const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
     expect(result!.validCount).toBe(1);
     expect(result!.items[0].valid).toBe(true);
@@ -764,8 +768,16 @@ describe('checklist-based acceptance', () => {
     const checker = new AcceptanceChecker({ readPage });
     const spec = normalizeAcceptance({ itemCount: 2, urlsLive: true });
     const items = [
-      { url: 'https://example.com/supplier1' },
-      { url: 'https://example.com/supplier2' },
+      { url: 'https://example.com/supplier1', checks: [
+        { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
+        { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+        { id: 'quality|Is quality proven?', hard: false, answer: 'yes', clause: 'quality' },
+      ] },
+      { url: 'https://example.com/supplier2', checks: [
+        { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
+        { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+        { id: 'quality|Is quality proven?', hard: false, answer: 'no', clause: 'quality' },
+      ] },
     ];
     const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
     expect(result!.validCount).toBe(2);
@@ -867,7 +879,9 @@ describe('acceptance summary K < N', () => {
     ];
     const checker = new AcceptanceChecker({ readPage });
     const spec = normalizeAcceptance({ itemCount: 5, urlsLive: true });
-    const items = [{ url: 'https://example.com/supplier' }];
+    const items = [{ url: 'https://example.com/supplier', checks: [
+      { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+    ] }];
     const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
     expect(result!.validCount).toBe(1);
     expect(result!.totalAsked).toBe(5);

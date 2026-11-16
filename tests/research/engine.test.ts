@@ -8,7 +8,7 @@ import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
-import { ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
+import { ResearchCancelled, ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
 import { LOW_PRICE_REASON, checklistFingerprint } from '../../src/research/checklist.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -1425,6 +1425,17 @@ describe('meaning check of claims', () => {
     expect((await engine.recheckSupport(project.id)).message).toBe('rechecked 1 piece(s), 1 claim(s): 0 to confirm');
     expect((await engine.load(project.id)).nodes[0].finding.claims[0].support).toMatchObject({ version: 2, verdict: 'supported' });
     router.complete = answer;
+  });
+
+  it('a cancel in the memo stage ends the research as cancelled, not as an error', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'What does a camp permit cost in Czechia?' });
+    engine.synthesize = async () => { throw new ResearchCancelled(); };
+    await expect(engine.run(project.id)).rejects.toBeInstanceOf(ResearchCancelled);
+    const saved = await engine.load(project.id);
+    expect(saved.phase).toBe('cancelled');
+    expect(saved.error).toBeNull();
+    expect(saved.log.some((l: { type: string; message: string }) => l.type === 'phase' && l.message === 'research cancelled')).toBe(true);
   });
 
   it('a stop on an idle research does not block the next action', async () => {

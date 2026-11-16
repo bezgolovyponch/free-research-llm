@@ -548,5 +548,19 @@
     "signal": "Lead review of the purpose branch (2026-11-16): hardenKind turned every kind 'yes' below lowPriceCut into unknown. On the 0c750f fixture the cut is 13,100 CZK with a median of 25,000 CZK, so real cars offered at 10,000 to 12,000 CZK could never be confirmed, and those are exactly the cheap and valuable items the owner asked for.",
     "cause": "A statistic that only says 'unusual' was used as a verdict. It was written against one case (tyres on rims at 2,000 CZK) and never checked against the low-priced real items in the same table.",
     "prevention": "A statistic may trigger a judgement, never replace it: below the cut, hardenKind runs a second kind judgement (judgeKindAgain: 3 votes, fast tier, the closed options A to E and U, sentence ids) whose prompt shows the item's price and the median of its comparables; A keeps the yes and its quote, B to E give no, U or no majority gives unknown; at or above the cut, or with no cut, nothing changes and no call is made. lowPriceStats is the one place that computes the cut and the median, and the engine caches the second judgement per item, cut and median. Tests: the tyre item answered B is no and rejected, a car at 10,000 CZK answered A stays yes and confirmed, no call above the cut (tests/research/verdict.test.ts, tests/research/checklist.test.ts, tests/research/engine.test.ts)."
+  },
+  {
+    "id": "F40",
+    "title": "the score said 100% while 0 items were confirmed; cancel did not stop judging; a crashed run said nothing",
+    "touches": [
+      "src/research/acceptance.mjs",
+      "src/research/engine.mjs",
+      "src/research/verdict.mjs",
+      "tests/research/verdict-integrity.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "live cars 0c750f on 8dfaa95: summary 0 of 20 confirmed, count check 1.0 '89 of 207', score 1, memo '1 of 20'; 446 model calls after POST /cancel; engine.start swallowed every run error",
+    "cause": "evaluate judged validity before any page was read (unjudged items confirmed), the final recompute had no caller, the memo was written before the last acceptance check, the judge loop never checked cancellation, start() caught and dropped errors",
+    "prevention": "evaluate always passes the checklist (unjudged = not-judged); checkAcceptance ends with recomputeAcceptanceValidity; synthesize checks acceptance before writing the memo; scoreOf in verdict.mjs is the only score formula; verdictInvariants compares count check, score and memo with the verdict; the judge loop checks cancellation; run() ends a cancel as phase cancelled and start() records any other error as phase failed"
   }
 ]

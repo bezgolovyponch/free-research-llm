@@ -145,6 +145,10 @@ export function acceptanceSummaryOf(project) {
   return verdict(result?.items ?? [], spec, project.checklist, project.decisionModel?.kind ?? null).summary;
 }
 
+export function scoreOf(checks) {
+  return checks.length ? checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length : 0;
+}
+
 export function verdictInvariants(project) {
   const reasons = [];
   const acceptanceResult = project.acceptanceResult;
@@ -172,6 +176,33 @@ export function verdictInvariants(project) {
 
   if (project.acceptance?.itemCount && !checklist?.length) {
     reasons.push("acceptance.itemCount set but decisionModel has no checklist items");
+  }
+
+  const countCheck = acceptanceResult.checks?.find((c) => c.id === 'count');
+  if (countCheck) {
+    const itemCount = project.acceptance?.itemCount ?? Math.max(1, acceptanceResult.items.length);
+    const expectedValue = Math.min(1, verdictResult.validCount / itemCount);
+    if (Math.abs(countCheck.value - expectedValue) > 0.001) {
+      reasons.push("count check value mismatch: got " + countCheck.value + " expected " + expectedValue);
+    }
+  }
+
+  const newChecks = acceptanceResult.checks?.filter((c) => !c.id.startsWith('checklist-')) ?? [];
+  for (const pc of verdictResult.perCheck) {
+    const total = pc.yes + pc.no + pc.unknown;
+    const rate = total ? pc.yes / total : 0;
+    newChecks.push({ id: `checklist-${pc.id}`, label: `Checklist: ${pc.clause}`, value: Math.round(Math.min(1, rate) * 1000) / 1000 });
+  }
+  const expectedScore = scoreOf(newChecks);
+  if (Math.abs((acceptanceResult.score ?? 0) - expectedScore) > 0.001) {
+    reasons.push("score mismatch: got " + acceptanceResult.score + " expected " + Math.round(expectedScore * 1000) / 1000);
+  }
+
+  if (project.report?.verdict && project.acceptanceSummary) {
+    const memoMatch = project.report.verdict.match(/PROVISIONAL\s*\(acceptance:\s*([^)]+)\)/i);
+    if (memoMatch && memoMatch[1].trim() !== project.acceptanceSummary.trim()) {
+      reasons.push("memo acceptance text mismatch: memo says '" + memoMatch[1].trim() + "' but acceptanceSummary is '" + project.acceptanceSummary.trim() + "'");
+    }
   }
 
   return reasons;
