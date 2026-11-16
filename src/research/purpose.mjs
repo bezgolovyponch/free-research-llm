@@ -424,10 +424,10 @@ export function conflictGoalOf(tree) {
 
 export async function buildPurposeTree(ctx, { question, guidance = '', notes = [] }) {
   const anchors = anchorsOf(question, guidance);
-  const purpose = await drawPurpose(ctx, anchors);
-  if (!purpose) return { phase: 'needs-purpose', tree: null, anchors };
-  const implications = await drawImplications(ctx, anchors, purpose);
   const conflict = await conflictAsked(ctx, anchors);
+  const purpose = await drawPurpose(ctx, anchors);
+  if (!purpose) return { phase: 'needs-purpose', tree: null, anchors, conflict };
+  const implications = await drawImplications(ctx, anchors, purpose);
   const candidates = traceables(anchors, purpose, implications);
   const drafted = await draftGoals(ctx, { anchors, purpose, implications, notes });
   const goals = [];

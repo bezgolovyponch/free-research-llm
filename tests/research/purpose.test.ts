@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CONFLICT_GOAL, CONFLICT_ROLE, PURPOSE, anchorsOf, applyOps, buildPurposeTree, conflictAsked, conflictGoalOf, critique, drawImplications, drawPurpose, ensureMandatory, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, refineGoal, thresholdsOf, traceGoal, traceables } from '../../src/research/purpose.mjs';
+import { CallBudget } from '../../src/research/semantic.mjs';
 import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
 
@@ -277,6 +278,14 @@ describe('the purpose is the sample nearest to the others', () => {
 });
 
 describe('the whole tree', () => {
+  it('decides whether cheap and valuable are asked before the purpose samples can spend the stage budget', async () => {
+    const router = fakeRouter({ conflict: { cost: 'C1', worth: 'C2' }, purpose: { who: 'a buyer', outcome: 'x', why: 'y', anchors: ['C1'] }, implications: { implications: [] } });
+    const built = await buildPurposeTree({ router, embedder: fakeEmbedder(), budget: new CallBudget({ purpose: 3 }) }, { question: 'cheap hatchback cars, with the highest value for the price' });
+    expect(router.calls[0].task).toBe('conflict');
+    expect(router.count('conflict')).toBe(2);
+    expect(built).toMatchObject({ phase: 'needs-purpose', tree: null, conflict: { asked: true, cost: 'C1', worth: 'C2' } });
+  });
+
   it('ends with the conflict goal after a critique that tried to delete it, every kept goal traced, and open entries listed', async () => {
     const question = 'Find plots to buy, affordable and valuable, with a scenic location';
     let conflictId = '';
