@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants } from "../../src/research/verdict.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf } from "../../src/research/verdict.mjs";
 import fixture from "../fixtures/verdict-0c750f.json";
 
 describe("verdict", () => {
@@ -220,5 +220,23 @@ describe("verdict", () => {
     expect(result.validCount).toBe(1);
     expect(result.vague).toContain("accurate and verified listing|Does this listing provide accurate and verified car listings?");
     expect(result.summary).toContain("1 of 20 confirmed");
+  });
+
+  it("hardIdsOf: kind id built from kind label via kindCluster", () => {
+    const checklist = [{ clause: "c", items: [{ id: "check1", hard: true, question: "q1" }] }];
+
+    const kind1 = { label: "used car", terms: ["hatchback"], not: ["parts"] };
+    const ids1 = hardIdsOf(checklist, kind1);
+    expect(ids1).toContain("kind|Is this page one used car offered as asked (not a part, accessory, wanted ad or list and not parts)?");
+
+    const kind2 = { label: "wholesale clothing provider", terms: ["wholesale clothing"], not: ["retail"] };
+    const ids2 = hardIdsOf(checklist, kind2);
+    expect(ids2).toContain("kind|Is this page one wholesale clothing provider offered as asked (not a part, accessory, wanted ad or list and not retail)?");
+
+    const idsNoKind = hardIdsOf(checklist, null);
+    expect(idsNoKind).not.toContainEqual(expect.stringMatching(/^kind\|/));
+
+    const idsNoChecklist = hardIdsOf(null, kind1);
+    expect(idsNoChecklist).not.toContainEqual(expect.stringMatching(/^kind\|/));
   });
 });

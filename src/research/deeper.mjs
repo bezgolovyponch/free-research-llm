@@ -46,6 +46,7 @@ export class DeeperReader {
     const page = await this.readPage(item.url).catch(() => null);
     const links = page?.links ?? [];
     if (links.length === 0) return item;
+    let anyConfirmed = false;
     for (const check of unknownHard) {
       const keyWords = extractKeyWords(check.clause + ' ' + check.id.split('|').pop());
       const relevantUrls = await findRelevantLinks(links, item.url, keyWords);
@@ -65,9 +66,13 @@ export class DeeperReader {
           check.answer = 'yes';
           check.quote = deeperCheck.quote ?? '';
           check.source = url;
+          anyConfirmed = true;
           break;
         }
       }
+    }
+    if (anyConfirmed) {
+      item.live = true;
     }
     return item;
   }

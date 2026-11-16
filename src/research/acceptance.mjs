@@ -2,7 +2,8 @@ import { plain } from './itemgate.mjs';
 import { regionVerdict } from './brief.mjs';
 import { isUmbrella, memberTerms } from './concept.mjs';
 import { entitiesFromJsonLd } from '../search/listings.mjs';
-import { verdict, itemTier } from './verdict.mjs';
+import { verdict, itemTier, hardIdsOf } from './verdict.mjs';
+export { qualifies } from './verdict.mjs';
 const CURRENCIES = {
   EUR: ['€', 'eur', 'euro'],
   PLN: ['zł', 'zl', 'pln'],
@@ -601,11 +602,6 @@ export function kindOnPage(text, kind) {
   });
 }
 
-export function qualifies(item, spec) {
-  const entity = Boolean(item.evidence);
-  return Boolean(item.live && (entity || item.listing) && (!spec.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
-}
-
 function pageIsLive(page, item, located, allowRedirect = false) {
   const status = Number(page?.status ?? 0);
   const text = String(page?.text ?? '');
@@ -673,7 +669,7 @@ export class AcceptanceChecker {
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
 
     const hasChecks = items.some((i) => (i.checks ?? []).length > 0);
-    const verdictResult = verdict(items, spec, hasChecks ? checklist : null);
+    const verdictResult = verdict(items, spec, hasChecks ? checklist : null, kind);
 
     for (const item of verdictResult.items) {
       item.valid = item.tier === 'confirmed';
@@ -689,14 +685,9 @@ export class AcceptanceChecker {
       const passed = items.filter((i) => (i.purpose ?? []).some((c) => c.id === criterion.id && c.passed)).length;
       checks.push({ id: criterion.id, label: criterion.label, value: items.length ? passed / items.length : 0, detail: `${passed} of ${items.length} delivered pages show it` });
     }
-    const allHardCheckIds = [...new Set(items.flatMap((i) => (i.checks ?? []).filter((c) => c.hard === true).map((c) => c.id)))];
-    for (const checkId of allHardCheckIds) {
-      const relevant = items.filter((i) => (i.checks ?? []).some((c) => c.id === checkId));
-      if (relevant.length === 0) continue;
-      const pass = relevant.filter((i) => (i.checks ?? []).some((c) => c.id === checkId && c.answer === 'yes')).length;
-      const rate = pass / relevant.length;
-      const label = items[0]?.checks?.find((c) => c.id === checkId)?.clause ?? checkId;
-      checks.push({ id: `checklist-${checkId}`, label: `Checklist: ${label}`, value: rate, detail: `${Math.round(rate * items.length)} of ${items.length} checked items pass this hard check` });
+    for (const pc of verdictResult.perCheck) {
+      const rate = pc.yes / (pc.yes + pc.no + pc.unknown) || 0;
+      checks.push({ id: `checklist-${pc.id}`, label: `Checklist: ${pc.clause}`, value: rate, detail: `${pc.yes} of ${pc.yes + pc.no + pc.unknown} checked items pass this hard check` });
     }
     const score = checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length;
     const sortedItems = [...verdictResult.items].sort((a, b) => {

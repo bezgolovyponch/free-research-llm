@@ -1,32 +1,51 @@
+import { kindCluster } from './checklist.mjs';
+
+export function qualifies(item, spec) {
+  const entity = Boolean(item.evidence);
+  const baseQualifies = Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
+  if (baseQualifies) return true;
+  const hardChecks = (item.checks ?? []).filter((c) => c.hard === true);
+  return hardChecks.length > 0 && hardChecks.every((c) => c.answer === 'yes');
+}
+
 export function itemTier(item, hardIds, spec) {
   const checks = item.checks ?? [];
   const hardChecks = checks.filter((c) => hardIds.includes(c.id));
-  const qualifiesResult = item.qualifies ?? qualifies(item, spec);
+  const explicitQualifies = item.qualifies;
+  const computedQualifies = qualifies(item, spec);
+  const qualifiesResult = explicitQualifies ?? computedQualifies;
+  const qualifiesWasExplicit = explicitQualifies !== undefined;
 
   if (hardIds.length === 0) {
     return qualifiesResult ? "confirmed" : "rejected";
   }
-  
+
   if (hardChecks.length === 0) {
     return "not-judged";
   }
-  
+
   const hasHardNo = hardChecks.some((c) => c.answer === "no");
-  if (hasHardNo || !qualifiesResult) {
+  const allHardYes = hardChecks.length > 0 && hardChecks.every((c) => c.answer === "yes");
+  if (hasHardNo || (!qualifiesResult && (qualifiesWasExplicit || !allHardYes))) {
     return "rejected";
   }
-  
+
   const hasHardUnknown = hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "");
   if (hasHardUnknown) {
     return "to-confirm";
   }
-  
+
   return "confirmed";
 }
 
-function qualifies(item, spec) {
-  const entity = Boolean(item.evidence);
-  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
+export function hardIdsOf(checklist, kind = null) {
+  const ids = [...new Set(checklist?.flatMap?.((cluster) => cluster.items?.filter((ci) => ci.hard).map((ci) => cluster.clause + "|" + ci.question) ?? []) ?? [])];
+  if (checklist && kind?.label) {
+    const kindId = kindCluster(kind).items[0].question;
+    const id = 'kind|' + kindId;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
 }
 
 export function itemEvidence(item, hardIds, spec) {
@@ -51,13 +70,9 @@ export function itemEvidence(item, hardIds, spec) {
   return { belief, plausibility, open: unknownIds };
 }
 
-export function verdict(items, spec, checklist) {
-  const hardIds = [...new Set(checklist?.flatMap?.((cluster) => cluster.items?.filter((ci) => ci.hard).map((ci) => cluster.clause + "|" + ci.question) ?? []) ?? [])];
-  const kindHardId = checklist?.some?.((cluster) => cluster.clause === "kind") ? "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?" : null;
-  if (kindHardId && !hardIds.includes(kindHardId)) {
-    hardIds.push(kindHardId);
-  }
-  
+export function verdict(items, spec, checklist, kind = null) {
+  const hardIds = hardIdsOf(checklist, kind);
+
   const itemsWithTier = items.map((item) => {
     const tier = itemTier(item, hardIds, spec);
     const evidence = itemEvidence(item, hardIds, spec);
@@ -134,16 +149,17 @@ export function verdictInvariants(project) {
   const reasons = [];
   const acceptanceResult = project.acceptanceResult;
   const checklist = project.checklist;
-  
+  const kind = project.decisionModel?.kind ?? null;
+
   if (!acceptanceResult || !checklist) return [];
-  
-  const hardIds = [...new Set(checklist.flatMap((cluster) => cluster.items.filter((ci) => ci.hard).map((ci) => cluster.clause + "|" + ci.question)))];
-  const verdictResult = verdict(acceptanceResult.items, project.acceptance, checklist);
-  
+
+  const hardIds = hardIdsOf(checklist, kind);
+  const verdictResult = verdict(acceptanceResult.items, project.acceptance, checklist, kind);
+
   if (acceptanceResult.validCount !== verdictResult.validCount) {
     reasons.push("validCount mismatch: acceptanceResult=" + acceptanceResult.validCount + " verdict=" + verdictResult.validCount);
   }
-  
+
   for (const item of verdictResult.items.filter((i) => i.tier === "confirmed")) {
     for (const hardId of hardIds) {
       const check = item.checks?.find((c) => c.id === hardId);
@@ -153,10 +169,10 @@ export function verdictInvariants(project) {
       }
     }
   }
-  
+
   if (project.acceptance?.itemCount && !checklist?.length) {
     reasons.push("acceptance.itemCount set but decisionModel has no checklist items");
   }
-  
+
   return reasons;
 }
