@@ -1,12 +1,4 @@
 {
-  "mechanisms": [
-    { "id": "M1", "key": "unpriced-change", "label": "a future change the price does not include yet", "test": "Is the change planned, announced or built, and do comparable prices already reflect it (priced in) or not yet?", "checker": "official", "basis": "Capozza & Helsley 1989; Titman 1985; Plantinga et al. 2002; Mohammad et al. 2013" },
-    { "id": "M2", "key": "information-gap", "label": "information the market lacks or does not trust", "test": "Which fact about this item is known to few buyers, and do comparables with that fact sell higher?", "checker": "consensus", "basis": "Kurlat & Stroebel 2015" },
-    { "id": "M3", "key": "coarse-pricing", "label": "the market prices a coarse class while the truth is finer", "test": "Does the discount of the coarse class apply to this exact variant, or has its cause been fixed or never applied here?", "checker": "consensus", "basis": "Fournier 1999; Abrahams et al. 2012" },
-    { "id": "M4", "key": "ignored-segment", "label": "an unfashionable or ignored segment", "test": "Is demand for this segment low for reasons that do not affect the asked purpose, compared with comparables?", "checker": "statistic", "basis": "Butler 1980 tourism area life cycle; Hu, Pavlou & Zhang 2017" },
-    { "id": "M5", "key": "real-defect", "label": "a real defect or risk the low price correctly reflects", "test": "Which evidence would show the low price is deserved, and is it present on the item?", "checker": "consensus", "basis": "Heuer 1999 Analysis of Competing Hypotheses" }
-  ],
-  "conflictObstacle": "M5",
   "admiralty": {
     "reliability": { "A": "completely reliable", "B": "usually reliable", "C": "fairly reliable", "D": "not usually reliable", "E": "unreliable", "F": "reliability cannot be judged" },
     "credibility": { "1": "confirmed by other sources", "2": "probably true", "3": "possibly true", "4": "doubtful", "5": "improbable", "6": "truth cannot be judged" },

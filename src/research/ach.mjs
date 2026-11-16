@@ -39,11 +39,11 @@ export function evidenceRows({ identity = null, priced = null, facts = [] }) {
   return rows;
 }
 
-export async function markRow(ctx, row, hypotheses) {
+export async function markRow(ctx, row, hypotheses, about = '') {
   const ids = hypotheses.map((hypothesis) => hypothesis.id);
   const messages = [
-    { role: 'system', content: 'You test competing explanations for a low price against one piece of evidence (analysis of competing hypotheses). For each hypothesis mark C when the evidence is consistent with it, I when it is inconsistent with it, N when it says nothing about it. Answer with JSON only: {"marks":{"M1":"C|I|N","M2":"C|I|N"}} with one mark per hypothesis id.' },
-    { role: 'user', content: `Evidence: ${row.evidence}\n\nHypotheses:\n${hypotheses.map((hypothesis) => `[${hypothesis.id}] ${hypothesis.hypothesis}`).join('\n')}` },
+    { role: 'system', content: 'You test competing explanations of one question against one piece of evidence (analysis of competing hypotheses). For each hypothesis mark C when the evidence is consistent with it, I when it is inconsistent with it, N when it says nothing about it. Answer with JSON only: {"marks":{"M1":"C|I|N","M2":"C|I|N"}} with one mark per hypothesis id.' },
+    { role: 'user', content: `${about ? `What is explained: ${about}\n\n` : ''}Evidence: ${row.evidence}\n\nHypotheses:\n${hypotheses.map((hypothesis) => `[${hypothesis.id}] ${hypothesis.hypothesis}`).join('\n')}` },
   ];
   const schema = (data) => {
     const marks = {};
@@ -61,9 +61,9 @@ export async function markRow(ctx, row, hypotheses) {
   return { ...row, marks, votes: result.replies.length };
 }
 
-export async function markRows(ctx, rows, hypotheses) {
+export async function markRows(ctx, rows, hypotheses, about = '') {
   const marked = [];
-  for (const row of rows) marked.push(await markRow(ctx, row, hypotheses));
+  for (const row of rows) marked.push(await markRow(ctx, row, hypotheses, about));
   return marked;
 }
 
@@ -90,6 +90,6 @@ export function diagnosticRows(hypotheses, rows, { questions = [] } = {}) {
 export async function buildMatrix(ctx, { identity = null, priced = null, facts = [], goal }) {
   const hypotheses = goal?.hypotheses ?? [];
   const rows = evidenceRows({ identity, priced, facts });
-  const marked = hypotheses.length ? await markRows(ctx, rows, hypotheses) : [];
+  const marked = hypotheses.length ? await markRows(ctx, rows, hypotheses, goal?.goal ?? '') : [];
   return diagnosticRows(hypotheses, marked, { questions: goal?.questions ?? [] });
 }

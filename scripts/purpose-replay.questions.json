@@ -68,5 +68,31 @@
       "European Union"
     ],
     "project": "b7772e"
+  },
+  "library": {
+    "question": "Find open-source PDF parsing libraries for Node.js that are actively maintained and well documented",
+    "guidance": "",
+    "kind": "library",
+    "regions": [],
+    "markets": [],
+    "project": null,
+    "expect": {
+      "tensions": 0
+    }
+  },
+  "trail": {
+    "question": "Find hiking trails within two hours of Prague that suit young children",
+    "guidance": "",
+    "kind": "trail",
+    "regions": [
+      "CZ"
+    ],
+    "markets": [
+      "Czech Republic"
+    ],
+    "project": null,
+    "expect": {
+      "tensions": 0
+    }
   }
 }

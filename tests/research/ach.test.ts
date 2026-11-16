@@ -79,11 +79,14 @@ describe('the matrix', () => {
     ]);
     expect(evidenceRows({ priced: { position: 'unknown' } })).toEqual([]);
     const router = fakeRouter({ 'ach-row': (request: { messages: { content: string }[] }) => ({ marks: request.messages[1].content.includes('rear arms') ? { M1: 'I', M2: 'N', M3: 'N' } : { M1: 'N', M2: 'N', M3: 'N' } }) });
-    const goal = { hypotheses, questions: [{ id: 'Q1', q: 'a', checker: 'consensus' }, { id: 'Q2', q: 'b', checker: 'official' }] };
+    const goal = { goal: 'Meet both at once: "first" and "second"', hypotheses, questions: [{ id: 'Q1', q: 'a', checker: 'consensus' }, { id: 'Q2', q: 'b', checker: 'official' }] };
     const matrix = await buildMatrix({ router }, { identity, priced, facts, goal });
     expect(matrix.kept.map((r: { evidence: string }) => r.evidence)).toEqual(['rear arms were renewed']);
     expect(matrix.dropped).toHaveLength(2);
     expect(matrix.ranking[2].id).toBe('M1');
     expect(matrix.needed.map((q: { id: string }) => q.id)).toEqual(['Q2']);
+    expect(router.userText('ach-row')).toContain('What is explained: Meet both at once: "first" and "second"');
+    expect(router.userText('ach-row')).toContain('competing explanations of one question against one piece of evidence');
+    expect(router.userText('ach-row')).not.toMatch(/price/i);
   });
 });

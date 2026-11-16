@@ -7,25 +7,27 @@ import { buildMatrix, diagnosticRows, pricedIn } from '../src/research/ach.mjs';
 import { lowPriceStats } from '../src/research/candidates.mjs';
 import { ChecklistJudge, hardenKind, migrateChecks } from '../src/research/checklist.mjs';
 import { HostBook, gatherEvidence, identify, subjectKey } from '../src/research/facts.mjs';
-import { PURPOSE, buildPurposeTree, conflictGoalOf, openEntries } from '../src/research/purpose.mjs';
+import { COST_CHECKERS, COST_PHASES, COST_ROLE, METHOD_ID, MIN_EXPLANATIONS, PRICE_CHECKER, VALUE_ROLE, buildPurposeTree, openEntries, tensionGoalsOf } from '../src/research/purpose.mjs';
 import { MIN_KEPT_SOURCES, PAGE_CHARS, composeQueries, judgeSource, relevanceReason, runScoping, screenSources } from '../src/research/scoping.mjs';
 import { CallBudget } from '../src/research/semantic.mjs';
 import { sentenceSpans } from '../src/research/spans.mjs';
 import { verdict } from '../src/research/verdict.mjs';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const MODES = ['car', 'suppliers', 'plots'];
+export const MODES = ['car', 'suppliers', 'plots', 'library', 'trail'];
 export const QUESTIONS_FILE = path.join(ROOT, 'scripts', 'purpose-replay.questions.json');
 export const FIXTURE_FILE = path.join(ROOT, 'tests', 'fixtures', 'verdict-0c750f.json');
 export const SIM_OUT = path.join(ROOT, 'data', 'handoff', 'sim', 'sim-out');
 export const JUDGE_SAMPLE = 20;
 export const MAX_LANGUAGES = 4;
-export const USAGE = 'usage: node scripts/purpose-replay.mjs <car|suppliers|plots|all> --out <dir outside the repo> [--projects <dir>] [--baseline <sim-out dir>]';
+export const USAGE = 'usage: node scripts/purpose-replay.mjs <car|suppliers|plots|library|trail|all> --out <dir outside the repo> [--projects <dir>] [--baseline <sim-out dir>]';
 
 export const BASELINE = {
-  car: { sources: '1 of 8', notes: '5 of 10', conflict: 'removed', numbers: '10 %, ...', ach: '9 of 17', facts: 'SDI, 1.4 16V, one MOT record', grades: 'all', prices: '1', kind: 'kind yes' },
-  suppliers: { sources: 'most', notes: '0 of 14', conflict: 'removed', numbers: '30 %, 30 days, 95 %', direction: 'reversed' },
-  plots: { sources: 'mixed', notes: '4 of 14', conflict: 'removed', numbers: '500 m, 3 %, 5 km' },
+  car: { sources: '1 of 8', notes: '5 of 10', tensions: 'removed', numbers: '10 %, ...', ach: '9 of 17', facts: 'SDI, 1.4 16V, one MOT record', grades: 'all', prices: '1', kind: 'kind yes' },
+  suppliers: { sources: 'most', notes: '0 of 14', tensions: 'removed', numbers: '30 %, 30 days, 95 %', direction: 'reversed' },
+  plots: { sources: 'mixed', notes: '4 of 14', tensions: 'removed', numbers: '500 m, 3 %, 5 km' },
+  library: {},
+  trail: {},
 };
 
 export function insideRepo(dir, root = ROOT) {
@@ -143,8 +145,35 @@ async function carEvidence(ctx, { entry, scoping, tree, fixture, rows, hosts }) 
   const screened = await screenSources(ctx, { sources: found, purpose: tree.purpose.text, subject: label, markets: [], regions: [] });
   const evidence = await gatherEvidence(ctx, { questions: treeQuestions(tree), sources: screened.kept, subject, kind: entry.kind, hosts });
   const priced = rows.length ? pricedIn({ ...item, subject }, rows, scoping.levels) : { position: 'unknown', reason: 'no candidate rows' };
-  const matrix = await buildMatrix(ctx, { identity, priced, facts: evidence.facts, goal: conflictGoalOf(tree) });
+  const matrix = await buildMatrix(ctx, { identity, priced, facts: evidence.facts, goal: tensionGoalsOf(tree)[0] ?? null });
   return { item: item.url, identity, subject, queries, dropped: screened.dropped, evidence, priced, matrix };
+}
+
+function tensionMetric(tree, wanted) {
+  if (!tree) return { value: 'no tree', target: 'a tree', pass: false };
+  const voted = tree.tensions?.pairs ?? [];
+  const goals = tensionGoalsOf(tree);
+  const cited = (goal) => (goal.hypotheses ?? []).filter((entry) => entry.id !== METHOD_ID);
+  const sound = goals.every((goal) => goal.protected && goal.state === 'kept' && voted.some((pair) => pair.id === goal.pair) && (goal.hypotheses ?? []).filter((entry) => entry.id === METHOD_ID).length === 1 && cited(goal).every((entry) => entry.notes?.length > 0) && Boolean(goal.gap) === cited(goal).length < MIN_EXPLANATIONS);
+  const gaps = goals.filter((goal) => goal.gap).length;
+  return {
+    value: `${voted.length} voted pair(s), ${goals.length} goal(s), ${goals.reduce((sum, goal) => sum + cited(goal).length, 0)} cited explanation(s), ${gaps} research gap(s)`,
+    target: wanted === 0 ? 'no tension goal' : 'one protected goal per voted pair; fewer than 2 cited explanations is a research gap',
+    pass: goals.length === voted.length && sound && (wanted === undefined || voted.length === wanted),
+  };
+}
+
+function sidesMetric(tree) {
+  if (!tree) return { value: 'no tree', pass: false };
+  const value = (tree.goals ?? []).find((goal) => goal.role === VALUE_ROLE);
+  const cost = (tree.goals ?? []).find((goal) => goal.role === COST_ROLE);
+  if (!tree.consumes?.value) return { value: `consumes no: ${value || cost ? 'a side is present' : 'neither side'}`, pass: !value && !cost };
+  const phases = (cost?.phases ?? []).filter((phase) => phase.questions > 0).length;
+  const checkers = (cost?.questions ?? []).every((question) => (question.price ? question.checker === PRICE_CHECKER : COST_CHECKERS.includes(question.checker)));
+  return {
+    value: `consumes ${tree.consumes.decided ? 'yes' : 'undecided'}: value side ${value?.questions?.length ?? 0} question(s), cost side ${phases} of ${COST_PHASES.length} phases with ${cost?.questions?.length ?? 0} question(s)`,
+    pass: Boolean(value?.protected && cost?.protected) && value.questions.length > 0 && phases === COST_PHASES.length && checkers,
+  };
 }
 
 export function metricRows(mode, run, baseline) {
@@ -152,13 +181,13 @@ export function metricRows(mode, run, baseline) {
   const add = (id, label, was, value, target, pass) => rows.push({ id, label, baseline: was ?? '-', value, target, pass });
   const tree = run.tree;
   const goals = tree?.goals ?? [];
-  const conflict = conflictGoalOf(tree);
-  const mechanisms = (conflict?.hypotheses ?? []).filter((hypothesis) => PURPOSE.mechanisms.some((mechanism) => mechanism.id === hypothesis.id)).length;
+  const tensions = tensionMetric(tree, run.expect?.tensions);
+  const sides = sidesMetric(tree);
   add('sources', 'Kept scoping sources judged on subject and market', baseline.sources, `${run.scoping.sources.length} kept, ${run.scoping.dropped.length} dropped`, `>= ${MIN_KEPT_SOURCES} kept`, run.scoping.sources.length >= MIN_KEPT_SOURCES);
   add('second-opinion', 'Kept sources another provider agrees with', 'not measured', percent(run.second.agreed, run.second.total), '>= 80%', run.second.total > 0 && share(run.second.agreed, run.second.total) >= 0.8);
   add('notes', 'Scoping notes with a quote on the page', baseline.notes, percent(run.notesOnPage, run.scoping.notes.length), '100%', run.notesOnPage === run.scoping.notes.length);
-  const askedConflict = tree?.conflict?.asked === true;
-  add('conflict', '"Why still cheap" goal present only when the question asks for a low price and worth, then with all 5 mechanisms', baseline.conflict, conflict ? `${conflict.state}, ${mechanisms} mechanisms` : tree ? `absent (asked: ${tree.conflict?.asked})` : 'no tree', 'present with 5 when asked, absent otherwise', askedConflict ? Boolean(conflict) && mechanisms === PURPOSE.mechanisms.length : Boolean(tree) && !conflict);
+  add('tensions', 'Tension goals only for voted pairs of the stated requirements, every explanation cited from a scoping note', baseline.tensions, tensions.value, tensions.target, tensions.pass);
+  add('value-cost', 'Value side and total-cost side present exactly when the result consumes resources', baseline.valueCost, sides.value, 'both sides with the three cost phases when it consumes, neither otherwise', sides.pass);
   const thresholds = tree?.thresholds ?? [];
   const invented = goals.flatMap((goal) => [goal, ...(goal.questions ?? []), ...(Array.isArray(goal.obstacles) ? goal.obstacles : [])]).reduce((sum, node) => sum + (node.inventedNumber?.length ?? 0), 0);
   const unlabelled = thresholds.filter((threshold) => !['asked', 'sourced', 'assumption'].includes(threshold.source)).length;
@@ -227,7 +256,7 @@ export async function runReplay({ mode, entry, out, router, search, embedder, fi
   }
   const ledger = (router.ledger ?? []).slice(ledgerStart);
   await write('ledger', ledger);
-  const run = { scoping, second, notesOnPage, tree: built.tree, phase: built.phase, car, banned: bannedCalls(ledger, env), budget: budget.report() };
+  const run = { scoping, second, notesOnPage, tree: built.tree, phase: built.phase, car, expect: entry.expect ?? {}, banned: bannedCalls(ledger, env), budget: budget.report() };
   const metrics = metricRows(mode, run, baseline);
   await write('metrics', { mode, phase: built.phase, enough: scoping.enough, metrics });
   return { run, metrics };

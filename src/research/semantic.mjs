@@ -1,4 +1,4 @@
-export const STAGE_CAPS = { scoping: 50, purpose: 24, tree: 90, evidence: 200 };
+export const STAGE_CAPS = { scoping: 50, purpose: 48, tree: 90, evidence: 200 };
 export const EXHAUSTIVE_CAP = 25;
 export const EXHAUSTIVE_CHUNK = 5;
 export const NONE = 'N';

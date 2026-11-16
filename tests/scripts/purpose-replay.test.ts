@@ -24,18 +24,24 @@ function script() {
     'scope-notes': { notes: [{ spans: ['S1'], label: 'rust at the mount' }, { spans: ['S77'], label: 'invented' }] },
     purpose: { who: 'a buyer', outcome: 'a sound car for little money', why: 'a small budget', anchors: ['C1'] },
     implications: { implications: [] },
-    conflict: { cost: 'C1', worth: 'C2' },
+    requirements: (request: { messages: { content: string }[] }) => ({ groups: [...request.messages[1].content.matchAll(/^\[(S\d+)\]/gm)].map((match) => [match[1]]) }),
+    tensions: { pairs: [['C1', 'C2']] },
+    consumes: { consumes: true },
+    restates: { restates: [] },
+    'obstacle-stated': { anchor: 'N' },
+    'cost-phase': { questions: [{ q: 'What does this phase take?', paid: 'B', checker: 'consensus' }], obstacles: [] },
+    'tension-explain': { explanations: [{ explanation: 'A known fault lowers what is asked', notes: ['N1'], test: 'Is the known fault present?', checker: 'page' }, { explanation: 'A repaired fault no longer applies', notes: ['N2'], test: 'Was the fault repaired?', checker: 'page' }, { explanation: 'No note behind it', notes: ['N99'] }] },
     goals: { goals: [{ goal: 'A sound engine and body', anchor: 'C2', notes: ['N1'] }, { goal: 'Arrange financing', anchor: 'C1', notes: [] }] },
     refine: refined,
     trace: (request: { messages: { content: string }[] }) => (request.messages[1].content.includes('Goal: A sound') ? { anchor: pickLetter(request, () => true), relation: 'S' } : { anchor: 'N' }),
     'same-goal': { same: 'B' },
-    critique: (request: { messages: { content: string }[] }) => ({ ops: [{ op: 'drop', id: request.messages[1].content.match(/^(G\d+) \[from conflict\]/m)![1], reason: 'A' }] }),
+    critique: (request: { messages: { content: string }[] }) => ({ ops: [{ op: 'drop', id: request.messages[1].content.match(/^(G\d+) \[from tension\]/m)![1], reason: 'A' }] }),
     identity: { fields: { L1: { value: 'Alpha 1.2', span: 'S1' } } },
     'source-method': { method: 'D', span: 'S2' },
     facts: { facts: [{ spans: ['S1'], for: 'Q1', direction: '-', scope: 'A' }, { spans: ['S2'], for: 'Q1', direction: '-', scope: 'B' }, { spans: ['S3'], for: 'Q1', direction: '+', scope: 'C' }] },
     'subject-match': { applies: 'B' },
     'claim-pair': { relation: 'A' },
-    'ach-row': (request: { messages: { content: string }[] }) => ({ marks: Object.fromEntries(['M1', 'M2', 'M3', 'M4', 'M5'].map((id) => [id, id === 'M5' && request.messages[1].content.includes('rusts') ? 'C' : 'N'])) }),
+    'ach-row': (request: { messages: { content: string }[] }) => ({ marks: Object.fromEntries(['M1', 'M2', 'M0'].map((id) => [id, id === 'M1' && request.messages[1].content.includes('rusts') ? 'C' : 'N'])) }),
     'kind-second': { kind: 'B', span: 'S1' },
     '': (request: { messages: { content: string }[] }) => (request.messages[1].content.includes('This page offers:') ? { kind: 'A', span: 'S1' } : [{ id: 'q1', answer: 'yes', spans: ['S1'] }, { id: 'q2', answer: 'no', spans: [] }]),
   };
@@ -66,11 +72,18 @@ describe('purpose replay: arguments', () => {
     expect(ran.stderr).toContain('outside the repository');
   });
 
-  it('holds the three questions of the simulation as an argument file', () => {
+  it('holds the five questions of the simulation as an argument file', () => {
     expect(Object.keys(questions)).toEqual(MODES);
     expect(questions.car.question).toContain('within 300km from prague');
     expect(questions.suppliers.question).toContain('wholesale branded second hand clothing');
     expect(questions.plots.question).toBe('Find appropriate plots to buy for a low-entry glamping business in the EU: affordable and valuable, with a scenic location and future upside');
+    expect(questions.library.question).toContain('open-source PDF parsing libraries for Node.js');
+    expect(questions.trail.question).toContain('hiking trails within two hours of Prague');
+    for (const mode of ['library', 'trail']) {
+      expect(questions[mode].question).not.toMatch(/price|cost|cheap|afford|value|budget|worth/i);
+      expect(questions[mode].expect).toEqual({ tensions: 0 });
+    }
+    expect(MODES).toEqual(['car', 'suppliers', 'plots', 'library', 'trail']);
   });
 });
 
@@ -83,7 +96,7 @@ describe('purpose replay: the baseline is reproduced from the stored simulation'
 
   it('counts the ACH rows that do not discriminate: 9 of 17', async () => {
     expect(storedMatrix(await read('car-4-ach'))).toEqual({ nonDiagnostic: 9, total: 17 });
-    expect(await readBaseline(SIM, 'car')).toMatchObject({ notes: '5 of 10', ach: '9 of 17', conflict: 'removed' });
+    expect(await readBaseline(SIM, 'car')).toMatchObject({ notes: '5 of 10', ach: '9 of 17', tensions: 'removed' });
     expect((await readBaseline(path.join(SIM, 'missing'), 'plots')).notes).toBe('4 of 14');
   });
 
@@ -103,7 +116,7 @@ describe('purpose replay: the baseline is reproduced from the stored simulation'
 });
 
 describe('purpose replay: one run with fakes', () => {
-  it('writes the stage files, keeps the conflict goal the critique tried to drop, and prints every metric row', async () => {
+  it('writes the stage files, keeps the tension goal the critique tried to drop, and prints every metric row', async () => {
     const out = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-replay-'));
     const router = Object.assign(fakeRouter(script()), { ledger: [] as { provider: string; model: string }[] });
     const complete = router.complete.bind(router);
@@ -119,12 +132,14 @@ describe('purpose replay: one run with fakes', () => {
     expect(search.searched[1]).toEqual(['Alpha 1.2 known faults', 'Alpha 1.2 časté závady']);
     expect(run.phase).toBe('needs-confirmation');
     expect(run.tree.ops.refused).toHaveLength(1);
-    expect(metrics.map((row: { id: string }) => row.id)).toEqual(['sources', 'second-opinion', 'notes', 'conflict', 'numbers', 'trace', 'scope', 'ach', 'facts', 'grades', 'prices', 'judge', 'kind', 'banned', 'calls']);
+    expect(run.tree.ops.refused[0].why).toContain('is a protected tension goal');
+    expect(metrics.map((row: { id: string }) => row.id)).toEqual(['sources', 'second-opinion', 'notes', 'tensions', 'value-cost', 'numbers', 'trace', 'scope', 'ach', 'facts', 'grades', 'prices', 'judge', 'kind', 'banned', 'calls']);
     const byId = Object.fromEntries(metrics.map((row: { id: string; value: string; pass: boolean | null }) => [row.id, row]));
     expect(byId.sources).toMatchObject({ value: '4 kept, 0 dropped', pass: true });
     expect(byId['second-opinion']).toMatchObject({ value: '4 of 4', pass: true });
     expect(byId.notes).toMatchObject({ value: '4 of 4', pass: true });
-    expect(byId.conflict).toMatchObject({ value: 'kept, 5 mechanisms', pass: true });
+    expect(byId.tensions).toMatchObject({ baseline: 'removed', value: '1 voted pair(s), 1 goal(s), 2 cited explanation(s), 0 research gap(s)', pass: true });
+    expect(byId['value-cost']).toMatchObject({ baseline: '-', value: 'consumes yes: value side 1 question(s), cost side 3 of 3 phases with 3 question(s)', pass: true });
     expect(byId.trace).toMatchObject({ value: '0', pass: true });
     expect(byId.scope.value).toContain('proposed: Arrange financing');
     expect(byId.scope.pass).toBeNull();
@@ -139,7 +154,10 @@ describe('purpose replay: one run with fakes', () => {
     expect(byId.calls.pass).toBe(true);
     const text = tableText('car', metrics);
     for (const row of metrics) expect(text).toContain(row.label);
-    expect(text).toContain('PASS | "Why still cheap" goal present only when the question asks for a low price and worth, then with all 5 mechanisms | removed | kept, 5 mechanisms | present with 5 when asked, absent otherwise');
+    expect(text).toContain('PASS | Tension goals only for voted pairs of the stated requirements, every explanation cited from a scoping note | removed | 1 voted pair(s), 1 goal(s), 2 cited explanation(s), 0 research gap(s) | one protected goal per voted pair; fewer than 2 cited explanations is a research gap');
+    const ach = router.calls.find((call) => call.task === 'ach-row')!.messages.map((message) => message.content).join(' ');
+    expect(ach).toContain('What is explained: Meet both at once:');
+    expect(ach).toContain('[M0] the combination does not hold here');
     const stored = JSON.parse(await fs.readFile(path.join(out, 'car-4-ach.json'), 'utf8'));
     expect(stored.kept.every((row: { marks: Record<string, string> }) => new Set(Object.values(row.marks)).size > 1)).toBe(true);
     expect(stored.tyres.cut).toBeGreaterThan(2000);
@@ -157,12 +175,48 @@ describe('purpose replay: one run with fakes', () => {
     expect(metrics.map((row: { id: string }) => row.id)).toContain('direction');
   });
 
-  it('counts ledger calls to a banned family, and metric rows fail when an asked conflict goal is missing', () => {
-    const notAsked = metricRows('suppliers', { scoping: { sources: [], dropped: [], notes: [] }, second: { agreed: 0, total: 0 }, notesOnPage: 0, tree: { conflict: { asked: false }, goals: [] }, car: null, banned: 2, budget: { tree: { used: 60, cap: 60, skipped: 3 } } }, {});
-    expect(notAsked.find((row: { id: string }) => row.id === 'conflict')).toMatchObject({ pass: true, value: 'absent (asked: false)' });
+  it('runs the two counter-example questions: no tension goal, and the cost side only when the consumes vote says so', async () => {
+    const replay = async (mode: 'library' | 'trail', more: Record<string, unknown>) => {
+      const out = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-replay-'));
+      const { run, metrics } = await runReplay({ mode, entry: questions[mode], out, router: fakeRouter({ ...script(), tensions: { pairs: [] }, ...more }), search: { ...search, searched: [] }, embedder: fakeEmbedder(), fixture, languages: ['English'] });
+      return { run, byId: Object.fromEntries(metrics.map((row: { id: string }) => [row.id, row])) };
+    };
+    const library = await replay('library', { consumes: { consumes: false } });
+    expect(library.run.tree.goals.map((goal: { role?: string }) => goal.role ?? '')).toEqual(['']);
+    expect(library.byId.tensions).toMatchObject({ baseline: '-', value: '0 voted pair(s), 0 goal(s), 0 cited explanation(s), 0 research gap(s)', target: 'no tension goal', pass: true });
+    expect(library.byId['value-cost']).toMatchObject({ value: 'consumes no: neither side', pass: true });
+    const trail = await replay('trail', { consumes: { consumes: true } });
+    expect(trail.run.tree.goals.map((goal: { role?: string }) => goal.role ?? '')).toEqual(['', 'value', 'cost']);
+    expect(trail.byId.tensions).toMatchObject({ target: 'no tension goal', pass: true });
+    expect(trail.byId['value-cost']).toMatchObject({ value: 'consumes yes: value side 1 question(s), cost side 3 of 3 phases with 3 question(s)', pass: true });
+    const voted = await replay('trail', { consumes: { consumes: true }, tensions: { pairs: [['C1', 'C1']] } });
+    expect(voted.byId.tensions).toMatchObject({ value: '1 voted pair(s), 1 goal(s), 2 cited explanation(s), 0 research gap(s)', target: 'no tension goal', pass: false });
+  });
+
+  it('counts ledger calls to a banned family, and the tension and value-cost rows fail on a tree that breaks their rule', () => {
     expect(bannedCalls([{ provider: 'a', model: 'qwen3-32b' }, { provider: 'b', model: 'llama-3' }, { provider: 'router', model: 'qwen' }], { FRL_BANNED_FAMILIES: 'qwen' })).toBe(1);
     expect(bannedCalls([{ provider: 'a', model: 'qwen3-32b' }], {})).toBe(0);
-    const rows = metricRows('plots', { scoping: { sources: [], dropped: [], notes: [] }, second: { agreed: 0, total: 0 }, notesOnPage: 0, tree: { conflict: { asked: true }, goals: [{ id: 'G1', goal: 'g', state: 'kept', trace: null, questions: [] }], thresholds: [] }, car: null, banned: 2, budget: { tree: { used: 60, cap: 60, skipped: 3 } } }, {});
-    expect(Object.fromEntries(rows.map((row: { id: string; pass: boolean | null }) => [row.id, row.pass]))).toEqual({ sources: false, 'second-opinion': false, notes: true, conflict: false, numbers: true, trace: false, scope: null, banned: false, calls: false });
+    const base = { scoping: { sources: [], dropped: [], notes: [] }, second: { agreed: 0, total: 0 }, notesOnPage: 0, car: null, banned: 2, budget: { tree: { used: 60, cap: 60, skipped: 3 } } };
+    const pair = { id: 'C1|C2', a: 'C1', b: 'C2', texts: ['a', 'b'], votes: 2 };
+    const method = { id: 'M0', key: 'method', hypothesis: 'the combination does not hold here', notes: [] };
+    const tension = (more: object) => ({ id: 'G2', role: 'tension', pair: 'C1|C2', goal: 'Meet both at once: "a" and "b"', state: 'kept', protected: true, trace: { kind: 'rule', text: 'tension' }, hypotheses: [method], questions: [], gap: { kind: 'research gap', found: 0, needed: 2 }, ...more });
+    const passes = (tree: object | null) => Object.fromEntries(metricRows('plots', { ...base, tree }, {}).map((row: { id: string; pass: boolean | null }) => [row.id, row.pass]));
+    expect(passes({ tensions: { pairs: [] }, consumes: { value: false, decided: true }, goals: [] })).toEqual({ sources: false, 'second-opinion': false, notes: true, tensions: true, 'value-cost': true, numbers: true, trace: true, scope: null, banned: false, calls: false });
+    expect(passes(null)).toMatchObject({ tensions: false, 'value-cost': false, numbers: false, trace: false });
+    expect(passes({ tensions: { pairs: [pair] }, consumes: { value: false, decided: true }, goals: [] }).tensions).toBe(false);
+    expect(passes({ tensions: { pairs: [pair] }, consumes: { value: false, decided: true }, goals: [tension({})] }).tensions).toBe(true);
+    expect(passes({ tensions: { pairs: [pair] }, consumes: { value: false, decided: true }, goals: [tension({ gap: undefined })] }).tensions).toBe(false);
+    expect(passes({ tensions: { pairs: [pair] }, consumes: { value: false, decided: true }, goals: [tension({ hypotheses: [{ id: 'M1', hypothesis: 'no note', notes: [] }, method] })] }).tensions).toBe(false);
+    expect(passes({ tensions: { pairs: [pair] }, consumes: { value: false, decided: true }, goals: [tension({ hypotheses: [] })] }).tensions).toBe(false);
+    expect(passes({ tensions: { pairs: [] }, consumes: { value: false, decided: true }, goals: [tension({})] }).tensions).toBe(false);
+    const value = { id: 'G3', role: 'value', protected: true, state: 'kept', trace: { kind: 'rule', text: 'value' }, questions: [{ id: 'Q1', q: 'x', checker: 'page' }] };
+    const cost = (more: object) => ({ id: 'G4', role: 'cost', protected: true, state: 'kept', trace: { kind: 'rule', text: 'cost' }, phases: [{ id: 'pre-transaction', questions: 1 }, { id: 'transaction', questions: 1 }, { id: 'post-transaction', questions: 1 }], questions: [{ id: 'Q2', q: 'a', checker: 'consensus', price: false }, { id: 'Q3', q: 'b', checker: 'code', price: true }, { id: 'Q4', q: 'c', checker: 'official', price: false }], ...more });
+    const sides = (consumes: boolean, goals: object[]) => passes({ tensions: { pairs: [] }, consumes: { value: consumes, decided: true }, goals })['value-cost'];
+    expect(sides(true, [value, cost({})])).toBe(true);
+    expect(sides(true, [value])).toBe(false);
+    expect(sides(true, [value, cost({ phases: [{ id: 'pre-transaction', questions: 0 }, { id: 'transaction', questions: 2 }, { id: 'post-transaction', questions: 1 }] })])).toBe(false);
+    expect(sides(true, [value, cost({ questions: [{ id: 'Q3', q: 'b', checker: 'page', price: true }] })])).toBe(false);
+    expect(sides(true, [value, cost({ questions: [{ id: 'Q3', q: 'b', checker: 'statistic', price: false }] })])).toBe(false);
+    expect(sides(false, [value, cost({})])).toBe(false);
   });
 });
