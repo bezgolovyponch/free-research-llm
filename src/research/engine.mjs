@@ -1329,12 +1329,12 @@ export class ResearchEngine {
       model: `${reply.provider}/${reply.model}`,
       generatedAt: new Date().toISOString(),
     };
+    await this.checkAcceptance(project, pages);
     this.planActions(project);
     if (project.report.claimCheck) {
       const passed = project.report.claimCheck.contradicted.length === 0;
       this.router.recordOutcome?.({ provider: reply.provider, model: reply.model, purpose: 'synthesize', passed });
     }
-    await this.checkAcceptance(project, pages);
     this.emit(project, 'report', `decision memo ready: ${project.report.verdict}`);
   }
 
@@ -1571,6 +1571,8 @@ export class ResearchEngine {
           if (confirmedCount >= targetCount) break;
           if (judgedCount >= JUDGE_PAGE_BUDGET) break;
 
+          this.throwIfCancelled(project);
+
           const cacheKey = `${item.url}::${fingerprint}`;
           const cached = checkCache[cacheKey];
           let checks;
@@ -1595,6 +1597,9 @@ export class ResearchEngine {
               delete checkCache[keys[0]];
             }
             judgedCount++;
+            if (judgedCount % 10 === 0) {
+              this.emit(project, 'acceptance', `judging pages: ${judgedCount} judged, ${confirmedCount} confirmed, budget ${JUDGE_PAGE_BUDGET}`);
+            }
           }
 
           if (prices && needsSecondKind(checks, item, prices.cut)) {
@@ -1631,6 +1636,7 @@ export class ResearchEngine {
       const deeperReader = new DeeperReader({ judge: this.checklistJudge, readPage });
       for (const item of project.acceptanceResult.items) {
         if (item.checks) {
+          this.throwIfCancelled(project);
           await deeperReader.readDeeperForUnknown(item, project.checklist, project.checkCache);
         }
       }
@@ -1638,18 +1644,11 @@ export class ResearchEngine {
 
     const kind = project.decisionModel?.kind ?? null;
     if (project.acceptanceResult) {
-      const verdictResult = verdict(project.acceptanceResult.items, project.acceptance, project.checklist, kind);
-      project.acceptanceResult.validCount = verdictResult.validCount;
-      project.acceptanceResult.verdict = verdictResult;
-      project.acceptanceResult.items = verdictResult.items;
-      for (const item of verdictResult.items) {
-        item.valid = item.tier === 'confirmed';
-        item.softYes = (item.checks ?? []).filter((c) => c.hard !== true && c.answer === 'yes').length;
-      }
+      this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, project.checklist, kind);
 
-      if (verdictResult.vague.length > 0) {
-        const vagueClauses = verdictResult.vague.map((id) => verdictResult.perCheck.find((c) => c.id === id)?.clause ?? id).join(', ');
-        project.acceptanceResult.vague = verdictResult.vague;
+      if (project.acceptanceResult.verdict?.vague.length > 0) {
+        const vagueClauses = project.acceptanceResult.verdict.vague.map((id) => project.acceptanceResult.verdict.perCheck.find((c) => c.id === id)?.clause ?? id).join(', ');
+        project.acceptanceResult.vague = project.acceptanceResult.verdict.vague;
         this.emit(project, 'acceptance', `requirement cannot be confirmed from the pages: ${vagueClauses} — define it in Hints`);
       }
 
@@ -1914,8 +1913,15 @@ export class ResearchEngine {
     void (async () => {
       try {
         await this.run(id, options);
-      } catch {
-        return;
+      } catch (error) {
+        if (error instanceof ResearchCancelled) return;
+        const project = await this.load(id).catch(() => null);
+        if (project) {
+          project.phase = 'failed';
+          project.error = error.message;
+          this.emit(project, 'phase', `research failed: ${error.message}`);
+          await this.store.save(project, { reason: `run ended with an error: ${String(error.message).slice(0, 120)}` });
+        }
       }
     })();
   }

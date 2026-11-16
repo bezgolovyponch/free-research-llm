@@ -668,8 +668,7 @@ export class AcceptanceChecker {
     const target = spec.itemCount ?? Math.max(1, items.length);
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
 
-    const hasChecks = items.some((i) => (i.checks ?? []).length > 0);
-    const verdictResult = verdict(items, spec, hasChecks ? checklist : null, kind);
+    const verdictResult = verdict(items, spec, checklist, kind);
 
     for (const item of verdictResult.items) {
       item.valid = item.tier === 'confirmed';
