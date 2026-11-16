@@ -33,10 +33,28 @@ function onlyCheck(checklist, checkId) {
     .filter((cluster) => cluster.items.length > 0);
 }
 
+export const DEEPER_PAGE_BUDGET = 60;
+export const DEEPER_PROGRESS_EVERY = 10;
+
+export function deeperOrder(items) {
+  const hard = (item) => (item.checks ?? []).filter((c) => c.hard === true);
+  return items
+    .filter((item) => item.checks && !hard(item).some((c) => c.answer === 'no') && hard(item).some((c) => c.answer === 'unknown'))
+    .sort((a, b) => hard(a).filter((c) => c.answer === 'unknown').length - hard(b).filter((c) => c.answer === 'unknown').length);
+}
+
 export class DeeperReader {
-  constructor({ judge, readPage } = {}) {
+  constructor({ judge, readPage, budget = DEEPER_PAGE_BUDGET, onProgress = () => {} } = {}) {
     this.judge = judge;
     this.readPage = readPage;
+    this.budget = budget;
+    this.onProgress = onProgress;
+    this.read = 0;
+    this.answered = 0;
+  }
+
+  spent() {
+    return this.read >= this.budget;
   }
 
   async readDeeperForUnknown(item, checklist, cache) {
@@ -55,13 +73,17 @@ export class DeeperReader {
         if (cache[cacheKey]) {
           deeperChecks = cache[cacheKey];
         } else {
+          if (this.spent()) return item;
+          this.read += 1;
           const deeperPage = await this.readPage(url).catch(() => null);
+          if (this.read % DEEPER_PROGRESS_EVERY === 0) this.onProgress(this);
           if (!deeperPage?.text) continue;
           deeperChecks = await this.judge.judge({ url }, deeperPage.text, onlyCheck(checklist, check.id));
           cache[cacheKey] = deeperChecks;
         }
         const deeperCheck = deeperChecks.find((c) => c.id === check.id);
         if (deeperCheck?.answer === 'yes') {
+          this.answered += 1;
           check.answer = 'yes';
           check.quote = deeperCheck.quote ?? '';
           check.source = url;

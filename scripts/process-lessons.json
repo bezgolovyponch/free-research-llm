@@ -562,5 +562,17 @@
     "signal": "live cars 0c750f on 8dfaa95: summary 0 of 20 confirmed, count check 1.0 '89 of 207', score 1, memo '1 of 20'; 446 model calls after POST /cancel; engine.start swallowed every run error",
     "cause": "evaluate judged validity before any page was read (unjudged items confirmed), the final recompute had no caller, the memo was written before the last acceptance check, the judge loop never checked cancellation, start() caught and dropped errors",
     "prevention": "evaluate always passes the checklist (unjudged = not-judged); checkAcceptance ends with recomputeAcceptanceValidity; synthesize checks acceptance before writing the memo; scoreOf in verdict.mjs is the only score formula; verdictInvariants compares count check, score and memo with the verdict; the judge loop checks cancellation; run() ends a cancel as phase cancelled and start() records any other error as phase failed"
+  },
+  {
+    "id": "F44",
+    "title": "deeper reads after judging ran silently with no limit, also for items a hard no had already rejected",
+    "touches": [
+      "src/research/deeper.mjs",
+      "src/research/engine.mjs",
+      "tests/research/deeper.test.ts"
+    ],
+    "signal": "suppliers b2f5b7 on 106f9d2: 'judging pages: 20 judged' then 11 minutes with no log line while ~120 judge calls succeeded; the stall watcher fired",
+    "cause": "checkAcceptance reads up to 3 same-host pages per unknown hard check per item with no page budget, no progress line, and for items already rejected by a hard no; hints turned into 8+ hard checks multiply it to ~2,000 possible judge calls",
+    "prevention": "deeperOrder skips rejected items and items with nothing unknown and reads the closest-to-confirmation first; DEEPER_PAGE_BUDGET 60 per acceptance check; a progress line every 10 pages and one line when the budget stops it"
   }
 ]

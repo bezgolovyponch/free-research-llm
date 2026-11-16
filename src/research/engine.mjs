@@ -7,7 +7,7 @@ import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind } from './checklist.mjs';
-import { DeeperReader } from './deeper.mjs';
+import { DeeperReader, deeperOrder } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -1633,12 +1633,15 @@ export class ResearchEngine {
     }
 
     if (project.checklist && readPage && project.acceptanceResult?.items?.length) {
-      const deeperReader = new DeeperReader({ judge: this.checklistJudge, readPage });
-      for (const item of project.acceptanceResult.items) {
-        if (item.checks) {
-          this.throwIfCancelled(project);
-          await deeperReader.readDeeperForUnknown(item, project.checklist, project.checkCache);
+      const progressLine = (reader) => `reading deeper pages: ${reader.read} read, ${reader.answered} check(s) answered, budget ${reader.budget}`;
+      const deeperReader = new DeeperReader({ judge: this.checklistJudge, readPage, onProgress: (reader) => this.emit(project, 'acceptance', progressLine(reader)) });
+      for (const item of deeperOrder(project.acceptanceResult.items)) {
+        if (deeperReader.spent()) {
+          this.emit(project, 'acceptance', `deeper reads stopped at the page budget: ${progressLine(deeperReader)}`);
+          break;
         }
+        this.throwIfCancelled(project);
+        await deeperReader.readDeeperForUnknown(item, project.checklist, project.checkCache);
       }
     }
 
