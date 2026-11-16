@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { OutcomeBook } from '../../src/llm/outcomes.mjs';
 import { ProviderError } from '../../src/llm/provider.mjs';
 import { PROVIDER_PRESETS } from '../../src/llm/presets.mjs';
-import { COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { PURPOSE_CLASS } from '../../src/llm/ranking.mjs';
+import { EXPECTED_OUTPUT_TOKENS, COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, overloaded, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -1263,5 +1264,39 @@ describe('ModelRouter.restoreCooldowns key count', () => {
     expect(restored).toEqual(['sambanova']);
     expect(router.cooldownUntil.get('sambanova')).toBe(now - 60000 + 30 * 60 * 1000);
     expect(router.cooldownReason.get('sambanova')).toBe('12 failed calls in a row before the restart; rests 30 min');
+  });
+});
+
+describe('ModelRouter banned model families', () => {
+  const make = (id: string, model: string) => ({ id, ready: true, describe: () => ({ fast: model, deep: model }), selected: { fast: model, deep: model }, chat: async () => ({ content: '{"ok":true}', model, provider: id }) });
+  const providers = () => [make('a', 'deepseek-chat'), make('b', 'llama-3.3-70b'), make('c', 'qwen3-32b')];
+
+  it('never offers a provider whose model family is in FRL_BANNED_FAMILIES', async () => {
+    const router = new ModelRouter({ providers: providers(), env: { FRL_BANNED_FAMILIES: ' DeepSeek , qwen' } });
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['b']);
+    expect(router.available({ tier: 'deep', avoid: 'b' }).map((p: { id: string }) => p.id)).toEqual(['b']);
+    for (let i = 0; i < 3; i++) await expect(router.complete({ messages: [] })).resolves.toMatchObject({ provider: 'b' });
+    expect(router.ledger.map((row: { provider: string }) => row.provider)).toEqual(['b', 'b', 'b']);
+  });
+
+  it('fails the call instead of using a banned family when nothing else is left', async () => {
+    const router = new ModelRouter({ providers: providers(), env: { FRL_BANNED_FAMILIES: 'deepseek,qwen,llama' }, maxWaitMs: 0 });
+    await expect(router.complete({ messages: [] })).rejects.toThrow();
+    expect(router.ledger.filter((row: { provider: string }) => row.provider !== 'router')).toEqual([]);
+  });
+
+  it('bans nothing when the variable is empty or unset, and reads it at each call', async () => {
+    const env: Record<string, string> = { FRL_BANNED_FAMILIES: '' };
+    const router = new ModelRouter({ providers: providers(), env });
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['a', 'b', 'c']);
+    expect(new ModelRouter({ providers: providers(), env: {} }).available({ tier: 'fast' })).toHaveLength(3);
+    env.FRL_BANNED_FAMILIES = 'deepseek';
+    expect(router.available({ tier: 'fast' }).map((p: { id: string }) => p.id)).toEqual(['b', 'c']);
+  });
+
+  it('knows the two purposes of the semantic layer', () => {
+    expect(EXPECTED_OUTPUT_TOKENS['purpose-judge']).toBe(120);
+    expect(EXPECTED_OUTPUT_TOKENS['purpose-draft']).toBe(900);
+    expect([PURPOSE_CLASS['purpose-judge'], PURPOSE_CLASS['purpose-draft']]).toEqual(['volume', 'top']);
   });
 });
