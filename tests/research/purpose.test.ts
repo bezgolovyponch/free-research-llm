@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CONFLICT_GOAL, CONFLICT_ROLE, PURPOSE, anchorsOf, applyOps, buildPurposeTree, conflictAsked, conflictGoalOf, critique, drawImplications, drawPurpose, ensureMandatory, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, refineGoal, thresholdsOf, traceGoal, traceables } from '../../src/research/purpose.mjs';
+import { CONFLICT_GOAL, CONFLICT_ROLE, PURPOSE, anchorsOf, applyOps, buildPurposeTree, conflictAsked, conflictGoalOf, critique, drawImplications, drawPurpose, ensureAskedConflict, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, refineGoal, thresholdsOf, traceGoal, traceables } from '../../src/research/purpose.mjs';
 import { CallBudget } from '../../src/research/semantic.mjs';
 import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
@@ -11,11 +11,11 @@ const refined = { refine: 'AND', questions: [{ q: 'Is it stated?', checker: 'pag
 describe('the stored knowledge holds mechanisms, not word lists', () => {
   it('has five mechanisms with ids and sources, the Admiralty scales, and no cue or word list', () => {
     const raw = JSON.parse(readFileSync(new URL('../../src/research/purpose.json', import.meta.url), 'utf8'));
-    expect(Object.keys(raw).sort()).toEqual(['admiralty', 'mandatoryObstacle', 'mechanisms']);
+    expect(Object.keys(raw).sort()).toEqual(['admiralty', 'conflictObstacle', 'mechanisms']);
     expect(raw.mechanisms.map((m: { id: string }) => m.id)).toEqual(MECHANISMS);
     expect(raw.mechanisms.every((m: { test: string; basis: string; checker: string }) => m.test && m.basis && m.checker)).toBe(true);
     expect(JSON.stringify(raw)).not.toMatch(/cues?"|words"|stems?"|stop"/i);
-    expect(raw.mandatoryObstacle).toBe('M5');
+    expect(raw.conflictObstacle).toBe('M5');
   });
 
   it('splits a question into clauses at punctuation only, with stable ids', () => {
@@ -53,13 +53,13 @@ describe('whether cheap and valuable are asked at once is voted on clause ids', 
     expect((await conflictAsked({ router: fakeRouter({ conflict: { cost: 'C9', worth: 'C1' } }) }, anchors)).asked).toBe(false);
   });
 
-  it('is undecided without a majority, so the goal is proposed to the user', async () => {
+  it('is undecided without a majority, and an undecided vote adds no goal: the branch exists only when the question asks for it', async () => {
     const anchors = anchorsOf('cheap things, good things');
     const undecided = await conflictAsked({ router: fakeRouter({ conflict: seq({ cost: 'C1', worth: 'C2' }, { cost: null, worth: null }, FAIL) }) }, anchors);
     expect(undecided.asked).toBeNull();
-    const tree = ensureMandatory({ conflict: undecided, goals: [] });
-    expect(conflictGoalOf(tree)).toMatchObject({ state: 'proposed', mandatory: true });
-    expect(openEntries(tree).map((e: { kind: string }) => e.kind)).toEqual(['goal']);
+    const tree = ensureAskedConflict({ conflict: undecided, goals: [] });
+    expect(conflictGoalOf(tree)).toBeNull();
+    expect(openEntries(tree)).toEqual([]);
   });
 });
 
@@ -67,31 +67,31 @@ describe('the "why still cheap" goal is kept by code', () => {
   const asked = { asked: true, votes: { yes: 2 }, cost: 'C1', worth: 'C2' };
 
   it('inserts the goal with every mechanism, a question per mechanism and the real-defect obstacle', () => {
-    const tree = ensureMandatory({ conflict: asked, goals: [{ id: 'G1', goal: 'Quality', questions: [{ id: 'Q1', q: 'x', checker: 'page' }], obstacles: [] }] });
+    const tree = ensureAskedConflict({ conflict: asked, goals: [{ id: 'G1', goal: 'Quality', questions: [{ id: 'Q1', q: 'x', checker: 'page' }], obstacles: [] }] });
     const goal = conflictGoalOf(tree);
-    expect(goal).toMatchObject({ id: 'G2', goal: CONFLICT_GOAL, role: CONFLICT_ROLE, mandatory: true, refine: 'OR', state: 'kept', anchors: ['C1', 'C2'], trace: { kind: 'rule', text: 'conflict' } });
+    expect(goal).toMatchObject({ id: 'G2', goal: CONFLICT_GOAL, role: CONFLICT_ROLE, protected: true, refine: 'OR', state: 'kept', anchors: ['C1', 'C2'], trace: { kind: 'rule', text: 'conflict' } });
     expect(goal.hypotheses.map((h: { id: string }) => h.id)).toEqual(MECHANISMS);
     expect(goal.hypotheses.map((h: { hypothesis: string }) => h.hypothesis)).toEqual(PURPOSE.mechanisms.map((m: { label: string }) => m.label));
     expect(goal.questions.map((q: { id: string; mechanism: string }) => [q.id, q.mechanism])).toEqual([['Q2', 'M1'], ['Q3', 'M2'], ['Q4', 'M3'], ['Q5', 'M4'], ['Q6', 'M5']]);
-    expect(goal.obstacles).toEqual([{ id: 'O1', obstacle: PURPOSE.mechanisms[4].label, checker: 'consensus', threshold: null, mechanism: 'M5', mandatory: true }]);
-    expect(ensureMandatory(tree)).toEqual(tree);
+    expect(goal.obstacles).toEqual([{ id: 'O1', obstacle: PURPOSE.mechanisms[4].label, checker: 'consensus', threshold: null, mechanism: 'M5', protected: true }]);
+    expect(ensureAskedConflict(tree)).toEqual(tree);
   });
 
   it('completes a kept goal to the five mechanisms, keeps its own wording and at most 2 confirmed extra hypotheses', () => {
     const kept = { conflict: asked, goals: [{ id: 'G1', role: CONFLICT_ROLE, goal: 'Why cheap', state: 'kept', questions: [], obstacles: [], hypotheses: [{ id: 'M3', hypothesis: 'own words' }, { id: 'X1', hypothesis: 'seller in a hurry', confirmed: true }, { id: 'X2', hypothesis: 'unconfirmed' }, { id: 'X3', hypothesis: 'b', confirmed: true }, { id: 'X4', hypothesis: 'c', confirmed: true }] }] };
-    const goal = conflictGoalOf(ensureMandatory(kept));
+    const goal = conflictGoalOf(ensureAskedConflict(kept));
     expect(goal.hypotheses.map((h: { id: string }) => h.id)).toEqual([...MECHANISMS, 'X1', 'X3']);
     expect(goal.hypotheses[2].hypothesis).toBe('own words');
     expect(goal.goal).toBe('Why cheap');
   });
 
   it('adds nothing when the question does not ask for both', () => {
-    expect(ensureMandatory({ conflict: { asked: false }, goals: [] }).goals).toEqual([]);
+    expect(ensureAskedConflict({ conflict: { asked: false }, goals: [] }).goals).toEqual([]);
   });
 
   it('refuses the critique drop of the conflict goal and of an obstacle, and logs it', async () => {
     const log: string[] = [];
-    const tree = ensureMandatory({ conflict: asked, goals: [{ id: 'G1', goal: 'Quality', state: 'kept', anchor: 'C2', questions: [{ id: 'Q1', q: 'x', checker: 'page' }], obstacles: [{ id: 'O9', obstacle: 'none', checker: 'page' }] }], ops: { applied: [], refused: [] } });
+    const tree = ensureAskedConflict({ conflict: asked, goals: [{ id: 'G1', goal: 'Quality', state: 'kept', anchor: 'C2', questions: [{ id: 'Q1', q: 'x', checker: 'page' }], obstacles: [{ id: 'O9', obstacle: 'none', checker: 'page' }] }], ops: { applied: [], refused: [] } });
     const conflict = conflictGoalOf(tree);
     const router = fakeRouter({ critique: { ops: [{ op: 'drop', id: conflict.id, reason: 'A' }, { op: 'drop', id: 'O9', reason: 'A' }, { op: 'checker', id: conflict.questions[0].id, checker: 'code' }, { op: 'checker', id: 'O9', checker: 'code' }, { op: 'drop', id: 'G77', reason: 'A' }, { op: 'explode' }] } });
     const ops = await critique({ router }, tree, []);
@@ -99,16 +99,16 @@ describe('the "why still cheap" goal is kept by code', () => {
     const out = await applyOps({ router, log: (line: string) => log.push(line) }, tree, ops);
     expect(out.goals).toEqual(tree.goals);
     expect(out.ops.applied).toEqual([]);
-    expect(out.ops.refused.map((r: { why: string }) => r.why)).toEqual([`"${CONFLICT_GOAL}" is a mandatory node`, 'an obstacle is a mandatory node', `"${CONFLICT_GOAL}" is a mandatory node`, 'an obstacle is a mandatory node']);
+    expect(out.ops.refused.map((r: { why: string }) => r.why)).toEqual([`"${CONFLICT_GOAL}" is protected because the question asks for it`, 'an obstacle is a protected node', `"${CONFLICT_GOAL}" is protected because the question asks for it`, 'an obstacle is a protected node']);
     expect(log).toHaveLength(4);
     expect(log[0]).toContain('critique operation refused: drop');
-    expect(conflictGoalOf(ensureMandatory(out)).hypotheses).toHaveLength(5);
+    expect(conflictGoalOf(ensureAskedConflict(out)).hypotheses).toHaveLength(5);
   });
 
   it('puts the goal back when a tree lost it', () => {
-    const tree = ensureMandatory({ conflict: asked, goals: [] });
+    const tree = ensureAskedConflict({ conflict: asked, goals: [] });
     const lost = { ...tree, goals: [] };
-    expect(conflictGoalOf(ensureMandatory(lost)).hypotheses.map((h: { id: string }) => h.id)).toEqual(MECHANISMS);
+    expect(conflictGoalOf(ensureAskedConflict(lost)).hypotheses.map((h: { id: string }) => h.id)).toEqual(MECHANISMS);
   });
 });
 
@@ -143,9 +143,9 @@ describe('every goal is traced to what was asked by a voted selection', () => {
     expect(openEntries({ goals: [proposed, conflict, { ...restated, id: 'G9' }] }).map((e: { state: string }) => e.state)).toEqual(['proposed', 'conflict']);
   });
 
-  it('never traces a mandatory goal: its trace is the rule', async () => {
+  it('never traces a protected goal: its trace is the rule', async () => {
     const router = fakeRouter({});
-    expect((await traceGoal({ router }, { goal: CONFLICT_GOAL, role: CONFLICT_ROLE, mandatory: true }, options)).trace).toEqual({ kind: 'rule', text: 'conflict' });
+    expect((await traceGoal({ router }, { goal: CONFLICT_GOAL, role: CONFLICT_ROLE, protected: true }, options)).trace).toEqual({ kind: 'rule', text: 'conflict' });
     expect(router.calls).toEqual([]);
   });
 });
@@ -312,7 +312,7 @@ describe('the whole tree', () => {
     expect(conflictGoalOf(tree).id).toBe(conflictId);
     expect(conflictGoalOf(tree).hypotheses).toHaveLength(5);
     expect(tree.ops.refused).toHaveLength(1);
-    expect(log.some((line) => line.includes('mandatory node'))).toBe(true);
+    expect(log.some((line) => line.includes('protected'))).toBe(true);
     expect(tree.goals.filter((g: { state: string; trace: unknown }) => g.state === 'kept' && !g.trace)).toEqual([]);
     expect(tree.thresholds).toEqual([{ node: 'Q1', goal: 'G1', op: '<=', value: 5, unit: 'km', source: 'assumption', hard: false }]);
     expect(openEntries(tree).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['G2', 'goal'], ['Q1', 'threshold']]);

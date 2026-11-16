@@ -53,7 +53,7 @@ Model tasks are named `T<stage><letter>`. Every task goes through `ask()` or `vo
 
 **Numbers (`thresholdsOf`).** A threshold lives only in the structured `threshold` field. Code compares its value with the numbers in the question and hints: equal → `source: "asked"`; else equal to a number in the quote of the cited note → `source: "sourced"` with the note's URL; else `source: "assumption"`. Any other digit run in `goal`, `q` or `obstacle` text that is in neither the user's words nor the field is recorded as `inventedNumber` on that node. An assumption is never a hard check: it runs as "asked but no limit stated" (the existing `noLimit` behaviour) until the user confirms the number.
 
-**Mandatory nodes (`ensureMandatory`, runs after every critique and before every save).** When `conflictAsked`: one goal with `role: "conflict"`, `mandatory: true`, hypotheses = every mechanism of `src/research/purpose.json` (`M1…M5`) plus at most 2 research-specific ones a model proposed and the user confirmed; a goal the model kept is completed with the missing mechanisms. `M5 real-defect` is its mandatory obstacle.
+**Protected nodes (`ensureAskedConflict`, runs after every critique and before every save).** Only when the vote `conflictAsked` decides that the question itself asks for a low price and worth at once (an example pattern, not a rule for every research; undecided or no adds nothing): one goal with `role: "conflict"`, `mandatory: true`, hypotheses = every mechanism of `src/research/purpose.json` (`M1…M5`) plus at most 2 research-specific ones a model proposed and the user confirmed; a goal the model kept is completed with the missing mechanisms. `M5 real-defect` is its mandatory obstacle.
 
 **Stored:** `project.purposeTree = { version, purpose, implications, conflict:{asked, votes}, goals:[{id, goal, state, trace, mandatory, role, refine, questions, obstacles, hypotheses}], notModelled, thresholds, ops:{applied, refused}, confirmedAt }`.
 
@@ -61,7 +61,7 @@ Model tasks are named `T<stage><letter>`. Every task goes through `ask()` or `vo
 
 ### Stage 3 · Obstacles (KAOS obstacle analysis) — in T2b, enforced in `purpose.mjs`
 
-An obstacle with checker `page` becomes a hard checklist item phrased as its absence, so a "no" is a veto in `verdict.mjs` (ELECTRE TRI veto, already implemented). An obstacle with any other checker is evidence for stage 4. Obstacles are mandatory nodes for `applyOps`.
+An obstacle with checker `page` becomes a checklist item phrased as its absence. It is hard (a "no" is a veto in `verdict.mjs`, ELECTRE TRI) only when it traces to a clause or hint the user wrote, or the user marks it hard when confirming the tree; otherwise it is soft and only orders items. No rule of the engine makes any goal or obstacle hard for every research. An obstacle with any other checker is evidence for stage 4. Obstacles are protected nodes for `applyOps` (the critique cannot delete them; the user can).
 
 ### Stage 4 · Evidence (Admiralty code / STANAG 2511; Heuer ACH; TruthFinder) — `src/research/facts.mjs`, `src/research/ach.mjs`
 

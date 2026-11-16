@@ -157,7 +157,8 @@ export function metricRows(mode, run, baseline) {
   add('sources', 'Kept scoping sources judged on subject and market', baseline.sources, `${run.scoping.sources.length} kept, ${run.scoping.dropped.length} dropped`, `>= ${MIN_KEPT_SOURCES} kept`, run.scoping.sources.length >= MIN_KEPT_SOURCES);
   add('second-opinion', 'Kept sources another provider agrees with', 'not measured', percent(run.second.agreed, run.second.total), '>= 80%', run.second.total > 0 && share(run.second.agreed, run.second.total) >= 0.8);
   add('notes', 'Scoping notes with a quote on the page', baseline.notes, percent(run.notesOnPage, run.scoping.notes.length), '100%', run.notesOnPage === run.scoping.notes.length);
-  add('conflict', '"Why still cheap" goal after critique, with all 5 mechanisms', baseline.conflict, conflict ? `${conflict.state}, ${mechanisms} mechanisms` : tree ? 'absent' : 'no tree', 'present with 5', Boolean(conflict) && mechanisms === PURPOSE.mechanisms.length);
+  const askedConflict = tree?.conflict?.asked === true;
+  add('conflict', '"Why still cheap" goal present only when the question asks for a low price and worth, then with all 5 mechanisms', baseline.conflict, conflict ? `${conflict.state}, ${mechanisms} mechanisms` : tree ? `absent (asked: ${tree.conflict?.asked})` : 'no tree', 'present with 5 when asked, absent otherwise', askedConflict ? Boolean(conflict) && mechanisms === PURPOSE.mechanisms.length : Boolean(tree) && !conflict);
   const thresholds = tree?.thresholds ?? [];
   const invented = goals.flatMap((goal) => [goal, ...(goal.questions ?? []), ...(Array.isArray(goal.obstacles) ? goal.obstacles : [])]).reduce((sum, node) => sum + (node.inventedNumber?.length ?? 0), 0);
   const unlabelled = thresholds.filter((threshold) => !['asked', 'sourced', 'assumption'].includes(threshold.source)).length;

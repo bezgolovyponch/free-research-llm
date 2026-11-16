@@ -6,7 +6,7 @@
     { "id": "M4", "key": "ignored-segment", "label": "an unfashionable or ignored segment", "test": "Is demand for this segment low for reasons that do not affect the asked purpose, compared with comparables?", "checker": "statistic", "basis": "Butler 1980 tourism area life cycle; Hu, Pavlou & Zhang 2017" },
     { "id": "M5", "key": "real-defect", "label": "a real defect or risk the low price correctly reflects", "test": "Which evidence would show the low price is deserved, and is it present on the item?", "checker": "consensus", "basis": "Heuer 1999 Analysis of Competing Hypotheses" }
   ],
-  "mandatoryObstacle": "M5",
+  "conflictObstacle": "M5",
   "admiralty": {
     "reliability": { "A": "completely reliable", "B": "usually reliable", "C": "fairly reliable", "D": "not usually reliable", "E": "unreliable", "F": "reliability cannot be judged" },
     "credibility": { "1": "confirmed by other sources", "2": "probably true", "3": "possibly true", "4": "doubtful", "5": "improbable", "6": "truth cannot be judged" },

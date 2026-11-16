@@ -139,7 +139,7 @@ describe('purpose replay: one run with fakes', () => {
     expect(byId.calls.pass).toBe(true);
     const text = tableText('car', metrics);
     for (const row of metrics) expect(text).toContain(row.label);
-    expect(text).toContain('PASS | "Why still cheap" goal after critique, with all 5 mechanisms | removed | kept, 5 mechanisms | present with 5');
+    expect(text).toContain('PASS | "Why still cheap" goal present only when the question asks for a low price and worth, then with all 5 mechanisms | removed | kept, 5 mechanisms | present with 5 when asked, absent otherwise');
     const stored = JSON.parse(await fs.readFile(path.join(out, 'car-4-ach.json'), 'utf8'));
     expect(stored.kept.every((row: { marks: Record<string, string> }) => new Set(Object.values(row.marks)).size > 1)).toBe(true);
     expect(stored.tyres.cut).toBeGreaterThan(2000);
@@ -157,10 +157,12 @@ describe('purpose replay: one run with fakes', () => {
     expect(metrics.map((row: { id: string }) => row.id)).toContain('direction');
   });
 
-  it('counts ledger calls to a banned family, and metric rows fail when a mandatory goal is missing', () => {
+  it('counts ledger calls to a banned family, and metric rows fail when an asked conflict goal is missing', () => {
+    const notAsked = metricRows('suppliers', { scoping: { sources: [], dropped: [], notes: [] }, second: { agreed: 0, total: 0 }, notesOnPage: 0, tree: { conflict: { asked: false }, goals: [] }, car: null, banned: 2, budget: { tree: { used: 60, cap: 60, skipped: 3 } } }, {});
+    expect(notAsked.find((row: { id: string }) => row.id === 'conflict')).toMatchObject({ pass: true, value: 'absent (asked: false)' });
     expect(bannedCalls([{ provider: 'a', model: 'qwen3-32b' }, { provider: 'b', model: 'llama-3' }, { provider: 'router', model: 'qwen' }], { FRL_BANNED_FAMILIES: 'qwen' })).toBe(1);
     expect(bannedCalls([{ provider: 'a', model: 'qwen3-32b' }], {})).toBe(0);
-    const rows = metricRows('plots', { scoping: { sources: [], dropped: [], notes: [] }, second: { agreed: 0, total: 0 }, notesOnPage: 0, tree: { goals: [{ id: 'G1', goal: 'g', state: 'kept', trace: null, questions: [] }], thresholds: [] }, car: null, banned: 2, budget: { tree: { used: 60, cap: 60, skipped: 3 } } }, {});
+    const rows = metricRows('plots', { scoping: { sources: [], dropped: [], notes: [] }, second: { agreed: 0, total: 0 }, notesOnPage: 0, tree: { conflict: { asked: true }, goals: [{ id: 'G1', goal: 'g', state: 'kept', trace: null, questions: [] }], thresholds: [] }, car: null, banned: 2, budget: { tree: { used: 60, cap: 60, skipped: 3 } } }, {});
     expect(Object.fromEntries(rows.map((row: { id: string; pass: boolean | null }) => [row.id, row.pass]))).toEqual({ sources: false, 'second-opinion': false, notes: true, conflict: false, numbers: true, trace: false, scope: null, banned: false, calls: false });
   });
 });

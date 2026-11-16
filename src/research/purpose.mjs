@@ -157,7 +157,7 @@ const tracePrompt = ({ query, options, none }) => [
 ];
 
 export async function traceGoal(ctx, goal, candidates) {
-  if (goal.mandatory) return { ...goal, trace: { kind: 'rule', text: goal.role ?? 'mandatory' } };
+  if (goal.protected) return { ...goal, trace: { kind: 'rule', text: goal.role ?? 'protected' } };
   const result = await retrieveThenVerify({
     query: goal.goal,
     candidates,
@@ -212,8 +212,8 @@ export async function mergeDuplicates(ctx, tree) {
   const merged = [];
   const judged = new Set();
   for (const goal of [...goals]) {
-    if (goal.mandatory || !goals.includes(goal)) continue;
-    const others = goals.filter((other) => other !== goal && !other.mandatory && !judged.has([goal.id, other.id].sort().join('|')));
+    if (goal.protected || !goals.includes(goal)) continue;
+    const others = goals.filter((other) => other !== goal && !other.protected && !judged.has([goal.id, other.id].sort().join('|')));
     if (!others.length) continue;
     const result = await retrieveThenVerify({ query: goal.goal, candidates: others.map((other) => ({ id: other.id, text: other.goal })), k: 2, pairwise: true, embedder: ctx.embedder, router: ctx.router, prompt: samePrompt, schema: sameSchema, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
     for (const pair of result.pairs) {
@@ -296,9 +296,9 @@ export async function applyOps(ctx, tree, ops, { candidates = [], notes = [] } =
     if (op.op === 'drop') {
       const node = find(op.id);
       if (!node) refused.push({ ...op, why: 'no such node' });
-      else if (node.kind === 'obstacle') refused.push({ ...op, why: 'an obstacle is a mandatory node' });
+      else if (node.kind === 'obstacle') refused.push({ ...op, why: 'an obstacle is a protected node' });
       else if (node.kind !== 'goal') refused.push({ ...op, why: 'only a goal can be dropped' });
-      else if (node.goal.mandatory) refused.push({ ...op, why: `"${node.goal.goal}" is a mandatory node` });
+      else if (node.goal.protected) refused.push({ ...op, why: `"${node.goal.goal}" is protected because the question asks for it` });
       else {
         goals = goals.filter((goal) => goal !== node.goal);
         applied.push({ ...op, goal: node.goal.goal, anchor: node.goal.trace?.id ?? node.goal.anchor ?? null });
@@ -307,7 +307,7 @@ export async function applyOps(ctx, tree, ops, { candidates = [], notes = [] } =
       const a = find(op.a);
       const b = find(op.b);
       if (a?.kind !== 'goal' || b?.kind !== 'goal') refused.push({ ...op, why: 'a merge needs two goals' });
-      else if (a.goal.mandatory || b.goal.mandatory) refused.push({ ...op, why: 'a mandatory node is never merged away' });
+      else if (a.goal.protected || b.goal.protected) refused.push({ ...op, why: 'a protected node is never merged away' });
       else if ((await sameGoal(ctx, a.goal, b.goal)) !== true) refused.push({ ...op, why: 'the two goals were not voted to be one objective' });
       else {
         goals = goals.filter((goal) => goal !== b.goal).map((goal) => (goal === a.goal ? absorb(a.goal, b.goal) : goal));
@@ -327,8 +327,8 @@ export async function applyOps(ctx, tree, ops, { candidates = [], notes = [] } =
       }
     } else if (op.op === 'checker') {
       const node = find(op.id);
-      if (node?.kind !== 'question') refused.push({ ...op, why: node?.kind === 'obstacle' ? 'an obstacle is a mandatory node' : 'only a question has a checker to change' });
-      else if (node.goal.mandatory) refused.push({ ...op, why: `"${node.goal.goal}" is a mandatory node` });
+      if (node?.kind !== 'question') refused.push({ ...op, why: node?.kind === 'obstacle' ? 'an obstacle is a protected node' : 'only a question has a checker to change' });
+      else if (node.goal.protected) refused.push({ ...op, why: `"${node.goal.goal}" is protected because the question asks for it` });
       else {
         goals = goals.map((goal) => (goal === node.goal ? { ...goal, questions: goal.questions.map((question) => (question === node.node ? { ...question, checker: op.checker } : question)) } : goal));
         applied.push(op);
@@ -339,11 +339,11 @@ export async function applyOps(ctx, tree, ops, { candidates = [], notes = [] } =
   return { ...tree, goals, ops: { applied, refused } };
 }
 
-export function ensureMandatory(tree) {
+export function ensureAskedConflict(tree) {
   const asked = tree.conflict?.asked ?? null;
   const goals = [...(tree.goals ?? [])];
   const present = goals.find((goal) => goal.role === CONFLICT_ROLE);
-  if (asked === false && !present) return { ...tree, goals };
+  if (asked !== true && !present) return { ...tree, goals };
   const base = present ?? { goal: CONFLICT_GOAL, role: CONFLICT_ROLE, refine: 'OR', state: asked === true ? 'kept' : 'proposed', reason: asked === true ? undefined : 'no majority on whether the question asks for a low price and worth at once: confirm or drop it', anchors: [tree.conflict?.cost, tree.conflict?.worth].filter(Boolean), questions: [], obstacles: [], hypotheses: [] };
   const own = Array.isArray(base.hypotheses) ? base.hypotheses : [];
   const ids = new Set(PURPOSE.mechanisms.map((mechanism) => mechanism.id));
@@ -354,9 +354,9 @@ export function ensureMandatory(tree) {
   const questions = [...(base.questions ?? [])];
   for (const mechanism of PURPOSE.mechanisms) if (!questions.some((question) => question.mechanism === mechanism.id)) questions.push({ q: mechanism.test, checker: mechanism.checker, threshold: null, note: null, mechanism: mechanism.id });
   const obstacles = Array.isArray(base.obstacles) ? [...base.obstacles] : [];
-  const defect = PURPOSE.mechanisms.find((mechanism) => mechanism.id === PURPOSE.mandatoryObstacle);
-  if (!obstacles.some((obstacle) => obstacle.mechanism === defect.id)) obstacles.push({ obstacle: defect.label, checker: defect.checker, threshold: null, mechanism: defect.id, mandatory: true });
-  const completed = { ...base, mandatory: true, trace: { kind: 'rule', text: CONFLICT_ROLE }, hypotheses, questions, obstacles };
+  const defect = PURPOSE.mechanisms.find((mechanism) => mechanism.id === PURPOSE.conflictObstacle);
+  if (!obstacles.some((obstacle) => obstacle.mechanism === defect.id)) obstacles.push({ obstacle: defect.label, checker: defect.checker, threshold: null, mechanism: defect.id, protected: true });
+  const completed = { ...base, protected: true, trace: { kind: 'rule', text: CONFLICT_ROLE }, hypotheses, questions, obstacles };
   return numberTree({ ...tree, goals: present ? goals.map((goal) => (goal === present ? completed : goal)) : [...goals, completed] });
 }
 
@@ -444,11 +444,11 @@ export async function buildPurposeTree(ctx, { question, guidance = '', notes = [
     else goals.push(traced);
   }
   let tree = numberTree({ version: TREE_VERSION, purpose, implications, conflict, goals, dropped, ops: { applied: [], refused: [] }, confirmedAt: null });
-  tree = ensureMandatory(tree);
+  tree = ensureAskedConflict(tree);
   tree = await mergeDuplicates(ctx, tree);
   const ops = await critique(ctx, tree, candidates);
   tree = await applyOps(ctx, tree, ops, { candidates, notes });
-  tree = ensureMandatory(tree);
+  tree = ensureAskedConflict(tree);
   tree = thresholdsOf(tree, { question, guidance, notes }).tree;
   tree.notModelled = notModelledOf(tree, anchors);
   const budgetNote = ctx.budget?.note?.() ?? '';
