@@ -574,5 +574,21 @@
     "signal": "suppliers b2f5b7 on 106f9d2: 'judging pages: 20 judged' then 11 minutes with no log line while ~120 judge calls succeeded; the stall watcher fired",
     "cause": "checkAcceptance reads up to 3 same-host pages per unknown hard check per item with no page budget, no progress line, and for items already rejected by a hard no; hints turned into 8+ hard checks multiply it to ~2,000 possible judge calls",
     "prevention": "deeperOrder skips rejected items and items with nothing unknown and reads the closest-to-confirmation first; DEEPER_PAGE_BUDGET 60 per acceptance check; a progress line every 10 pages and one line when the budget stops it"
+  },
+  {
+    "id": "F45",
+    "title": "a check read prose with a pattern and reported a mismatch that was not there; a contract a model was only told was broken again",
+    "touches": [
+      "src/research/verdict.mjs",
+      "src/research/engine.mjs",
+      "src/research/purpose.mjs",
+      "src/research/semantic.mjs",
+      "tests/research/verdict-integrity.test.ts",
+      "tests/research/purpose.test.ts",
+      "tests/research/semantic.test.ts"
+    ],
+    "signal": "Audit of #190 and #191 on main 106f9d2 and the live replay of 2026-11-16 (data/replay): verdictInvariants reported 'memo acceptance text mismatch' for a memo that matched, because its pattern stopped at the first ')' of '(open: c)' and because a run that is not short writes 'hard checks at 0%' instead of the summary. The suppliers question asks for 'the highest price/value ratio, proven good quality' and the cheap-and-valuable vote said no 2 of 2 (cost null). Numbers the user never stated stayed in free text: suppliers 2, plots 8, against a target of at most 1. The car replay used 37 of 40 scoping calls.",
+    "cause": "The memo check parsed the sentence back out of the memo text instead of comparing the value code had stored. The conflict contract defined cost as 'a low price', so a clause that trades price against value did not fit it. 'A number goes only in threshold' was an instruction in the prompt with no validator behind it, and a thousands-separated number was read as two numbers, one of them invented.",
+    "prevention": "A check compares stored values, never text it parses back: planActions stores acceptanceContradiction with acceptanceContradictionKind ('short' or 'hard-checks'), and verdictInvariants compares the stored sentence with acceptanceSummaryOf only for 'short', and not when the memo is rewritten next (memoNext). A contract defines its terms by meaning: cost is a clause that limits, minimises or trades off what is paid, including the most worth per unit of money; one clause may be both cost and worth. A rule on model text is enforced by code: draftGoals, refineGoal and the critique's add reject a text holding a number that is in neither the user's words nor the cited quote nor the node's own threshold, ask once more, then moveNumbers takes it out of the text and stores it as an assumption threshold that is never hard; strayNumbers reads one written number as one number. STAGE_CAPS.scoping is 50."
   }
 ]

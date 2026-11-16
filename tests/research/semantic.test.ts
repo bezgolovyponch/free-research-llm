@@ -75,7 +75,7 @@ describe('call budget', () => {
     expect(budget.report()).toEqual({ tree: { used: 3, cap: 3, skipped: 3 } });
     expect(budget.note()).toBe('call budget reached: tree stopped at 3 calls, 3 judgement(s) left as unknown');
     expect(new CallBudget().note()).toBe('');
-    expect(STAGE_CAPS).toEqual({ scoping: 40, purpose: 24, tree: 90, evidence: 200 });
+    expect(STAGE_CAPS).toEqual({ scoping: 50, purpose: 24, tree: 90, evidence: 200 });
   });
 });
 

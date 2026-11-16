@@ -1089,7 +1089,7 @@ export class ResearchEngine {
     const project = await this.load(id);
     this.emit(project, 'candidates', state.verified ? 'external verifier finished; table rebuilt: only plots it confirmed count toward the result' : `site fit in the background: ${state.measured} listing(s) measured${state.pending ? `, ${state.pending} still queued` : ''}; table rebuilt from the measurements`);
     await this.collectCandidates(project);
-    await this.checkAcceptance(project);
+    await this.checkAcceptance(project, null, { memoNext: true });
     this.planActions(project);
     await this.store.save(project, { reason: 'table rebuilt from background site measurements' });
     return project;
@@ -1359,7 +1359,7 @@ export class ResearchEngine {
       if (contradicts) {
         const failedLabels = failedHard.map((c) => c.label).join('; ') || 'item count short';
         const msg = short ? acceptanceSummaryOf(project) : `hard checks at 0%: ${failedLabels}`;
-        project.report.status = { ...project.report.status, provisional: true, acceptanceContradiction: msg };
+        project.report.status = { ...project.report.status, provisional: true, acceptanceContradiction: msg, acceptanceContradictionKind: short ? 'short' : 'hard-checks' };
         project.report.verdict = `PROVISIONAL (acceptance: ${msg}) — ${project.report.verdict.replace(/^PROVISIONAL\s*[—:-]?\s*/i, '')}`;
       }
       project.acceptanceSummary = acceptanceSummaryOf(project);
@@ -1508,7 +1508,7 @@ export class ResearchEngine {
       return this.run(id, { pages });
     }
     if (project.report) {
-      await this.checkAcceptance(project, pages);
+      await this.checkAcceptance(project, pages, { memoNext: true });
       this.planActions(project);
     }
     return this.store.save(project, { reason: 'start-of-loop repairs and re-score' });
@@ -1517,7 +1517,7 @@ export class ResearchEngine {
   async remeasure(id, { pages = null } = {}) {
     const project = await this.load(id);
     if (project.report) {
-      await this.checkAcceptance(project, pages);
+      await this.checkAcceptance(project, pages, { memoNext: true });
       this.planActions(project);
     }
     return this.store.save(project, { reason: 'expected result re-measured' });
@@ -1538,7 +1538,7 @@ export class ResearchEngine {
     };
   }
 
-  async checkAcceptance(project, pages = null) {
+  async checkAcceptance(project, pages = null, { memoNext = false } = {}) {
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
@@ -1655,7 +1655,7 @@ export class ResearchEngine {
         this.emit(project, 'acceptance', `requirement cannot be confirmed from the pages: ${vagueClauses} — define it in Hints`);
       }
 
-      const invariantReasons = verdictInvariants(project);
+      const invariantReasons = verdictInvariants(project, { memo: !memoNext });
       if (invariantReasons.length > 0) {
         project.acceptanceResult.provisional = invariantReasons;
         this.emit(project, 'acceptance', `verdict invariant failed: ${invariantReasons.join('; ')}`);
@@ -2113,7 +2113,7 @@ export class ResearchEngine {
     try {
       const project = await this.load(id);
       await this.synthesize(project, pages);
-      await this.checkAcceptance(project, pages);
+      await this.checkAcceptance(project, pages, { memoNext: true });
       this.checkSpecs(project);
       this.planActions(project);
       const asked = project.acceptanceResult?.totalAsked ?? 0;

@@ -49,28 +49,53 @@ describe('verdict integrity fixes', () => {
       expect(reasons.some(r => r.includes('count check value mismatch'))).toBe(true);
     });
 
-    it('flags memo/summary mismatch', () => {
-      const project = {
-        acceptance: { itemCount: 20 },
-        checklist: [{ clause: 'c', items: [{ id: 'check1', hard: true, question: 'q1' }] }],
-        acceptanceResult: {
-          items: [
-            { url: '1', checks: [{ id: 'c|q1', answer: 'yes', hard: true }], qualifies: true },
-          ],
-          validCount: 1,
-          checks: [
-            { id: 'count', label: 'At least 20 valid items', value: 0.05, passed: false },
-            { id: 'checklist-c|q1', label: 'Checklist: c', value: 1, passed: true },
-          ],
-          score: 0.525,
-        },
-        acceptanceSummary: '1 of 20 confirmed',
-        report: {
-          verdict: 'PROVISIONAL (acceptance: 0 of 20 confirmed · 19 to confirm) — some memo text',
-        },
-      };
-      const reasons = verdictInvariants(project);
-      expect(reasons.some(r => r.includes('memo acceptance text mismatch'))).toBe(true);
+    const openProject = (status: Record<string, unknown> | undefined, verdictText: string) => ({
+      nodes: [],
+      acceptance: { itemCount: 20 },
+      checklist: [{ clause: 'c', items: [{ id: 'check1', hard: true, question: 'q1' }] }],
+      acceptanceResult: {
+        items: [{ url: '1', live: true, listing: true, checks: [{ id: 'c|q1', clause: 'c', answer: 'unknown', hard: true }] }],
+        validCount: 0,
+        totalAsked: 20,
+        checks: [
+          { id: 'count', label: 'At least 20 valid items', value: 0, passed: false },
+          { id: 'checklist-c|q1', label: 'Checklist: c', value: 0, passed: false },
+        ],
+        score: 0,
+      },
+      acceptanceSummary: '0 of 20 confirmed · 1 to confirm (open: c)',
+      report: { verdict: verdictText, ...(status ? { status } : {}) } as { verdict: string; status?: Record<string, unknown> },
+    });
+
+    it('accepts a short memo whose summary holds brackets, with or without the stored sentence', () => {
+      const text = 'PROVISIONAL (acceptance: 0 of 20 confirmed · 1 to confirm (open: c)) — GO';
+      expect(acceptanceSummaryOf(openProject(undefined, text))).toBe('0 of 20 confirmed · 1 to confirm (open: c)');
+      expect(verdictInvariants(openProject(undefined, text))).toEqual([]);
+      expect(verdictInvariants(openProject({ acceptanceContradiction: '0 of 20 confirmed · 1 to confirm (open: c)', acceptanceContradictionKind: 'short' }, text))).toEqual([]);
+    });
+
+    it('accepts a memo that names the hard checks at 0% instead of the summary', () => {
+      const project = openProject({ acceptanceContradiction: 'hard checks at 0%: Checklist: c', acceptanceContradictionKind: 'hard-checks' }, 'PROVISIONAL (acceptance: hard checks at 0%: Checklist: c) — GO');
+      expect(verdictInvariants(project)).toEqual([]);
+    });
+
+    it('flags a stored short sentence that differs from the verdict summary, unless the memo is rewritten next', () => {
+      const project = openProject({ acceptanceContradiction: '1 of 20 confirmed · 19 to confirm', acceptanceContradictionKind: 'short' }, 'PROVISIONAL (acceptance: 1 of 20 confirmed · 19 to confirm) — GO');
+      expect(verdictInvariants(project)).toEqual(["memo acceptance text mismatch: memo says '1 of 20 confirmed · 19 to confirm' but the verdict summary is '0 of 20 confirmed · 1 to confirm (open: c)'"]);
+      expect(verdictInvariants(project, { memo: false })).toEqual([]);
+    });
+
+    it('planActions stores the sentence and which case it was', () => {
+      const short = openProject(undefined, 'GO');
+      ResearchEngine.prototype.planActions.call({}, short);
+      expect(short.report.status).toMatchObject({ acceptanceContradiction: '0 of 20 confirmed · 1 to confirm (open: c)', acceptanceContradictionKind: 'short' });
+      expect(short.report.verdict).toContain('PROVISIONAL (acceptance: 0 of 20 confirmed · 1 to confirm (open: c)) — ');
+      expect(verdictInvariants(short)).toEqual([]);
+      const full = openProject(undefined, 'GO');
+      full.acceptanceResult.totalAsked = 0;
+      ResearchEngine.prototype.planActions.call({}, full);
+      expect(full.report.status).toMatchObject({ acceptanceContradiction: 'hard checks at 0%: Checklist: c', acceptanceContradictionKind: 'hard-checks' });
+      expect(verdictInvariants(full)).toEqual([]);
     });
 
     it('flags score mismatch', () => {
