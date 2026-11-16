@@ -1,0 +1,3015 @@
+{
+  "acceptance": {
+    "expected": "The list of 20 highest possible price/value ratio to buy, working links, no broken links, verified with the research logic, recently posted, 80 trade offs to confirm and review",
+    "itemCount": 20,
+    "urlsLive": true,
+    "valueRange": [
+      0,
+      65000
+    ],
+    "unit": "CZK",
+    "mustMention": []
+  },
+  "checklist": [
+    {
+      "clause": "accurate and verified listing",
+      "items": [
+        {
+          "clause": "accurate and verified listing",
+          "question": "Does this listing provide accurate and verified car listings?",
+          "hard": true
+        }
+      ]
+    },
+    {
+      "clause": "within 300km of prague",
+      "items": [
+        {
+          "clause": "within 300km of prague",
+          "question": "Is this listing within 300km from Prague?",
+          "hard": true,
+          "numeric": {
+            "measure": "distanceKm",
+            "op": "<=",
+            "value": 300,
+            "unit": "km"
+          }
+        }
+      ]
+    }
+  ],
+  "acceptanceResult": {
+    "items": [
+      {
+        "url": "https://auto.bazos.cz/inzerat/226126886/pekna-skoda-fabia-12-mpi-malo-najeto-velmi-dobry-stav.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 285 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "yes",
+            "quote": "najeto pouze 158.000 km (ověřených)",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Pěkná Škoda Fabia 1.2 MPi, málo najeto, velmi dobrý stav\n - TOP - [14.11. 2026]",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 285
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226003711/nazev-novy-predni-levy-svetlomet-kia-ceed-ed-92101-1h000.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 83 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 1800,
+        "unit": "CZK",
+        "distanceKm": 83
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226132468/zimni-pneu-na-plechacich-kia-ceed.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 133 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "no",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Zimní pneu na plechačích Kia Ceed\n - [7.11. 2026] \n Smazat/ Upravit/ Topovat \n Obuté zimní pneu Polaris 2, 185/65 R 15 88 T disk 5 1/2 Jx 15 CH ET 47\n2x7mm 2x6mm\nSundáno z Kia Ceed\n+4x poklice +originál šrouby\nCena za sadu 2000",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 2000,
+        "unit": "CZK",
+        "distanceKm": 133
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226377363/seat-ibiza-14-16v-55kw-r-v-2004-pojizdna-na-opravu.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 222 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "SEAT Ibiza 1.4 16V, 55kW, r. v. 2004 – pojízdná, na opravu /",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 10000,
+        "unit": "CZK",
+        "distanceKm": 222
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226380796/prodam-seat-ibiza-12-2004-spise-nd.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 7 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Ibiza 1.2 2004 ( spíše ND )",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 11000,
+        "unit": "CZK",
+        "distanceKm": 7
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226185293/honda-civic-8g-ufo-18-i-vtec-103kw-manual.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 6 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodam na náhradní díly bud po částech nebo jako celek. Honda civic 8g, UFO, 1.8 Vtec, 103kw, manual, již bez dokladu, motor, převodovka plně funkční, prodej v celku bez alu kol.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 11999,
+        "unit": "CZK",
+        "distanceKm": 6
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226251138/honda-civic-6g.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 40 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Mam tady na prodej hondu civic 6g",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 12000,
+        "unit": "CZK",
+        "distanceKm": 40
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226270426/citroen-c3-14-benzin-plne-pojizdny.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 270 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "🚗 Citroën C3 1.4 benzín – plně pojízdný\nProdám Citroën C3 s benzínovým motorem 1.4.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 14000,
+        "unit": "CZK",
+        "distanceKm": 270
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226259832/honda-civic-7g-14-hatchback-66kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 13 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Honda Civic 7G 1.4i 66 kW – pojízdná, 277 000 km\nProdám Hondu Civic 7. generace, 3dveřový hatchback, benzínový motor 1.4i 66 kW, manuální převodovka.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 14900,
+        "unit": "CZK",
+        "distanceKm": 13
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226117355/prodam-seat-ibiza-tento-vikend-cena-jen-14999.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 85 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Ibiza r.v.2008 1,2 naj.142xxx, klima,tmavě modrá barva,Benzín,el.ovládání oken, 3 dveřový, STK 1/27 manuální řazení. další. Oděrky na karoserii,ale jezdí perfektně.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 14999,
+        "unit": "CZK",
+        "distanceKm": 85
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225750561/citroen-c3-16-hdi.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 202 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Citroen C3 1.6 hdi\n - TOP - [14.11. 2026] \n Smazat/ Upravit/ Topovat \n Kompletní, pojízdný, bez TP, na díly. Rychlé jednání dohoda. Možno bez katalyzátoru za 10000,-.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 15000,
+        "unit": "CZK",
+        "distanceKm": 202
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226067979/honda-civic-14-i-klima.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 73 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Honda Civic 1,4 i KLIMA",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 15000,
+        "unit": "CZK",
+        "distanceKm": 73
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226203181/kia-ceed-rv-2009-14-cvvt-80-kw-jako-celek-na-nd.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 80 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám vůz Kia CEED jako celek na ND. rv 2009, 1,4 CVVT 80 kw, pohon benzin/LPG.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 15000,
+        "unit": "CZK",
+        "distanceKm": 80
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225315881/dacia-sandero-14-rv-2008-dovoz-nemecko.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 83 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "PRODÁM:\nDACIA SANDERO\nR.V. 2008\nMOTOR: 1390 CM3 (55KW)\nSTAV TACHOMETRU: 139152 KM\nPLNĚ POJÍZDNÉ.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 16000,
+        "unit": "CZK",
+        "distanceKm": 83
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226325542/honda-civic-16-v-tec-2001-81kw-sada-zimnich-kol.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 92 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Honda Civic 1.6 V-tec, 2001, 81kW + sada zimních kol\n - TOP - [14.11. 2026] \n Smazat/ Upravit/ Topovat \n Prodám Hondu Civic.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 16000,
+        "unit": "CZK",
+        "distanceKm": 92
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226258732/seat-ibiza-14-16v.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 73 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "no",
+            "quote": "Seat Leon 1,6 16V KLIMA - [8.11. 2026]",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 17000,
+        "unit": "CZK",
+        "distanceKm": 73
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225957419/seat-ibiza-12-47kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 65 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "no",
+            "quote": "Seat Ibiza 1.2 51kw - [13.11. 2026]",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 17000,
+        "unit": "CZK",
+        "distanceKm": 65
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226228134/seat-leon-14.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 117 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Seat Leon 1.4 benzín | 2006 | 230 000 km",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 18000,
+        "unit": "CZK",
+        "distanceKm": 117
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225703439/skoda-fabia-1-14mpi-55kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 74 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Škoda Fabia 1",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 18000,
+        "unit": "CZK",
+        "distanceKm": 74
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225874795/honda-civic-7g-ep2-16.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 230 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám pojizdnou Hondu Civic EP2, 7má generace s motorem 1.6 vtec.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 18000,
+        "unit": "CZK",
+        "distanceKm": 230
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226003685/citroen-c3.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 199 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám C3, 1,4 HDI r.v. 2009, manuál, klima, včetně 4x zimní pneu, najeto 223.000km.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 19000,
+        "unit": "CZK",
+        "distanceKm": 199
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226385366/seat-ibiza-12-51kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 121 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Seat Ibiza 1.2 51kw",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 19000,
+        "unit": "CZK",
+        "distanceKm": 121
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225780289/skoda-fabia-12-htp-2004.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 136 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Fabii 1.2 47kw. Rok výroby 2004.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 19500,
+        "unit": "CZK",
+        "distanceKm": 136
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226148089/seat-leon-16-16v-klima.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 73 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Leon 1,6 16V KLIMA",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 19900,
+        "unit": "CZK",
+        "distanceKm": 73
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226398947/skoda-fabia-1-14-16v.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 87 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Dobry den, prodám Fabii 1 1.4 16v 55kw",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 19990,
+        "unit": "CZK",
+        "distanceKm": 87
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225648377/prodej-kia-picanto-male-5-dverove-auto-cena-dohodou.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 85 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodej Kia Picanto malé 5 dveřové auto, ale jezdí pěkně.Vnitřek čistý. Auto je bez koroze,spodek vozu je ošetřen nástřikem, nízký nájezd 150xxx,nové brzdy,nové tlumiče,uvnitř pěkný a zachovalý,model 2005,ABS,manuální převodovka,posilovač řízení, atd. Auto je připraveno na STK!! Žádné klima.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 19999,
+        "unit": "CZK",
+        "distanceKm": 85
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225482270/seat-ibiza-14-tdi.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 113 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "PRODÁM SEAT IBIZA 5.DVÉŘ,STŘÍBRNÁ METALÍZA,1.4TDI 55kW R.V 03 NAJETO 226.000KM STK DO 10/28.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 113
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226352786/seat-ibiza-12-htp.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 35 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 35
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225585175/dacia-sandero-16-lpg.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 72 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodáme vozidlo Dacia Sandero 1.6 64kw benzín/LPG, motor K7M718, rok výroby 2009, najeto 289.501 km.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 72
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226009599/seat-ibiza.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 229 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Ibizu, rok výroby 2003, s benzínovým motorem 1.4 o výkonu 55 kW.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 229
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226349681/prodam-peugeot-107.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 37 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám osobní automobil peugeot 107, 1.0 benzin, červené barvy, bez STK, proto na náhradní díly. Auto je zcela pojízdné.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 37
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225982932/prodam-citroen-c3.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 171 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 171
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226359555/honda-civic-5g.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 129 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "no",
+            "quote": "Brzdový set Brembo na civic EG,EK (4-pistky, 300mm) plug-in-play",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 129
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226355776/seat-leon-19-81kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 199 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Seat Leon 1.9 81kw\n - [12.11. 2026] \n Smazat/ Upravit/ Topovat \n Prodám buď jako celek nebo na díly \nPojízdné",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 199
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225945522/seat-leon.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 261 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám. Seata \nR.v. 2001, 81kw",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 20000,
+        "unit": "CZK",
+        "distanceKm": 261
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226378830/peugeot-107-rv-2008-10-50kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 276 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Peugeot 107 r.v 2008 najeto 222xxx pravidelně servisováno loni uděláno rozvody čepy výfuk olejový servis jezdí spolehlivě nízká spotřeba vše funkční platná stk",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 21000,
+        "unit": "CZK",
+        "distanceKm": 276
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226175406/seat-ibiza-14-lpg-benzin-2005.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 279 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Ibiza 1.4 LPG / benzín, rok výroby 2005. Najeto 293 xxx km.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 21000,
+        "unit": "CZK",
+        "distanceKm": 279
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226402135/skoda-fabia-19-tdi.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 68 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Škoda Fabia 1.9tdi r.v 2003 kombi přední okna v el. Pracovní auto",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 21000,
+        "unit": "CZK",
+        "distanceKm": 68
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226353887/seat-ibiza-6l-14-16v-2-sady-kol.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 42 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám SEAT Ibiza (generace 6L) benzínový motor 1.4 16V.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 22000,
+        "unit": "CZK",
+        "distanceKm": 42
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226218556/seat-leon-1p-fr-20tfsi-147kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 275 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodam Seat Leon 1P FR 2.0TFSI 147kw",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 23000,
+        "unit": "CZK",
+        "distanceKm": 275
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226084281/skoda-fabia-12.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 102 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám škodu fabia 1.2 r.v 2003\nstk 10/27 dobrý stav.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 24000,
+        "unit": "CZK",
+        "distanceKm": 102
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226142720/prodam-honda-civic-7g-sport.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 104 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Honda Civic 7g Sport",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 24000,
+        "unit": "CZK",
+        "distanceKm": 104
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226042206/honda-civic-14-66kw-klima-puvod-cr.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 6 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Honda Civic, 1.4 benzín, 66 kW, r.v. 2002.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 24990,
+        "unit": "CZK",
+        "distanceKm": 6
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226124846/seat-ibiza.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 282 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Ibiza 1,4 TDI, viz foto. Velmi dobrý stav, zachovalá, denně v provozu, platná STK, nízké náklady.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 282
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/224709213/dacia-sandero-14mpi-najeto-80-tisic-km.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 49 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Dacia Sandero 1.4MPi\nRok výroby 2010, najeto 80 tisíc km. Plně funkční, plně pojízdné, kosmetické vady z předchozího provozu.\nDovoz Německo - německé doklady na přihlášení.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 49
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226135083/dacia-sandero-12i-lpg.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 53 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Dacia Sandero 1,2i LPG\n - [8.11. 2026] \n Smazat/ Upravit/ Topovat \n Dacia Sandro 1,2i LPG,r.v.2012,originál plyn,funkční klima,el.okna,dálkový centrál,2 klíče,kožený volant,STK do konce roku,pěkné zimní kola,najeto 190 tis.km,originál rádio,funkční auto.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 53
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226299305/skoda-fabia-ii-12-htp.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 112 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Škoda Fabia 2 generace hatchback.\nRok: 2008\nMotor 1.2 HTP benzín\nNajeto: 281 tis km\nSTK: 07/27\nAuto je servisované a plně pojízdné, zimní gumy.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 112
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225591359/dacia-sandero.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 200 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám dacia r.v.2009 165000km tk do 09/28 +zimní kola",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 200
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226318455/toyota-yaris.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 116 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Dobrý den, prodám Toyotu Yaris, je to 1.4 D. Nafta. Je to rok 2003.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 116
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225314130/motor-dacia-sandero.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 125 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "no",
+            "quote": "Prodám motor dacia sandero r.v. 2017, prasklý blok, vše za 25000,- možný prodej i po částech",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 125
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226390742/seat-leon-1m.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 4 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Leon 1.4 16V, rok výroby 2000.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 4
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226339017/honda-civic-16i.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 264 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Honda Civic 1,6i,81kW,rv.2002,najeto:165tis.km, ABS,ESP, manuální převodovka,podélný posun,výškově nastavitelná sedadla,centrální zamykání,klima,el.okna,el.zrcátka,rádio,palubní počítač,kosmetické vady,cena:25000kč,Pouze volat",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 264
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226398792/skoda-fabia-200119sdi.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 176 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Škodu Fabii\nMotorizace-1.9 SDI-47kw\nR.v- 2001\nNová stk + emise\nNajeto-375xxx\nVýbava-rádio,přední okna v el.,zrcátka v el.,centralní zamykání,vyhřívané zadní okno,alu kola s novýma pneumatikama.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 176
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226288939/prodam-peugeot-308-16i-88kw-rok-2010.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 86 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Peugeot 308 1.6i 88KW Rok 2010",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 86
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226346688/citroen-c3.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 266 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Citroen C3.Rok uvedení do provozu 2008.Obsah 1,1 benzín, nová STK, najeto:viz foto.Velmi zachovalý interiér, vozem jezdila jen jedna osoba.Spolehlivý nízkonákladový vůz.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 266
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225353110/sandero-14-55-kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 99 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Dacia Sandero 2008 r.v.\n1,4 benzín 55 Kw\n167 tis.km najeto",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 99
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226295566/honda-civic-6g-hatchback.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 82 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Zdravím mam tu naprodej Hondu Civic 6g hatch buď na dodělaní nebo na nd",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 82
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226268278/honda-civic-16i-vtec-81kw-01-ac.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 20 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Hondu Civic rok 2001 s motorem 1.6 VTEC benzín.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 20
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226218166/seat-leon-19-tdi.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 191 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 191
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226151634/prodam-seat-ibiza-12-tsi-77-kw-r-v-2013-210-xxx-km.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 73 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Ibiza 1.2 TSI, 77 kW, benzín, nájezd 210 xxx km, r. v. 2013",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 73
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225991908/prodam-seat-leon-1p-na-nahradni-dily.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 111 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Leon 1P na náhradní díly",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 25000,
+        "unit": "CZK",
+        "distanceKm": 111
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226050045/skoda-fabia-1-12-mpi-40kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 67 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám automobil Škoda fabia 1 hatchback rok výroby 2003.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 26000,
+        "unit": "CZK",
+        "distanceKm": 67
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/224973216/prodam-peugeot-308-16-benzin-88-kw-rv-2011-navi.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 103 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Peugeot 308 - 1.6 (benzín), 88 kw, r.v. 2011 (NAVI)",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 26000,
+        "unit": "CZK",
+        "distanceKm": 103
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226311659/peugeot-307-14-16v-65kw-nove-rozvody.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 49 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Peugeot 307, 1.4 16v 65kW Nové rozvody",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 26990,
+        "unit": "CZK",
+        "distanceKm": 49
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226208092/skoda-fabia.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 106 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 27000,
+        "unit": "CZK",
+        "distanceKm": 106
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226006978/seat-ibiza.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 124 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 27000,
+        "unit": "CZK",
+        "distanceKm": 124
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226188025/kia-ceed-lpg.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 5 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám kia ceed 2010 r. 1.4 benzin Lpg",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 27000,
+        "unit": "CZK",
+        "distanceKm": 5
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226089252/prodam-seat-leon-16-77-kw.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 123 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodam Seat Leon 1.6 77 kw",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 27000,
+        "unit": "CZK",
+        "distanceKm": 123
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226318601/citroen-c3-11-44kw-rv-2008.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 22 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "no",
+            "quote": "Citroen C4 Picasso 1.6 HDI 80KW",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 27900,
+        "unit": "CZK",
+        "distanceKm": 22
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226313079/prodam-seat-ibiza.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 72 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Ibiza . V provozu od roku 2002. Najeto 144 068 km.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 28000,
+        "unit": "CZK",
+        "distanceKm": 72
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226321091/seat-leon-1.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 291 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat leon 1 generace 1,4 16v 55kw po stk po výměně oleju fyltru svíček a čerpadla a nové stk.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 28000,
+        "unit": "CZK",
+        "distanceKm": 291
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226379305/peugeot-107-10i-50kw-rok-2009-stk-092027-jedna-majitelka.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 125 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Peugeot 107 1.0i 50kw rok 2009 STK 09/2027Euro4,původ ČR,v ČR jedna majitelka,garance km",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 28990,
+        "unit": "CZK",
+        "distanceKm": 125
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226304647/dacia-sandero-15-dci-50-kw-2009-klima-1majitel-nova-stk.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 125 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Dacia Sandero 1.5 dCi\nDo provozu 5/2009\nNajeto 247.000 km\nMotor diesel 1.5 dCi 50 kW (68 PS)",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 125
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225737092/dacia-sandero.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 80 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Dobrý den prodám dacia sandero rok výroby 2009.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 80
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225912736/skoda-citigo-10mpi-44kw-52017-najeto-87tkm.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 289 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodáme Škodu Fabii 1.4 MPI sedan \n-rok výroby 2003\n-STK 2027\n-momentálně po výměně těsnění pod hlavou\n-k vozidlu sada zimních zánovních kol, nosič kol\n-vozidlo má Tažné zařízení\n-k vidění v Havířově autochodura s.r.o",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 289
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226106585/seat-ibiza-12-12v.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 73 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Seat Ibiza 1,2 12V",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 73
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225556849/prodam-fabii-14-74-kw-benzin-r-v-2009.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 55 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Škoda Fabia 1.4, 16V, 74 kW, benzín, r. v. 2009",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 55
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226315095/citroen-c3-11-44kw-cr-klima.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 16 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "Najeto km: 82000 | Palivo: benzin | Motor: 1124 ccm | Výkon: 44 kW | Karoserie: hatchback | Barva: světle hnědá | Možnost odpočtu DPH: Ne",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Citroën C3 1.1 44kW, ČR, REZERVACE",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 16
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225719390/dacia-sandero-16-mpi-lpg-rv-2008.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 203 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodej vozidla Dacia Sandero, 1,6 MPI,r.v.2008,zakoupeno jako nové v ČR, do provozu 10/2008, STK do 8/2028,nádrž na LPG do r. 2032,najeto 216.000 km, tažné zařízení, 4/2026 nové přední tlumiče, 7/2026 komplet nové přední brzdy včetně brzdových kotoučů.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 203
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226396141/peugeot-307.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 245 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 245
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226303667/peugeot-107-10-benzin-r-v-2013-nova-stk-do-042028-kli.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 7 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám spolehlivý a úsporný městský vůz Peugeot 107.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 7
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226271245/honda-civic-14i-garazovana-stk-do-062027-sednout-a-jet.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 98 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Honda Civic 1.4i – garážovaná, STK do 06/2027, sednout a jet",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29000,
+        "unit": "CZK",
+        "distanceKm": 98
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226201355/seat-ibiza-14i-63kw-alu.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 97 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Seat Ibiza 1.4i, r.v. 2007, 1390 ccm, 63 kW, najeto 242tis km, ABS, rádio CD, klimatizace, el. okna, el. zrcátka, centrál, dálkový, multifunkční volant...",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29800,
+        "unit": "CZK",
+        "distanceKm": 97
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226201087/dacia-sandero-14-mpi-tazne-zarizeni.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 97 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Dacia Sandero, 1.4 mpi, tažné zařízení, r.v. 2009, 1390 ccm, 55 kW, manuál, rádio CD, isofix...",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29800,
+        "unit": "CZK",
+        "distanceKm": 97
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225877499/dacia-sandero-14-benzin.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 110 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Dacia Sandero 1.4 Benzín 55KW / 1.Majitel",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29900,
+        "unit": "CZK",
+        "distanceKm": 110
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226237685/seat-ibiza-12i-47kw-puvod-cr.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 212 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Seat Ibiza, 1.2i 47kW PŮVOD ČR",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 29900,
+        "unit": "CZK",
+        "distanceKm": 212
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226117568/toyota-yaris-10i-2003-hatchback-nova-stk-1028.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 3 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Toyota Yaris 1.0i 2003 hatchback nová STK 10/28",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 30000,
+        "unit": "CZK",
+        "distanceKm": 3
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226014576/dacia-sandero-12-16v.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 58 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Dacia Sandero 1,2 16V\n - [5.11. 2026] \n Smazat/ Upravit/ Topovat \n Prodám úsporné menší vozidlo, r.v.2009, červená barva, najeto cca 161000 km, klimatizace, přední okna v elektrice, lehký šrám na boku.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 30000,
+        "unit": "CZK",
+        "distanceKm": 58
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/226265378/kia-picanto-70-049km-stk-092028-benzin-10i-2009.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 20 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Kia Picanto v dobrém stavu, plně funkční, spolehlivé, bez závad po prvním majiteli.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 30000,
+        "unit": "CZK",
+        "distanceKm": 20
+      },
+      {
+        "url": "https://auto.bazos.cz/inzerat/225222294/skoda-fabia-i-14-mpi-44-kw-148-tis-km-stk-102027.php",
+        "live": true,
+        "listing": true,
+        "inRange": true,
+        "purpose": [],
+        "checks": [
+          {
+            "id": "within 300km of prague|Is this listing within 300km from Prague?",
+            "answer": "yes",
+            "quote": "distanceKm: 32 km",
+            "hard": true,
+            "clause": "within 300km of prague"
+          },
+          {
+            "id": "accurate and verified listing|Does this listing provide accurate and verified car listings?",
+            "answer": "unknown",
+            "quote": "",
+            "hard": true,
+            "clause": "accurate and verified listing"
+          },
+          {
+            "id": "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?",
+            "answer": "yes",
+            "quote": "Prodám Škodu Fabii I s benzínovým motorem 1.4 MPI, objemem 1 397 cm³ a výkonem 44 kW.",
+            "hard": true,
+            "clause": "kind"
+          }
+        ],
+        "value": 30000,
+        "unit": "CZK",
+        "distanceKm": 32
+      }
+    ]
+  }
+}

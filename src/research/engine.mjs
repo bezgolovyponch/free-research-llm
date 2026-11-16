@@ -4,7 +4,8 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, entityDeliverables, hardCheckPassRate, hardChecksPass, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks, qualifies, softYesCount } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks, qualifies } from './acceptance.mjs';
+import { verdict, itemTier, itemEvidence, verdictInvariants } from './verdict.mjs';
 import { ChecklistJudge, checklistSummary, checklistFingerprint, filterCountItems, askedCounts } from './checklist.mjs';
 import { DeeperReader } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
@@ -1361,6 +1362,9 @@ export class ResearchEngine {
         project.report.status = { ...project.report.status, provisional: true, acceptanceContradiction: msg };
         project.report.verdict = `PROVISIONAL (acceptance: ${msg}) — ${project.report.verdict.replace(/^PROVISIONAL\s*[—:-]?\s*/i, '')}`;
       }
+      if (project.acceptanceResult.verdict?.summary) {
+        project.acceptanceSummary = project.acceptanceResult.verdict.summary;
+      }
     }
     return status;
   }
@@ -1552,10 +1556,10 @@ export class ResearchEngine {
         const fingerprint = checklistFingerprint(newChecklist);
         const targetCount = project.acceptance?.itemCount ?? project.acceptanceResult.items.length;
         let judgedCount = 0;
-        let validCount = 0;
+        let confirmedCount = 0;
 
         for (const item of project.acceptanceResult.items) {
-          if (validCount >= targetCount) break;
+          if (confirmedCount >= targetCount) break;
           if (judgedCount >= JUDGE_PAGE_BUDGET) break;
 
           const cacheKey = `${item.url}::${fingerprint}`;
@@ -1570,7 +1574,10 @@ export class ResearchEngine {
           } else {
             const page = await readPage(item.url).catch(() => null);
             const pageText = page?.text ?? '';
-            if (!pageText) continue;
+            if (!pageText) {
+              item.checks = [];
+              continue;
+            }
             checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null);
             item.checklist = checklistSummary([item])[0];
             checkCache[cacheKey] = { checks, summary: item.checklist };
@@ -1594,10 +1601,9 @@ export class ResearchEngine {
             }
           }
 
-          const hardChecks = checks.filter(c => c.hard === true);
-          const hardPass = hardChecks.length > 0 && hardChecks.every(c => c.answer === 'yes');
-          if (hardPass && qualifies(item, project.acceptance)) {
-            validCount++;
+          const tier = itemTier(item, project.checklist.flatMap((cluster) => cluster.items.filter((ci) => ci.hard).map((ci) => cluster.clause + '|' + ci.question)), project.acceptance);
+          if (tier === 'confirmed') {
+            confirmedCount++;
           }
         }
       }
@@ -1612,8 +1618,27 @@ export class ResearchEngine {
       }
     }
 
-    if (project.acceptanceResult) {
-      this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, project.checklist);
+    if (project.acceptanceResult && project.checklist) {
+      const verdictResult = verdict(project.acceptanceResult.items, project.acceptance, project.checklist);
+      project.acceptanceResult.validCount = verdictResult.validCount;
+      project.acceptanceResult.verdict = verdictResult;
+      project.acceptanceResult.items = verdictResult.items;
+      for (const item of verdictResult.items) {
+        item.valid = item.tier === 'confirmed';
+        item.softYes = (item.checks ?? []).filter((c) => c.hard !== true && c.answer === 'yes').length;
+      }
+
+      if (verdictResult.vague.length > 0) {
+        const vagueClauses = verdictResult.vague.map((id) => verdictResult.perCheck.find((c) => c.id === id)?.clause ?? id).join(', ');
+        project.acceptanceResult.vague = verdictResult.vague;
+        this.emit(project, 'acceptance', `requirement cannot be confirmed from the pages: ${vagueClauses} — define it in Hints`);
+      }
+
+      const invariantReasons = verdictInvariants(project);
+      if (invariantReasons.length > 0) {
+        project.acceptanceResult.provisional = invariantReasons;
+        this.emit(project, 'acceptance', `verdict invariant failed: ${invariantReasons.join('; ')}`);
+      }
     }
 
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
@@ -1621,29 +1646,30 @@ export class ResearchEngine {
   }
 
   recomputeAcceptanceValidity(result, spec, checklist) {
-    const { items, checks, ...rest } = result;
-    for (const item of items) {
-      item.valid = hardChecksPass(item) && qualifies(item, spec);
-      item.softYes = softYesCount(item);
+    if (!checklist) return;
+    const verdictResult = verdict(result.items, spec, checklist);
+    result.validCount = verdictResult.validCount;
+    result.verdict = verdictResult;
+    result.items = verdictResult.items;
+    for (const item of verdictResult.items) {
+      item.valid = item.tier === 'confirmed';
+      item.softYes = (item.checks ?? []).filter((c) => c.hard !== true && c.answer === 'yes').length;
     }
-    const allHardCheckIds = [...new Set(items.flatMap((i) => (i.checks ?? []).filter((c) => c.hard === true).map((c) => c.id)))];
-    const newChecks = checks.filter((c) => !c.id.startsWith('checklist-'));
+    const allHardCheckIds = [...new Set(result.items.flatMap((i) => (i.checks ?? []).filter((c) => c.hard === true).map((c) => c.id)))];
+    const newChecks = result.checks.filter((c) => !c.id.startsWith('checklist-'));
     for (const checkId of allHardCheckIds) {
-      const rate = hardCheckPassRate(items, checkId);
-      const label = items[0]?.checks?.find((c) => c.id === checkId)?.clause ?? checkId;
-      newChecks.push({ id: `checklist-${checkId}`, label: `Checklist: ${label}`, value: Math.round(Math.min(1, rate) * 1000) / 1000, detail: `${Math.round(rate * items.length)} of ${items.length} checked items pass this hard check`, passed: rate >= 0.999 });
+      const relevant = result.items.filter((i) => (i.checks ?? []).some((c) => c.id === checkId));
+      if (relevant.length === 0) continue;
+      const pass = relevant.filter((i) => (i.checks ?? []).some((c) => c.id === checkId && c.answer === 'yes')).length;
+      const rate = pass / relevant.length;
+      const label = result.items[0]?.checks?.find((c) => c.id === checkId)?.clause ?? checkId;
+      newChecks.push({ id: `checklist-${checkId}`, label: `Checklist: ${label}`, value: Math.round(Math.min(1, rate) * 1000) / 1000, detail: `${Math.round(rate * result.items.length)} of ${result.items.length} checked items pass this hard check`, passed: rate >= 0.999 });
     }
-    const sortedItems = [...items].sort((a, b) => {
-      if (a.valid !== b.valid) return a.valid ? -1 : 1;
-      return softYesCount(b) - softYesCount(a);
-    });
-    const validCount = sortedItems.filter((i) => i.valid).length;
-    const target = spec.itemCount ?? Math.max(1, sortedItems.length);
     const countCheck = newChecks.find((c) => c.id === 'count');
     if (countCheck) {
-      countCheck.value = Math.min(1, validCount / target);
-      countCheck.passed = validCount >= target;
-      countCheck.detail = `${validCount} of ${target} delivered pass every check`;
+      countCheck.value = Math.min(1, verdictResult.validCount / (spec.itemCount ?? Math.max(1, result.items.length)));
+      countCheck.passed = verdictResult.validCount >= (spec.itemCount ?? Math.max(1, result.items.length));
+      countCheck.detail = `${verdictResult.validCount} of ${spec.itemCount ?? Math.max(1, result.items.length)} delivered pass every check`;
     }
     const score = newChecks.reduce((s, c) => s + Math.min(1, c.value), 0) / newChecks.length;
     Object.assign(result, {
@@ -1796,7 +1822,7 @@ export class ResearchEngine {
       const valid = project.acceptanceResult?.validCount ?? 0;
       const short = asked > 0 && valid < asked;
       project.phase = 'done';
-      project.acceptanceSummary = short ? `${asked} asked, ${valid} valid` : `${valid} of ${asked} valid`;
+      project.acceptanceSummary = project.acceptanceResult?.verdict?.summary ?? (short ? `${asked} asked, ${valid} valid` : `${valid} of ${asked} valid`);
       if (project.report) {
         project.report.status = { ...project.report.status, short };
       }
@@ -2066,7 +2092,7 @@ export class ResearchEngine {
       const valid = project.acceptanceResult?.validCount ?? 0;
       const short = asked > 0 && valid < asked;
       project.phase = 'done';
-      project.acceptanceSummary = short ? `${asked} asked, ${valid} valid` : `${valid} of ${asked} valid`;
+      project.acceptanceSummary = project.acceptanceResult?.verdict?.summary ?? (short ? `${asked} asked, ${valid} valid` : `${valid} of ${asked} valid`);
       if (project.report) {
         project.report.status = { ...project.report.status, short };
       }

@@ -2,6 +2,7 @@ import { plain } from './itemgate.mjs';
 import { regionVerdict } from './brief.mjs';
 import { isUmbrella, memberTerms } from './concept.mjs';
 import { entitiesFromJsonLd } from '../search/listings.mjs';
+import { verdict, itemTier } from './verdict.mjs';
 const CURRENCIES = {
   EUR: ['€', 'eur', 'euro'],
   PLN: ['zł', 'zl', 'pln'],
@@ -605,25 +606,6 @@ export function qualifies(item, spec) {
   return Boolean(item.live && (entity || item.listing) && (!spec.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
 }
 
-export function hardChecksPass(item) {
-  const checks = item.checks ?? [];
-  const hard = checks.filter((c) => c.hard === true);
-  if (hard.length === 0) return true;
-  return hard.every((c) => c.answer === 'yes');
-}
-
-export function softYesCount(item) {
-  const checks = item.checks ?? [];
-  return checks.filter((c) => c.hard !== true && c.answer === 'yes').length;
-}
-
-export function hardCheckPassRate(items, checkId) {
-  const relevant = items.filter((i) => (i.checks ?? []).some((c) => c.id === checkId));
-  if (relevant.length === 0) return 0;
-  const pass = relevant.filter((i) => (i.checks ?? []).some((c) => c.id === checkId && c.answer === 'yes')).length;
-  return pass / relevant.length;
-}
-
 function pageIsLive(page, item, located, allowRedirect = false) {
   const status = Number(page?.status ?? 0);
   const text = String(page?.text ?? '');
@@ -689,14 +671,17 @@ export class AcceptanceChecker {
     const items = await this.inspectAll(deliverables.slice(0, Math.min(MAX_ITEM_CHECKS, Math.ceil(wanted * INSPECT_PER_ASKED))), spec, { located, kind, purpose });
     const target = spec.itemCount ?? Math.max(1, items.length);
     const good = (predicate) => Math.min(1, items.filter(predicate).length / target);
-    const checks = [];
-    const validItems = items.filter((i) => hardChecksPass(i) && qualifies(i, spec));
-    const valid = validItems.length;
-    for (const item of items) {
-      item.valid = hardChecksPass(item) && qualifies(item, spec);
-      item.softYes = softYesCount(item);
+
+    const hasChecks = items.some((i) => (i.checks ?? []).length > 0);
+    const verdictResult = verdict(items, spec, hasChecks ? checklist : null);
+
+    for (const item of verdictResult.items) {
+      item.valid = item.tier === 'confirmed';
+      item.softYes = (item.checks ?? []).filter((c) => c.hard !== true && c.answer === 'yes').length;
     }
-    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, valid / spec.itemCount), detail: `${valid} of ${deliverables.length} delivered pass every check; first ${items.length} inspected (${located ? 'a single listing page that opens' : 'a page that opens and describes the asked kind'}${spec.valueRange ? ', price in range' : ''})` });
+
+    const checks = [];
+    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, verdictResult.validCount / spec.itemCount), detail: `${verdictResult.validCount} of ${deliverables.length} delivered pass every check; first ${items.length} inspected (${located ? 'a single listing page that opens' : 'a page that opens and describes the asked kind'}${spec.valueRange ? ', price in range' : ''})` });
     if (spec.urlsLive) checks.push({ id: 'live', label: 'Links open a real page', value: good((i) => i.live), detail: `${items.filter((i) => i.live).length} of ${items.length} checked links are live` });
     if (spec.valueRange) checks.push({ id: 'range', label: `Value within ${spec.valueRange.join('–')} ${spec.unit}`.trim(), value: good((i) => i.inRange), detail: `${items.filter((i) => i.inRange).length} of ${items.length} pages show a value in range` });
     if (spec.mustMention.length) checks.push({ id: 'mentions', label: `Pages mention: ${spec.mustMention.join(', ')}`, value: items.length ? items.reduce((s, i) => s + (i.mentions ?? 0), 0) / target : 0, detail: 'share of required terms found on the pages' });
@@ -706,15 +691,18 @@ export class AcceptanceChecker {
     }
     const allHardCheckIds = [...new Set(items.flatMap((i) => (i.checks ?? []).filter((c) => c.hard === true).map((c) => c.id)))];
     for (const checkId of allHardCheckIds) {
-      const rate = hardCheckPassRate(items, checkId);
+      const relevant = items.filter((i) => (i.checks ?? []).some((c) => c.id === checkId));
+      if (relevant.length === 0) continue;
+      const pass = relevant.filter((i) => (i.checks ?? []).some((c) => c.id === checkId && c.answer === 'yes')).length;
+      const rate = pass / relevant.length;
       const label = items[0]?.checks?.find((c) => c.id === checkId)?.clause ?? checkId;
       checks.push({ id: `checklist-${checkId}`, label: `Checklist: ${label}`, value: rate, detail: `${Math.round(rate * items.length)} of ${items.length} checked items pass this hard check` });
     }
     const score = checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length;
-    const sortedItems = [...items].sort((a, b) => {
+    const sortedItems = [...verdictResult.items].sort((a, b) => {
       if (a.valid !== b.valid) return a.valid ? -1 : 1;
-      return softYesCount(b) - softYesCount(a);
+      return b.softYes - a.softYes;
     });
-    return { score: Math.round(score * 1000) / 1000, checks: checks.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })), items: sortedItems, checkedAt: new Date().toISOString(), validCount: valid, totalAsked: spec.itemCount ?? 0 };
+    return { score: Math.round(score * 1000) / 1000, checks: checks.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })), items: sortedItems, checkedAt: new Date().toISOString(), validCount: verdictResult.validCount, totalAsked: spec.itemCount ?? 0, verdict: verdictResult };
   }
 }

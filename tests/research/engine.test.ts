@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
-import { hardChecksPass, qualifies } from '../../src/research/acceptance.mjs';
+import { qualifies } from '../../src/research/acceptance.mjs';
+import { itemTier } from '../../src/research/verdict.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -1486,7 +1487,7 @@ describe('list-first research flow', () => {
     }) as never;
     const done = await engine.run(project.id);
     expect(done.phase).toBe('done');
-    expect(done.acceptanceSummary).toBe('20 asked, 0 valid');
+    expect(done.acceptanceSummary).toBe('0 of 20 confirmed');
     expect(calls[0]).toEqual({ sweep: true, research: 0 });
     expect(calls.at(-1)!.sweep).toBe(true);
     expect(calls.at(-1)!.research).toBeGreaterThan(0);
@@ -2149,7 +2150,8 @@ describe('hub search', () => {
     await engine.checkAcceptance(project);
     const item = project.acceptanceResult!.items[0];
     expect(item.checks.find((c) => c.id === checkId)).toMatchObject({ answer: 'yes', quote: 'We ship to 30 countries', source: deepUrl });
-    expect(hardChecksPass(item)).toBe(true);
+    const hardIds = project.checklist.flatMap((cluster) => cluster.items.filter((ci) => ci.hard).map((ci) => cluster.clause + '|' + ci.question));
+    expect(itemTier(item, hardIds, project.acceptance)).toBe('confirmed');
     expect(item.valid).toBe(qualifies(item, project.acceptance));
   });
 
