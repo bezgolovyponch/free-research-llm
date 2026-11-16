@@ -3,6 +3,18 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-11-16 · purpose-driven decomposition, pull request 1 (branch `feat/purpose-decomposition`, not pushed)
+
+Asked: implement pull request 1 of [docs/specs/purpose-decomposition.md](docs/specs/purpose-decomposition.md) with the lead's decisions: the `FRL_BANNED_FAMILIES` switch, the new data files, `clausesOf` without its English connectives, one replay run per research, the 0c750f fixture in place of the stored projects, no live replay, no word, cue, stem or overlap rule in the new code.
+
+- **Semantic layer.** `src/llm/embedder.mjs` returns ranks only (`rank`, `medoid`), one model per comparison, a cache per model in `data/embeddings/`. `src/research/semantic.mjs`: `ask` (contract validator, one retry), `vote` (quorum, different providers, outcome per reply), `retrieveThenVerify` (shortlist by rank, lettered options shuffled per vote, exhaustive path without an embedder), `CallBudget`. Router: purposes `purpose-judge` and `purpose-draft`; `FRL_BANNED_FAMILIES` filters model families in `available` and before each attempt.
+- **Judge.** `src/research/spans.mjs` numbers the sentences of a page. The checklist judge answers with sentence ids, at most 4 questions a call; a yes or no whose ids give no quote is unknown. The kind is a selection among closed options in its own call. `hardenKind` turns a kind yes below `lowPriceCut` of the candidate table into unknown. `migrateChecks` runs once in `reground`. `CHECKLIST_VERSION` 4, `JUDGE_VERSION` 2 in the fingerprint.
+- **Stages 0 to 4 as modules** (used by the replay; the engine wiring is pull request 2): `scoping.mjs`, `purpose.mjs` (rewritten), `facts.mjs`, `ach.mjs`; `purpose.json` holds five mechanisms `M1`–`M5` and the Admiralty scales.
+- **Replay.** `scripts/purpose-replay.mjs` with `scripts/purpose-replay.questions.json`; it refuses an `--out` inside the repository. It was **not** run against live models: the lead runs it after review.
+- **Tests.** New: `tests/llm/embedder.test.ts`, `tests/research/{semantic,spans,scoping,facts,ach}.test.ts`, `tests/scripts/purpose-replay.test.ts`, `tests/helpers/fakes.ts`; rewritten: `tests/research/purpose.test.ts`; extended: checklist, verdict, engine, router, strategy, recall. Lessons F35–F38.
+- **Changed tests.** `tests/research/strategy.test.ts`: the clause is now "but also with the strong price increase trend" (it started at "with the strong price" while `clausesOf` split at "but also"). Judge tests answer with `spans` instead of `quote`. The draft's span test claimed a quote of two non-adjacent sentences is found as one string on the page; it is not, so the test checks each sentence.
+- **Still open:** the live replay on the three researches (the merge gate); pull requests 2 to 4 of the spec. `clusterChecklist` in `checklist.mjs` still groups questions by word overlap until pull request 2 builds the checklist from the confirmed tree. `clausesOf` drops one-word clauses, so a clause such as "hatchback" gets no id. With the fixture of 0c750f the low price cut is 13,100 CZK, so cars priced below it stay "to confirm" on the kind check.
+
 ## Session 2026-11-06 · sea criterion only when asked; PR #140 merged
 
 Asked: finish the "sea only when asked" fix (audit failure mode A6: a sea check applied to an inland Czech question the user never asked for), add a test for every changed module, merge the PR explicitly, restart ongoing researches after the merge.

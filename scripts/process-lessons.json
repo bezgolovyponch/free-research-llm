@@ -473,5 +473,65 @@
     "signal": "Review of the verdict branch (2026-11-16): qualifies() returned true whenever every hard check was yes, so a page that was not live, outside the value range or failing a purpose check became confirmed; one engine test passed only through it (its item page was shorter than MIN_LIVE_TEXT, so not live and never in range). verdict() stored belief and plausibility as item.evidence, the field that holds an entity's evidence URL: qualifies() then saw every item as an entity and the inspector would read the object as a URL on the next pass.",
     "cause": "1) A worker fixed a failing test by widening the validity rule instead of the test page; 2) a new per-item field reused a name already carrying meaning elsewhere in acceptance.mjs; 3) the summary sentence was still built in three engine sites, two of them copies.",
     "prevention": "qualifies() is the base gate only (live, listing or entity, in range, purpose checks) and itemTier() rejects on a failed gate or any hard no, with no override field; the verdict stores its numbers as item.support; acceptanceSummaryOf(project) in verdict.mjs is the one summary sentence used by planActions and both done paths; the engine test page is long enough to be live, and asserts qualifies and valid; covered by tests/research/verdict.test.ts and tests/research/engine.test.ts"
+  },
+  {
+    "id": "F35",
+    "title": "meaning was decided by words: cue lists, stems and token overlap",
+    "touches": [
+      "src/research/semantic.mjs",
+      "src/research/purpose.mjs",
+      "src/research/purpose.json",
+      "src/research/scoping.mjs",
+      "src/research/facts.mjs",
+      "src/llm/embedder.mjs",
+      "tests/research/semantic.test.ts",
+      "tests/research/purpose.test.ts"
+    ],
+    "signal": "The first purpose draft (2026-11-16) used cue lists for 'cheap and valuable', word stems and shared-token counts for goal traceability and same claim, token rules for same subject and word presence for source relevance. The owner rejected it: sources and forums do not use the explicit words, and word rules in one language break the universal engine.",
+    "cause": "A lexical rule is the cheapest thing to write and to test, so it was used wherever two texts had to be compared by meaning. An absolute similarity threshold would have been the same mistake: one translation pair scored 0.635 on one embedding model and 0.919 on another.",
+    "prevention": "Embeddings only rank, a grounded closed-set model judgement decides: retrieveThenVerify in src/research/semantic.mjs (shortlist by rank, lettered options shuffled per vote, a none option, majority or unknown). The embedder returns indexes and never a score (rank, medoid). src/research/purpose.json holds mechanisms and the Admiralty scales, no word list; tests/research/purpose.test.ts asserts it and answers the conflict vote in three languages with a fake."
+  },
+  {
+    "id": "F36",
+    "title": "a rule a model is only told to follow is broken",
+    "touches": [
+      "src/research/purpose.mjs",
+      "src/research/ach.mjs",
+      "src/research/facts.mjs",
+      "src/research/spans.mjs",
+      "scripts/purpose-replay.mjs",
+      "tests/research/ach.test.ts",
+      "tests/research/facts.test.ts"
+    ],
+    "signal": "Simulation on three researches (2026-11-16): the critique deleted the 'why still cheap' goal in 3 of 3 runs, quotes were paraphrased (0 of 14 scoping notes found on the page for suppliers), 9 of 17 ACH rows that mark every hypothesis the same were kept, and source grades came from the model's own label (an aggregator got 'A statistic').",
+    "cause": "Each rule was an instruction in a prompt, with the model also holding the pen: it rewrote the whole tree, typed the quotes, built the matrix and graded its sources.",
+    "prevention": "The model returns ids and operations, code holds the pen: the critique returns operations and applyOps refuses a drop of a mandatory node; ensureMandatory re-inserts the conflict goal with the five mechanisms after every critique; models pick sentence ids and quoteFromSpans builds the quote; diagnosticRows drops rows that cannot tell hypotheses apart; gradeFacts computes credibility from independent hosts and reliability from the host's history. The replay (scripts/purpose-replay.mjs) measures each one against the simulation baseline."
+  },
+  {
+    "id": "F37",
+    "title": "a yes or no without a quote counted, and a part priced at a twelfth of the median passed the kind check",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/engine.mjs",
+      "src/research/verdict.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/verdict.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "Live research 0c750f (2026-11-16): applyQuoteCheck kept an answer whose quote was empty, and winter tyres on rims at 2,000 CZK were judged 'yes' on the kind question among cars with a median of 25,000 CZK.",
+    "cause": "The quote check only tested a quote that was present; the kind was one yes/no question a small model answers 'yes' to whenever the page names the item; no price statistic was consulted.",
+    "prevention": "The judge answers with sentence ids and applyQuoteCheck turns a yes or no whose ids give no quote into unknown; the kind is a selection among closed options in its own call (kindCluster options A to E and U); hardenKind turns a kind yes below lowPriceCut of the candidate table into unknown; migrateChecks does the same for stored answers once in reground; the judge version is part of checklistFingerprint so old answers are not reused."
+  },
+  {
+    "id": "F38",
+    "title": "numbers, goals and a purpose direction the user never stated entered the tree unmarked",
+    "touches": [
+      "src/research/purpose.mjs",
+      "tests/research/purpose.test.ts",
+      "scripts/purpose-replay.mjs"
+    ],
+    "signal": "Simulation (2026-11-16): thresholds nobody asked for (10 %, 30 days, 95 %, 500 m, 3 %), goals outside the request (financing, a marketing plan, certification), and a reversed purpose: a small shop needs a small minimum order, the tree asked for large capacity.",
+    "cause": "The tree was free text from one model call, so an invented number looked like an asked one, and nothing compared a goal with the clauses of the question.",
+    "prevention": "thresholdsOf: a number lives only in the structured threshold field and is 'asked' when the user's words state it, 'sourced' when the cited note's quote states it, otherwise an 'assumption' that is never a hard check; any other digit in a goal or question text is recorded as inventedNumber. traceGoal: each goal is selected against the retrieved clauses, hints, purpose and implications with a relation; no trace means 'proposed', a contradiction means 'conflict'. Implications are stored as inferred. openEntries lists all of these for the user; engine.confirmTree (next pull request) is the only way past them."
   }
 ]
