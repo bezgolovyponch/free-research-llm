@@ -3,25 +3,83 @@ import { clausesOf } from './strategy.mjs';
 import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
 
 export const PURPOSE = JSON.parse(readFileSync(new URL('./purpose.json', import.meta.url), 'utf8'));
-export const TREE_VERSION = 1;
-export const CONFLICT_ROLE = 'conflict';
-export const CONFLICT_GOAL = 'Why is it still cheap?';
+export const TREE_VERSION = 2;
+export const TENSION_ROLE = 'tension';
+export const VALUE_ROLE = 'value';
+export const COST_ROLE = 'cost';
+export const VALUE_GOAL = 'What the result must do for the purpose';
+export const COST_GOAL = 'Total cost to obtain and use it';
+export const VALUE_BASIS = 'EN 12973:2020 value management: value = satisfaction of needs / resources used; function analysis by "how?" and "why?" (FAST)';
+export const COST_BASIS = 'Total cost of ownership (Ellram 1993, 1995): pre-transaction, transaction and post-transaction costs';
+export const COST_PHASES = [
+  { id: 'pre-transaction', covers: 'finding, qualifying, minimum order, registration' },
+  { id: 'transaction', covers: 'price, delivery, duties, payment' },
+  { id: 'post-transaction', covers: 'defects, returns, repairs, resale or disposal' },
+];
+export const PRICE_CHECKER = 'code';
+export const COST_CHECKERS = ['consensus', 'page', 'official'];
+export const METHOD_ALTERNATIVE = 'the combination does not hold here';
+export const METHOD_ID = 'M0';
+export const METHOD_BASIS = 'Heuer 1999 Analysis of Competing Hypotheses';
+export const RESEARCH_GAP = 'research gap';
+export const MIN_EXPLANATIONS = 2;
+export const MAX_EXPLANATIONS = 4;
+export const MAX_TENSIONS = 3;
 export const CHECKERS = ['page', 'code', 'consensus', 'statistic', 'official'];
 export const THRESHOLD_OPS = ['<=', '>=', '<', '>'];
 export const DIRECTIONS = ['low', 'high', 'match'];
 export const DROP_REASONS = { A: 'redundant with another goal', B: 'not asked by the question or its purpose', C: 'a means, not an objective' };
 export const MAX_GOALS = 8;
 export const MAX_NOTES_SHOWN = 14;
-export const EXTRA_HYPOTHESES = 2;
 export const PURPOSE_STAGE = 'purpose';
 export const TREE_STAGE = 'tree';
+export const TREE_CALLS_PER_GOAL = 12;
+export const TREE_MIN_CAP = 60;
+export const UNREFINED = 'not refined into measurable questions';
 
 const OPEN_STATES = ['proposed', 'conflict'];
+const QUESTION_LETTERS = 'ABCDEFGH';
 const lines = (rows) => rows.map((row) => `[${row.id}] ${row.text}`).join('\n');
+const noteLines = (notes) => lines(notes.map((note) => ({ id: note.id, text: `${note.label}: ${String(note.quote).slice(0, 160)}` })));
 
-export function anchorsOf(question, guidance = '') {
+export function treeCap(goals) {
+  return Math.max(TREE_MIN_CAP, Math.max(0, Number(goals) || 0) * TREE_CALLS_PER_GOAL);
+}
+
+function planTree(ctx, goals) {
+  if (!ctx.budget?.caps) return;
+  ctx.budget.caps[TREE_STAGE] = treeCap(goals);
+  ctx.log?.(`tree budget: ${ctx.budget.caps[TREE_STAGE]} calls for ${goals} goal(s) (${TREE_CALLS_PER_GOAL} a goal, at least ${TREE_MIN_CAP})`);
+}
+
+export async function groupSpans(ctx, spans) {
+  const singles = spans.map((span) => [span.id]);
+  if (spans.length < 2) return { groups: singles, grouped: false, votes: {} };
+  const known = new Set(spans.map((span) => span.id));
+  const order = new Map(spans.map((span, index) => [span.id, index]));
+  const messages = [
+    { role: 'system', content: 'You read one request that was cut into pieces at its punctuation, in any language. Group the pieces into requirements by meaning: pieces that only make sense together are one requirement, and a list of examples of one thing is one requirement. Every piece id goes into exactly one group. Answer with JSON only: {"groups":[["S1","S2"],["S3"]]}.' },
+    { role: 'user', content: `Pieces:\n${lines(spans)}` },
+  ];
+  const schema = (data) => {
+    if (!Array.isArray(data?.groups) || data.groups.some((group) => !Array.isArray(group))) return { error: '"groups" must be a list of lists of piece ids' };
+    const groups = data.groups.map((group) => group.map((id) => idOf(id, known))).filter((group) => group.length);
+    const named = groups.flat();
+    if (named.some((id) => !id)) return { error: `a group names an id that is not one of ${[...known].join(', ')}` };
+    if (named.length !== spans.length || new Set(named).size !== spans.length) return { error: 'every piece id must be in exactly one group' };
+    return { value: groups.map((group) => [...group].sort((a, b) => order.get(a) - order.get(b))).sort((a, b) => order.get(a[0]) - order.get(b[0])) };
+  };
+  const result = await vote({ router: ctx.router, task: 'requirements', tier: 'fast', messages, schema, n: 3, quorum: 2, budget: ctx.budget, stage: PURPOSE_STAGE });
+  return result.value ? { groups: result.value, grouped: true, votes: result.tally } : { groups: singles, grouped: false, votes: result.tally };
+}
+
+export async function anchorsOf(ctx, question, guidance = '') {
+  const spans = clausesOf(question).map((text, index) => ({ id: `S${index + 1}`, text }));
+  const textOf = new Map(spans.map((span) => [span.id, span.text]));
+  const { groups, grouped } = await groupSpans(ctx, spans);
+  if (!grouped && spans.length > 1) ctx.log?.(`requirements: no majority on grouping the ${spans.length} pieces of the question by meaning; the punctuation split is kept`);
   return [
-    ...clausesOf(question).map((text, index) => ({ id: `C${index + 1}`, kind: 'clause', text })),
+    ...groups.map((group, index) => ({ id: `C${index + 1}`, kind: 'clause', text: group.map((id) => textOf.get(id)).join(', '), spans: group })),
     ...clausesOf(guidance).map((text, index) => ({ id: `H${index + 1}`, kind: 'hint', text })),
   ];
 }
@@ -79,17 +137,125 @@ export async function drawImplications(ctx, anchors, purpose) {
   return agreed.map((entry, index) => ({ id: `I${index + 1}`, ...entry.item, source: 'inferred', samples: entry.samples }));
 }
 
-export async function conflictAsked(ctx, anchors) {
-  const known = new Set(anchors.map((anchor) => anchor.id));
+export async function consumesVote(ctx, purpose, anchors) {
   const messages = [
-    { role: 'system', content: 'You read the clauses of a request, in any language. "cost": the id of the clause that limits, minimises or trades off what is paid, or null; a clause that asks for the most worth per unit of money is a cost clause, because it trades what is paid against what is received. "worth": the id of the clause that asks for worth beyond the minimum (value, quality, upside), or null. One clause may be both cost and worth: then give its id in both fields. Answer with JSON only: {"cost":"C<n>","worth":"C<n>"}.' },
-    { role: 'user', content: `Clauses and hints:\n${lines(anchors)}` },
+    { role: 'system', content: 'You read the purpose of one request and its requirements, in any language. Decide whether the result is something the asker obtains or uses, so that getting it or using it consumes money, time or other resources of theirs. Answer with JSON only: {"consumes":true} or {"consumes":false}.' },
+    { role: 'user', content: `Purpose: ${purpose.text}\n\nRequirements and hints:\n${lines(anchors)}` },
   ];
-  const schema = (data) => (data && typeof data === 'object' && !Array.isArray(data) && ('cost' in data || 'worth' in data) ? { value: { cost: idOf(data.cost, known), worth: idOf(data.worth, known) } } : { error: 'answer with the two fields "cost" and "worth"' });
-  const result = await vote({ router: ctx.router, task: 'conflict', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => (value.cost && value.worth ? 'yes' : 'no'), budget: ctx.budget, stage: PURPOSE_STAGE });
-  if (!result.value) return { asked: null, votes: result.tally, cost: null, worth: null };
-  const asked = Boolean(result.value.cost && result.value.worth);
-  return { asked, votes: result.tally, cost: asked ? result.value.cost : null, worth: asked ? result.value.worth : null };
+  const schema = (data) => (typeof data?.consumes === 'boolean' ? { value: data.consumes } : { error: '"consumes" must be true or false' });
+  const result = await vote({ router: ctx.router, task: 'consumes', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => String(value), budget: ctx.budget, stage: PURPOSE_STAGE });
+  return { value: result.value ?? true, decided: result.value !== null, votes: result.tally };
+}
+
+export async function tensionsAsked(ctx, anchors) {
+  const clauses = anchors.filter((anchor) => anchor.kind === 'clause');
+  if (!clauses.length) return { pairs: [], decided: true, replies: 0, votes: {} };
+  const known = new Set(clauses.map((clause) => clause.id));
+  const order = new Map(clauses.map((clause, index) => [clause.id, index]));
+  const textOf = new Map(clauses.map((clause) => [clause.id, clause.text]));
+  const messages = [
+    { role: 'system', content: 'You read the requirements of one request, in any language. Two requirements pull against each other when meeting one more fully usually makes the other harder to meet. Name only pairs the requirements themselves state, whatever the two qualities are. When both sides are inside one requirement, give its id twice. Give an empty list when none pull against each other. Answer with JSON only: {"pairs":[["C1","C3"]]}.' },
+    { role: 'user', content: `Requirements:\n${lines(clauses)}` },
+  ];
+  const schema = (data) => {
+    if (!Array.isArray(data?.pairs)) return { error: '"pairs" must be a list of pairs of requirement ids, or an empty list' };
+    const ids = new Set();
+    for (const pair of data.pairs) {
+      const [a, b] = (Array.isArray(pair) ? pair : String(pair ?? '').split('|')).map((id) => idOf(id, known));
+      if (a && b) ids.add([a, b].sort((x, y) => order.get(x) - order.get(y)).join('|'));
+    }
+    return { value: [...ids].sort() };
+  };
+  const result = await vote({ router: ctx.router, task: 'tensions', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value.join(','), budget: ctx.budget, stage: PURPOSE_STAGE });
+  const votes = {};
+  for (const reply of result.replies) for (const id of reply.value) votes[id] = (votes[id] ?? 0) + 1;
+  const rank = (id) => id.split('|').map((part) => order.get(part));
+  const pairs = Object.keys(votes).filter((id) => votes[id] >= 2).sort((x, y) => rank(x)[0] - rank(y)[0] || rank(x)[1] - rank(y)[1]).slice(0, MAX_TENSIONS).map((id) => {
+    const [a, b] = id.split('|');
+    return { id, a, b, texts: [textOf.get(a), textOf.get(b)], votes: votes[id] };
+  });
+  return { pairs, decided: result.replies.length >= 2, replies: result.replies.length, votes };
+}
+
+function tensionText(pair) {
+  return pair.a === pair.b ? `Meet both sides of one requirement at once: "${pair.texts[0]}"` : `Meet both at once: "${pair.texts[0]}" and "${pair.texts[1]}"`;
+}
+
+function retrievedOf(goal) {
+  return (Array.isArray(goal.hypotheses) ? goal.hypotheses : []).filter((entry) => entry && entry.id !== METHOD_ID && entry.hypothesis && Array.isArray(entry.notes) && entry.notes.length > 0).slice(0, MAX_EXPLANATIONS);
+}
+
+function completeTension(goal) {
+  const retrieved = retrievedOf(goal);
+  const linked = new Set(retrieved.map((entry) => entry.id));
+  const out = {
+    ...goal,
+    role: TENSION_ROLE,
+    protected: true,
+    state: 'kept',
+    refine: 'OR',
+    trace: { kind: 'rule', text: TENSION_ROLE },
+    hypotheses: [...retrieved, { id: METHOD_ID, key: 'method', hypothesis: METHOD_ALTERNATIVE, notes: [], basis: METHOD_BASIS }],
+    questions: (goal.questions ?? []).filter((question) => !question.hypothesis || linked.has(question.hypothesis)),
+    obstacles: Array.isArray(goal.obstacles) ? goal.obstacles : [],
+  };
+  delete out.gap;
+  return retrieved.length < MIN_EXPLANATIONS ? { ...out, gap: { kind: RESEARCH_GAP, found: retrieved.length, needed: MIN_EXPLANATIONS } } : out;
+}
+
+export function tensionGoalsOf(tree) {
+  return (tree?.goals ?? []).filter((goal) => goal.role === TENSION_ROLE);
+}
+
+export function ensureTensions(tree) {
+  const pairs = tree?.tensions?.pairs ?? [];
+  const voted = new Set(pairs.map((pair) => pair.id));
+  const goals = (tree?.goals ?? []).filter((goal) => goal.role !== TENSION_ROLE || voted.has(goal.pair)).map((goal) => (goal.role === TENSION_ROLE ? completeTension(goal) : goal));
+  for (const pair of pairs) {
+    if (goals.some((goal) => goal.role === TENSION_ROLE && goal.pair === pair.id)) continue;
+    goals.push(completeTension({ goal: tensionText(pair), pair: pair.id, anchors: [...new Set([pair.a, pair.b])], hypotheses: [], questions: [], obstacles: [] }));
+  }
+  return numberTree({ ...tree, goals });
+}
+
+async function explainTension(ctx, goal, { notes, said }) {
+  const ranked = ctx.embedder ? await ctx.embedder.rank(goal.goal, notes.map((note) => `${note.label}: ${note.quote}`), MAX_NOTES_SHOWN) : null;
+  const shown = ranked?.order?.length ? ranked.order.map((index) => notes[index]).filter(Boolean) : notes.slice(0, MAX_NOTES_SHOWN);
+  const noteIds = new Set(shown.map((note) => note.id));
+  const userNumbers = numbersIn(said);
+  const allowedFor = (entry) => new Set([...userNumbers, ...shown.filter((note) => entry.notes.includes(note.id)).flatMap((note) => numbersIn(note.quote))]);
+  const messages = [
+    { role: 'system', content: `You explain how two requirements that pull against each other can still both hold, using only the notes given. At most ${MAX_EXPLANATIONS} explanations of at most 20 words, each a different one, each with the ids of the notes it rests on and one "test": a question a checker can answer to see whether the explanation applies to one result, with one checker of page (stated on the item's page), code (computed or compared across items), consensus (independent sources agree), statistic (a published figure), official (a registry or plan). Never give an explanation no note supports, and write no number a cited note does not state. Give an empty list when the notes explain nothing. Answer with JSON only: {"explanations":[{"explanation":"...","notes":["N2"],"test":"...","checker":"consensus"}]}.` },
+    { role: 'user', content: `${goal.goal}\n\nNotes:\n${noteLines(shown)}` },
+  ];
+  let rounds = 0;
+  const schema = (data) => {
+    rounds += 1;
+    if (!Array.isArray(data?.explanations)) return { error: '"explanations" must be a list, or an empty list' };
+    const drafted = data.explanations.map((entry) => ({ hypothesis: shortText(entry?.explanation, 20, 240), notes: [...new Set((Array.isArray(entry?.notes) ? entry.notes : []).map((id) => idOf(id, noteIds)).filter(Boolean))], test: shortText(entry?.test, 40, 300), checker: CHECKERS.find((name) => name === String(entry?.checker ?? '').trim().toLowerCase()) ?? 'consensus' })).filter((entry) => entry.hypothesis && entry.notes.length).slice(0, MAX_EXPLANATIONS);
+    const stray = drafted.flatMap((entry) => [...strayNumbers(entry.hypothesis, allowedFor(entry)), ...strayNumbers(entry.test, allowedFor(entry))]);
+    if (stray.length && rounds < 2) return { error: numberError(stray, 'an explanation or its test') };
+    return { value: drafted };
+  };
+  const reply = await ask({ router: ctx.router, task: 'tension-explain', tier: 'deep', messages, schema, budget: ctx.budget, stage: TREE_STAGE });
+  const hypotheses = [];
+  const questions = [];
+  for (const entry of reply?.value ?? []) {
+    const settled = await settleNumbers(ctx, { hypothesis: entry.hypothesis }, 'hypothesis', allowedFor(entry));
+    if (!settled.hypothesis) continue;
+    const id = `M${hypotheses.length + 1}`;
+    hypotheses.push({ id, key: 'retrieved', hypothesis: settled.hypothesis, notes: entry.notes, source: 'scoping', ...(settled.keptNumber ? { keptNumber: settled.keptNumber } : {}), ...(settled.movedNumber ? { movedNumber: settled.movedNumber } : {}) });
+    if (!entry.test) continue;
+    const question = await settleNumbers(ctx, { q: entry.test, checker: entry.checker, threshold: null, note: entry.notes[0], hypothesis: id }, 'q', allowedFor(entry));
+    if (question.q) questions.push(question);
+  }
+  return { ...goal, hypotheses, questions };
+}
+
+export async function explainTensions(ctx, tree, { notes = [], said = '' } = {}) {
+  const goals = [];
+  for (const goal of tree.goals ?? []) goals.push(goal.role === TENSION_ROLE && notes.length && !retrievedOf(goal).length ? await explainTension(ctx, goal, { notes, said }) : goal);
+  return ensureTensions({ ...tree, goals });
 }
 
 export function normalizeThreshold(threshold) {
@@ -105,7 +271,7 @@ export async function draftGoals(ctx, { anchors, purpose, implications = [], not
   const noteIds = new Set(shown.map((note) => note.id));
   const messages = [
     { role: 'system', content: `You list the goals a result must reach (Goal-Question-Metric). At most ${MAX_GOALS} goals of at most 12 words, no numbers. "anchor" is the id the goal comes from: a clause (C), a hint (H), the purpose (P) or an implication (I). "notes" are the ids of scoping notes the goal uses. Do not add goals nobody asked for. Answer with JSON only: {"goals":[{"goal":"...","anchor":"C3","notes":["N2"]}]}.` },
-    { role: 'user', content: `Clauses and hints:\n${lines(anchors)}\n\n[P] ${purpose.text}\n${implications.length ? `\nImplications:\n${lines(implications.map((entry) => ({ id: entry.id, text: `${entry.attribute}: ${entry.direction}` })))}\n` : ''}${shown.length ? `\nScoping notes:\n${lines(shown.map((note) => ({ id: note.id, text: `${note.label}: ${String(note.quote).slice(0, 160)}` })))}` : ''}` },
+    { role: 'user', content: `Clauses and hints:\n${lines(anchors)}\n\n[P] ${purpose.text}\n${implications.length ? `\nImplications:\n${lines(implications.map((entry) => ({ id: entry.id, text: `${entry.attribute}: ${entry.direction}` })))}\n` : ''}${shown.length ? `\nScoping notes:\n${noteLines(shown)}` : ''}` },
   ];
   const userNumbers = numbersIn([said, ...anchors.map((anchor) => anchor.text)].join('\n'));
   const allowedFor = (entry) => new Set([...userNumbers, ...shown.filter((note) => entry.notes.includes(note.id)).flatMap((note) => numbersIn(note.quote))]);
@@ -130,49 +296,151 @@ function leafOf(entry, textField, noteIds) {
   return { [textField]: text, checker, threshold: normalizeThreshold(entry?.threshold), ...(textField === 'q' ? { note: idOf(entry?.note, noteIds) } : {}) };
 }
 
-export async function refineGoal(ctx, { goal, anchorText = '', notes = [], said = '', cited = null }) {
+function leafRules({ notes = [], said = '', cited = null }) {
   const noteIds = new Set(notes.map((note) => note.id));
-  const system = `You refine one goal into questions a checker can answer. "refine": "AND" when every question must hold, "OR" when one is enough. At most 3 questions, each with exactly one checker: page (stated on the item's page), code (computed or compared across items), consensus (independent sources agree), statistic (a published figure), official (a registry or plan). At most 2 obstacles: conditions that defeat the goal. A number goes only in "threshold", never in the text; use null when no number was given. Answer with JSON only: {"refine":"AND|OR","questions":[{"q":"...","checker":"page","threshold":{"op":"<=","value":0,"unit":"..."},"note":"N2"}],"obstacles":[{"obstacle":"...","checker":"page","threshold":null}]}.`;
-  const user = `Goal: ${goal}\nIt comes from: ${anchorText}${notes.length ? `\n\nNotes:\n${lines(notes.map((note) => ({ id: note.id, text: `${note.label}: ${String(note.quote).slice(0, 160)}` })))}` : ''}`;
   const userNumbers = numbersIn(said);
   const goalNotes = notes.filter((note) => (cited ?? [...noteIds]).includes(note.id));
   const allowedFor = (leaf) => new Set([...userNumbers, ...[...goalNotes, ...notes.filter((note) => note.id === leaf.note)].flatMap((note) => numbersIn(note.quote)), ...(leaf.threshold ? [leaf.threshold.value] : [])]);
-  const noQuestion = { error: 'at least one question with a "q" text and one checker of page, code, consensus, statistic, official' };
-  const validator = () => {
-    let rounds = 0;
-    return (data) => {
-      rounds += 1;
-      const refine = oneOf(data?.refine, ['AND', 'OR']);
-      const drafted = {
-        q: (Array.isArray(data?.questions) ? data.questions : []).slice(0, 3).map((entry) => leafOf(entry, 'q', noteIds)).filter(Boolean),
-        obstacle: (Array.isArray(data?.obstacles) ? data.obstacles : []).slice(0, 2).map((entry) => leafOf(entry, 'obstacle', noteIds)).filter(Boolean),
-      };
-      if (!refine) return { error: '"refine" must be AND or OR' };
-      if (!drafted.q.length) return noQuestion;
-      const stray = Object.entries(drafted).flatMap(([field, leaves]) => leaves.flatMap((leaf) => strayNumbers(leaf[field], allowedFor(leaf))));
-      if (stray.length && rounds < 2) return { error: numberError(stray, 'a question or an obstacle') };
-      return { value: { refine, questions: drafted.q, obstacles: drafted.obstacle } };
-    };
+  return { noteIds, allowedFor };
+}
+
+function leafValidator(parse, allowedFor) {
+  let rounds = 0;
+  return (data) => {
+    rounds += 1;
+    const drafted = parse(data);
+    if (drafted.error !== undefined) return drafted;
+    const stray = [['q', drafted.questions], ['obstacle', drafted.obstacles]].flatMap(([field, leaves]) => leaves.flatMap((leaf) => strayNumbers(leaf[field], allowedFor(leaf))));
+    if (stray.length && rounds < 2) return { error: numberError(stray, 'a question or an obstacle') };
+    return { value: drafted };
+  };
+}
+
+async function settleLeaves(ctx, list, field, allowedFor) {
+  const out = [];
+  for (const leaf of list) out.push(await settleNumbers(ctx, leaf, field, allowedFor(leaf)));
+  return out.filter((leaf) => leaf[field]);
+}
+
+export async function measurableQuestions(ctx, questions, { goal, anchorText = '' }) {
+  const shown = questions.slice(0, QUESTION_LETTERS.length);
+  if (!shown.length) return questions;
+  const letters = shown.map((_, index) => QUESTION_LETTERS[index]);
+  const messages = [
+    { role: 'system', content: 'You compare questions with the goal they were written for, by meaning and in any language. A question only restates when it asks again what the goal or the statement it comes from already says, and names nothing a checker could observe, count, compare or look up. List the letters of the questions that only restate; give an empty list when none does. Answer with JSON only: {"restates":["A"]}.' },
+    { role: 'user', content: `Goal: ${goal}\nIt comes from: ${anchorText}\n\nQuestions:\n${shown.map((question, index) => `${letters[index]}) ${question.q}`).join('\n')}` },
+  ];
+  const schema = (data) => (Array.isArray(data?.restates) ? { value: [...new Set(data.restates.map((letter) => oneOf(letter, letters)).filter(Boolean))].sort() } : { error: '"restates" must be a list of question letters, or an empty list' });
+  const result = await vote({ router: ctx.router, task: 'restates', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value.join(''), budget: ctx.budget, stage: TREE_STAGE });
+  const votes = {};
+  for (const reply of result.replies) for (const letter of reply.value) votes[letter] = (votes[letter] ?? 0) + 1;
+  return questions.filter((_, index) => (votes[QUESTION_LETTERS[index]] ?? 0) < 2);
+}
+
+export async function refineGoal(ctx, { goal, anchorText = '', notes = [], said = '', cited = null, method = '' }) {
+  const { noteIds, allowedFor } = leafRules({ notes, said, cited });
+  const system = `You refine one goal into questions a checker can answer. "refine": "AND" when every question must hold, "OR" when one is enough. At most 3 questions, each with exactly one checker: page (stated on the item's page), code (computed or compared across items), consensus (independent sources agree), statistic (a published figure), official (a registry or plan). At most 2 obstacles: conditions that defeat the goal. A number goes only in "threshold", never in the text; use null when no number was given. Answer with JSON only: {"refine":"AND|OR","questions":[{"q":"...","checker":"page","threshold":{"op":"<=","value":0,"unit":"..."},"note":"N2"}],"obstacles":[{"obstacle":"...","checker":"page","threshold":null}]}.`;
+  const user = `Goal: ${goal}\nIt comes from: ${anchorText}${method ? `\n${method}` : ''}${notes.length ? `\n\nNotes:\n${noteLines(notes)}` : ''}`;
+  const parse = (data) => {
+    const refine = oneOf(data?.refine, ['AND', 'OR']);
+    const questions = (Array.isArray(data?.questions) ? data.questions : []).slice(0, 3).map((entry) => leafOf(entry, 'q', noteIds)).filter(Boolean);
+    const obstacles = (Array.isArray(data?.obstacles) ? data.obstacles : []).slice(0, 2).map((entry) => leafOf(entry, 'obstacle', noteIds)).filter(Boolean);
+    if (!refine) return { error: '"refine" must be AND or OR' };
+    if (!questions.length) return { error: 'at least one question with a "q" text and one checker of page, code, consensus, statistic, official' };
+    return { refine, questions, obstacles };
   };
   const settle = async (reply) => {
     if (!reply) return null;
-    const leaves = async (list, field) => {
-      const out = [];
-      for (const leaf of list) out.push(await settleNumbers(ctx, leaf, field, allowedFor(leaf)));
-      return out.filter((leaf) => leaf[field]);
-    };
-    const questions = await leaves(reply.value.questions, 'q');
-    return questions.length ? { refine: reply.value.refine, questions, obstacles: await leaves(reply.value.obstacles, 'obstacle') } : null;
+    const questions = await settleLeaves(ctx, reply.value.questions, 'q', allowedFor);
+    return questions.length ? { refine: reply.value.refine, questions, obstacles: await settleLeaves(ctx, reply.value.obstacles, 'obstacle', allowedFor) } : null;
   };
-  const request = { router: ctx.router, task: 'refine', tier: 'deep', budget: ctx.budget, stage: TREE_STAGE };
-  const first = await ask({ ...request, schema: validator(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] });
+  const draft = (more = '') => ask({ router: ctx.router, task: 'refine', tier: 'deep', budget: ctx.budget, stage: TREE_STAGE, schema: leafValidator(parse, allowedFor), messages: [{ role: 'system', content: system }, { role: 'user', content: `${user}${more}` }] });
+  const first = await draft();
   if (!first) return null;
-  if (first.value.obstacles.length) return settle(first);
-  const again = await ask({ ...request, schema: validator(), messages: [{ role: 'system', content: system }, { role: 'user', content: `${user}\n\nName at least one obstacle that would defeat this goal.` }] });
-  const withObstacle = again?.value.obstacles.length ? await settle(again) : null;
-  if (withObstacle?.obstacles.length) return withObstacle;
-  const bare = await settle(first);
-  return bare ? { ...bare, obstacles: 'missing' } : null;
+  let refined = first.value.obstacles.length ? await settle(first) : null;
+  if (!first.value.obstacles.length) {
+    const again = await draft('\n\nName at least one obstacle that would defeat this goal.');
+    const withObstacle = again?.value.obstacles.length ? await settle(again) : null;
+    const bare = withObstacle?.obstacles.length ? null : await settle(first);
+    refined = withObstacle?.obstacles.length ? withObstacle : bare ? { ...bare, obstacles: 'missing' } : null;
+  }
+  if (!refined) return null;
+  const kept = await measurableQuestions(ctx, refined.questions, { goal, anchorText });
+  if (kept.length === refined.questions.length) return refined;
+  if (kept.length) return { ...refined, questions: kept, restated: refined.questions.length - kept.length };
+  const again = await settle(await draft('\n\nEvery question only restated the goal. Ask only for what a checker can observe, count, compare or look up.'));
+  const measured = again ? await measurableQuestions(ctx, again.questions, { goal, anchorText }) : [];
+  return measured.length ? { ...refined, refine: again.refine, questions: measured, restated: refined.questions.length + again.questions.length - measured.length } : null;
+}
+
+const statedPrompt = ({ query, options, none }) => [
+  { role: 'system', content: `You check whether the asker stated a condition, by meaning and in any language. "anchor": the letter of the statement that itself states this condition, or ${none} when no statement does. Answer with JSON only: {"anchor":"<letter>"}.` },
+  { role: 'user', content: `Condition: ${query}\n\nStatements:\n${optionLines(options, none, 'none of these statements')}` },
+];
+
+async function softObstacles(ctx, obstacles, anchors) {
+  if (!Array.isArray(obstacles)) return obstacles;
+  const out = [];
+  for (const obstacle of obstacles) {
+    const result = await retrieveThenVerify({ query: obstacle.obstacle, candidates: anchors.map((anchor) => ({ id: anchor.id, text: anchor.text })), k: 3, embedder: ctx.embedder, router: ctx.router, prompt: statedPrompt, field: 'anchor', task: 'obstacle-stated', budget: ctx.budget, stage: TREE_STAGE });
+    out.push(result.picked ? { ...obstacle, soft: false, trace: { id: result.picked.id, text: result.picked.text } } : { ...obstacle, soft: true });
+  }
+  return out;
+}
+
+function sideGoal(role, goal, basis, refined) {
+  return { goal, role, protected: true, state: 'kept', trace: { kind: 'rule', text: role }, basis, notes: [], refine: refined?.refine ?? 'AND', questions: refined?.questions ?? [], obstacles: refined?.obstacles ?? 'missing' };
+}
+
+export async function valueSide(ctx, { purpose, anchors, notes = [], said = '' }) {
+  const refined = await refineGoal(ctx, { goal: VALUE_GOAL, anchorText: `${purpose.text}\n${lines(anchors)}`, notes: notes.slice(0, MAX_NOTES_SHOWN), said, cited: [], method: 'Ask "how?" of the purpose: each question names one thing the result must do for it, in the terms of this request, and what a checker observes to see that it does. Asking "why?" of a question must lead back to the purpose.' });
+  return sideGoal(VALUE_ROLE, VALUE_GOAL, VALUE_BASIS, refined ? { ...refined, obstacles: await softObstacles(ctx, refined.obstacles, anchors) } : null);
+}
+
+async function costPhase(ctx, phase, { purpose, anchors, notes, said }) {
+  const { noteIds, allowedFor } = leafRules({ notes, said, cited: [] });
+  const system = `You refine one goal, the total cost to obtain and use a result, for one phase of total cost of ownership: ${phase.id} (${phase.covers}). At most 2 questions about the costs of this phase that apply to this request, in its own terms. "paid": "A" when the question asks what is paid for an item itself, which code measures from the items and comparable items; "B" for any other cost, then with one checker of consensus (independent sources agree), page (stated on the item's page) or official (a registry or tariff). At most 1 obstacle: a cost of this phase that would defeat the purpose, with one checker of page, code, consensus, statistic, official. A number goes only in "threshold", never in the text; use null when no number was given. Answer with JSON only: {"questions":[{"q":"...","paid":"A|B","checker":"consensus","threshold":{"op":"<=","value":0,"unit":"..."},"note":"N2"}],"obstacles":[{"obstacle":"...","checker":"page","threshold":null}]}.`;
+  const user = `Goal: ${COST_GOAL}\nPurpose: ${purpose.text}\n\nRequirements and hints:\n${lines(anchors)}${notes.length ? `\n\nNotes:\n${noteLines(notes)}` : ''}`;
+  const parse = (data) => {
+    const questions = (Array.isArray(data?.questions) ? data.questions : []).slice(0, 2).map((entry) => {
+      const text = shortText(entry?.q, 40, 300);
+      const named = String(entry?.checker ?? '').trim().toLowerCase();
+      const price = (oneOf(entry?.paid, ['A', 'B']) ?? (named === PRICE_CHECKER ? 'A' : 'B')) === 'A';
+      return text ? { q: text, checker: price ? PRICE_CHECKER : COST_CHECKERS.includes(named) ? named : COST_CHECKERS[0], threshold: normalizeThreshold(entry?.threshold), note: idOf(entry?.note, noteIds), phase: phase.id, price } : null;
+    }).filter(Boolean);
+    const obstacles = (Array.isArray(data?.obstacles) ? data.obstacles : []).slice(0, 1).map((entry) => leafOf(entry, 'obstacle', noteIds)).filter(Boolean).map((leaf) => ({ ...leaf, phase: phase.id }));
+    return questions.length ? { questions, obstacles } : { error: `at least one question with a "q" text about a cost of the ${phase.id} phase` };
+  };
+  const reply = await ask({ router: ctx.router, task: 'cost-phase', tier: 'deep', budget: ctx.budget, stage: TREE_STAGE, schema: leafValidator(parse, allowedFor), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] });
+  if (!reply) return { questions: [], obstacles: [] };
+  return { questions: await settleLeaves(ctx, reply.value.questions, 'q', allowedFor), obstacles: await settleLeaves(ctx, reply.value.obstacles, 'obstacle', allowedFor) };
+}
+
+export async function costSide(ctx, { purpose, anchors, notes = [], said = '' }) {
+  const shown = notes.slice(0, MAX_NOTES_SHOWN);
+  const questions = [];
+  const obstacles = [];
+  const phases = [];
+  for (const phase of COST_PHASES) {
+    const refined = await costPhase(ctx, phase, { purpose, anchors, notes: shown, said });
+    questions.push(...refined.questions);
+    obstacles.push(...refined.obstacles);
+    phases.push({ id: phase.id, covers: phase.covers, questions: refined.questions.length });
+  }
+  return { ...sideGoal(COST_ROLE, COST_GOAL, COST_BASIS, { refine: 'AND', questions, obstacles: obstacles.length ? await softObstacles(ctx, obstacles, anchors) : 'missing' }), phases };
+}
+
+export function valueForCost({ satisfied, asked, cost } = {}) {
+  const satisfaction = Number(asked) > 0 && Number.isFinite(Number(satisfied)) ? Number(satisfied) / Number(asked) : null;
+  const spent = Number.isFinite(Number(cost)) && Number(cost) > 0 ? Number(cost) : null;
+  return { satisfaction, cost: spent, ratio: satisfaction === null || spent === null ? null : satisfaction / spent };
+}
+
+export function valueForCostOf(tree) {
+  const value = (tree?.goals ?? []).find((goal) => goal.role === VALUE_ROLE);
+  const cost = (tree?.goals ?? []).find((goal) => goal.role === COST_ROLE);
+  if (!value || !cost) return null;
+  return { measure: 'value-for-cost', checker: PRICE_CHECKER, value: value.id, cost: cost.id, satisfied: (value.questions ?? []).map((question) => question.id), costs: (cost.questions ?? []).map((question) => question.id), basis: VALUE_BASIS };
 }
 
 export function traceables(anchors, purpose, implications = []) {
@@ -212,9 +480,16 @@ export async function traceGoal(ctx, goal, candidates) {
   const relation = result.picked ? result.extra?.relation : null;
   const trace = result.picked ? { id: result.picked.id, text: result.picked.text } : null;
   if (relation === 'S') return { ...goal, state: 'kept', trace, votes: result.tally };
-  if (relation === 'R') return { ...goal, state: 'dropped', trace, reason: 'only restates what was asked', votes: result.tally };
+  if (relation === 'R') return { ...goal, state: 'kept', trace, restates: true, votes: result.tally };
   if (relation === 'X') return { ...goal, state: 'conflict', trace, reason: `contradicts ${trace.id}: ${trace.text}`, votes: result.tally };
   return { ...goal, state: 'proposed', trace: null, reason: result.none ? 'traces to no clause, hint, purpose or implication: confirm or drop it' : 'no majority on what it traces to: confirm or drop it', votes: result.tally };
+}
+
+async function traceAndRefine(ctx, entry, { candidates, notes, said, cited = null }) {
+  const traced = await traceGoal(ctx, entry, candidates);
+  const anchor = traced.trace ?? candidates.find((candidate) => candidate.id === entry.anchor);
+  const refined = await refineGoal(ctx, { goal: entry.goal, anchorText: anchor?.text ?? '', notes, said, cited });
+  return refined ? { ...traced, ...refined } : { unrefined: traced };
 }
 
 const samePrompt = ({ query, candidate }) => [
@@ -328,6 +603,8 @@ export async function critique(ctx, tree, candidates, { said = '' } = {}) {
   return ops.filter((op) => op.op !== 'add' || op.goal);
 }
 
+const protectedWhy = (goal) => `"${goal.goal}" is a protected ${goal.role ?? ''} goal`.replace(/\s+/g, ' ');
+
 export async function applyOps(ctx, tree, ops, { candidates = [], notes = [], said = '' } = {}) {
   let goals = [...(tree.goals ?? [])];
   const applied = [...(tree.ops?.applied ?? [])];
@@ -339,7 +616,7 @@ export async function applyOps(ctx, tree, ops, { candidates = [], notes = [], sa
       if (!node) refused.push({ ...op, why: 'no such node' });
       else if (node.kind === 'obstacle') refused.push({ ...op, why: 'an obstacle is a protected node' });
       else if (node.kind !== 'goal') refused.push({ ...op, why: 'only a goal can be dropped' });
-      else if (node.goal.protected) refused.push({ ...op, why: `"${node.goal.goal}" is protected because the question asks for it` });
+      else if (node.goal.protected) refused.push({ ...op, why: protectedWhy(node.goal) });
       else {
         goals = goals.filter((goal) => goal !== node.goal);
         applied.push({ ...op, goal: node.goal.goal, anchor: node.goal.trace?.id ?? node.goal.anchor ?? null });
@@ -355,21 +632,16 @@ export async function applyOps(ctx, tree, ops, { candidates = [], notes = [], sa
         applied.push(op);
       }
     } else if (op.op === 'add') {
-      const anchor = candidates.find((candidate) => candidate.id === op.anchor);
-      const refined = await refineGoal(ctx, { goal: op.goal, anchorText: anchor?.text ?? '', notes, said, cited: [] });
-      if (!refined) refused.push({ ...op, why: 'the goal could not be refined into questions' });
+      const added = await traceAndRefine(ctx, { goal: op.goal, anchor: op.anchor, notes: [], ...(op.threshold ? { threshold: op.threshold, movedNumber: op.movedNumber } : {}) }, { candidates, notes, said, cited: [] });
+      if (added.unrefined) refused.push({ ...op, why: `the goal was ${UNREFINED}` });
       else {
-        const traced = await traceGoal(ctx, { goal: op.goal, anchor: op.anchor, notes: [], ...(op.threshold ? { threshold: op.threshold, movedNumber: op.movedNumber } : {}), ...refined }, candidates);
-        if (traced.state === 'dropped') refused.push({ ...op, why: traced.reason });
-        else {
-          goals = numberTree({ goals: [...goals, traced] }).goals;
-          applied.push({ ...op, state: traced.state });
-        }
+        goals = numberTree({ goals: [...goals, added] }).goals;
+        applied.push({ ...op, state: added.state });
       }
     } else if (op.op === 'checker') {
       const node = find(op.id);
       if (node?.kind !== 'question') refused.push({ ...op, why: node?.kind === 'obstacle' ? 'an obstacle is a protected node' : 'only a question has a checker to change' });
-      else if (node.goal.protected) refused.push({ ...op, why: `"${node.goal.goal}" is protected because the question asks for it` });
+      else if (node.goal.protected) refused.push({ ...op, why: protectedWhy(node.goal) });
       else {
         goals = goals.map((goal) => (goal === node.goal ? { ...goal, questions: goal.questions.map((question) => (question === node.node ? { ...question, checker: op.checker } : question)) } : goal));
         applied.push(op);
@@ -378,27 +650,6 @@ export async function applyOps(ctx, tree, ops, { candidates = [], notes = [], sa
   }
   for (const entry of refused.slice((tree.ops?.refused ?? []).length)) ctx.log?.(`critique operation refused: ${entry.op} ${entry.id ?? entry.a ?? entry.goal ?? ''}: ${entry.why}`);
   return { ...tree, goals, ops: { applied, refused } };
-}
-
-export function ensureAskedConflict(tree) {
-  const asked = tree.conflict?.asked ?? null;
-  const goals = [...(tree.goals ?? [])];
-  const present = goals.find((goal) => goal.role === CONFLICT_ROLE);
-  if (asked !== true && !present) return { ...tree, goals };
-  const base = present ?? { goal: CONFLICT_GOAL, role: CONFLICT_ROLE, refine: 'OR', state: asked === true ? 'kept' : 'proposed', reason: asked === true ? undefined : 'no majority on whether the question asks for a low price and worth at once: confirm or drop it', anchors: [tree.conflict?.cost, tree.conflict?.worth].filter(Boolean), questions: [], obstacles: [], hypotheses: [] };
-  const own = Array.isArray(base.hypotheses) ? base.hypotheses : [];
-  const ids = new Set(PURPOSE.mechanisms.map((mechanism) => mechanism.id));
-  const hypotheses = [
-    ...PURPOSE.mechanisms.map((mechanism) => ({ id: mechanism.id, key: mechanism.key, hypothesis: own.find((entry) => entry?.id === mechanism.id)?.hypothesis ?? mechanism.label, test: mechanism.test, basis: mechanism.basis })),
-    ...own.filter((entry) => entry && !ids.has(entry.id) && entry.confirmed === true).slice(0, EXTRA_HYPOTHESES),
-  ];
-  const questions = [...(base.questions ?? [])];
-  for (const mechanism of PURPOSE.mechanisms) if (!questions.some((question) => question.mechanism === mechanism.id)) questions.push({ q: mechanism.test, checker: mechanism.checker, threshold: null, note: null, mechanism: mechanism.id });
-  const obstacles = Array.isArray(base.obstacles) ? [...base.obstacles] : [];
-  const defect = PURPOSE.mechanisms.find((mechanism) => mechanism.id === PURPOSE.conflictObstacle);
-  if (!obstacles.some((obstacle) => obstacle.mechanism === defect.id)) obstacles.push({ obstacle: defect.label, checker: defect.checker, threshold: null, mechanism: defect.id, protected: true });
-  const completed = { ...base, protected: true, trace: { kind: 'rule', text: CONFLICT_ROLE }, hypotheses, questions, obstacles };
-  return numberTree({ ...tree, goals: present ? goals.map((goal) => (goal === present ? completed : goal)) : [...goals, completed] });
 }
 
 function numberRuns(text) {
@@ -490,7 +741,7 @@ export function thresholdsOf(tree, { question = '', guidance = '', answers = [],
 export function notModelledOf(tree, anchors) {
   const covered = new Set();
   for (const goal of tree.goals ?? []) {
-    if (goal.state === 'dropped') continue;
+    if (goal.state === 'dropped' || goal.role === TENSION_ROLE) continue;
     for (const id of [goal.trace?.id, goal.anchor, ...(goal.anchors ?? [])]) if (id) covered.add(id);
   }
   return anchors.filter((anchor) => anchor.kind === 'clause' && !covered.has(anchor.id)).map((anchor) => ({ id: anchor.id, text: anchor.text }));
@@ -501,6 +752,7 @@ export function openEntries(tree) {
   for (const goal of tree?.goals ?? []) if (OPEN_STATES.includes(goal.state)) open.push({ id: goal.id, kind: 'goal', state: goal.state, text: goal.goal, reason: goal.reason ?? goal.state });
   for (const threshold of tree?.thresholds ?? []) if (threshold.source === 'assumption' && !threshold.confirmed) open.push({ id: threshold.node, kind: 'threshold', text: `${threshold.op ?? ''} ${threshold.value} ${threshold.unit}`.trim(), reason: 'a number the question, the hints and the cited note do not state' });
   for (const entry of tree?.implications ?? []) if (entry.source === 'inferred') open.push({ id: entry.id, kind: 'implication', text: `${entry.attribute}: ${entry.direction}`, reason: 'inferred from the purpose, not stated' });
+  for (const goal of tensionGoalsOf(tree)) if (goal.gap) open.push({ id: goal.id, kind: 'research-gap', text: goal.goal, reason: `${RESEARCH_GAP}: ${goal.gap.found} explanation(s) with a cited scoping note, at least ${goal.gap.needed} are needed before the tension can be tested` });
   return open;
 }
 
@@ -508,40 +760,38 @@ export function needsConfirmation(tree) {
   return Boolean(tree) && !tree.confirmedAt && openEntries(tree).length > 0;
 }
 
-export function conflictGoalOf(tree) {
-  return (tree?.goals ?? []).find((goal) => goal.role === CONFLICT_ROLE) ?? null;
-}
-
 export async function buildPurposeTree(ctx, { question, guidance = '', answers = [], notes = [] }) {
   const said = [question, guidance, ...answers].join('\n');
-  const anchors = anchorsOf(question, guidance);
-  const conflict = await conflictAsked(ctx, anchors);
+  const anchors = await anchorsOf(ctx, question, guidance);
+  const tensions = await tensionsAsked(ctx, anchors);
   const purpose = await drawPurpose(ctx, anchors);
-  if (!purpose) return { phase: 'needs-purpose', tree: null, anchors, conflict };
+  if (!purpose) return { phase: 'needs-purpose', tree: null, anchors, tensions };
+  const consumes = await consumesVote(ctx, purpose, anchors);
+  if (!consumes.decided) ctx.log?.('value and cost sides: no majority on whether the result consumes resources of the asker; both sides are kept');
   const implications = await drawImplications(ctx, anchors, purpose);
   const candidates = traceables(anchors, purpose, implications);
   const drafted = await draftGoals(ctx, { anchors, purpose, implications, notes, said });
+  planTree(ctx, drafted.length + tensions.pairs.length + (consumes.value ? 2 : 0));
   const goals = [];
   const dropped = [];
   for (const entry of drafted) {
-    const anchor = candidates.find((candidate) => candidate.id === entry.anchor);
-    const refined = await refineGoal(ctx, { goal: entry.goal, anchorText: anchor?.text ?? '', notes: notes.filter((note) => entry.notes.includes(note.id)), said });
-    if (!refined) {
-      dropped.push({ goal: entry.goal, reason: 'not refined into questions' });
-      continue;
-    }
-    const traced = await traceGoal(ctx, { ...entry, ...refined }, candidates);
-    if (traced.state === 'dropped') dropped.push({ goal: traced.goal, reason: traced.reason, trace: traced.trace });
-    else goals.push(traced);
+    const built = await traceAndRefine(ctx, entry, { candidates, notes: notes.filter((note) => entry.notes.includes(note.id)), said });
+    if (built.unrefined) dropped.push({ goal: entry.goal, reason: UNREFINED, trace: built.unrefined.trace ?? null });
+    else goals.push(built);
   }
-  let tree = numberTree({ version: TREE_VERSION, purpose, implications, conflict, goals, dropped, ops: { applied: [], refused: [] }, confirmedAt: null });
-  tree = ensureAskedConflict(tree);
+  if (consumes.value) goals.push(await valueSide(ctx, { purpose, anchors, notes, said }), await costSide(ctx, { purpose, anchors, notes, said }));
+  let tree = numberTree({ version: TREE_VERSION, purpose, implications, consumes, tensions, goals, dropped, ops: { applied: [], refused: [] }, confirmedAt: null });
+  tree = await explainTensions(ctx, ensureTensions(tree), { notes, said });
   tree = await mergeDuplicates(ctx, tree);
   const ops = await critique(ctx, tree, candidates, { said });
+  planTree(ctx, tree.goals.length + dropped.length + ops.filter((op) => op.op === 'add').length);
   tree = await applyOps(ctx, tree, ops, { candidates, notes, said });
-  tree = ensureAskedConflict(tree);
+  tree = ensureTensions(tree);
   tree = thresholdsOf(tree, { question, guidance, answers, notes }).tree;
   tree.notModelled = notModelledOf(tree, anchors);
+  tree.valueForCost = valueForCostOf(tree);
+  tree.unrefined = [...dropped.filter((entry) => entry.reason === UNREFINED).map((entry) => entry.goal), ...tree.goals.filter((goal) => !(goal.questions ?? []).length && goal.role !== TENSION_ROLE).map((goal) => goal.goal)];
+  if (tree.unrefined.length) ctx.log?.(`${tree.unrefined.length} goal(s) ${UNREFINED}: ${tree.unrefined.join(' | ')}`);
   const budgetNote = ctx.budget?.note?.() ?? '';
   if (budgetNote) ctx.log?.(budgetNote);
   const embedNote = ctx.embedder?.failureNote?.() ?? '';

@@ -1,168 +1,366 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CONFLICT_GOAL, CONFLICT_ROLE, PURPOSE, anchorsOf, applyOps, buildPurposeTree, conflictAsked, conflictGoalOf, critique, draftGoals, drawImplications, drawPurpose, ensureAskedConflict, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, refineGoal, thresholdsOf, traceGoal, traceables } from '../../src/research/purpose.mjs';
-import { CallBudget } from '../../src/research/semantic.mjs';
+import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, consumesVote, costSide, critique, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, refineGoal, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide } from '../../src/research/purpose.mjs';
+import { CallBudget, STAGE_CAPS } from '../../src/research/semantic.mjs';
 import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
 
-const MECHANISMS = ['M1', 'M2', 'M3', 'M4', 'M5'];
-const refined = { refine: 'AND', questions: [{ q: 'Is it stated?', checker: 'page', threshold: null, note: null }], obstacles: [{ obstacle: 'It is missing', checker: 'page', threshold: null }] };
+type Ask = { messages: { content: string }[] };
 
-describe('the stored knowledge holds mechanisms, not word lists', () => {
-  it('has five mechanisms with ids and sources, the Admiralty scales, and no cue or word list', () => {
+const refined = { refine: 'AND', questions: [{ q: 'Is it stated?', checker: 'page', threshold: null, note: null }], obstacles: [{ obstacle: 'It is missing', checker: 'page', threshold: null }] };
+const split = (question: string, guidance = '') => anchorsOf({ router: fakeRouter({}) }, question, guidance);
+const plotAnchors = await split('Find plots to buy, price up to 65000CZK');
+const smallShopAnchors = await split('wholesale providers, for a small shop');
+const shopAnchors = await split('Find wholesale providers, with the highest price/value ratio, for a small shop');
+
+describe('the stored knowledge holds only the Admiralty scales, and the engine names no domain', () => {
+  it('keeps admiralty alone in purpose.json: no mechanisms, no conflict obstacle, no word list', () => {
     const raw = JSON.parse(readFileSync(new URL('../../src/research/purpose.json', import.meta.url), 'utf8'));
-    expect(Object.keys(raw).sort()).toEqual(['admiralty', 'conflictObstacle', 'mechanisms']);
-    expect(raw.mechanisms.map((m: { id: string }) => m.id)).toEqual(MECHANISMS);
-    expect(raw.mechanisms.every((m: { test: string; basis: string; checker: string }) => m.test && m.basis && m.checker)).toBe(true);
-    expect(JSON.stringify(raw)).not.toMatch(/cues?"|words"|stems?"|stop"/i);
-    expect(raw.conflictObstacle).toBe('M5');
+    expect(Object.keys(raw)).toEqual(['admiralty']);
+    expect(Object.keys(PURPOSE)).toEqual(['admiralty']);
+    expect(Object.keys(raw.admiralty.reliability)).toEqual(['A', 'B', 'C', 'D', 'E', 'F']);
+    expect(Object.keys(raw.admiralty.credibility)).toEqual(['1', '2', '3', '4', '5', '6']);
+    expect(JSON.stringify(raw)).not.toMatch(/cues?"|words"|stems?"|stop"|mechanism/i);
   });
 
-  it('splits a question into clauses at punctuation only, with stable ids', () => {
+  it('has no domain word, brand name or trace of the removed conflict path in purpose.mjs', () => {
+    const source = readFileSync(new URL('../../src/research/purpose.mjs', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/\b(cheap\w*|plots?|cars?|cloth\w*|garments?|glamping|ralph|lauren|moncl\w*|north face|barbour|suppliers?|wholesale)\b/i);
+    expect(source).not.toMatch(/conflictAsked|ensureAskedConflict|CONFLICT_GOAL|CONFLICT_ROLE|conflictGoalOf|mechanisms|conflictObstacle|valueRange/);
+    expect(TREE_VERSION).toBe(2);
+  });
+
+  it('splits a question into pieces at punctuation only', () => {
     expect(clausesOf('plots but also cheap, so no air condition; near the sea')).toEqual(['plots but also cheap', 'so no air condition', 'near the sea']);
     expect(clausesOf('cars near the city, hatchback, , cheap;')).toEqual(['cars near the city', 'hatchback', 'cheap']);
-    expect(anchorsOf('cars near the city, hatchback').map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual(['C1 cars near the city', 'C2 hatchback']);
-    expect(anchorsOf('cheap plots, near the sea', 'sea within 20 km')).toEqual([
-      { id: 'C1', kind: 'clause', text: 'cheap plots' },
-      { id: 'C2', kind: 'clause', text: 'near the sea' },
-      { id: 'H1', kind: 'hint', text: 'sea within 20 km' },
-    ]);
   });
 });
 
-describe('whether cheap and valuable are asked at once is voted on clause ids', () => {
+describe('requirements are the punctuation pieces grouped by meaning', () => {
+  const question = 'similar to A, B, C, D with highest price/value ratio, proven good quality';
+
+  it('groups a list of examples of one thing into one requirement by a vote on piece ids, and keeps the hints', async () => {
+    const router = fakeRouter({ requirements: { groups: [['S5'], ['S3', 'S1', 'S2', 'S4']] } });
+    const anchors = await anchorsOf({ router }, question, 'sold by weight, graded');
+    expect(anchors).toEqual([
+      { id: 'C1', kind: 'clause', text: 'similar to A, B, C, D with highest price/value ratio', spans: ['S1', 'S2', 'S3', 'S4'] },
+      { id: 'C2', kind: 'clause', text: 'proven good quality', spans: ['S5'] },
+      { id: 'H1', kind: 'hint', text: 'sold by weight' },
+      { id: 'H2', kind: 'hint', text: 'graded' },
+    ]);
+    expect(router.count('requirements')).toBe(2);
+    expect(router.calls[0]).toMatchObject({ tier: 'fast', purpose: 'purpose-judge' });
+    expect(router.userText('requirements')).toContain('[S4] D with highest price/value ratio');
+    expect(router.userText('requirements')).not.toContain('sold by weight');
+  });
+
+  it('keeps the punctuation split and logs it when no majority groups the pieces the same way', async () => {
+    const log: string[] = [];
+    const router = fakeRouter({ requirements: seq({ groups: [['S1', 'S2', 'S3', 'S4'], ['S5']] }, { groups: [['S1', 'S2'], ['S3', 'S4'], ['S5']] }, FAIL) });
+    const anchors = await anchorsOf({ router, log: (line: string) => log.push(line) }, question);
+    expect(anchors.map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual(['C1 similar to A', 'C2 B', 'C3 C', 'C4 D with highest price/value ratio', 'C5 proven good quality']);
+    expect(log).toEqual(['requirements: no majority on grouping the 5 pieces of the question by meaning; the punctuation split is kept']);
+  });
+
+  it('refuses a grouping that invents a piece or leaves one out, and asks nothing for a single piece', async () => {
+    const router = fakeRouter({ requirements: seq({ groups: [['S1', 'S9'], ['S2']] }, { groups: [['S1']] }) });
+    const anchors = await anchorsOf({ router }, 'first piece, second piece');
+    expect(router.calls[1].messages[2].content).toContain('a group names an id that is not one of S1, S2');
+    expect(router.calls[3].messages[2].content).toContain('every piece id must be in exactly one group');
+    expect(anchors.map((anchor: { text: string }) => anchor.text)).toEqual(['first piece', 'second piece']);
+    const single = fakeRouter({});
+    expect(await anchorsOf({ router: single }, 'one piece only')).toEqual([{ id: 'C1', kind: 'clause', text: 'one piece only', spans: ['S1'] }]);
+    expect(single.calls).toEqual([]);
+  });
+});
+
+describe('tensions are pairs of the asker\'s own requirements, decided by votes on their ids', () => {
   const cases = [
-    { text: 'Find plots to buy, affordable and valuable, with future upside', reply: { cost: 'C2', worth: 'C2' } },
-    { text: 'Najdi ojetý vůz, za nízkou cenu, a zároveň spolehlivý', reply: { cost: 'C2', worth: 'C3' } },
-    { text: 'Finde Lieferanten, mit niedrigem Preis, und nachweislich guter Qualität', reply: { cost: 'C2', worth: 'C3' } },
+    { text: 'Find trails near the city, short enough for children, with wide views from a summit', pair: ['C2', 'C3'] },
+    { text: 'Najdi knihovnu, s co nejvíce funkcemi, a co nejmenší velikostí', pair: ['C3', 'C2'] },
+    { text: 'Finde einen Dienst, mit schneller Lieferung, und gründlicher Prüfung', pair: ['C2', 'C3'] },
   ];
 
-  it('is true when a majority names a clause for both, in any language, with no cue list', async () => {
+  it('keeps a pair a majority names, in any language and for any two qualities', async () => {
     for (const entry of cases) {
-      const router = fakeRouter({ conflict: entry.reply });
-      const result = await conflictAsked({ router }, anchorsOf(entry.text));
-      expect(result).toMatchObject({ asked: true, cost: entry.reply.cost, worth: entry.reply.worth });
-      expect(router.calls).toHaveLength(2);
+      const router = fakeRouter({ tensions: { pairs: [entry.pair] } });
+      const anchors = await split(entry.text);
+      const result = await tensionsAsked({ router }, anchors);
+      expect(result).toMatchObject({ decided: true, replies: 2, votes: { 'C2|C3': 2 } });
+      expect(result.pairs).toEqual([{ id: 'C2|C3', a: 'C2', b: 'C3', texts: [anchors[1].text, anchors[2].text], votes: 2 }]);
       expect(router.calls[0]).toMatchObject({ tier: 'fast', purpose: 'purpose-judge' });
+      expect(router.userText('tensions')).not.toMatch(/price|cost|quality/i);
     }
   });
 
-  it('is false when the majority finds only one side, and an invented clause id counts as none', async () => {
-    const anchors = anchorsOf('Find the most valuable paintings, in the museum');
-    expect((await conflictAsked({ router: fakeRouter({ conflict: { cost: null, worth: 'C1' } }) }, anchors)).asked).toBe(false);
-    expect((await conflictAsked({ router: fakeRouter({ conflict: { cost: 'C9', worth: 'C1' } }) }, anchors)).asked).toBe(false);
-  });
-
-  it('counts a clause that asks for the most worth per unit of money as cost and worth at once, and a worth-only question stays no', async () => {
-    const byContract = (clause: string | null) => (request: { messages: { content: string }[] }) => {
-      const contract = request.messages[0].content;
-      const tradesOff = contract.includes('limits, minimises or trades off what is paid') && contract.includes('the most worth per unit of money is a cost clause') && contract.includes('One clause may be both cost and worth');
-      return { cost: tradesOff ? clause : null, worth: 'C2' };
-    };
-    const suppliers = anchorsOf('Find the wholesale branded second hand clothing providers, with highest price/value ratio, proven good quality');
-    expect(suppliers[1]).toMatchObject({ id: 'C2', text: 'with highest price/value ratio' });
-    const asked = await conflictAsked({ router: fakeRouter({ conflict: byContract('C2') }) }, suppliers);
-    expect(asked).toMatchObject({ asked: true, cost: 'C2', worth: 'C2', votes: { yes: 2 } });
-    const worthOnly = anchorsOf('Find second hand clothing providers, of proven good quality');
-    const no = await conflictAsked({ router: fakeRouter({ conflict: byContract(null) }) }, worthOnly);
-    expect(no).toMatchObject({ asked: false, cost: null, worth: null, votes: { no: 2 } });
-    expect(conflictGoalOf(ensureAskedConflict({ conflict: no, goals: [] }))).toBeNull();
-  });
-
-  it('is undecided without a majority, and an undecided vote adds no goal: the branch exists only when the question asks for it', async () => {
-    const anchors = anchorsOf('cheap things, good things');
-    const undecided = await conflictAsked({ router: fakeRouter({ conflict: seq({ cost: 'C1', worth: 'C2' }, { cost: null, worth: null }, FAIL) }) }, anchors);
-    expect(undecided.asked).toBeNull();
-    const tree = ensureAskedConflict({ conflict: undecided, goals: [] });
-    expect(conflictGoalOf(tree)).toBeNull();
-    expect(openEntries(tree)).toEqual([]);
+  it('counts each pair on its own, takes a requirement named twice as a tension inside it, and an invented id as none', async () => {
+    const anchors = await split('first thing, second thing, third thing', 'a hint');
+    const mixed = await tensionsAsked({ router: fakeRouter({ tensions: seq({ pairs: [['C1', 'C2'], ['C3', 'C3']] }, { pairs: [['C2', 'C1'], ['C1', 'C9'], ['H1', 'C1']] }, { pairs: ['C3|C3', ['C2', 'C3']] }) }) }, anchors);
+    expect(mixed.pairs.map((pair: { id: string; votes: number }) => [pair.id, pair.votes])).toEqual([['C1|C2', 2], ['C3|C3', 2]]);
+    expect(mixed.votes).toEqual({ 'C1|C2': 2, 'C3|C3': 2, 'C2|C3': 1 });
+    const none = await tensionsAsked({ router: fakeRouter({ tensions: { pairs: [] } }) }, anchors);
+    expect(none).toMatchObject({ pairs: [], decided: true, replies: 2 });
+    const undecided = await tensionsAsked({ router: fakeRouter({ tensions: seq({ pairs: [['C1', 'C2']] }, FAIL, FAIL) }) }, anchors);
+    expect(undecided).toMatchObject({ pairs: [], decided: false, replies: 1 });
+    expect(ensureTensions({ tensions: undecided, goals: [] }).goals).toEqual([]);
+    expect(openEntries(ensureTensions({ tensions: undecided, goals: [] }))).toEqual([]);
   });
 });
 
-describe('the "why still cheap" goal is kept by code', () => {
-  const asked = { asked: true, votes: { yes: 2 }, cost: 'C1', worth: 'C2' };
+describe('a tension goal is kept by code, only for voted pairs', () => {
+  const tensions = { pairs: [{ id: 'C1|C2', a: 'C1', b: 'C2', texts: ['as light as possible', 'lasting many years'], votes: 2 }] };
+  const notes = [
+    { id: 'N1', url: 'https://one.example.org/a', quote: 'Frames of one alloy weigh 300 g less and last as long.', label: 'alloy' },
+    { id: 'N2', url: 'https://two.example.org/b', quote: 'Older models are sold off when a new one arrives.', label: 'model change' },
+    { id: 'N3', url: 'https://three.example.org/c', quote: 'Makers test every frame.', label: 'testing' },
+  ];
+  const explained = { explanations: [
+    { explanation: 'One alloy is lighter and lasts as long', notes: ['N1', 'N9'], test: 'Is the frame made of that alloy?', checker: 'page' },
+    { explanation: 'A replaced model keeps its build', notes: ['n2'], test: 'Was the model replaced by a newer one?', checker: 'oracle' },
+    { explanation: 'Sellers are generous', notes: ['N8'], test: 'Is the seller generous?', checker: 'page' },
+    { explanation: 'It simply is so', test: 'Is it so?', checker: 'page' },
+  ] };
 
-  it('inserts the goal with every mechanism, a question per mechanism and the real-defect obstacle', () => {
-    const tree = ensureAskedConflict({ conflict: asked, goals: [{ id: 'G1', goal: 'Quality', questions: [{ id: 'Q1', q: 'x', checker: 'page' }], obstacles: [] }] });
-    const goal = conflictGoalOf(tree);
-    expect(goal).toMatchObject({ id: 'G2', goal: CONFLICT_GOAL, role: CONFLICT_ROLE, protected: true, refine: 'OR', state: 'kept', anchors: ['C1', 'C2'], trace: { kind: 'rule', text: 'conflict' } });
-    expect(goal.hypotheses.map((h: { id: string }) => h.id)).toEqual(MECHANISMS);
-    expect(goal.hypotheses.map((h: { hypothesis: string }) => h.hypothesis)).toEqual(PURPOSE.mechanisms.map((m: { label: string }) => m.label));
-    expect(goal.questions.map((q: { id: string; mechanism: string }) => [q.id, q.mechanism])).toEqual([['Q2', 'M1'], ['Q3', 'M2'], ['Q4', 'M3'], ['Q5', 'M4'], ['Q6', 'M5']]);
-    expect(goal.obstacles).toEqual([{ id: 'O1', obstacle: PURPOSE.mechanisms[4].label, checker: 'consensus', threshold: null, mechanism: 'M5', protected: true }]);
-    expect(ensureAskedConflict(tree)).toEqual(tree);
+  it('builds the goal from the two requirement texts, protected, with the one method alternative and a research gap', () => {
+    const tree = ensureTensions({ tensions, goals: [{ id: 'G1', goal: 'Light', questions: [{ id: 'Q1', q: 'x', checker: 'page' }], obstacles: [] }] });
+    const [goal] = tensionGoalsOf(tree);
+    expect(goal).toMatchObject({ id: 'G2', goal: 'Meet both at once: "as light as possible" and "lasting many years"', role: TENSION_ROLE, pair: 'C1|C2', anchors: ['C1', 'C2'], protected: true, state: 'kept', refine: 'OR', trace: { kind: 'rule', text: 'tension' }, questions: [], obstacles: [] });
+    expect(goal.hypotheses).toEqual([{ id: 'M0', key: 'method', hypothesis: METHOD_ALTERNATIVE, notes: [], basis: 'Heuer 1999 Analysis of Competing Hypotheses' }]);
+    expect(METHOD_ALTERNATIVE).toBe('the combination does not hold here');
+    expect(goal.gap).toEqual({ kind: 'research gap', found: 0, needed: 2 });
+    expect(openEntries(tree)).toEqual([{ id: 'G2', kind: 'research-gap', text: goal.goal, reason: 'research gap: 0 explanation(s) with a cited scoping note, at least 2 are needed before the tension can be tested' }]);
+    expect(needsConfirmation(tree)).toBe(true);
+    expect(ensureTensions(tree)).toEqual(tree);
+    const inside = ensureTensions({ tensions: { pairs: [{ id: 'C1|C1', a: 'C1', b: 'C1', texts: ['light and lasting', 'light and lasting'], votes: 2 }] }, goals: [] });
+    expect(inside.goals[0]).toMatchObject({ goal: 'Meet both sides of one requirement at once: "light and lasting"', anchors: ['C1'] });
   });
 
-  it('completes a kept goal to the five mechanisms, keeps its own wording and at most 2 confirmed extra hypotheses', () => {
-    const kept = { conflict: asked, goals: [{ id: 'G1', role: CONFLICT_ROLE, goal: 'Why cheap', state: 'kept', questions: [], obstacles: [], hypotheses: [{ id: 'M3', hypothesis: 'own words' }, { id: 'X1', hypothesis: 'seller in a hurry', confirmed: true }, { id: 'X2', hypothesis: 'unconfirmed' }, { id: 'X3', hypothesis: 'b', confirmed: true }, { id: 'X4', hypothesis: 'c', confirmed: true }] }] };
-    const goal = conflictGoalOf(ensureAskedConflict(kept));
-    expect(goal.hypotheses.map((h: { id: string }) => h.id)).toEqual([...MECHANISMS, 'X1', 'X3']);
-    expect(goal.hypotheses[2].hypothesis).toBe('own words');
-    expect(goal.goal).toBe('Why cheap');
+  it('adds no goal without a voted pair, removes one whose pair was not voted, and puts a lost one back', () => {
+    expect(ensureTensions({ tensions: { pairs: [] }, goals: [] }).goals).toEqual([]);
+    expect(ensureTensions({ goals: [] }).goals).toEqual([]);
+    const tree = ensureTensions({ tensions, goals: [] });
+    expect(ensureTensions({ ...tree, tensions: { pairs: [] } }).goals).toEqual([]);
+    expect(tensionGoalsOf(ensureTensions({ ...tree, goals: [] }))).toHaveLength(1);
   });
 
-  it('adds nothing when the question does not ask for both', () => {
-    expect(ensureAskedConflict({ conflict: { asked: false }, goals: [] }).goals).toEqual([]);
+  it('takes explanations only with the id of a note it was shown, one test question each, and no gap from 2 on', async () => {
+    const router = fakeRouter({ 'tension-explain': explained });
+    const embedder = fakeEmbedder([2, 0, 1]);
+    const tree = await explainTensions({ router, embedder }, ensureTensions({ tensions, goals: [] }), { notes });
+    const [goal] = tensionGoalsOf(tree);
+    expect(goal.hypotheses).toEqual([
+      { id: 'M1', key: 'retrieved', hypothesis: 'One alloy is lighter and lasts as long', notes: ['N1'], source: 'scoping' },
+      { id: 'M2', key: 'retrieved', hypothesis: 'A replaced model keeps its build', notes: ['N2'], source: 'scoping' },
+      { id: 'M0', key: 'method', hypothesis: METHOD_ALTERNATIVE, notes: [], basis: 'Heuer 1999 Analysis of Competing Hypotheses' },
+    ]);
+    expect(goal.questions).toEqual([
+      { id: 'Q1', q: 'Is the frame made of that alloy?', checker: 'page', threshold: null, note: 'N1', hypothesis: 'M1' },
+      { id: 'Q2', q: 'Was the model replaced by a newer one?', checker: 'consensus', threshold: null, note: 'N2', hypothesis: 'M2' },
+    ]);
+    expect(goal.gap).toBeUndefined();
+    expect(openEntries(tree)).toEqual([]);
+    expect(router.calls).toHaveLength(1);
+    expect(router.calls[0]).toMatchObject({ task: 'tension-explain', tier: 'deep' });
+    expect(embedder.calls[0]).toMatchObject({ query: goal.goal, k: 14 });
+    expect(router.userText('tension-explain').indexOf('[N3]')).toBeLessThan(router.userText('tension-explain').indexOf('[N1]'));
+    expect(await explainTensions({ router: fakeRouter({}) }, tree, { notes })).toEqual(tree);
   });
 
-  it('refuses the critique drop of the conflict goal and of an obstacle, and logs it', async () => {
+  it('reports a research gap when fewer than 2 explanations cite a note, and asks no model without notes', async () => {
+    const one = await explainTensions({ router: fakeRouter({ 'tension-explain': { explanations: explained.explanations.slice(2).concat(explained.explanations[0]) } }) }, ensureTensions({ tensions, goals: [] }), { notes });
+    expect(tensionGoalsOf(one)[0].hypotheses.map((entry: { id: string }) => entry.id)).toEqual(['M1', 'M0']);
+    expect(tensionGoalsOf(one)[0].gap).toEqual({ kind: 'research gap', found: 1, needed: 2 });
+    expect(openEntries(one).map((entry: { kind: string }) => entry.kind)).toEqual(['research-gap']);
+    const silent = fakeRouter({});
+    const none = await explainTensions({ router: silent }, ensureTensions({ tensions, goals: [] }), { notes: [] });
+    expect(silent.calls).toEqual([]);
+    expect(tensionGoalsOf(none)[0].gap.found).toBe(0);
+    const forged = ensureTensions({ tensions, goals: [{ ...tensionGoalsOf(none)[0], hypotheses: [{ id: 'M1', hypothesis: 'no note', notes: [] }, { id: 'M2', hypothesis: 'made up' }] }] });
+    expect(tensionGoalsOf(forged)[0].hypotheses.map((entry: { id: string }) => entry.id)).toEqual(['M0']);
+  });
+
+  it('asks once more when an explanation holds a number no cited note states, then moves a quantity out of the text', async () => {
+    const numbered = { explanations: [{ explanation: 'The alloy saves 300 g', notes: ['N1'], test: 'Does the frame weigh under 900 g?', checker: 'page' }, { explanation: 'A replaced model keeps its build', notes: ['N2'], test: 'Was it replaced?', checker: 'page' }] };
+    const router = fakeRouter({ 'tension-explain': numbered, 'number-kind': { kind: 'A' } });
+    const tree = await explainTensions({ router }, ensureTensions({ tensions, goals: [] }), { notes });
+    expect(router.count('tension-explain')).toBe(2);
+    expect(router.userText('tension-explain', 1)).toContain('holds a number nobody stated (900)');
+    const [goal] = tensionGoalsOf(tree);
+    expect(goal.hypotheses[0].hypothesis).toBe('The alloy saves 300 g');
+    expect(goal.questions[0]).toMatchObject({ q: 'Does the frame weigh under g?', threshold: { value: 900, source: 'assumption', moved: true }, movedNumber: [900] });
+    expect(thresholdsOf(tree, { question: 'light, lasting', notes }).thresholds).toEqual([{ node: 'Q1', goal: 'G1', op: null, value: 900, unit: '', source: 'assumption', moved: true, hard: false }]);
+  });
+
+  it('refuses the critique drop of a tension goal, of a value or cost goal and of an obstacle, and logs each', async () => {
     const log: string[] = [];
-    const tree = ensureAskedConflict({ conflict: asked, goals: [{ id: 'G1', goal: 'Quality', state: 'kept', anchor: 'C2', questions: [{ id: 'Q1', q: 'x', checker: 'page' }], obstacles: [{ id: 'O9', obstacle: 'none', checker: 'page' }] }], ops: { applied: [], refused: [] } });
-    const conflict = conflictGoalOf(tree);
-    const router = fakeRouter({ critique: { ops: [{ op: 'drop', id: conflict.id, reason: 'A' }, { op: 'drop', id: 'O9', reason: 'A' }, { op: 'checker', id: conflict.questions[0].id, checker: 'code' }, { op: 'checker', id: 'O9', checker: 'code' }, { op: 'drop', id: 'G77', reason: 'A' }, { op: 'explode' }] } });
+    const side = (role: string, goal: string, id: string, q: string) => ({ id, goal, role, protected: true, state: 'kept', questions: [{ id: q, q: 'x', checker: 'code' }], obstacles: [] });
+    const tree = ensureTensions({ tensions, goals: [{ id: 'G1', goal: 'Light', state: 'kept', anchor: 'C1', questions: [{ id: 'Q1', q: 'x', checker: 'page' }], obstacles: [{ id: 'O9', obstacle: 'none', checker: 'page' }] }, side(VALUE_ROLE, VALUE_GOAL, 'G2', 'Q2'), side(COST_ROLE, COST_GOAL, 'G3', 'Q3')], ops: { applied: [], refused: [] } });
+    const tension = tensionGoalsOf(tree)[0];
+    const router = fakeRouter({ critique: { ops: [{ op: 'drop', id: tension.id, reason: 'A' }, { op: 'drop', id: 'G2', reason: 'C' }, { op: 'checker', id: 'Q3', checker: 'page' }, { op: 'drop', id: 'O9', reason: 'A' }, { op: 'merge', a: 'G2', b: 'G3' }, { op: 'drop', id: 'G77', reason: 'A' }, { op: 'explode' }] } });
     const ops = await critique({ router }, tree, []);
-    expect(ops).toHaveLength(4);
+    expect(ops).toHaveLength(5);
     const out = await applyOps({ router, log: (line: string) => log.push(line) }, tree, ops);
     expect(out.goals).toEqual(tree.goals);
     expect(out.ops.applied).toEqual([]);
-    expect(out.ops.refused.map((r: { why: string }) => r.why)).toEqual([`"${CONFLICT_GOAL}" is protected because the question asks for it`, 'an obstacle is a protected node', `"${CONFLICT_GOAL}" is protected because the question asks for it`, 'an obstacle is a protected node']);
-    expect(log).toHaveLength(4);
+    expect(out.ops.refused.map((entry: { why: string }) => entry.why)).toEqual([`"${tension.goal}" is a protected tension goal`, `"${VALUE_GOAL}" is a protected value goal`, `"${COST_GOAL}" is a protected cost goal`, 'an obstacle is a protected node', 'a protected node is never merged away']);
+    expect(log).toHaveLength(5);
     expect(log[0]).toContain('critique operation refused: drop');
-    expect(conflictGoalOf(ensureAskedConflict(out)).hypotheses).toHaveLength(5);
-  });
-
-  it('puts the goal back when a tree lost it', () => {
-    const tree = ensureAskedConflict({ conflict: asked, goals: [] });
-    const lost = { ...tree, goals: [] };
-    expect(conflictGoalOf(ensureAskedConflict(lost)).hypotheses.map((h: { id: string }) => h.id)).toEqual(MECHANISMS);
+    expect(router.userText('critique')).toContain(`${tension.id} [from tension] Meet both at once`);
+    expect(router.userText('critique')).toContain('G2 [from value]');
   });
 });
 
 describe('every goal is traced to what was asked by a voted selection', () => {
-  const anchors = anchorsOf('Find wholesale providers, with the highest price/value ratio, for a small shop');
+  const anchors = shopAnchors;
   const purpose = { id: 'P', text: 'a small shop owner wants stock that sells' };
   const implications = [{ id: 'I1', attribute: 'minimum order size', direction: 'low', anchor: 'C3', source: 'inferred' }];
   const options = traceables(anchors, purpose, implications);
-  const tracer = (wanted: string | null, relation: string) => (request: { messages: { content: string }[] }) => ({ anchor: wanted ? pickLetter(request, (text) => text.includes(wanted)) : 'N', relation });
+  const tracer = (wanted: string | null, relation: string) => (request: Ask) => ({ anchor: wanted ? pickLetter(request, (text) => text.includes(wanted)) : 'N', relation });
 
   it('offers the claimed anchor plus the 3 nearest by embedding rank, and keeps a goal voted S with its trace', async () => {
     const router = fakeRouter({ trace: tracer('price/value', 'S') });
     const embedder = fakeEmbedder([3, 0, 1, 2]);
     const goal = await traceGoal({ router, embedder }, { goal: 'Compare price per kilogram', anchor: 'C2' }, options);
     expect(goal).toMatchObject({ state: 'kept', trace: { id: 'C2', text: 'with the highest price/value ratio' } });
+    expect(goal.restates).toBeUndefined();
     expect(embedder.calls[0].candidates).toHaveLength(4);
     expect(embedder.calls[0].k).toBe(3);
     expect(router.userText('trace')).toContain('N) none of these statements');
     expect(router.calls).toHaveLength(2);
   });
 
-  it('proposes a goal voted N, marks X as a conflict with what it contradicts, and drops R', async () => {
+  it('keeps a goal that restates its clause, flagged, proposes a goal voted N, and marks X as a conflict with what it contradicts', async () => {
     const embedder = fakeEmbedder();
+    const restated = await traceGoal({ router: fakeRouter({ trace: tracer('price/value', 'R') }), embedder }, { goal: 'Highest price/value ratio', anchor: 'C2' }, options);
+    expect(restated).toMatchObject({ state: 'kept', restates: true, trace: { id: 'C2', text: 'with the highest price/value ratio' }, votes: { R: 2 } });
+    expect(restated.reason).toBeUndefined();
     const proposed = await traceGoal({ router: fakeRouter({ trace: tracer(null, 'S') }), embedder }, { goal: 'Secure financing', anchor: 'C1' }, options);
     expect(proposed).toMatchObject({ state: 'proposed', trace: null });
     const conflict = await traceGoal({ router: fakeRouter({ trace: tracer('minimum order size', 'X') }), embedder }, { goal: 'Suppliers with large capacity', anchor: 'I1' }, options);
     expect(conflict).toMatchObject({ state: 'conflict', trace: { id: 'I1' }, reason: 'contradicts I1: minimum order size: low is preferred' });
-    const restated = await traceGoal({ router: fakeRouter({ trace: tracer('wholesale', 'R') }), embedder }, { goal: 'Find wholesale providers', anchor: 'C1' }, options);
-    expect(restated.state).toBe('dropped');
-    const split = await traceGoal({ router: fakeRouter({ trace: seq({ anchor: 'A', relation: 'S' }, { anchor: 'A', relation: 'X' }, { anchor: 'N' }) }), embedder }, { goal: 'Unclear', anchor: 'C1' }, options);
-    expect(split).toMatchObject({ state: 'proposed', reason: 'no majority on what it traces to: confirm or drop it' });
+    const undecided = await traceGoal({ router: fakeRouter({ trace: seq({ anchor: 'A', relation: 'S' }, { anchor: 'A', relation: 'X' }, { anchor: 'N' }) }), embedder }, { goal: 'Unclear', anchor: 'C1' }, options);
+    expect(undecided).toMatchObject({ state: 'proposed', reason: 'no majority on what it traces to: confirm or drop it' });
     expect(openEntries({ goals: [proposed, conflict, { ...restated, id: 'G9' }] }).map((e: { state: string }) => e.state)).toEqual(['proposed', 'conflict']);
   });
 
   it('never traces a protected goal: its trace is the rule', async () => {
     const router = fakeRouter({});
-    expect((await traceGoal({ router }, { goal: CONFLICT_GOAL, role: CONFLICT_ROLE, protected: true }, options)).trace).toEqual({ kind: 'rule', text: 'conflict' });
+    expect((await traceGoal({ router }, { goal: VALUE_GOAL, role: VALUE_ROLE, protected: true }, options)).trace).toEqual({ kind: 'rule', text: 'value' });
+    expect((await traceGoal({ router }, { goal: COST_GOAL, role: COST_ROLE, protected: true }, options)).trace).toEqual({ kind: 'rule', text: 'cost' });
     expect(router.calls).toEqual([]);
+  });
+});
+
+describe('a question that only restates its goal or clause is dropped, the goal is not', () => {
+  const restating = { q: 'Is the quality proven and good?', checker: 'consensus', threshold: null, note: null };
+  const measurable = { q: 'Do independent buyers report the grading as accurate?', checker: 'consensus', threshold: null, note: null };
+  const drafted = (...questions: object[]) => ({ refine: 'AND', questions, obstacles: refined.obstacles });
+  const judge = (request: Ask) => ({ restates: [...request.messages[1].content.matchAll(/^([A-H])\) (.+)$/gm)].filter((match) => match[2].includes('proven and good')).map((match) => match[1]) });
+
+  it('drops the restating question by a vote on question letters and keeps the measurable one', async () => {
+    const router = fakeRouter({ refine: drafted(restating, measurable), restates: judge });
+    const out = await refineGoal({ router }, { goal: 'Proven good quality', anchorText: 'proven good quality' });
+    expect(out.questions).toEqual([measurable]);
+    expect(out.restated).toBe(1);
+    expect(router.count('refine')).toBe(1);
+    expect(router.count('restates')).toBe(2);
+    expect(router.calls.find((call: { task?: string }) => call.task === 'restates')).toMatchObject({ tier: 'fast', purpose: 'purpose-judge' });
+    expect(router.userText('restates')).toContain('Goal: Proven good quality\nIt comes from: proven good quality\n\nQuestions:\nA) Is the quality proven and good?\nB) Do independent buyers report the grading as accurate?');
+  });
+
+  it('asks once more for measurable questions when every question restated, and takes those', async () => {
+    const router = fakeRouter({ refine: seq(drafted(restating), drafted(measurable)), restates: judge });
+    const out = await refineGoal({ router }, { goal: 'Proven good quality', anchorText: 'proven good quality' });
+    expect(router.count('refine')).toBe(2);
+    expect(router.userText('refine', 1)).toContain('Every question only restated the goal. Ask only for what a checker can observe, count, compare or look up.');
+    expect(out.questions).toEqual([measurable]);
+    expect(out.obstacles).toEqual(refined.obstacles);
+  });
+
+  it('has no refinement when the second answer restates too, and keeps the questions when the vote has no majority', async () => {
+    const router = fakeRouter({ refine: drafted(restating), restates: judge });
+    expect(await refineGoal({ router }, { goal: 'Proven good quality', anchorText: 'proven good quality' })).toBeNull();
+    expect(router.count('refine')).toBe(2);
+    const undecided = fakeRouter({ refine: drafted(restating), restates: seq({ restates: ['A'] }, { restates: [] }, FAIL) });
+    expect((await refineGoal({ router: undecided }, { goal: 'Proven good quality' })).questions).toEqual([restating]);
+    expect(await measurableQuestions({ router: fakeRouter({ restates: { restates: ['A', 'Z', 'b'] } }) }, [restating, restating, measurable], { goal: 'g' })).toEqual([measurable]);
+  });
+});
+
+describe('a result the asker obtains or uses has a value side and a total-cost side', () => {
+  const purpose = { id: 'P', text: 'a family wants a day out with small children, because they have one free day' };
+  const phaseOf = (request: Ask) => COST_PHASES.find((phase: { id: string }) => request.messages[0].content.includes(`ownership: ${phase.id} (`))!.id;
+  const phases: Record<string, unknown> = {
+    'pre-transaction': { questions: [{ q: 'How long does finding and checking the route take?', paid: 'B', checker: 'consensus' }], obstacles: [] },
+    transaction: { questions: [{ q: 'What is paid for parking and entry?', paid: 'A', checker: 'page' }, { q: 'How long is the drive there?', paid: 'B', checker: 'statistic' }, { q: 'A third question', paid: 'B', checker: 'page' }], obstacles: [{ obstacle: 'The drive takes longer than the walk', checker: 'code' }, { obstacle: 'second', checker: 'page' }] },
+    'post-transaction': { questions: [{ q: 'What does a missed return connection cost?', checker: 'code' }, { q: 'Is rescue paid by the visitor?', checker: 'official', paid: 'b' }], obstacles: [{ obstacle: 'No way back before dark', checker: 'official' }] },
+  };
+
+  it('decides by a vote whether the result consumes resources, and keeps both sides when undecided', async () => {
+    const anchors = await split('Find hiking trails near the city, that suit young children');
+    const yes = fakeRouter({ consumes: { consumes: true } });
+    expect(await consumesVote({ router: yes }, purpose, anchors)).toEqual({ value: true, decided: true, votes: { true: 2 } });
+    expect(yes.calls[0]).toMatchObject({ tier: 'fast', purpose: 'purpose-judge' });
+    expect(yes.userText('consumes')).toContain(`Purpose: ${purpose.text}`);
+    expect(yes.userText('consumes')).toContain('consumes money, time or other resources');
+    expect(await consumesVote({ router: fakeRouter({ consumes: { consumes: false } }) }, purpose, anchors)).toEqual({ value: false, decided: true, votes: { false: 2 } });
+    expect(await consumesVote({ router: fakeRouter({ consumes: seq({ consumes: true }, { consumes: false }, { consumes: 'maybe' }) }) }, purpose, anchors)).toMatchObject({ value: true, decided: false });
+  });
+
+  it('refines the cost side into the three phases of total cost of ownership: code measures what is paid, sources the other costs', async () => {
+    const anchors = await split('Find hiking trails near the city, that suit young children');
+    const router = fakeRouter({ 'cost-phase': (request: Ask) => phases[phaseOf(request)], 'obstacle-stated': (request: Ask) => ({ anchor: request.messages[1].content.includes('Condition: No way back') ? pickLetter(request, (text) => text.includes('young children')) : 'N' }) });
+    const goal = await costSide({ router, embedder: fakeEmbedder() }, { purpose, anchors });
+    expect(goal).toMatchObject({ goal: COST_GOAL, role: COST_ROLE, protected: true, state: 'kept', refine: 'AND', trace: { kind: 'rule', text: 'cost' } });
+    expect(COST_GOAL).toBe('Total cost to obtain and use it');
+    expect(goal.basis).toContain('Ellram');
+    expect(goal.phases).toEqual([{ id: 'pre-transaction', covers: 'finding, qualifying, minimum order, registration', questions: 1 }, { id: 'transaction', covers: 'price, delivery, duties, payment', questions: 2 }, { id: 'post-transaction', covers: 'defects, returns, repairs, resale or disposal', questions: 2 }]);
+    expect(goal.questions.map((q: { phase: string; checker: string; price: boolean }) => [q.phase, q.checker, q.price])).toEqual([['pre-transaction', 'consensus', false], ['transaction', 'code', true], ['transaction', 'consensus', false], ['post-transaction', 'code', true], ['post-transaction', 'official', false]]);
+    expect(goal.obstacles).toEqual([
+      { obstacle: 'The drive takes longer than the walk', checker: 'code', threshold: null, phase: 'transaction', soft: true },
+      { obstacle: 'No way back before dark', checker: 'official', threshold: null, phase: 'post-transaction', soft: false, trace: { id: 'C2', text: 'that suit young children' } },
+    ]);
+    expect(router.count('cost-phase')).toBe(3);
+    expect(router.userText('cost-phase', 1)).toContain('transaction (price, delivery, duties, payment)');
+    expect(router.userText('cost-phase')).toContain(`Goal: ${COST_GOAL}\nPurpose: ${purpose.text}`);
+  });
+
+  it('keeps the cost goal with the phase empty when a phase gets no answer, and the number rule holds for cost questions', async () => {
+    const anchors = await split('Find hiking trails near the city, that suit young children');
+    const numbered = { questions: [{ q: 'Is parking under 200 a day?', paid: 'A' }], obstacles: [] };
+    const router = fakeRouter({ 'number-kind': { kind: 'A' }, 'cost-phase': (request: Ask) => (phaseOf(request) === 'transaction' ? numbered : phaseOf(request) === 'pre-transaction' ? { questions: [] } : FAIL) });
+    const goal = await costSide({ router }, { purpose, anchors, said: 'trails near the city' });
+    expect(router.count('cost-phase')).toBe(5);
+    expect(router.userText('cost-phase', 1)).toContain('at least one question with a "q" text about a cost of the pre-transaction phase');
+    expect(router.userText('cost-phase', 3)).toContain('holds a number nobody stated (200)');
+    expect(goal.phases.map((phase: { questions: number }) => phase.questions)).toEqual([0, 1, 0]);
+    expect(goal.questions).toEqual([{ q: 'Is parking under a day?', checker: 'code', threshold: { op: null, value: 200, unit: '', source: 'assumption', moved: true }, note: null, phase: 'transaction', price: true, movedNumber: [200] }]);
+    expect(goal.obstacles).toBe('missing');
+  });
+
+  it('refines the value side by asking how of the purpose, with soft obstacles unless the asker stated them', async () => {
+    const anchors = await split('Find hiking trails near the city, that suit young children');
+    const reply = { refine: 'AND', questions: [{ q: 'Can a child walk the whole route?', checker: 'consensus' }, { q: 'Is the day out good for the family?', checker: 'page' }], obstacles: [{ obstacle: 'The route has exposed sections', checker: 'official' }, { obstacle: 'Too long for young children', checker: 'page' }] };
+    const router = fakeRouter({ refine: reply, restates: { restates: ['B'] }, 'obstacle-stated': (request: Ask) => ({ anchor: request.messages[1].content.includes('Condition: Too long') ? pickLetter(request, (text) => text.includes('young children')) : 'N' }) });
+    const goal = await valueSide({ router, embedder: fakeEmbedder() }, { purpose, anchors });
+    expect(goal).toMatchObject({ goal: VALUE_GOAL, role: VALUE_ROLE, protected: true, state: 'kept', trace: { kind: 'rule', text: 'value' } });
+    expect(VALUE_GOAL).toBe('What the result must do for the purpose');
+    expect(goal.basis).toContain('EN 12973');
+    expect(goal.questions.map((q: { q: string }) => q.q)).toEqual(['Can a child walk the whole route?']);
+    expect(goal.obstacles).toEqual([{ obstacle: 'The route has exposed sections', checker: 'official', threshold: null, soft: true }, { obstacle: 'Too long for young children', checker: 'page', threshold: null, soft: false, trace: { id: 'C2', text: 'that suit young children' } }]);
+    expect(router.userText('refine')).toContain(`Goal: ${VALUE_GOAL}\nIt comes from: ${purpose.text}\n[C1] Find hiking trails near the city\n[C2] that suit young children\nAsk "how?" of the purpose`);
+    const bare = await valueSide({ router: fakeRouter({ refine: FAIL }) }, { purpose, anchors });
+    expect(bare).toMatchObject({ goal: VALUE_GOAL, protected: true, questions: [], obstacles: 'missing' });
+  });
+
+  it('measures value for cost by code over the two sides', () => {
+    const tree = { goals: [{ id: 'G1', goal: 'x', questions: [{ id: 'Q1' }] }, { id: 'G2', role: VALUE_ROLE, questions: [{ id: 'Q2' }, { id: 'Q3' }] }, { id: 'G3', role: COST_ROLE, questions: [{ id: 'Q4' }] }] };
+    expect(valueForCostOf(tree)).toMatchObject({ measure: 'value-for-cost', checker: 'code', value: 'G2', cost: 'G3', satisfied: ['Q2', 'Q3'], costs: ['Q4'] });
+    expect(valueForCostOf({ goals: [tree.goals[0], tree.goals[1]] })).toBeNull();
+    expect(valueForCost({ satisfied: 3, asked: 4, cost: 150 })).toEqual({ satisfaction: 0.75, cost: 150, ratio: 0.005 });
+    expect(valueForCost({ satisfied: 3, asked: 4, cost: 0 })).toEqual({ satisfaction: 0.75, cost: null, ratio: null });
+    expect(valueForCost({ satisfied: 1, asked: 0, cost: 10 })).toEqual({ satisfaction: null, cost: 10, ratio: null });
+    expect(valueForCost()).toEqual({ satisfaction: null, cost: null, ratio: null });
   });
 });
 
@@ -202,7 +400,7 @@ describe('numbers live in a structured field and are compared with the user numb
 });
 
 describe('a number nobody stated never stays in goal, question or obstacle text', () => {
-  const anchors = anchorsOf('Find plots to buy, price up to 65000CZK');
+  const anchors = plotAnchors;
   const purpose = { id: 'P', text: 'a buyer wants a plot' };
   const said = 'Find plots to buy, price up to 65000CZK\nsea within 20 km\nat most 3 hours by car';
   const withNumber = { refine: 'AND', questions: [{ q: 'Is the price in the top 10% of listings?', checker: 'code', threshold: null }], obstacles: [{ obstacle: 'Cost exceeds €5,000 per hectare', checker: 'page', threshold: { op: '>', value: 5000, unit: 'EUR/ha' } }] };
@@ -320,7 +518,7 @@ describe('the critique returns operations that code applies or refuses', () => {
   });
 
   it('lists a clause left with no goal as not modelled after a drop', async () => {
-    const anchors = anchorsOf('a scenic location, low entry cost');
+    const anchors = await split('a scenic location, low entry cost');
     const out = await applyOps({ router: fakeRouter({}) }, tree, [{ op: 'drop', id: 'G3', reason: 'B' }, { op: 'checker', id: 'Q1', checker: 'official' }]);
     expect(out.ops.applied).toEqual([{ op: 'drop', id: 'G3', reason: 'B', goal: 'Low entry cost', anchor: 'C2' }, { op: 'checker', id: 'Q1', checker: 'official' }]);
     expect(out.goals[0].questions[0].checker).toBe('official');
@@ -358,7 +556,7 @@ describe('a goal is refined into questions with one checker each', () => {
 });
 
 describe('the purpose is the sample nearest to the others', () => {
-  const anchors = anchorsOf('wholesale providers, for a small shop');
+  const anchors = smallShopAnchors;
   const samples = [{ who: 'a', outcome: 'first', why: 'x', anchors: ['C1'] }, { who: 'b', outcome: 'second', why: 'y', anchors: ['C2', 'C1'] }, { who: 'c', outcome: 'third', why: 'z', anchors: ['C2'] }];
 
   it('takes the medoid by embedding rank, and the sample sharing most anchors without an embedder', async () => {
@@ -385,45 +583,146 @@ describe('the purpose is the sample nearest to the others', () => {
 });
 
 describe('the whole tree', () => {
-  it('decides whether cheap and valuable are asked before the purpose samples can spend the stage budget', async () => {
-    const router = fakeRouter({ conflict: { cost: 'C1', worth: 'C2' }, purpose: { who: 'a buyer', outcome: 'x', why: 'y', anchors: ['C1'] }, implications: { implications: [] } });
-    const built = await buildPurposeTree({ router, embedder: fakeEmbedder(), budget: new CallBudget({ purpose: 3 }) }, { question: 'cheap hatchback cars, with the highest value for the price' });
-    expect(router.calls[0].task).toBe('conflict');
-    expect(router.count('conflict')).toBe(2);
-    expect(built).toMatchObject({ phase: 'needs-purpose', tree: null, conflict: { asked: true, cost: 'C1', worth: 'C2' } });
+  const lettersOfPieces = (request: Ask) => [...request.messages[1].content.matchAll(/^\[(S\d+)\]/gm)].map((match) => [match[1]]);
+  const base = {
+    requirements: (request: Ask) => ({ groups: lettersOfPieces(request) }),
+    implications: { implications: [] },
+    'same-goal': { same: 'B' },
+    restates: { restates: [] },
+    'obstacle-stated': { anchor: 'N' },
+    critique: { ops: [] },
+  };
+  const phaseQuestion = (request: Ask) => ({ questions: [{ q: `What does the ${COST_PHASES.find((phase: { id: string }) => request.messages[0].content.includes(`ownership: ${phase.id} (`))!.id} phase take?`, paid: 'B', checker: 'consensus' }], obstacles: [] });
+
+  it('votes on requirements and tensions before the purpose samples can spend the stage budget', async () => {
+    const router = fakeRouter({ ...base, tensions: { pairs: [['C1', 'C2']] }, purpose: { who: 'a buyer', outcome: 'x', why: 'y', anchors: ['C1'] } });
+    const built = await buildPurposeTree({ router, embedder: fakeEmbedder(), budget: new CallBudget({ purpose: 4 }) }, { question: 'as light as possible, lasting many years' });
+    expect(router.calls.map((call: { task?: string }) => call.task)).toEqual(['requirements', 'requirements', 'tensions', 'tensions']);
+    expect(built).toMatchObject({ phase: 'needs-purpose', tree: null, tensions: { decided: true, pairs: [{ id: 'C1|C2' }] } });
   });
 
-  it('ends with the conflict goal after a critique that tried to delete it, every kept goal traced, and open entries listed', async () => {
-    const question = 'Find plots to buy, affordable and valuable, with a scenic location';
-    let conflictId = '';
+  it('keeps a restating goal refined, both sides and the tension goal after a critique that tried to delete them, and lists what is open', async () => {
+    const question = 'Find a tent to buy, at a low entry price, with a long service life';
+    const notes = [
+      { id: 'N1', url: 'https://one.example.org/a', quote: 'Last season models are sold off when a new one arrives.', label: 'model change' },
+      { id: 'N2', url: 'https://two.example.org/b', quote: 'Heavier cloth lasts longer and sells for less.', label: 'weight' },
+    ];
+    let critiqued = '';
     const router = fakeRouter({
-      purpose: { who: 'a buyer', outcome: 'a plot that pays back', why: 'low entry', anchors: ['C2'] },
-      implications: { implications: [] },
-      conflict: { cost: 'C2', worth: 'C2' },
-      goals: { goals: [{ goal: 'A scenic location', anchor: 'C3', notes: [] }, { goal: 'Secure financing', anchor: 'C2', notes: [] }, { goal: 'Invented anchor', anchor: 'C9' }] },
-      refine: (request: { messages: { content: string }[] }) => (request.messages[1].content.includes('scenic') ? { ...refined, questions: [{ q: 'Is a viewpoint within 5 km?', checker: 'official', threshold: { op: '<=', value: 5, unit: 'km' } }] } : refined),
-      trace: (request: { messages: { content: string }[] }) => (request.messages[1].content.includes('Goal: A scenic') ? { anchor: pickLetter(request, (text) => text.includes('scenic')), relation: 'S' } : { anchor: 'N' }),
-      'same-goal': { same: 'B' },
-      critique: (request: { messages: { content: string }[] }) => {
-        conflictId = request.messages[1].content.match(/^(G\d+) \[from conflict\]/m)![1];
-        return { ops: [{ op: 'drop', id: conflictId, reason: 'A' }] };
+      ...base,
+      tensions: { pairs: [['C2', 'C3']] },
+      purpose: { who: 'a camper', outcome: 'a tent that lasts', why: 'a small budget', anchors: ['C2'] },
+      consumes: { consumes: true },
+      goals: { goals: [{ goal: 'A long service life', anchor: 'C3', notes: [] }, { goal: 'A low entry price', anchor: 'C2', notes: [] }, { goal: 'Secure financing', anchor: 'C2', notes: [] }, { goal: 'Invented anchor', anchor: 'C9' }] },
+      trace: (request: Ask) => {
+        const goal = request.messages[1].content;
+        if (goal.includes('Goal: A long')) return { anchor: pickLetter(request, (text) => text.includes('service life')), relation: 'S' };
+        if (goal.includes('Goal: A low')) return { anchor: pickLetter(request, (text) => text.includes('entry price')), relation: 'R' };
+        return { anchor: 'N' };
+      },
+      refine: (request: Ask) => {
+        const asked = request.messages[1].content;
+        if (asked.includes('Goal: A long')) return { ...refined, questions: [{ q: 'Is the warranty at least 5 years?', checker: 'page', threshold: { op: '>=', value: 5, unit: 'years' } }] };
+        if (asked.includes('Goal: A low') && !asked.includes('Every question only restated')) return { ...refined, questions: [{ q: 'Is the entry price low?', checker: 'page' }] };
+        if (asked.includes('Goal: A low')) return { ...refined, questions: [{ q: 'Where does the price stand among comparable items?', checker: 'code' }] };
+        if (asked.includes(`Goal: ${VALUE_GOAL}`)) return { refine: 'AND', questions: [{ q: 'Does it stay dry in heavy rain?', checker: 'consensus' }], obstacles: [{ obstacle: 'Seams leak after one season', checker: 'consensus' }] };
+        return refined;
+      },
+      restates: (request: Ask) => ({ restates: request.messages[1].content.includes('A) Is the entry price low?') ? ['A'] : [] }),
+      'cost-phase': phaseQuestion,
+      'tension-explain': { explanations: [{ explanation: 'A replaced model is sold off', notes: ['N1'], test: 'Is it a model of last season?', checker: 'page' }, { explanation: 'Heavier cloth lasts longer for less', notes: ['N2'], test: 'Is the cloth heavier than usual?', checker: 'page' }, { explanation: 'No note', notes: ['N7'] }] },
+      critique: (request: Ask) => {
+        critiqued = request.messages[1].content;
+        const id = (role: string) => critiqued.match(new RegExp(`^(G\\d+) \\[from ${role}\\]`, 'm'))![1];
+        return { ops: [{ op: 'drop', id: id('tension'), reason: 'A' }, { op: 'drop', id: id('value'), reason: 'C' }, { op: 'drop', id: id('cost'), reason: 'C' }] };
       },
     });
     const log: string[] = [];
-    let notes = 0;
-    const embedder = Object.assign(fakeEmbedder(), { failureNote: () => (notes++ ? '' : 'embeddings unavailable (one: answered 503); every candidate is judged instead') });
-    const { phase, tree } = await buildPurposeTree({ router, embedder, log: (line: string) => log.push(line) }, { question });
-    expect(log.filter((line) => line.startsWith('embeddings unavailable'))).toHaveLength(1);
+    let failures = 0;
+    const embedder = Object.assign(fakeEmbedder(), { failureNote: () => (failures++ ? '' : 'embeddings unavailable (one: answered 503); every candidate is judged instead') });
+    const budget = new CallBudget();
+    const { phase, tree, anchors } = await buildPurposeTree({ router, embedder, budget, log: (line: string) => log.push(line) }, { question, notes });
+    expect(anchors.map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual(['C1 Find a tent to buy', 'C2 at a low entry price', 'C3 with a long service life']);
     expect(phase).toBe('needs-confirmation');
-    expect(tree.goals.map((g: { goal: string; state: string }) => [g.goal, g.state])).toEqual([['A scenic location', 'kept'], ['Secure financing', 'proposed'], [CONFLICT_GOAL, 'kept']]);
-    expect(conflictGoalOf(tree).id).toBe(conflictId);
-    expect(conflictGoalOf(tree).hypotheses).toHaveLength(5);
-    expect(tree.ops.refused).toHaveLength(1);
-    expect(log.some((line) => line.includes('protected'))).toBe(true);
+    expect(tree.version).toBe(2);
+    expect(tree.goals.map((g: { id: string; goal: string; state: string; role?: string }) => [g.id, g.goal, g.state, g.role ?? ''])).toEqual([
+      ['G1', 'A long service life', 'kept', ''],
+      ['G2', 'A low entry price', 'kept', ''],
+      ['G3', 'Secure financing', 'proposed', ''],
+      ['G4', VALUE_GOAL, 'kept', 'value'],
+      ['G5', COST_GOAL, 'kept', 'cost'],
+      ['G6', 'Meet both at once: "at a low entry price" and "with a long service life"', 'kept', 'tension'],
+    ]);
+    expect(tree.goals[1]).toMatchObject({ restates: true, restated: 1, trace: { id: 'C2', text: 'at a low entry price' } });
+    expect(tree.goals[1].questions.map((q: { q: string; checker: string }) => [q.q, q.checker])).toEqual([['Where does the price stand among comparable items?', 'code']]);
+    expect(router.userText('refine', 1)).toContain('It comes from: at a low entry price');
+    expect(tree.dropped).toEqual([]);
+    expect(tree.consumes).toEqual({ value: true, decided: true, votes: { true: 2 } });
+    expect(tree.goals[4].phases.map((entry: { id: string; questions: number }) => [entry.id, entry.questions])).toEqual([['pre-transaction', 1], ['transaction', 1], ['post-transaction', 1]]);
+    expect(tree.valueForCost).toMatchObject({ measure: 'value-for-cost', checker: 'code', value: 'G4', cost: 'G5', satisfied: ['Q4'], costs: ['Q5', 'Q6', 'Q7'] });
+    expect(tree.goals[3].obstacles).toEqual([{ id: 'O4', obstacle: 'Seams leak after one season', checker: 'consensus', threshold: null, soft: true }]);
+    const [tension] = tensionGoalsOf(tree);
+    expect(tension.hypotheses.map((entry: { id: string; notes: string[] }) => [entry.id, entry.notes])).toEqual([['M1', ['N1']], ['M2', ['N2']], ['M0', []]]);
+    expect(tension.questions.map((q: { id: string; hypothesis: string }) => [q.id, q.hypothesis])).toEqual([['Q8', 'M1'], ['Q9', 'M2']]);
+    expect(tension.gap).toBeUndefined();
+    expect(critiqued).toContain('G6 [from tension]');
+    expect(tree.ops.applied).toEqual([]);
+    expect(tree.ops.refused.map((entry: { why: string }) => entry.why)).toEqual([`"${tension.goal}" is a protected tension goal`, `"${VALUE_GOAL}" is a protected value goal`, `"${COST_GOAL}" is a protected cost goal`]);
     expect(tree.goals.filter((g: { state: string; trace: unknown }) => g.state === 'kept' && !g.trace)).toEqual([]);
-    expect(tree.thresholds).toEqual([{ node: 'Q1', goal: 'G1', op: '<=', value: 5, unit: 'km', source: 'assumption', hard: false }]);
-    expect(openEntries(tree).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['G2', 'goal'], ['Q1', 'threshold']]);
-    expect(tree.notModelled).toEqual([{ id: 'C1', text: 'Find plots to buy' }]);
+    expect(tree.thresholds).toEqual([{ node: 'Q1', goal: 'G1', op: '>=', value: 5, unit: 'years', source: 'assumption', hard: false }]);
+    expect(openEntries(tree).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['G3', 'goal'], ['Q1', 'threshold']]);
+    expect(tree.notModelled).toEqual([{ id: 'C1', text: 'Find a tent to buy' }]);
+    expect(tree.unrefined).toEqual([]);
     expect(tree.confirmedAt).toBeNull();
+    expect(budget.caps.tree).toBe(72);
+    expect(budget.report().tree.skipped).toBe(0);
+    expect(log.filter((line) => line.startsWith('tree budget: 72 calls for 6 goal(s) (12 a goal, at least 60)'))).toHaveLength(2);
+    expect(log.filter((line) => line.startsWith('embeddings unavailable'))).toHaveLength(1);
+    expect(log.filter((line) => line.includes('protected'))).toHaveLength(3);
+    expect(router.calls.findIndex((call: { task?: string }) => call.task === 'consumes')).toBeGreaterThan(router.calls.findIndex((call: { task?: string }) => call.task === 'purpose'));
+    expect(router.count('conflict')).toBe(0);
+  });
+
+  it('adds neither side when the vote says the result consumes nothing, both when it does, for a question with no price wording, and never a tension nobody voted', async () => {
+    const question = 'Find open-source libraries that read documents, actively maintained, well documented';
+    const script = (consumes: unknown) => ({ ...base, tensions: { pairs: [] }, purpose: { who: 'a developer', outcome: 'a library to build on', why: 'a deadline', anchors: ['C1'] }, consumes, goals: { goals: [{ goal: 'Actively maintained', anchor: 'C2', notes: [] }] }, trace: (request: Ask) => ({ anchor: pickLetter(request, (text) => text.includes('maintained')), relation: 'S' }), refine: refined, 'cost-phase': phaseQuestion });
+    const without = await buildPurposeTree({ router: fakeRouter(script({ consumes: false })), embedder: fakeEmbedder(), budget: new CallBudget() }, { question });
+    expect(without.tree.goals.map((g: { goal: string }) => g.goal)).toEqual(['Actively maintained']);
+    expect(without.tree.consumes).toMatchObject({ value: false, decided: true });
+    expect(without.tree.valueForCost).toBeNull();
+    expect(tensionGoalsOf(without.tree)).toEqual([]);
+    expect(without.phase).toBe('tree-ready');
+    const router = fakeRouter(script({ consumes: true }));
+    const withSides = await buildPurposeTree({ router, embedder: fakeEmbedder(), budget: new CallBudget() }, { question });
+    expect(withSides.tree.goals.map((g: { goal: string; role?: string }) => [g.goal, g.role ?? ''])).toEqual([['Actively maintained', ''], [VALUE_GOAL, 'value'], [COST_GOAL, 'cost']]);
+    expect(withSides.tree.goals[2].questions.map((q: { phase: string; q: string }) => [q.phase, q.q])).toEqual([['pre-transaction', 'What does the pre-transaction phase take?'], ['transaction', 'What does the transaction phase take?'], ['post-transaction', 'What does the post-transaction phase take?']]);
+    expect(tensionGoalsOf(withSides.tree)).toEqual([]);
+    const log: string[] = [];
+    const undecided = await buildPurposeTree({ router: fakeRouter(script(seq({ consumes: true }, { consumes: false }, FAIL))), embedder: fakeEmbedder(), budget: new CallBudget(), log: (line: string) => log.push(line) }, { question });
+    expect(undecided.tree.consumes).toMatchObject({ value: true, decided: false });
+    expect(undecided.tree.goals.map((g: { role?: string }) => g.role ?? '')).toEqual(['', 'value', 'cost']);
+    expect(log).toContain('value and cost sides: no majority on whether the result consumes resources of the asker; both sides are kept');
+  });
+
+  it('sizes the tree budget per goal so that 8 goals are all refined, and names a goal that was not', async () => {
+    expect([treeCap(0), treeCap(5), treeCap(6), treeCap(11)]).toEqual([60, 60, 72, 132]);
+    const names = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'].map((name) => `Goal number ${name}`);
+    const script = (refine: unknown) => ({ ...base, tensions: { pairs: [] }, purpose: { who: 'a', outcome: 'x', why: 'y', anchors: ['C1'] }, consumes: { consumes: false }, goals: { goals: names.map((goal) => ({ goal, anchor: 'C1', notes: [] })) }, trace: (request: Ask) => ({ anchor: pickLetter(request, () => true), relation: 'S' }), refine });
+    const budget = new CallBudget({ ...STAGE_CAPS, tree: 10 });
+    const log: string[] = [];
+    const { tree } = await buildPurposeTree({ router: fakeRouter(script(refined)), embedder: fakeEmbedder(), budget, log: (line: string) => log.push(line) }, { question: 'eight things at once' });
+    expect(tree.goals.map((g: { goal: string }) => g.goal)).toEqual(names);
+    expect(tree.goals.every((g: { questions: unknown[]; state: string }) => g.questions.length === 1 && g.state === 'kept')).toBe(true);
+    expect(budget.caps.tree).toBe(96);
+    expect(budget.report().tree).toMatchObject({ cap: 96, skipped: 0 });
+    expect(budget.report().tree.used).toBeGreaterThan(10);
+    expect(log[0]).toBe('tree budget: 96 calls for 8 goal(s) (12 a goal, at least 60)');
+    expect(tree.unrefined).toEqual([]);
+    const missing: string[] = [];
+    const partial = await buildPurposeTree({ router: fakeRouter(script((request: Ask) => (request.messages[1].content.includes('number three') ? FAIL : refined))), embedder: fakeEmbedder(), budget: new CallBudget(), log: (line: string) => missing.push(line) }, { question: 'eight things at once' });
+    expect(partial.tree.goals).toHaveLength(7);
+    expect(partial.tree.dropped).toEqual([{ goal: 'Goal number three', reason: UNREFINED, trace: { id: 'C1', text: 'eight things at once' } }]);
+    expect(partial.tree.unrefined).toEqual(['Goal number three']);
+    expect(missing).toContain('1 goal(s) not refined into measurable questions: Goal number three');
   });
 });
