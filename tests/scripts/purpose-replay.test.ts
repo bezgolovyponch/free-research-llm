@@ -30,7 +30,10 @@ function script() {
     'scope-notes': { notes: [{ spans: ['S1'], label: 'rust at the mount' }, { spans: ['S77'], label: 'invented' }] },
     purpose: { who: 'a buyer', outcome: 'a sound car for little money', why: 'a small budget', anchors: ['C1'] },
     implications: { implications: [] },
-    requirements: (request: { messages: { content: string }[] }) => ({ groups: [...request.messages[1].content.matchAll(/^\[(S\d+)\]/gm)].map((match) => [match[1]]) }),
+    requirements: (request: { messages: { content: string }[] }) => {
+      const ids = [...request.messages[1].content.matchAll(/^\[([ST]\d+)\]/gm)].map((match) => match[1]);
+      return { groups: ids[0].startsWith('T') ? [ids] : ids.map((id) => [id]) };
+    },
     tensions: { pairs: [['C1', 'C2']] },
     consumes: { consumes: true },
     restates: { restates: [] },
@@ -113,13 +116,16 @@ describe('purpose replay: with --projects the inputs come from the stored resear
     expect((await storedProject(PROJECTS, 'b2f5b7')).id).toBe('b2f5b7-fixture');
   });
 
-  it('gives the stored hints to the purpose tree as hint anchors', async () => {
+  it('gives the stored hints to the purpose tree as one hint anchor for one hint that lists examples', async () => {
     const out = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-replay-'));
     const { entry, rows } = await replayInputs(questions.suppliers, PROJECTS);
     const router = fakeRouter(script());
     const { run } = await runReplay({ mode: 'suppliers', entry, rows, out, router, search: { ...search, searched: [] }, embedder: fakeEmbedder(), fixture, languages: ['English'] });
-    expect(run.anchors.filter((anchor: { kind: string }) => anchor.kind === 'hint').map((anchor: { text: string }) => anchor.text)).toEqual(['Supplier countries: NL', 'DE', 'UK', 'IT', 'PL', 'LT']);
-    expect(router.userText('purpose')).toContain('[H1] Supplier countries: NL');
+    expect(run.anchors.filter((anchor: { kind: string }) => anchor.kind === 'hint').map((anchor: { text: string }) => anchor.text)).toEqual(['Supplier countries: NL, DE, UK, IT, PL, LT']);
+    expect(run.tree.requirements.hints.grouping).toEqual({ grouped: true, valid: 2 });
+    expect(router.userText('purpose')).toContain('[H1] Supplier countries: NL, DE, UK, IT, PL, LT');
+    expect(router.count('purpose')).toBe(3);
+    expect(run.scoping.screened).toEqual({ purpose: 'a buyer wants a sound car for little money, because a small budget', subject: 'wholesale second hand clothing provider, as asked: Find wholesale branded second hand clothing providers for a retail second hand shop in Czech Republic and Slovakia' });
     expect(router.userText('source-relevance')).toContain('Asked market: Czechia, Slovakia');
     expect(router.userText('fixed-perspectives')).toContain('Question: Find wholesale branded second hand clothing providers for a retail second hand shop in Czech Republic and Slovakia');
   });
@@ -241,12 +247,30 @@ describe('purpose replay: the second opinion is asked on the same sentences and 
     expect(row).toMatchObject({ value: '2 of 5; 2 disagree, 1 not judged, 0 answered by the same provider', pass: false });
   });
 
+  it('screens the library question against what its requirements mean, not the kind word, the first and the second time', async () => {
+    const out = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-replay-'));
+    const pdf = { ...search, searched: [], async search() { return [{ url: 'https://docs.example.org/pdf', title: 'Parsing PDF files in Node.js', text: 'This guide compares packages that parse PDF files in Node.js. Each package is rated by its release history. The documentation of each is linked.' }, { url: 'https://town.example.org/loans', title: 'Lending rules of the town library', text: 'The town library lends books for four weeks. Readers renew a loan at the desk. The reading room opens at nine.' }]; } };
+    const relevance = (request: { messages: { content: string }[] }) => {
+      const asked = request.messages[1].content;
+      const meant = asked.includes('Asked subject: library, as asked: Find open-source PDF parsing libraries for Node.js that are actively maintained and well documented');
+      return { about: meant && asked.includes('Source title: Parsing PDF files in Node.js') ? 'A' : 'C', market: 'B', span: 'S1' };
+    };
+    const router = fakeRouter({ ...script(), tensions: { pairs: [] }, 'source-relevance': relevance });
+    const { run } = await runReplay({ mode: 'library', entry: questions.library, out, router, search: pdf, embedder: fakeEmbedder(), fixture, languages: ['English'] });
+    expect(run.scoping.sources.map((source: { url: string; about: string }) => [source.url, source.about])).toEqual([['https://docs.example.org/pdf', 'A']]);
+    expect(run.scoping.dropped).toEqual([{ url: 'https://town.example.org/loans', reason: 'off-subject: a different subject' }]);
+    expect(run.second).toMatchObject({ agreed: 1, total: 1 });
+    expect(router.userText('source-role')).toContain('Asked subject: library, as asked: Find open-source PDF parsing libraries for Node.js');
+    const bare = await screenSources({ router: fakeRouter({ 'source-relevance': relevance, 'source-role': { role: 'A' } }), embedder: fakeEmbedder() }, { sources: await pdf.search(), purpose: questions.library.question, subject: questions.library.kind });
+    expect(bare.kept).toEqual([]);
+  });
+
   it('judges the second time with the purpose and the subject the first screen used', async () => {
     const out = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-replay-'));
     const rows = [{ title: 'Alpha 1.2', subject: ['Alpha'] }, { title: 'Alpha 1.4', subject: ['Alpha'] }];
     const router = fakeRouter({ ...script(), 'subject-levels': { levels: ['make', 'engine'] } });
     const { run } = await runReplay({ mode: 'plots', entry: { ...questions.trail, kind: 'car' }, rows, out, router, search: { ...search, searched: [] }, embedder: fakeEmbedder(), fixture, languages: ['English'] });
-    expect(run.scoping.screened).toEqual({ purpose: questions.trail.question, subject: 'car (any of: Alpha)' });
+    expect(run.scoping.screened).toEqual({ purpose: 'a buyer wants a sound car for little money, because a small budget', subject: 'car (any of: Alpha)' });
     const judged = router.calls.filter((call) => call.task === 'source-relevance').map((call) => call.messages[1].content);
     expect(judged).toHaveLength(8);
     expect(judged.every((asked) => asked.includes('Asked subject: car (any of: Alpha)'))).toBe(true);

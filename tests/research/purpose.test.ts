@@ -40,18 +40,45 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
   const question = 'similar to A, B, C, D with highest price/value ratio, proven good quality';
 
   it('groups a list of examples of one thing into one requirement by a vote on piece ids, and keeps the hints', async () => {
-    const router = fakeRouter({ requirements: { groups: [['S5'], ['S3', 'S1', 'S2', 'S4']] } });
+    const router = fakeRouter({ requirements: (request: Ask) => (request.messages[1].content.includes('[T1]') ? { groups: [['T1'], ['T2']] } : { groups: [['S5'], ['S3', 'S1', 'S2', 'S4']] }) });
     const anchors = await anchorsOf({ router }, question, 'sold by weight, graded');
     expect(anchors).toEqual([
       { id: 'C1', kind: 'clause', text: 'similar to A, B, C, D with highest price/value ratio', spans: ['S1', 'S2', 'S3', 'S4'] },
       { id: 'C2', kind: 'clause', text: 'proven good quality', spans: ['S5'] },
-      { id: 'H1', kind: 'hint', text: 'sold by weight' },
-      { id: 'H2', kind: 'hint', text: 'graded' },
+      { id: 'H1', kind: 'hint', text: 'sold by weight', spans: ['T1'] },
+      { id: 'H2', kind: 'hint', text: 'graded', spans: ['T2'] },
     ]);
-    expect(router.count('requirements')).toBe(2);
+    expect(router.count('requirements')).toBe(4);
     expect(router.calls[0]).toMatchObject({ tier: 'fast', purpose: 'purpose-judge' });
     expect(router.userText('requirements')).toContain('[S4] D with highest price/value ratio');
     expect(router.userText('requirements')).not.toContain('sold by weight');
+    expect(router.userText('requirements', 2)).toBe(`${router.calls.filter((call: { task?: string }) => call.task === 'requirements')[0].messages[0].content}\nPieces:\n[T1] sold by weight\n[T2] graded`);
+  });
+
+  it('groups a hint that lists several examples into one hint anchor, with the same split and complete-link consensus as the question', async () => {
+    const hint = 'supplier located in NL, DE, UK, IT, PL or LT';
+    const votes = seq({ groups: [['T1', 'T2', 'T3', 'T4', 'T5']] }, { groups: [['T1', 'T2'], ['T3', 'T4', 'T5']] }, { groups: [['T1', 'T2', 'T3', 'T4', 'T5']] });
+    const router = fakeRouter({ requirements: (request: Ask, index: number) => (request.messages[1].content.includes('[T1]') ? votes(request, index) : { groups: [['S1']] }) });
+    const log: string[] = [];
+    const budget = new CallBudget();
+    const stored = await requirementsOf({ router, budget, log: (line: string) => log.push(line) }, 'Find wholesale providers', hint);
+    expect(stored.anchors).toEqual([
+      { id: 'C1', kind: 'clause', text: 'Find wholesale providers', spans: ['S1'] },
+      { id: 'H1', kind: 'hint', text: hint, spans: ['T1', 'T2', 'T3', 'T4', 'T5'] },
+    ]);
+    expect(stored.hints).toMatchObject({ grouping: { grouped: true, valid: 3 }, pieces: [{ text: 'supplier located in NL', asked: true, spans: ['T1'] }, { text: 'DE', asked: false }, { text: 'UK' }, { text: 'IT' }, { text: 'PL or LT', asked: true, split: false, spans: ['T5'] }] });
+    const splitAsked = router.calls.filter((call: { task?: string }) => call.task === 'requirement-split').map((call: Ask) => call.messages[1].content);
+    expect([...new Set(splitAsked)]).toEqual(['Piece: Find wholesale providers', 'Piece: supplier located in NL', 'Piece: PL or LT']);
+    expect(budget.caps.purpose).toBe(purposeCap(3));
+    expect(log.filter((line) => line.includes('no majority'))).toEqual([]);
+    const splitter = (request: Ask) => (request.messages[1].content === 'Piece: sold per kg graded A or cream' ? { more: true, second: 'graded A or cream' } : { more: false });
+    const twice = await requirementsOf({ router: fakeRouter({ 'requirement-split': splitter, requirements: (request: Ask) => (request.messages[1].content.includes('[T1]') ? { groups: [['T1'], ['T2']] } : { groups: [['S1']] }) }) }, 'Find wholesale providers', 'sold per kg graded A or cream');
+    expect(twice.anchors.slice(1)).toEqual([{ id: 'H1', kind: 'hint', text: 'sold per kg', spans: ['T1'] }, { id: 'H2', kind: 'hint', text: 'graded A or cream', spans: ['T2'] }]);
+    const undecided: string[] = [];
+    const kept = await requirementsOf({ router: fakeRouter({}), log: (line: string) => undecided.push(line) }, 'Find wholesale providers', hint);
+    expect(kept.anchors.filter((anchor: { kind: string }) => anchor.kind === 'hint')).toHaveLength(5);
+    expect(undecided).toEqual(['requirements: no majority on grouping the 5 pieces of the hints by meaning; the punctuation split is kept']);
+    expect((await requirementsOf({ router: fakeRouter({}) }, 'Find wholesale providers')).hints).toBeUndefined();
   });
 
   it('groups by consensus over the votes: three votes that differ in one piece still group the list', async () => {

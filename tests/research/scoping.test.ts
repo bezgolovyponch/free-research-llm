@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COST_BASIS, COST_GOAL, VALUE_BASIS, VALUE_GOAL } from '../../src/research/purpose.mjs';
-import { MAX_SOURCES, MIN_HOSTS, MIN_PERSPECTIVES, composeQueries, diversityOf, findSources, fixedPerspectives, pageKey, perspectives, relevanceReason, runScoping, scopeNotes, scopingCap, screenSources, screeningSubject, subjectLabels, subjectLevels } from '../../src/research/scoping.mjs';
+import { MAX_SOURCES, MIN_HOSTS, MIN_PERSPECTIVES, SUBJECT_CHARS, askedSubject, composeQueries, diversityOf, findSources, fixedPerspectives, pageKey, perspectives, relevanceReason, runScoping, scopeNotes, scopingCap, screenSources, screeningSubject, subjectLabels, subjectLevels } from '../../src/research/scoping.mjs';
 import { CallBudget } from '../../src/research/semantic.mjs';
 import { quoteFound } from '../../src/research/quote.mjs';
 import { fakeEmbedder, fakeRouter, seq } from '../helpers/fakes';
@@ -27,6 +27,12 @@ describe('scoping queries are composed by code', () => {
     expect(screeningSubject(['car'], 'car')).toBe('car');
     expect(screeningSubject(['Alpha', 'Beta', 'Alpha 1.2'], 'car')).toBe('car (any of: Alpha; Beta; Alpha 1.2)');
     expect(screeningSubject([], 'car')).toBe('car');
+    const asked = [{ id: 'C1', kind: 'clause', text: 'Find open-source PDF parsing  libraries for Node.js' }, { id: 'C2', kind: 'clause', text: 'actively maintained' }, { id: 'H1', kind: 'hint', text: 'ask the forum' }];
+    expect(screeningSubject(['library'], 'library', asked)).toBe('library, as asked: Find open-source PDF parsing libraries for Node.js; actively maintained');
+    expect(screeningSubject([], '', asked)).toBe('Find open-source PDF parsing libraries for Node.js; actively maintained');
+    expect(screeningSubject(['Alpha', 'Beta'], 'car', asked)).toBe('car (any of: Alpha; Beta)');
+    expect(screeningSubject([], 'library', [{ id: 'H1', kind: 'hint', text: 'ask the forum' }])).toBe('library');
+    expect(askedSubject('k', [{ id: 'C1', kind: 'clause', text: 'x'.repeat(500) }])).toHaveLength('k, as asked: '.length + SUBJECT_CHARS);
   });
 
   it('repeats the perspectives call once when a market language has no phrase', async () => {

@@ -141,9 +141,7 @@ export async function groupSpans(ctx, spans) {
   return { groups, grouped: true, valid };
 }
 
-export async function requirementsOf(ctx, question, guidance = '') {
-  const texts = clausesOf(question);
-  planPurpose(ctx, texts.filter((piece) => wordCount(piece) >= SPLIT_MIN_WORDS).length);
+async function groupedPieces(ctx, texts, { prefix, of }) {
   const spans = [];
   const pieces = [];
   for (const [index, piece] of texts.entries()) {
@@ -151,20 +149,34 @@ export async function requirementsOf(ctx, question, guidance = '') {
     if (parts.length > 1) ctx.log?.(`requirements: the piece "${oneSpace(piece)}" holds two requirements; it is split before "${parts[1]}"`);
     const ids = [];
     for (const text of parts.length > 1 ? parts : [piece]) {
-      spans.push({ id: `S${spans.length + 1}`, text, piece: index });
-      ids.push(`S${spans.length}`);
+      spans.push({ id: `${prefix}${spans.length + 1}`, text, piece: index });
+      ids.push(`${prefix}${spans.length}`);
     }
     pieces.push({ text: piece, asked: wordCount(piece) >= SPLIT_MIN_WORDS, split: parts.length > 1, votes, spans: ids });
   }
   const byId = new Map(spans.map((span) => [span.id, span]));
   const { groups, grouped, valid } = await groupSpans(ctx, spans);
-  if (!grouped && spans.length > 1) ctx.log?.(`requirements: no majority on grouping the ${spans.length} pieces of the question by meaning; the punctuation split is kept`);
+  if (!grouped && spans.length > 1) ctx.log?.(`requirements: no majority on grouping the ${spans.length} pieces of the ${of} by meaning; the punctuation split is kept`);
   const joined = (group) => group.map((id, at) => `${at === 0 ? '' : byId.get(id).piece === byId.get(group[at - 1]).piece ? ' ' : ', '}${byId.get(id).text}`).join('');
+  return { groups: groups.map((group) => ({ text: joined(group), spans: group })), pieces, grouping: { grouped, valid } };
+}
+
+export async function requirementsOf(ctx, question, guidance = '') {
+  const texts = clausesOf(question);
+  const hintTexts = clausesOf(guidance);
+  planPurpose(ctx, [...texts, ...hintTexts].filter((piece) => wordCount(piece) >= SPLIT_MIN_WORDS).length);
+  const asked = await groupedPieces(ctx, texts, { prefix: 'S', of: 'question' });
+  const hinted = hintTexts.length ? await groupedPieces(ctx, hintTexts, { prefix: 'T', of: 'hints' }) : null;
   const anchors = [
-    ...groups.map((group, index) => ({ id: `C${index + 1}`, kind: 'clause', text: joined(group), spans: group })),
-    ...clausesOf(guidance).map((text, index) => ({ id: `H${index + 1}`, kind: 'hint', text })),
+    ...asked.groups.map((group, index) => ({ id: `C${index + 1}`, kind: 'clause', ...group })),
+    ...(hinted?.groups ?? []).map((group, index) => ({ id: `H${index + 1}`, kind: 'hint', ...group })),
   ];
-  return { anchors, pieces, grouping: { grouped, valid } };
+  return { anchors, pieces: asked.pieces, grouping: asked.grouping, ...(hinted ? { hints: { pieces: hinted.pieces, grouping: hinted.grouping } } : {}) };
+}
+
+export async function drawRequirements(ctx, question, guidance = '') {
+  const requirements = await requirementsOf(ctx, question, guidance);
+  return { requirements, purpose: await drawPurpose(ctx, requirements.anchors) };
 }
 
 export async function anchorsOf(ctx, question, guidance = '') {
@@ -890,11 +902,11 @@ export function needsConfirmation(tree) {
   return Boolean(tree) && (coverageOpen(tree).length > 0 || (!tree.confirmedAt && openEntries(tree).length > 0));
 }
 
-export async function buildPurposeTree(ctx, { question, guidance = '', answers = [], notes = [] }) {
+export async function buildPurposeTree(ctx, { question, guidance = '', answers = [], notes = [], drawn = null }) {
   const said = [question, guidance, ...answers].join('\n');
-  const { anchors, ...requirements } = await requirementsOf(ctx, question, guidance);
+  const { anchors, ...requirements } = drawn?.requirements ?? (await requirementsOf(ctx, question, guidance));
   const tensions = await tensionsAsked(ctx, anchors);
-  const purpose = await drawPurpose(ctx, anchors);
+  const purpose = drawn ? drawn.purpose : await drawPurpose(ctx, anchors);
   if (!purpose) return { phase: 'needs-purpose', tree: null, anchors, requirements, tensions };
   const consumes = await consumesVote(ctx, purpose, anchors);
   if (!consumes.decided) ctx.log?.('value and cost sides: no majority on whether the result consumes resources of the asker; both sides are kept');

@@ -8,7 +8,7 @@ import { buildBrief, countryByCode } from '../src/research/brief.mjs';
 import { lowPriceStats } from '../src/research/candidates.mjs';
 import { ChecklistJudge, hardenKind, migrateChecks } from '../src/research/checklist.mjs';
 import { HostBook, gatherEvidence, identify, subjectKey } from '../src/research/facts.mjs';
-import { COST_CHECKERS, COST_PHASES, COST_ROLE, METHOD_ID, MIN_EXPLANATIONS, PRICE_CHECKER, VALUE_ROLE, buildPurposeTree, coverageOf, openEntries, tensionGoalsOf } from '../src/research/purpose.mjs';
+import { COST_CHECKERS, COST_PHASES, COST_ROLE, METHOD_ID, MIN_EXPLANATIONS, PRICE_CHECKER, VALUE_ROLE, buildPurposeTree, coverageOf, drawRequirements, openEntries, tensionGoalsOf } from '../src/research/purpose.mjs';
 import { KNOWLEDGE, MIN_HOSTS, MIN_PERSPECTIVES, OFF_MARKET, PAGE_CHARS, composeQueries, diversityOf, judgeSource, relevanceReason, runScoping, screenSources } from '../src/research/scoping.mjs';
 import { CallBudget } from '../src/research/semantic.mjs';
 import { sentenceSpans } from '../src/research/spans.mjs';
@@ -277,14 +277,15 @@ export async function runReplay({ mode, entry, out, router, search, embedder, fi
   const ctx = { router, search, embedder, budget, log };
   const ledgerStart = (router.ledger ?? []).length;
   const spoken = (entry.languages ?? languages ?? ['English']).slice(0, MAX_LANGUAGES);
-  const { scoping, pages } = await runScoping(ctx, { question: entry.question, purpose: entry.question, kind: entry.kind, regions: entry.regions ?? [], markets: entry.markets ?? [], languages: spoken, rows, titles: rows.map((row) => row.title).filter(Boolean) });
+  const drawn = await drawRequirements(ctx, entry.question, entry.guidance ?? '');
+  const { scoping, pages } = await runScoping(ctx, { question: entry.question, purpose: drawn.purpose?.text ?? entry.question, requirements: drawn.requirements.anchors, kind: entry.kind, regions: entry.regions ?? [], markets: entry.markets ?? [], languages: spoken, rows, titles: rows.map((row) => row.title).filter(Boolean) });
   await write('0-scope-plan', { levels: scoping.levels, languages: scoping.languages, subjects: scoping.subjects, perspectives: scoping.perspectives, queries: scoping.queries, embedModel: scoping.embedModel });
   await write('0-scope-sources', { kept: scoping.sources, dropped: scoping.dropped, diversity: scoping.diversity, enough: scoping.enough });
   await write('0-scope-notes', scoping.notes);
   const second = await secondOpinions(ctx, pages, { ...scoping.screened, markets: entry.markets ?? [], regions: entry.regions ?? [] });
   await write('0-scope-second', second);
   const notesOnPage = scoping.notes.filter((note) => quoteOfSpans(note.quote, sentenceSpans(pages.find((page) => page.url === note.url)?.text ?? '', { limit: PAGE_CHARS }))).length;
-  const built = await buildPurposeTree(ctx, { question: entry.question, guidance: entry.guidance ?? '', notes: scoping.notes });
+  const built = await buildPurposeTree(ctx, { question: entry.question, guidance: entry.guidance ?? '', notes: scoping.notes, drawn });
   await write('1-tree', { phase: built.phase, anchors: built.anchors, tree: built.tree, open: openEntries(built.tree) });
   let car = null;
   if (mode === 'car' && fixture && built.tree) {

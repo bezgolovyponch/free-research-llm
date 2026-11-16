@@ -13,6 +13,7 @@ export const SCOPING_BASE_CAP = 20;
 export const SCOPING_CALLS_PER_SOURCE = 5;
 export const THIN = 'scoping thin';
 export const SUBJECT_LABELS = 5;
+export const SUBJECT_CHARS = 400;
 export const RELEVANCE_SPANS = 8;
 export const NOTE_SPANS = 40;
 export const BLOCK_CHARS = 4000;
@@ -162,9 +163,15 @@ export function subjectLabels(rows, levels, kind) {
   return labels.length ? [...new Set(labels)] : [kind].filter(Boolean);
 }
 
-export function screeningSubject(subjects, kind) {
+export function askedSubject(kind, requirements) {
+  const asked = (requirements ?? []).filter((anchor) => anchor?.kind === 'clause' && anchor.text).map((anchor) => String(anchor.text).replace(/\s+/g, ' ').trim()).join('; ').slice(0, SUBJECT_CHARS);
+  if (!asked) return kind;
+  return kind ? `${kind}, as asked: ${asked}` : asked;
+}
+
+export function screeningSubject(subjects, kind, requirements = []) {
   const labels = (subjects ?? []).filter((label) => label && label !== kind);
-  if (!labels.length) return kind;
+  if (!labels.length) return askedSubject(kind, requirements);
   return labels.length === 1 && !kind ? labels[0] : `${kind} (any of: ${labels.join('; ')})`;
 }
 
@@ -324,13 +331,13 @@ export async function scopeNotes(ctx, { sources, purpose }) {
   return { notes, rejected };
 }
 
-export async function runScoping(ctx, { question, purpose = '', kind, regions = [], markets = [], languages = ['English'], rows = [], titles = [] }) {
+export async function runScoping(ctx, { question, purpose = '', kind, regions = [], markets = [], languages = ['English'], rows = [], titles = [], requirements = [] }) {
   planScoping(ctx);
   const levels = await subjectLevels(ctx, { question, kind, titles });
   const subjects = subjectLabels(rows, levels, kind);
   let views = [...(await fixedPerspectives(ctx, { question, purpose, languages })), ...(await perspectives(ctx, { question, purpose, languages }))];
   const queries = composeQueries(subjects, views).map((entry) => ({ ...entry, round: 1 }));
-  const screening = { purpose: purpose || question, subject: screeningSubject(subjects, kind), markets, regions };
+  const screening = { purpose: purpose || question, subject: screeningSubject(subjects, kind, requirements), markets, regions };
   const found = await findSources(ctx, queries);
   const first = await screenSources(ctx, { sources: found, ...screening });
   const kept = [...first.kept];
