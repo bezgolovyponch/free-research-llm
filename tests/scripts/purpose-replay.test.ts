@@ -255,8 +255,12 @@ describe('purpose replay: the second opinion is asked on the same sentences and 
       const meant = asked.includes('Asked subject: library, as asked: Find open-source PDF parsing libraries for Node.js that are actively maintained and well documented');
       return { about: meant && asked.includes('Source title: Parsing PDF files in Node.js') ? 'A' : 'C', market: 'B', span: 'S1' };
     };
-    const router = fakeRouter({ ...script(), tensions: { pairs: [] }, 'source-relevance': relevance });
+    const router = fakeRouter({ ...script(), tensions: { pairs: [] }, 'source-relevance': relevance, 'requirement-subjects': { subjects: [{ anchor: 'C1', phrase: 'PDF parsing libraries for Node.js' }] } });
     const { run } = await runReplay({ mode: 'library', entry: questions.library, out, router, search: pdf, embedder: fakeEmbedder(), fixture, languages: ['English'] });
+    expect(run.scoping.queries.map((query: { query: string }) => query.query).slice(0, 3)).toEqual(['PDF parsing libraries for Node.js what makes one good', 'PDF parsing libraries for Node.js all costs of owning', 'PDF parsing libraries for Node.js known faults']);
+    expect(run.scoping.queries.every((query: { query: string; subject: string }) => query.subject === 'PDF parsing libraries for Node.js' && !query.query.startsWith('library '))).toBe(true);
+    const plan = JSON.parse(await fs.readFile(path.join(out, 'library-0-scope-plan.json'), 'utf8'));
+    expect(plan).toMatchObject({ subjects: ['PDF parsing libraries for Node.js'], subjectsFrom: 'requirements', askedSubjects: { rejected: [] } });
     expect(run.scoping.sources.map((source: { url: string; about: string }) => [source.url, source.about])).toEqual([['https://docs.example.org/pdf', 'A']]);
     expect(run.scoping.dropped).toEqual([{ url: 'https://town.example.org/loans', reason: 'off-subject: a different subject' }]);
     expect(run.second).toMatchObject({ agreed: 1, total: 1 });

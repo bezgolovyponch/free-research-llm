@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COST_BASIS, COST_GOAL, VALUE_BASIS, VALUE_GOAL } from '../../src/research/purpose.mjs';
-import { MAX_SOURCES, MIN_HOSTS, MIN_PERSPECTIVES, SUBJECT_CHARS, askedSubject, composeQueries, diversityOf, findSources, fixedPerspectives, pageKey, perspectives, relevanceReason, runScoping, scopeNotes, scopingCap, screenSources, screeningSubject, subjectLabels, subjectLevels } from '../../src/research/scoping.mjs';
+import { MAX_SOURCES, MIN_HOSTS, MIN_PERSPECTIVES, SUBJECT_CHARS, askedSubject, composeQueries, diversityOf, findSources, fixedPerspectives, pageKey, perspectives, relevanceReason, requirementSubjects, runScoping, scopeNotes, scopingCap, screenSources, screeningSubject, subjectLabels, subjectLevels } from '../../src/research/scoping.mjs';
 import { CallBudget } from '../../src/research/semantic.mjs';
 import { quoteFound } from '../../src/research/quote.mjs';
 import { fakeEmbedder, fakeRouter, seq } from '../helpers/fakes';
@@ -206,6 +206,97 @@ describe('a value perspective and a cost perspective are always present', () => 
     expect(composeQueries(['x'], many, 12, { used: ['x v1', 'x c1', 'x p1', 'x v2'], first: ['P'], shift: 1 }).map((q: { query: string }) => q.query)).toEqual(['x p2', 'x c2']);
     expect(composeQueries(['x', 'y'], many.slice(0, 1), 12, { used: ['x v1', 'y v2'], shift: 1 }).map((q: { query: string }) => q.query)).toEqual(['y v1', 'x v2']);
     expect(composeQueries(['x'], many.slice(0, 1), 12, { used: ['x v1', 'x v2'], shift: 1 })).toEqual([]);
+  });
+});
+
+describe('queries are composed from what the requirements mean', () => {
+  const requirements = [
+    { id: 'C1', kind: 'clause', text: 'Find open-source PDF parsing libraries for Node.js' },
+    { id: 'C2', kind: 'clause', text: 'actively maintained and well documented' },
+    { id: 'H1', kind: 'hint', text: 'ask the forum' },
+  ];
+  const good = { subjects: [
+    { anchor: 'C1', phrase: 'PDF parsing libraries for Node.js', translations: [{ lang: 'Czech', phrase: 'knihovny pro čtení PDF v Node.js' }, { lang: 'Klingon', phrase: 'x' }] },
+    { anchor: 'C2', phrase: 'well documented PDF libraries', translations: [{ lang: 'Czech', phrase: 'dobře zdokumentované knihovny PDF' }] },
+  ] };
+  const nearest = (wanted: Record<string, number>) => fakeEmbedder((query, candidates) => [wanted[query] ?? 0, ...candidates.map((_, index) => index)]);
+
+  it('takes one phrase per requirement, only of words of the requirements, and a translation only when it is nearest to its own phrase', async () => {
+    const router = fakeRouter({ 'requirement-subjects': good });
+    const embedder = nearest({ 'knihovny pro čtení PDF v Node.js': 0, 'dobře zdokumentované knihovny PDF': 0 });
+    const drawn = await requirementSubjects({ router, embedder }, { requirements, languages: ['English', 'Czech'] });
+    expect(drawn.subjects).toEqual([
+      { anchor: 'C1', label: 'PDF parsing libraries for Node.js', translations: { Czech: 'knihovny pro čtení PDF v Node.js' } },
+      { anchor: 'C2', label: 'well documented PDF libraries', translations: {} },
+    ]);
+    expect(drawn.rejected).toEqual([{ anchor: 'C2', lang: 'Czech', phrase: 'dobře zdokumentované knihovny PDF', reason: 'nearer in meaning to another requirement than to its own' }]);
+    expect(router.count('requirement-subjects')).toBe(1);
+    expect(router.calls[0]).toMatchObject({ tier: 'deep' });
+    expect(router.userText('requirement-subjects')).toContain('[C2] actively maintained and well documented\nLanguages: English, Czech');
+    expect(router.userText('requirement-subjects')).not.toContain('ask the forum');
+    expect(embedder.calls.map((call) => [call.query, call.candidates])).toEqual([['knihovny pro čtení PDF v Node.js', ['PDF parsing libraries for Node.js', 'well documented PDF libraries']], ['dobře zdokumentované knihovny PDF', ['PDF parsing libraries for Node.js', 'well documented PDF libraries']]]);
+  });
+
+  it('asks once more when a phrase holds a word nobody wrote, then drops the phrases that still do; a translation that cannot be checked is not used', async () => {
+    const invented = { subjects: [{ anchor: 'C1', phrase: 'best JavaScript PDF tools' }, { anchor: 'C2', phrase: 'PDF parsing libraries' }, { anchor: 'C9', phrase: 'PDF' }] };
+    const router = fakeRouter({ 'requirement-subjects': seq(invented, { subjects: [{ anchor: 'C1', phrase: 'Node.js PDF parsing libraries open-source Find for', translations: [{ lang: 'Czech', phrase: 'knihovny PDF' }] }, { anchor: 'C2', phrase: 'PDF parsing libraries' }, { anchor: 'C1', phrase: 'PDF' }] }) });
+    const drawn = await requirementSubjects({ router, embedder: fakeEmbedder() }, { requirements, languages: ['English', 'Czech'] });
+    expect(router.calls[1].messages[2].content).toContain('the phrase for C1 has words that are not in the requirements: best, javascript, tools; the phrase for C2 has no word of its own requirement');
+    expect(router.count('requirement-subjects')).toBe(2);
+    expect(drawn.subjects).toEqual([{ anchor: 'C1', label: 'Node.js PDF parsing libraries open-source Find', translations: {} }]);
+    expect(drawn.rejected).toEqual([{ anchor: 'C2', phrase: 'PDF parsing libraries', reason: 'no word of its own requirement' }, { anchor: 'C1', lang: 'Czech', phrase: 'knihovny PDF', reason: 'a translation that code could not check' }]);
+  });
+
+  it('falls back to nothing when the call fails or no phrase passes, and makes no call without requirements', async () => {
+    expect(await requirementSubjects({ router: fakeRouter({}) }, { requirements })).toEqual({ subjects: [], rejected: [], failed: true });
+    expect(await requirementSubjects({ router: fakeRouter({ 'requirement-subjects': { subjects: [{ anchor: 'C1', phrase: 'lending rules' }] } }) }, { requirements })).toEqual({ subjects: [], rejected: [], failed: true });
+    const silent = fakeRouter({});
+    expect(await requirementSubjects({ router: silent }, { requirements: [requirements[2]] })).toEqual({ subjects: [], rejected: [] });
+    expect(silent.calls).toEqual([]);
+  });
+
+  it('puts the phrase of the query language in front of the aspect phrase', () => {
+    const subjects = [{ anchor: 'C1', label: 'PDF parsing libraries for Node.js', translations: { Czech: 'knihovny pro čtení PDF v Node.js' } }];
+    expect(composeQueries(subjects, views).map((q: { query: string; subject: string; lang: string }) => [q.query, q.subject, q.lang])).toEqual([
+      ['PDF parsing libraries for Node.js known faults', 'PDF parsing libraries for Node.js', 'English'],
+      ['knihovny pro čtení PDF v Node.js časté závady', 'knihovny pro čtení PDF v Node.js', 'Czech'],
+      ['knihovny pro čtení PDF v Node.js zkušenosti majitelů', 'knihovny pro čtení PDF v Node.js', 'Czech'],
+    ]);
+  });
+
+  const english = { value: [{ lang: 'English', phrase: 'what makes one good' }], cost: [{ lang: 'English', phrase: 'all costs of owning' }] };
+  const script = (more: Record<string, unknown> = {}) => ({ 'fixed-perspectives': english, perspectives: { perspectives: [{ name: 'Maintainers', aspects: [{ lang: 'English', phrase: 'release history' }] }] }, 'source-relevance': { about: 'A', market: 'B', span: 'S1' }, 'source-role': { role: 'A' }, 'scope-notes': { notes: [] }, ...more });
+  const run = async (router: ReturnType<typeof fakeRouter>, input: Record<string, unknown>) => {
+    const searched: string[] = [];
+    const log: string[] = [];
+    const search = { search: async (queries: string[]) => { searched.push(...queries); return []; } };
+    const { scoping } = await runScoping({ router, embedder: fakeEmbedder(), search, budget: new CallBudget(), log: (line: string) => log.push(line) }, { question: 'q', kind: 'library', languages: ['English'], ...input });
+    return { scoping, searched, log: log.filter((line) => line.startsWith('scoping: ')) };
+  };
+
+  it('searches the library question for PDF parsing in Node.js, not for the kind word', async () => {
+    const { scoping, searched, log } = await run(fakeRouter(script({ 'requirement-subjects': { subjects: [{ anchor: 'C1', phrase: 'PDF parsing libraries for Node.js' }, { anchor: 'C2', phrase: 'lending rules of libraries' }] } })), { requirements });
+    expect(searched.slice(0, 3)).toEqual(['PDF parsing libraries for Node.js what makes one good', 'PDF parsing libraries for Node.js all costs of owning', 'PDF parsing libraries for Node.js release history']);
+    expect(searched.every((query) => query.startsWith('PDF parsing libraries for Node.js ') && !query.startsWith('library '))).toBe(true);
+    expect(scoping.subjects).toEqual(['PDF parsing libraries for Node.js']);
+    expect(scoping.subjectsFrom).toBe('requirements');
+    expect(scoping.askedSubjects.rejected).toEqual([{ anchor: 'C2', phrase: 'lending rules of libraries', reason: 'words that are not in the requirements: lending, rules, of' }]);
+    expect(scoping.screened.subject).toBe('library, as asked: Find open-source PDF parsing libraries for Node.js; actively maintained and well documented');
+    expect(log).toEqual(['scoping: subject phrase "lending rules of libraries" for C2 is not used: words that are not in the requirements: lending, rules, of']);
+  });
+
+  it('falls back to the kind label only when the call fails, and keeps the candidate labels when a table exists', async () => {
+    const failed = await run(fakeRouter(script()), { requirements });
+    expect(failed.searched.slice(0, 3)).toEqual(['library what makes one good', 'library all costs of owning', 'library release history']);
+    expect(failed.scoping.subjectsFrom).toBe('kind');
+    expect(failed.log).toEqual(['scoping: no subject phrase was drawn from the requirements; the queries use the kind label "library"']);
+    const router = fakeRouter(script({ 'requirement-subjects': good, 'subject-levels': { levels: ['make', 'engine'] } }));
+    const table = await run(router, { requirements, rows: [{ title: 'Alpha 1.2', subject: ['Alpha'] }, { title: 'Alpha 1.4', subject: ['Alpha'] }], titles: ['Alpha 1.2', 'Alpha 1.4'] });
+    expect(router.count('requirement-subjects')).toBe(0);
+    expect(table.searched.slice(0, 3)).toEqual(['Alpha what makes one good', 'Alpha all costs of owning', 'Alpha release history']);
+    expect(table.scoping.subjectsFrom).toBe('table');
+    expect(table.scoping.askedSubjects).toBeUndefined();
+    expect(table.scoping.screened.subject).toBe('library (any of: Alpha)');
   });
 });
 

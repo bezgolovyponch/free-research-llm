@@ -279,7 +279,7 @@ export async function runReplay({ mode, entry, out, router, search, embedder, fi
   const spoken = (entry.languages ?? languages ?? ['English']).slice(0, MAX_LANGUAGES);
   const drawn = await drawRequirements(ctx, entry.question, entry.guidance ?? '');
   const { scoping, pages } = await runScoping(ctx, { question: entry.question, purpose: drawn.purpose?.text ?? entry.question, requirements: drawn.requirements.anchors, kind: entry.kind, regions: entry.regions ?? [], markets: entry.markets ?? [], languages: spoken, rows, titles: rows.map((row) => row.title).filter(Boolean) });
-  await write('0-scope-plan', { levels: scoping.levels, languages: scoping.languages, subjects: scoping.subjects, perspectives: scoping.perspectives, queries: scoping.queries, embedModel: scoping.embedModel });
+  await write('0-scope-plan', { levels: scoping.levels, languages: scoping.languages, subjects: scoping.subjects, subjectsFrom: scoping.subjectsFrom, askedSubjects: scoping.askedSubjects ?? null, perspectives: scoping.perspectives, queries: scoping.queries, embedModel: scoping.embedModel });
   await write('0-scope-sources', { kept: scoping.sources, dropped: scoping.dropped, diversity: scoping.diversity, enough: scoping.enough });
   await write('0-scope-notes', scoping.notes);
   const second = await secondOpinions(ctx, pages, { ...scoping.screened, markets: entry.markets ?? [], regions: entry.regions ?? [] });
