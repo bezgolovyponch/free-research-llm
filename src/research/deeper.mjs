@@ -1,4 +1,5 @@
 import { plain } from './itemgate.mjs';
+import { hardIdsOf, itemTier } from './verdict.mjs';
 
 function extractKeyWords(question) {
   return plain(question).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
@@ -36,11 +37,12 @@ function onlyCheck(checklist, checkId) {
 export const DEEPER_PAGE_BUDGET = 60;
 export const DEEPER_PROGRESS_EVERY = 10;
 
-export function deeperOrder(items) {
-  const hard = (item) => (item.checks ?? []).filter((c) => c.hard === true);
+export function deeperOrder(items, { checklist = null, kind = null, spec = null } = {}) {
+  const hardIds = hardIdsOf(checklist, kind);
+  const open = (item) => (item.checks ?? []).filter((c) => hardIds.includes(c.id) && c.answer !== 'yes').length;
   return items
-    .filter((item) => item.checks && !hard(item).some((c) => c.answer === 'no') && hard(item).some((c) => c.answer === 'unknown'))
-    .sort((a, b) => hard(a).filter((c) => c.answer === 'unknown').length - hard(b).filter((c) => c.answer === 'unknown').length);
+    .filter((item) => itemTier(item, hardIds, spec) === 'to-confirm')
+    .sort((a, b) => open(a) - open(b));
 }
 
 export class DeeperReader {

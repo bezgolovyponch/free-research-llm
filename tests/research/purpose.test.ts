@@ -221,12 +221,14 @@ describe('a number nobody stated never stays in goal, question or obstacle text'
   });
 
   it('moves a number that is still there after the retry into an assumption threshold, which is never hard', async () => {
-    const router = fakeRouter({ refine: { ...withNumber, obstacles: [{ obstacle: 'Bale size is below 38 kg', checker: 'page', threshold: { op: '<', value: 12, unit: 'kg' } }] } });
+    const router = fakeRouter({ 'number-kind': { kind: 'A' }, refine: { ...withNumber, obstacles: [{ obstacle: 'Bale size is below 38 kg', checker: 'page', threshold: { op: '<', value: 12, unit: 'kg' } }] } });
     const out = await refineGoal({ router }, { goal: 'Low price', said });
     expect(router.count('refine')).toBe(2);
     expect(out.questions).toEqual([{ q: 'Is the price in the top % of listings?', checker: 'code', threshold: { op: null, value: 10, unit: '', source: 'assumption', moved: true }, note: null, movedNumber: [10] }]);
     expect(out.obstacles).toEqual([{ obstacle: 'Bale size is below kg', checker: 'page', threshold: { op: '<', value: 12, unit: 'kg' }, movedNumber: [38] }]);
-    const drafted = await draftGoals({ router: fakeRouter({ goals: { goals: [{ goal: 'Grow 10 percent a year', anchor: 'C1' }] } }) }, { anchors, purpose, said });
+    expect(router.count('number-kind')).toBe(4);
+    expect(router.userText('number-kind')).toContain('Sentence: Is the price in the top [[10]]% of listings?');
+    const drafted = await draftGoals({ router: fakeRouter({ 'number-kind': { kind: 'A' }, goals: { goals: [{ goal: 'Grow 10 percent a year', anchor: 'C1' }] } }) }, { anchors, purpose, said });
     expect(drafted).toEqual([{ goal: 'Grow percent a year', anchor: 'C1', notes: [], threshold: { op: null, value: 10, unit: '', source: 'assumption', moved: true }, movedNumber: [10] }]);
     const tree = thresholdsOf({ goals: [{ id: 'G1', ...drafted[0], questions: out.questions.map((q: object, i: number) => ({ id: `Q${i + 1}`, ...q })), obstacles: out.obstacles.map((o: object, i: number) => ({ id: `O${i + 1}`, ...o })) }] }, { question: said }).tree;
     expect(tree.thresholds.map((t: { node: string; value: number; source: string; hard: boolean }) => [t.node, t.value, t.source, t.hard])).toEqual([['G1', 10, 'assumption', false], ['Q1', 10, 'assumption', false], ['O1', 12, 'assumption', false]]);
@@ -251,11 +253,36 @@ describe('a number nobody stated never stays in goal, question or obstacle text'
     expect(answered.goals[0].questions[0].inventedNumber).toBeUndefined();
   });
 
+  it('moves only a quantity: a number in a name, a code or a year is voted to stay and is not counted as invented, and no majority leaves the text', async () => {
+    const marked = (request: { messages: { content: string }[] }) => request.messages[1].content.match(/\[\[(.+?)\]\]/)![1];
+    const kinds: Record<string, unknown> = { '9001': { kind: 'B' }, '1.2': { kind: 'B' }, '4': { kind: 'B' }, '2000': { kind: 'B' }, '2019': { kind: 'C' }, '5': { kind: 'A' } };
+    const byMeaning = (request: { messages: { content: string }[] }, index: number) => (marked(request) === '77' ? [{ kind: 'A' }, { kind: 'B' }, FAIL][index % 3] : kinds[marked(request)]);
+    const reply = { refine: 'AND', questions: [
+      { q: 'Is an ISO 9001 certificate listed?', checker: 'page', threshold: null },
+      { q: 'Is the 1.2 MPi engine of the Golf 4 reliable since 2019?', checker: 'consensus', threshold: null },
+      { q: 'Is a road within 5 km of the Natura 2000 area?', checker: 'official', threshold: null },
+    ], obstacles: [{ obstacle: 'Batch 77 was recalled', checker: 'page', threshold: null }] };
+    const router = fakeRouter({ refine: reply, 'number-kind': byMeaning });
+    const out = await refineGoal({ router }, { goal: 'Proven quality', said });
+    expect(router.count('refine')).toBe(2);
+    expect(router.calls.find((call: { task?: string }) => call.task === 'number-kind')).toMatchObject({ tier: 'fast', purpose: 'purpose-judge' });
+    expect(out.questions).toEqual([
+      { q: 'Is an ISO 9001 certificate listed?', checker: 'page', threshold: null, note: null, keptNumber: [9001] },
+      { q: 'Is the 1.2 MPi engine of the Golf 4 reliable since 2019?', checker: 'consensus', threshold: null, note: null, keptNumber: [1.2, 4, 2019] },
+      { q: 'Is a road within km of the Natura 2000 area?', checker: 'official', threshold: { op: null, value: 5, unit: '', source: 'assumption', moved: true }, note: null, movedNumber: [5], keptNumber: [2000] },
+    ]);
+    expect(out.obstacles).toEqual([{ obstacle: 'Batch 77 was recalled', checker: 'page', threshold: null }]);
+    const tree = thresholdsOf({ goals: [{ id: 'G1', goal: 'Proven quality', questions: out.questions.map((q: object, i: number) => ({ id: `Q${i + 1}`, ...q })), obstacles: out.obstacles.map((o: object, i: number) => ({ id: `O${i + 1}`, ...o })) }] }, { question: said }).tree;
+    expect(tree.goals[0].questions.map((q: { inventedNumber?: number[] }) => q.inventedNumber)).toEqual([undefined, undefined, undefined]);
+    expect(tree.goals[0].obstacles[0].inventedNumber).toEqual([77]);
+    expect(tree.thresholds.map((t: { node: string; value: number; source: string; hard: boolean }) => [t.node, t.value, t.source, t.hard])).toEqual([['Q3', 5, 'assumption', false]]);
+  });
+
   it('reads a thousands-separated number as one number, and moves the number of a goal the critique adds', async () => {
     const tree = { goals: [{ id: 'G1', goal: 'Low entry cost', questions: [{ id: 'Q1', q: 'Is the cost at most €5,000?', checker: 'page', threshold: { op: '<=', value: 5000, unit: 'EUR' } }], obstacles: [] }], ops: { applied: [], refused: [] } };
     expect(thresholdsOf(tree, { question: 'plots' }).tree.goals[0].questions[0].inventedNumber).toBeUndefined();
     const candidates = [{ id: 'C1', text: 'plots to buy' }];
-    const router = fakeRouter({ critique: { ops: [{ op: 'add', goal: 'Visitors above 500,000 a year', anchor: 'C1' }] }, refine: refined, trace: { anchor: 'N' } });
+    const router = fakeRouter({ 'number-kind': { kind: 'A' }, critique: { ops: [{ op: 'add', goal: 'Visitors above 500,000 a year', anchor: 'C1' }] }, refine: refined, trace: { anchor: 'N' } });
     const ops = await critique({ router }, tree, candidates, { said });
     expect(router.count('critique')).toBe(2);
     expect(ops).toEqual([{ op: 'add', goal: 'Visitors above a year', anchor: 'C1', threshold: { op: null, value: 500000, unit: '', source: 'assumption', moved: true }, movedNumber: [500000] }]);

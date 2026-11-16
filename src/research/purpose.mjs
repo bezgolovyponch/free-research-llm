@@ -115,11 +115,12 @@ export async function draftGoals(ctx, { anchors, purpose, implications = [], not
     const drafted = (Array.isArray(data?.goals) ? data.goals : []).slice(0, MAX_GOALS).map((entry) => ({ goal: shortText(entry?.goal, 12, 160), anchor: idOf(entry?.anchor, known), notes: [...new Set((Array.isArray(entry?.notes) ? entry.notes : []).map((id) => idOf(id, noteIds)).filter(Boolean))] })).filter((entry) => entry.goal && entry.anchor);
     const stray = drafted.flatMap((entry) => strayNumbers(entry.goal, allowedFor(entry)));
     if (stray.length && rounds < 2) return { error: numberError(stray, 'a goal') };
-    const goals = drafted.map((entry) => moveNumbers(entry, 'goal', allowedFor(entry))).filter((entry) => entry.goal);
-    return goals.length ? { value: goals } : { error: 'every goal needs a "goal" text and an "anchor" id from the lists' };
+    return drafted.length ? { value: drafted } : { error: 'every goal needs a "goal" text and an "anchor" id from the lists' };
   };
   const reply = await ask({ router: ctx.router, task: 'goals', tier: 'deep', messages, schema, budget: ctx.budget, stage: TREE_STAGE });
-  return reply?.value ?? [];
+  const goals = [];
+  for (const entry of reply?.value ?? []) goals.push(await settleNumbers(ctx, entry, 'goal', allowedFor(entry)));
+  return goals.filter((entry) => entry.goal);
 }
 
 function leafOf(entry, textField, noteIds) {
@@ -150,18 +151,28 @@ export async function refineGoal(ctx, { goal, anchorText = '', notes = [], said 
       if (!drafted.q.length) return noQuestion;
       const stray = Object.entries(drafted).flatMap(([field, leaves]) => leaves.flatMap((leaf) => strayNumbers(leaf[field], allowedFor(leaf))));
       if (stray.length && rounds < 2) return { error: numberError(stray, 'a question or an obstacle') };
-      const settled = (field) => drafted[field].map((leaf) => moveNumbers(leaf, field, allowedFor(leaf))).filter((leaf) => leaf[field]);
-      const questions = settled('q');
-      return questions.length ? { value: { refine, questions, obstacles: settled('obstacle') } } : noQuestion;
+      return { value: { refine, questions: drafted.q, obstacles: drafted.obstacle } };
     };
+  };
+  const settle = async (reply) => {
+    if (!reply) return null;
+    const leaves = async (list, field) => {
+      const out = [];
+      for (const leaf of list) out.push(await settleNumbers(ctx, leaf, field, allowedFor(leaf)));
+      return out.filter((leaf) => leaf[field]);
+    };
+    const questions = await leaves(reply.value.questions, 'q');
+    return questions.length ? { refine: reply.value.refine, questions, obstacles: await leaves(reply.value.obstacles, 'obstacle') } : null;
   };
   const request = { router: ctx.router, task: 'refine', tier: 'deep', budget: ctx.budget, stage: TREE_STAGE };
   const first = await ask({ ...request, schema: validator(), messages: [{ role: 'system', content: system }, { role: 'user', content: user }] });
   if (!first) return null;
-  if (first.value.obstacles.length) return first.value;
+  if (first.value.obstacles.length) return settle(first);
   const again = await ask({ ...request, schema: validator(), messages: [{ role: 'system', content: system }, { role: 'user', content: `${user}\n\nName at least one obstacle that would defeat this goal.` }] });
-  if (again?.value.obstacles.length) return again.value;
-  return { ...first.value, obstacles: 'missing' };
+  const withObstacle = again?.value.obstacles.length ? await settle(again) : null;
+  if (withObstacle?.obstacles.length) return withObstacle;
+  const bare = await settle(first);
+  return bare ? { ...bare, obstacles: 'missing' } : null;
 }
 
 export function traceables(anchors, purpose, implications = []) {
@@ -305,15 +316,16 @@ export async function critique(ctx, tree, candidates, { said = '' } = {}) {
       if (op === 'merge' && idOf(entry.a, ids) && idOf(entry.b, ids) && idOf(entry.a, ids) !== idOf(entry.b, ids)) ops.push({ op, a: idOf(entry.a, ids), b: idOf(entry.b, ids) });
       else if (op === 'drop' && idOf(entry.id, ids)) ops.push({ op, id: idOf(entry.id, ids), reason: oneOf(entry.reason, Object.keys(DROP_REASONS)) ?? 'B' });
       else if (op === 'add' && idOf(entry.anchor, anchorIds)) {
-        const added = moveNumbers({ goal: shortText(entry.goal, 12, 160) }, 'goal', allowed);
-        if (added.goal) ops.push({ op, ...added, anchor: idOf(entry.anchor, anchorIds) });
+        if (shortText(entry.goal, 12, 160)) ops.push({ op, goal: shortText(entry.goal, 12, 160), anchor: idOf(entry.anchor, anchorIds) });
       }
       else if (op === 'checker' && idOf(entry.id, ids) && CHECKERS.includes(String(entry.checker ?? '').trim().toLowerCase())) ops.push({ op, id: idOf(entry.id, ids), checker: String(entry.checker).trim().toLowerCase() });
     }
     return { value: ops };
   };
   const reply = await ask({ router: ctx.router, task: 'critique', tier: 'deep', messages, schema, budget: ctx.budget, stage: TREE_STAGE });
-  return reply?.value ?? [];
+  const ops = [];
+  for (const op of reply?.value ?? []) ops.push(op.op === 'add' ? await settleNumbers(ctx, op, 'goal', allowed) : op);
+  return ops.filter((op) => op.op !== 'add' || op.goal);
 }
 
 export async function applyOps(ctx, tree, ops, { candidates = [], notes = [], said = '' } = {}) {
@@ -412,8 +424,36 @@ function numberError(stray, where) {
   return `the text of ${where} holds a number nobody stated (${[...new Set(stray.map((run) => run.raw))].join(', ')}): move it into "threshold" and write the text without it`;
 }
 
-export function moveNumbers(node, textField, allowed) {
-  const stray = strayNumbers(node[textField], allowed);
+export const NUMBER_KINDS = { A: 'a quantity used as a limit, target or amount', B: 'part of a name, model, code, standard or identifier', C: 'a date or year' };
+
+async function numberKind(ctx, text, run) {
+  const marked = `${text.slice(0, run.at)}[[${run.raw}]]${text.slice(run.at + run.raw.length)}`;
+  const messages = [
+    { role: 'system', content: `You read one sentence, in any language, with one number marked by [[ ]]. Say what the marked number is: ${Object.entries(NUMBER_KINDS).map(([letter, label]) => `${letter} ${label}`).join('; ')}. Answer with JSON only: {"kind":"A|B|C"}.` },
+    { role: 'user', content: `Sentence: ${marked}` },
+  ];
+  const schema = (data) => {
+    const kind = oneOf(data?.kind, Object.keys(NUMBER_KINDS));
+    return kind ? { value: kind } : { error: '"kind" must be A, B or C' };
+  };
+  const result = await vote({ router: ctx.router, task: 'number-kind', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: TREE_STAGE });
+  return result.value;
+}
+
+export async function settleNumbers(ctx, node, textField, allowed) {
+  const text = String(node[textField] ?? '');
+  const quantities = [];
+  const kept = [];
+  for (const run of strayNumbers(text, allowed)) {
+    const kind = await numberKind(ctx, text, run);
+    if (kind === 'A') quantities.push(run);
+    else if (kind) kept.push(...run.values);
+  }
+  const moved = moveNumbers(node, textField, quantities);
+  return kept.length ? { ...moved, keptNumber: [...new Set(kept)] } : moved;
+}
+
+export function moveNumbers(node, textField, stray) {
   if (!stray.length) return node;
   let text = String(node[textField]);
   for (const run of [...stray].reverse()) text = `${text.slice(0, run.at)} ${text.slice(run.at + run.raw.length)}`;
@@ -428,7 +468,7 @@ export function thresholdsOf(tree, { question = '', guidance = '', answers = [],
   const thresholds = [];
   const settle = (node, goal, textField) => {
     const quoted = [noteById.get(node.note), ...(goal.notes ?? []).map((id) => noteById.get(id))].filter(Boolean).flatMap((note) => numbersIn(note.quote));
-    const invented = strayNumbers(node[textField], new Set([...said, ...quoted, ...(node.threshold ? [node.threshold.value] : [])])).flatMap((run) => run.values);
+    const invented = strayNumbers(node[textField], new Set([...said, ...quoted, ...(node.keptNumber ?? []), ...(node.threshold ? [node.threshold.value] : [])])).flatMap((run) => run.values);
     const out = { ...node };
     delete out.inventedNumber;
     if (invented.length) out.inventedNumber = [...new Set(invented)];
