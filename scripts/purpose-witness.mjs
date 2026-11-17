@@ -3,14 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { KeychainSecrets } from '../src/secrets.mjs';
 import { App } from '../src/app.mjs';
-import { ResearchEngine } from '../src/research/engine.mjs';
-import { AcceptanceChecker, collectDeliverables, entityDeliverables, purposeChecks, isExcludedSurfaceUrl } from '../src/research/acceptance.mjs';
-import { buildBrief } from '../src/research/brief.mjs';
-import { candidateDeliverables } from '../src/research/candidates.mjs';
 import { verdict } from '../src/research/verdict.mjs';
-import { ExchangeRates } from '../src/research/rates.mjs';
-import { SearchService } from '../src/search/search.mjs';
-import { SiteAssessor } from '../src/research/site.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -49,56 +42,10 @@ async function main() {
 
   const engine = app.engine;
 
-  const brief = buildBrief({ question: project.question, acceptance: project.acceptance ?? {}, constraints: project.constraints ?? {} });
-  if (!brief.regions?.length && project.area?.countries?.length) brief.regions = project.area.countries;
-
-  const CallBudget = (await import('../src/research/semantic.mjs')).CallBudget;
-  const { Embedder } = await import('../src/llm/embedder.mjs');
-  const ctx = {
-    router: app.router,
-    search: app.search,
-    embedder: app.engine.embedder ?? new Embedder({ env: process.env, dir: path.join(outDir, 'embeddings') }),
-    budget: new CallBudget(),
-    log: (msg) => console.log('  ' + msg),
-  };
-
-  await engine.studyDomain(project);
-
-  const { buildPurposeTree } = await import('../src/research/purpose.mjs');
-  const purposeResult = await buildPurposeTree(ctx, {
-    question: project.question,
-    guidance: project.guidance ?? '',
-    notes: project.scoping?.notes ?? [],
-    answers: [],
-  });
-
-  project.purposeTree = purposeResult.tree;
-
-  const DecisionModeler = (await import('../src/research/decision.mjs')).DecisionModeler;
-  const modeler = new DecisionModeler({ router: app.router, cases: app.cases });
-  await modeler.build(project, { force: true });
-
-  const convert = engine.rates ? await engine.rates.converter() : undefined;
-  const readPage = engine.cachedPageReader(null);
-
-  const terms = [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? []), ...(brief.kind?.terms ?? [])])];
-  const notTerms = [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? []), ...(brief.kind?.not ?? [])])];
-  const kindLabel = project.decisionModel?.kind?.label ?? brief.kind?.label ?? '';
-  const nodesForEntities = [...(project.nodes ?? []), { id: 'hubs', sources: project.hubSources ?? [] }];
-
-  const fromTable = candidateDeliverables(project.candidates);
-  const listed = new Set(fromTable.map((d) => d.url));
-  const deliverables = (brief.located === false
-    ? await entityDeliverables(nodesForEntities, { terms, not: notTerms, kindLabel, regions: brief.regions ?? [], readPage })
-    : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))])).filter((d) => !isExcludedSurfaceUrl(d.url));
-
-  const acceptanceResult = await new AcceptanceChecker({ readPage, convert }).evaluate(
-    project.acceptance,
-    deliverables,
-    { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.decisionModel?.checklist ?? null }
-  );
-
-  const verdictResult = verdict(acceptanceResult.items, project.acceptance, project.decisionModel?.checklist ?? null, project.decisionModel?.kind ?? null);
+  await engine.ensurePurposeTree(project);
+  await engine.checkAcceptance(project);
+  const acceptanceResult = project.acceptanceResult;
+  const verdictResult = acceptanceResult.verdict ?? verdict(acceptanceResult.items, project.acceptance, project.decisionModel?.checklist ?? null, project.decisionModel?.kind ?? null);
 
   const modelCallsByStage = {};
   if (app.router.ledger) {

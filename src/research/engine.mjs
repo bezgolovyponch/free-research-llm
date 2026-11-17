@@ -460,36 +460,8 @@ export class ResearchEngine {
     this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
 
-    const needsPurposeTree = !project.purposeTree ||
-      project.purposeTree.version !== TREE_VERSION ||
-      project.purposeTree.question !== project.question ||
-      project.purposeTree.guidance !== String(project.guidance ?? '');
-
-    let purposeTree = project.purposeTree;
-    if (needsPurposeTree) {
-      this.emit(project, 'phase', 'building purpose tree from question and scoping notes');
-      const ctx = {
-        router: this.router,
-        search: this.search,
-        embedder: this.embedder ?? new Embedder({ env: process.env }),
-        budget: new CallBudget(),
-        log: (msg) => this.emit(project, 'decision', msg),
-      };
-      const { phase: treePhase, tree, anchors } = await buildPurposeTree(ctx, {
-        question: project.question,
-        guidance: project.guidance ?? '',
-        notes: project.scoping?.notes ?? [],
-      });
-      if (tree) {
-        purposeTree = { ...tree, question: project.question, guidance: String(project.guidance ?? ''), version: TREE_VERSION, at: new Date().toISOString() };
-        project.purposeTree = purposeTree;
-        this.emit(project, 'tree', `purpose tree built: ${tree.goals?.length ?? 0} goals (phase: ${treePhase})`);
-      } else {
-        this.emit(project, 'warn', `purpose tree not built: ${treePhase}`);
-      }
-    } else {
-      this.emit(project, 'tree', `reusing stored purpose tree (${purposeTree.goals?.length ?? 0} goals)`);
-    }
+    await this.ensurePurposeTree(project);
+    const purposeTree = project.purposeTree;
 
     const purposeGoals = purposeTree?.goals?.filter((g) => g.state === 'kept').map((g) => g.goal).join('; ') || '';
 
@@ -721,15 +693,12 @@ export class ResearchEngine {
     return sources.length;
   }
 
-  async studyDomain(project) {
-    if (!this.router || this.demo || !this.search?.search) return true;
-    if (project.domain?.ready) return true;
-    this.ensureItemCount(project);
-    await this.ensureDecisionModel(project);
-    const purpose = project.decisionModel?.purpose ?? '';
-    const kind = project.decisionModel?.kind ?? null;
-    const brief = project.brief ?? this.briefOf(project);
-    const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
+  purposeTreeFresh(project) {
+    const tree = project.purposeTree;
+    return Boolean(tree && tree.version === TREE_VERSION && tree.question === project.question && tree.guidance === String(project.guidance ?? ''));
+  }
+
+  async runScopingStage(project, { purpose, kind, brief, languages }) {
     const titles = (project.sweep?.pages ?? []).flatMap((page) => (page.listings ?? []).map((l) => String(l.title ?? ''))).filter(Boolean);
     const requirements = project.nodes?.flatMap((node) => node.question ?? []).filter(Boolean) ?? [];
     const ctx = {
@@ -751,10 +720,65 @@ export class ResearchEngine {
       requirements,
     });
     project.scoping = scoping;
-    const understanding = domainUnderstanding(
-      scoping.sources.map((source) => ({ claims: [{ text: source.spanQuote ?? '', value: null, unit: '', sourceIds: [], quote: source.spanQuote ?? '' }], text: source.spanQuote ?? '', url: source.url, title: source.title })),
-      { hint: project.guidance ?? '', sources: scoping.sources, members: isUmbrella(kind) ? kind.members : [] }
-    );
+    return scoping;
+  }
+
+  async ensurePurposeTree(project) {
+    if (!this.router || this.demo || !project.acceptance?.itemCount) return project.purposeTree ?? null;
+    if (this.purposeTreeFresh(project)) return project.purposeTree;
+    if (!project.scoping?.notes?.length && this.search?.search) {
+      const brief = project.brief ?? this.briefOf(project);
+      const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
+      await this.runScopingStage(project, { purpose: project.decisionModel?.purpose ?? '', kind: project.decisionModel?.kind ?? null, brief, languages });
+    }
+    this.emit(project, 'phase', 'building the purpose tree from the question, hints and scoping notes');
+    const ctx = {
+      router: this.router,
+      search: this.search,
+      embedder: this.embedder ?? new Embedder({ env: process.env }),
+      budget: new CallBudget(),
+      log: (msg) => this.emit(project, 'decision', msg),
+    };
+    const { phase: treePhase, tree } = await buildPurposeTree(ctx, {
+      question: project.question,
+      guidance: project.guidance ?? '',
+      notes: project.scoping?.notes ?? [],
+    });
+    if (!tree?.goals?.length) {
+      this.emit(project, 'warn', `purpose tree not built: ${treePhase}; the stored checklist stays`);
+      return project.purposeTree ?? null;
+    }
+    project.purposeTree = { ...tree, question: project.question, guidance: String(project.guidance ?? ''), version: TREE_VERSION, at: new Date().toISOString() };
+    this.emit(project, 'tree', `purpose tree built: ${tree.goals.length} goals (phase: ${treePhase})`);
+    await this.rebuildDecisionModel(project);
+    await this.store.save(project, { reason: 'purpose tree built' });
+    return project.purposeTree;
+  }
+
+  async studyDomain(project) {
+    if (!this.router || this.demo || !this.search?.search) return true;
+    if (project.domain?.ready) return true;
+    this.ensureItemCount(project);
+    await this.ensureDecisionModel(project);
+    const purpose = project.decisionModel?.purpose ?? '';
+    const kind = project.decisionModel?.kind ?? null;
+    const object = kind ? [kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
+    const hint = project.guidance ?? '';
+    const brief = project.brief ?? this.briefOf(project);
+    const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
+    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages, object, hint }) }).catch(() => null);
+    const queries = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 4).slice(0, DOMAIN_QUERIES);
+    if (!queries.length) return true;
+    const found = await this.search.search(queries, { maxSources: DOMAIN_SOURCES }).catch(() => []);
+    const sources = (Array.isArray(found) ? found : []).map((source, index) => ({ ...source, id: `D${index + 1}` }));
+    const replies = [];
+    for (let index = 0; index < sources.length; index += DOMAIN_PAGES_PER_CALL) {
+      const batch = sources.slice(index, index + DOMAIN_PAGES_PER_CALL);
+      const answer = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainFindingsPrompt({ question: project.question, purpose, sources: batch }) }).catch(() => null);
+      replies.push(answer);
+    }
+    const findings = mergeFindings(replies, sources);
+    const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [] });
     const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
     const matchedTitles = Number(project.decisionModel?.kind?.verified?.matched ?? 0);
     const sweptListings = (project.sweep?.pages ?? []).reduce((n, page) => n + (page.listings?.length ?? 0), 0);
@@ -1657,6 +1681,7 @@ export class ResearchEngine {
   }
 
   async checkAcceptance(project, pages = null, { memoNext = false } = {}) {
+    await this.ensurePurposeTree(project);
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);

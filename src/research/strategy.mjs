@@ -1,5 +1,5 @@
 import { plain } from './itemgate.mjs';
-import { SEA_WORDS } from './constants.mjs';
+import { SEA_WORDS } from './brief.mjs';
 import { PERCEIVED_MAX_C } from './cci.mjs';
 import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
@@ -7,6 +7,7 @@ import { areaM2, zoningOf, explorePoints, haversineKm } from './site.mjs';
 import { cadastreNotes } from './parcels.mjs';
 import { withConfirmRisk } from './blockers.mjs';
 import { quoteFound } from './quote.mjs';
+import { clausesOf } from './clauses.mjs';
 
 export const STRATEGY_TTL_MS = 7 * 24 * 3600 * 1000;
 
@@ -151,10 +152,6 @@ export function strategyFor(templateId) {
 
 export function criteriaOfText(strategy, text) {
   return (strategy?.criteria ?? []).filter((c) => c.words?.test(String(text ?? ''))).map((c) => c.id);
-}
-
-export function clausesOf(question) {
-  return String(question ?? '').split(/,|;/).map((c) => c.trim()).filter(Boolean);
 }
 
 export function foundationOf(strategy, project, { exclude = [] } = {}) {

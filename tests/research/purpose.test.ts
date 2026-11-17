@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, confirmTree, consumesVote, costSide, coverageOf, coveredAnchors, critique, dismissNotModelled, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, requirementsOf, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide, voteHardness } from '../../src/research/purpose.mjs';
 import { CallBudget, STAGE_CAPS } from '../../src/research/semantic.mjs';
-import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
 
 type Ask = { messages: { content: string }[] };
@@ -28,11 +27,6 @@ describe('the stored knowledge holds only the Admiralty scales, and the engine n
     expect(source).not.toMatch(/\b(cheap\w*|plots?|cars?|cloth\w*|garments?|glamping|ralph|lauren|moncl\w*|north face|barbour|suppliers?|wholesale)\b/i);
     expect(source).not.toMatch(/conflictAsked|ensureAskedConflict|CONFLICT_GOAL|CONFLICT_ROLE|conflictGoalOf|mechanisms|conflictObstacle|valueRange/);
     expect(TREE_VERSION).toBe(2);
-  });
-
-  it('splits a question into pieces at punctuation only', () => {
-    expect(clausesOf('plots but also cheap, so no air condition; near the sea')).toEqual(['plots but also cheap', 'so no air condition', 'near the sea']);
-    expect(clausesOf('cars near the city, hatchback, , cheap;')).toEqual(['cars near the city', 'hatchback', 'cheap']);
   });
 });
 

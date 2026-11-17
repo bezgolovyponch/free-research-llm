@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { clausesOf } from './strategy.mjs';
+import { clausesOf } from './clauses.mjs';
 import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
 
 export const PURPOSE = JSON.parse(readFileSync(new URL('./purpose.json', import.meta.url), 'utf8'));

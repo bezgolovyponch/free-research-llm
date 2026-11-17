@@ -336,6 +336,15 @@ describe('decision model version', () => {
     expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, checklistVersion: CHECKLIST_VERSION } })).toBe(true);
   });
 
+  it('treats a model built before the current purpose tree as stale so the checklist follows the tree', async () => {
+    const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
+    const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
+    const model = { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] }, version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION, treeAt: null };
+    expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: model })).toBe(true);
+    expect(modeler.fresh({ question: 'q', guidance: '', purposeTree: { at: '2026-11-18T00:00:00.000Z' }, decisionModel: model })).toBe(false);
+    expect(modeler.fresh({ question: 'q', guidance: '', purposeTree: { at: '2026-11-18T00:00:00.000Z' }, decisionModel: { ...model, treeAt: '2026-11-18T00:00:00.000Z' } })).toBe(true);
+  });
+
   it('treats a current model with no kind and no criteria as stale so the next run tries again', async () => {
     const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
