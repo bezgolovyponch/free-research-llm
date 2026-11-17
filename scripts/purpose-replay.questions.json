@@ -17,7 +17,8 @@
     ],
     "project": "0c750f",
     "item": "https://auto.bazos.cz/inzerat/226126886/pekna-skoda-fabia-12-mpi-malo-najeto-velmi-dobry-stav.php",
-    "tyres": "https://auto.bazos.cz/inzerat/226132468/zimni-pneu-na-plechacich-kia-ceed.php"
+    "tyres": "https://auto.bazos.cz/inzerat/226132468/zimni-pneu-na-plechacich-kia-ceed.php",
+    "type": "valuation"
   },
   "suppliers": {
     "question": "Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio , proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic",
@@ -29,7 +30,8 @@
     "markets": [
       "Czech Republic"
     ],
-    "project": "b2f5b7"
+    "project": "b2f5b7",
+    "type": "entity-list"
   },
   "plots": {
     "question": "Find appropriate plots to buy for a low-entry glamping business in the EU: affordable and valuable, with a scenic location and future upside",
@@ -67,7 +69,8 @@
     "markets": [
       "European Union"
     ],
-    "project": "b7772e"
+    "project": "b7772e",
+    "type": "located-listings"
   },
   "library": {
     "question": "Find open-source PDF parsing libraries for Node.js that are actively maintained and well documented",
@@ -78,7 +81,8 @@
     "project": null,
     "expect": {
       "tensions": 0
-    }
+    },
+    "type": "entity-list"
   },
   "trail": {
     "question": "Find hiking trails within two hours of Prague that suit young children",
@@ -93,6 +97,7 @@
     "project": null,
     "expect": {
       "tensions": 0
-    }
+    },
+    "type": "located-listings"
   }
 }

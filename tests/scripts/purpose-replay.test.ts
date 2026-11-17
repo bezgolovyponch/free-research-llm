@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { MODES, ROOT, bannedCalls, coverageMetric, insideRepo, metricRows, offMarketDrops, parseArgs, quoteOfSpans, readBaseline, replayInputs, runReplay, secondOpinions, storedEntry, storedMatrix, storedNotes, storedProject, storedSources, tableText } from '../../scripts/purpose-replay.mjs';
+import { MODES, ROOT, bannedCalls, coverageMetric, insideRepo, metricRows, offMarketDrops, parseArgs, quoteOfSpans, readBaseline, replayInputs, runReplay, runSpread, secondKappa, secondOpinions, spreadTable, storedEntry, storedMatrix, storedNotes, storedProject, storedSources, tableText } from '../../scripts/purpose-replay.mjs';
 import { needsConfirmation, notModelledOf } from '../../src/research/purpose.mjs';
 import { diversityOf, screenSources } from '../../src/research/scoping.mjs';
 import { sentenceSpans } from '../../src/research/spans.mjs';
@@ -244,7 +244,41 @@ describe('purpose replay: the second opinion is asked on the same sentences and 
     expect(one).toMatchObject({ agreed: 0, same: 1, total: 1 });
     expect(one.rows[0].state).toBe('same provider');
     const row = metricRows('plots', { scoping: { sources: [], dropped: [], notes: [] }, second, notesOnPage: 0, car: null, banned: 0, budget: {}, tree: null }, {}).find((entry: { id: string }) => entry.id === 'second-opinion');
-    expect(row).toMatchObject({ value: '2 of 5; 2 disagree, 1 not judged, 0 answered by the same provider', pass: false });
+    expect(row).toMatchObject({ pass: false, rate: { part: 2, total: 5 } });
+    expect(row.value).toMatch(/^2 of 5 \(40%\), kappa (n\/a|-?\d\.\d\d) on 4 judged by another provider \(too few: under 30\); 2 disagree, 1 not judged, 0 answered by the same provider$/);
+    expect(second.kappa.n).toBe(4);
+  });
+
+  it('reports kappa next to the percent: chance-corrected agreement of the two judgements on the same sources', () => {
+    const judged = (first: string, again: string, state = first === again ? 'agrees' : 'disagrees') => ({ state, first: { about: first[0], market: first[1] }, second: { about: again[0], market: again[1] } });
+    const rows = [...Array.from({ length: 20 }, () => judged('AA', 'AA')), ...Array.from({ length: 15 }, () => judged('BC', 'BC')), ...Array.from({ length: 5 }, () => judged('AA', 'BC')), ...Array.from({ length: 10 }, () => judged('BC', 'AA')), { state: 'same provider', first: { about: 'A', market: 'A' }, second: { about: 'A', market: 'A' } }, { state: 'not judged', first: { about: 'A', market: 'A' }, second: null }];
+    const { kappa, n } = secondKappa(rows);
+    expect(n).toBe(50);
+    expect(kappa).toBeCloseTo(0.4, 10);
+    expect(secondKappa([judged('AA', 'AA'), judged('AA', 'AA')])).toEqual({ kappa: null, n: 2 });
+    const row = metricRows('plots', { scoping: { sources: [], dropped: [], notes: [] }, second: { agreed: 35, disagreed: 15, unjudged: 1, same: 1, total: 52, rows }, notesOnPage: 0, car: null, banned: 0, budget: {}, tree: null }, {}).find((entry: { id: string }) => entry.id === 'second-opinion');
+    expect(row.value).toBe('35 of 52 (67%), kappa 0.40 on 50 judged by another provider; 15 disagree, 1 not judged, 1 answered by the same provider');
+  });
+
+  it('repeats a replay with --runs and reports each rate with its count and its spread over the runs', () => {
+    expect(parseArgs(['car', '--out', os.tmpdir()]).runs).toBe(1);
+    expect(parseArgs(['car', '--out', os.tmpdir(), '--runs', '3']).runs).toBe(3);
+    for (const bad of ['0', '10', '1.5', 'x']) expect(parseArgs(['car', '--out', os.tmpdir(), '--runs', bad]).error).toContain('--runs must be a whole number from 1 to 9');
+    const run = (agreed: number, total: number, notes: number) => [
+      { id: 'second-opinion', label: 'Second opinion', value: `${agreed} of ${total}`, pass: agreed / total >= 0.8, rate: { part: agreed, total } },
+      { id: 'notes', label: 'Notes', value: `${notes} of 10`, pass: notes === 10, rate: { part: notes, total: 10 } },
+      { id: 'scope', label: 'Scope', value: 'none', pass: null },
+    ];
+    const spread = runSpread([run(8, 10, 10), run(6, 10, 10), run(9, 12, 9)]);
+    expect(spread[0]).toMatchObject({ id: 'second-opinion', runs: 3, passed: 1, judged: 3, counts: ['8 of 10', '6 of 10', '9 of 12'] });
+    expect(spread[0].rate).toMatchObject({ min: 0.6, max: 0.8, n: 3 });
+    expect(spread[0].rate.mean).toBeCloseTo((0.8 + 0.6 + 0.75) / 3, 10);
+    expect(spread[1]).toMatchObject({ passed: 2, judged: 3, counts: ['10 of 10', '10 of 10', '9 of 10'] });
+    expect(spread[2]).toMatchObject({ judged: 0, rate: null });
+    const text = spreadTable('car', spread);
+    expect(text).toContain('== car: 3 run(s) ==');
+    expect(text).toContain('1 of 3 | Second opinion | 8 of 10; 6 of 10; 9 of 12 | 72%, 60% to 80% over 3 run(s)');
+    expect(text).toContain('READ | Scope | - | -');
   });
 
   it('screens the library question against what its requirements mean, not the kind word, the first and the second time', async () => {
@@ -332,7 +366,8 @@ describe('purpose replay: one run with fakes', () => {
     const byId = Object.fromEntries(metrics.map((row: { id: string; value: string; pass: boolean | null }) => [row.id, row]));
     expect(byId.sources).toMatchObject({ value: '4 kept from 4 host(s) across 3 perspective(s), 0 dropped', target: '>= 4 hosts across >= 2 perspectives', pass: true });
     expect(byId.roles).toMatchObject({ value: '0 knowledge, 0 without a voted role, of 0 off-market drop(s)', pass: true });
-    expect(byId['second-opinion']).toMatchObject({ value: '4 of 4; 0 disagree, 0 not judged, 0 answered by the same provider', pass: true });
+    expect(byId['second-opinion']).toMatchObject({ pass: true, rate: { part: 4, total: 4 } });
+    expect(byId['second-opinion'].value).toMatch(/^4 of 4 \(100%\), kappa (n\/a|-?\d\.\d\d) on 4 judged by another provider \(too few: under 30\); 0 disagree, 0 not judged, 0 answered by the same provider$/);
     expect(byId.coverage.value).toMatch(/^(\d+) of \1 requirement\(s\) in a kept goal/);
     expect(byId.coverage).toMatchObject({ target: 'every requirement in a kept goal', pass: true });
     expect(run.tree.notModelled).toEqual([]);
