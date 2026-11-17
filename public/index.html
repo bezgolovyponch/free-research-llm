@@ -859,8 +859,8 @@ function renderHead(){
   $("projTitle").textContent=p.question;
   const a=p.acceptance||{};const ar=p.acceptanceResult;
   $("projExpected").innerHTML=a.expected?"Expected: "+esc(a.expected)+(ar?' · <b style="color:'+(ar.score>=0.999?"var(--gr)":ar.score>0?"var(--am)":"var(--rd)")+'">'+Math.round(ar.score*100)+"% met</b>":""):'<span class="faint">No expected result yet: More → Edit expected result</span>';
-  const building=p.phase==="building-tree";const color=looping||running||building?"var(--bl)":p.phase==="done"?"var(--gr)":p.phase==="error"?"var(--rd)":"var(--gray)";
-  $("phasePill").innerHTML='<i class="'+(looping||running||building?"pulse":"")+'" style="background:'+color+'"></i>'+(looping?"improving":building?"building tree":esc(p.phase))+(mq.phone.matches&&ns.length?" · "+fin+"/"+ns.length:"")+(p.demo?" · demo":"");
+  const building=p.phase==="building-tree";const short=p.phase==="done"&&ar&&ar.totalAsked>0&&(ar.validCount??0)<ar.totalAsked;const color=looping||running||building?"var(--bl)":short?"var(--am)":p.phase==="done"?"var(--gr)":p.phase==="error"?"var(--rd)":"var(--gray)";
+  $("phasePill").innerHTML='<i class="'+(looping||running||building?"pulse":"")+'" style="background:'+color+'"></i>'+(looping?"improving":building?"building tree":short?"short · "+(ar.validCount??0)+" of "+ar.totalAsked:esc(p.phase))+(mq.phone.matches&&ns.length?" · "+fin+"/"+ns.length:"")+(p.demo?" · demo":"");
   $("progBar").style.width=(ns.length?Math.round(100*fin/ns.length):0)+"%";
   $("progText").textContent=fin+"/"+ns.length+" researched";
   const joined=iJoined(p);

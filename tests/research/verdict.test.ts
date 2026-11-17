@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf } from "../../src/research/verdict.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome } from "../../src/research/verdict.mjs";
 import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
 import { lowPriceStats } from "../../src/research/candidates.mjs";
 import { fakeRouter } from "../helpers/fakes";
@@ -369,5 +369,23 @@ describe("purpose gate", () => {
   it("never lets the kind judge stand in for a failed names check", () => {
     const failedNames = { ...item({ answer: "yes", quote: "Groothandel" }), purpose: [{ id: "purpose-names-1", passed: false }] };
     expect(qualifies(failedNames, {})).toBe(false);
+  });
+});
+
+describe("runOutcome", () => {
+  const done = (totalAsked: number, validCount: number) => ({ phase: "done", acceptanceResult: { totalAsked, validCount } });
+
+  it("is short when a finished research delivered fewer items than asked", () => {
+    expect(runOutcome(done(20, 1))).toEqual({ state: "short", confirmed: 1, asked: 20 });
+  });
+
+  it("is met when every asked item is confirmed, or no count was asked", () => {
+    expect(runOutcome(done(20, 20)).state).toBe("met");
+    expect(runOutcome(done(0, 0)).state).toBe("met");
+    expect(runOutcome({ phase: "done" }).state).toBe("met");
+  });
+
+  it("keeps the phase while the research has not finished", () => {
+    expect(runOutcome({ phase: "researching", acceptanceResult: { totalAsked: 20, validCount: 1 } }).state).toBe("researching");
   });
 });
