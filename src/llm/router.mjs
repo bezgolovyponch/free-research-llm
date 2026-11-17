@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { PURPOSE_CLASS } from './ranking.mjs';
 import { extractJson } from '../research/json.mjs';
 import { ProviderError } from './provider.mjs';
-import { MAX_PROMPT_TOKENS, familyOf } from './ranking.mjs';
+import { CHOICE_LETTERS, MAX_PROMPT_TOKENS, familyOf, independentFamilies, letterBias, letterTallies, replyFamily } from './ranking.mjs';
 import { paidDailyTokens, paidProviderIds } from './presets.mjs';
 
 export class NoModelAvailableError extends Error {}
@@ -117,6 +117,7 @@ export class ModelRouter {
     this.streakBenches = new Map();
     this.cooldownReason = new Map();
     this.tokenTally = new Map();
+    this.letters = new Map();
     this.ledger = [];
     this.calls = 0;
     this.paidIds = new Set(paid ?? paidProviderIds(env));
@@ -166,7 +167,7 @@ export class ModelRouter {
     return [...this.providers].sort((a, b) => rank(a) - rank(b));
   }
 
-  available({ avoid, tier = 'fast', purpose, tokens = 0 } = {}) {
+  available({ avoid, tier = 'fast', purpose, tokens = 0, closed = false } = {}) {
     const time = this.now();
     this.restPaidProviders(time);
     const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.trialBusy(p.id, time) && !this.needsPayment(p.id, time));
@@ -174,7 +175,8 @@ export class ModelRouter {
     const fits = roomy.filter((p) => !MAX_PROMPT_TOKENS[p.id] || tokens <= MAX_PROMPT_TOKENS[p.id]);
     const sized = fits.length ? [...fits, ...roomy.filter((p) => !fits.includes(p))] : roomy;
     const ranked = this.demoteDead(this.demoteOverBudget(this.demoteSlow(this.demoteFull(sized), tier), tokens, purpose));
-    const usable = this.demotePaid([...ranked, ...this.lastResortLocals(tier, purpose, tokens, time)]).filter((p) => !this.isBanned(p, tier));
+    const unbiased = closed ? this.demoteLetterBiased(ranked, tier) : ranked;
+    const usable = this.demotePaid([...unbiased, ...this.lastResortLocals(tier, purpose, tokens, time)]).filter((p) => !this.isBanned(p, tier));
     const avoided = new Set((Array.isArray(avoid) ? avoid : [avoid]).filter(Boolean));
     if (!avoided.size) return usable;
     const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
@@ -182,7 +184,35 @@ export class ModelRouter {
     const other = usable.filter((p) => !avoided.has(p.id) && !avoidedFamilies.has(family(p)));
     const sameFamily = usable.filter((p) => !avoided.has(p.id) && avoidedFamilies.has(family(p)));
     const preferred = [...this.demoteSlow(other, tier), ...this.demoteSlow(sameFamily, tier)];
-    return preferred.length ? this.demotePaid([...preferred, ...usable.filter((p) => avoided.has(p.id))]) : usable;
+    return preferred.length ? this.demotePaid([...(closed ? this.demoteLetterBiased(preferred, tier) : preferred), ...usable.filter((p) => avoided.has(p.id))]) : usable;
+  }
+
+  modelOf(provider, tier = 'fast') {
+    return provider?.describe?.()?.[tier] ?? provider?.selected?.[tier] ?? provider?.selected?.fast ?? null;
+  }
+
+  familyOf(providerId, { tier = 'fast', model = null } = {}) {
+    return replyFamily(model ?? this.modelOf(this.providers.find((p) => p.id === providerId), tier), providerId);
+  }
+
+  families({ tier = 'fast', purpose } = {}) {
+    return independentFamilies(this.available({ tier, purpose }).map((p) => this.familyOf(p.id, { tier })));
+  }
+
+  letterBias() {
+    return letterBias(this.letters);
+  }
+
+  restoreLetters(rows) {
+    letterTallies(rows, this.letters);
+    return this.letterBias().filter((row) => row.biased);
+  }
+
+  demoteLetterBiased(providers, tier = 'fast') {
+    const biased = new Set(this.letterBias().filter((row) => row.biased).map((row) => `${row.provider}|${row.model ?? ''}`));
+    if (!biased.size) return providers;
+    const flagged = (p) => biased.has(`${p.id}|${this.modelOf(p, tier) ?? ''}`);
+    return [...providers.filter((p) => !flagged(p)), ...providers.filter(flagged)];
   }
 
   bannedFamilies() {
@@ -345,6 +375,7 @@ export class ModelRouter {
     }
     this.ledger.push(row);
     if (this.ledger.length > 500) this.ledger.shift();
+    if (row.letter) letterTallies([row], this.letters);
     if (row.provider && row.provider !== 'router') {
       const tokens = Number(row.tokens) || 0;
       if (tokens > 0) {
@@ -575,7 +606,7 @@ export class ModelRouter {
     this.notify({ kind: 'gave-up', purpose, tier, reasons });
   }
 
-  async waitForCooldown({ avoid, tier, purpose, tokens }, notice = { at: null }) {
+  async waitForCooldown({ avoid, tier, purpose, tokens, closed = false }, notice = { at: null }) {
     let waited = 0;
     let first = true;
     for (;;) {
@@ -586,12 +617,20 @@ export class ModelRouter {
       await this.sleep(wait);
       waited += wait;
       first = false;
-      const candidates = this.available({ avoid, tier, purpose, tokens });
+      const candidates = this.available({ avoid, tier, purpose, tokens, closed });
       if (candidates.length || !this.trialPending()) return candidates;
     }
   }
 
-  async tryProviders(candidates, { messages, tier, json, purpose, temperature }, errors) {
+  choiceOf(choice, data) {
+    const options = Number(choice?.options);
+    if (!choice?.field || !(options >= 2)) return {};
+    const letter = String(data?.[choice.field] ?? '').trim().toUpperCase();
+    const at = letter.length === 1 ? CHOICE_LETTERS.indexOf(letter) : -1;
+    return at >= 0 && at < options ? { letter, options } : { options };
+  }
+
+  async tryProviders(candidates, { messages, tier, json, purpose, temperature, task = null, choice = null }, errors) {
     for (const provider of candidates) {
       let attemptMessages = messages;
       let repairs = 0;
@@ -608,7 +647,7 @@ export class ModelRouter {
           const data = json ? extractJson(reply.content) : null;
           const waitMs = reply.waitMs ?? 0;
           const ms = Math.max(0, (this.now() - started) - waitMs);
-          this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms, tokens: reply.usage?.total_tokens ?? null, ...(waitMs > 0 ? { waitMs } : {}) });
+          this.record({ purpose, tier, provider: provider.id, model: reply.model, ok: true, ms, tokens: reply.usage?.total_tokens ?? null, ...(waitMs > 0 ? { waitMs } : {}), ...(task ? { task } : {}), ...this.choiceOf(choice, data) });
           this.timeoutStreak.delete(provider.id);
           this.computeErrorStreak.delete(provider.id);
           this.failureStreak.delete(provider.id);
@@ -649,17 +688,18 @@ export class ModelRouter {
     return null;
   }
 
-  async complete({ messages, tier = 'fast', json = true, purpose = 'chat', avoid, temperature }) {
-    const request = { messages, tier, json, purpose, temperature };
+  async complete({ messages, tier = 'fast', json = true, purpose = 'chat', avoid, temperature, task = null, choice = null }) {
+    const request = { messages, tier, json, purpose, temperature, task, choice };
     const errors = [];
     const tokens = estimateTokens(messages);
     const offline = { step: 0, waited: 0 };
     const notice = { at: null };
-    let candidates = this.available({ avoid, tier, purpose, tokens });
+    const closed = Boolean(choice);
+    let candidates = this.available({ avoid, tier, purpose, tokens, closed });
     let round = 0;
     let offlineExhausted = false;
     while (round < MAX_WAIT_ROUNDS) {
-      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose, tokens }, notice);
+      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose, tokens, closed }, notice);
       if (!candidates.length) break;
       const stateBefore = this.snapshotProviderState(candidates);
       const reply = await this.tryProviders(candidates, request, errors);
@@ -667,7 +707,7 @@ export class ModelRouter {
       if (errors.length && errors.every((error) => isNetworkError(error))) {
         this.restoreProviderState(stateBefore);
         if (await this.waitOffline(offline)) {
-          candidates = this.available({ avoid, tier, purpose, tokens });
+          candidates = this.available({ avoid, tier, purpose, tokens, closed });
           continue;
         }
         offlineExhausted = true;

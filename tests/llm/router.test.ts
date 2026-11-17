@@ -38,6 +38,46 @@ describe('tierTimeoutMs', () => {
   });
 });
 
+describe('provider families and closed-choice letters', () => {
+  const served = (id: string, model: string, reply = '{"pick":"A"}') => ({ ...provider(id, []), selected: { fast: model, deep: model }, async chat() { return { content: reply, model, provider: id, usage: {} }; } });
+
+  it('exposes one family per vendor and serving stack', () => {
+    const router = new ModelRouter({ providers: [served('groq', 'openai/gpt-oss-120b'), served('cerebras', 'gpt-oss-120b'), served('gemini', 'gemini-flash'), served('mine', 'my-own-model')], env: {} });
+    expect(router.familyOf('groq')).toEqual({ stack: 'groq', vendor: 'gpt-oss' });
+    expect(router.familyOf('groq', { model: 'llama-3.3-70b' })).toEqual({ stack: 'groq', vendor: 'llama' });
+    expect(router.familyOf('mine')).toEqual({ stack: 'mine', vendor: 'mine' });
+    expect(router.families().map((family: { stack: string }) => family.stack)).toEqual(['groq', 'gemini', 'mine']);
+    expect(new ModelRouter({ providers: [served('groq', 'openai/gpt-oss-120b'), served('cerebras', 'gpt-oss-120b')], env: {} }).families()).toHaveLength(1);
+  });
+
+  it('writes the task, the chosen letter and the number of options into the call ledger row', async () => {
+    const router = new ModelRouter({ providers: [served('a', 'llama-3.3-70b', '{"pick":"b"}')], env: {} });
+    await router.complete({ messages: [{ role: 'user', content: 'x' }], purpose: 'purpose-judge', task: 'trace', choice: { field: 'pick', options: 3 } });
+    await router.complete({ messages: [{ role: 'user', content: 'x' }], purpose: 'purpose-judge', task: 'trace', choice: { field: 'other', options: 3 } });
+    await router.complete({ messages: [{ role: 'user', content: 'x' }], purpose: 'purpose-judge', task: 'facts' });
+    expect(router.ledger.map((row: { task?: string; letter?: string; options?: number }) => [row.task, row.letter, row.options])).toEqual([['trace', 'B', 3], ['trace', undefined, 3], ['facts', undefined, undefined]]);
+    expect(router.letterBias()).toMatchObject([{ provider: 'a', model: 'llama-3.3-70b', task: 'trace', options: 3, n: 1, counts: [0, 1, 0], tested: false, biased: false }]);
+  });
+
+  it('ranks a model whose letters fail the chi-square test down for closed-choice calls only', async () => {
+    const lean = served('lean', 'llama-3.3-70b');
+    const even = served('even', 'gemini-flash');
+    const router = new ModelRouter({ providers: [lean, even], env: {} });
+    const rows = (id: string, model: string, letters: string) => [...letters].map((letter) => ({ provider: id, model, task: 'trace', letter, options: 3, ok: true }));
+    expect(router.restoreLetters([...rows('lean', 'llama-3.3-70b', 'A'.repeat(24) + 'BBBCCC'), ...rows('even', 'gemini-flash', 'ABC'.repeat(10))]).map((row: { provider: string }) => row.provider)).toEqual(['lean']);
+    const order = (closed: boolean) => router.available({ closed }).map((p: { id: string }) => p.id);
+    expect(order(false)).toEqual(['lean', 'even']);
+    expect(order(true)).toEqual(['even', 'lean']);
+    const closed = await router.complete({ messages: [{ role: 'user', content: 'x' }], purpose: 'purpose-judge', task: 'trace', choice: { field: 'pick', options: 3 } });
+    expect(closed.provider).toBe('even');
+    const open = await router.complete({ messages: [{ role: 'user', content: 'x' }], purpose: 'purpose-judge', task: 'facts' });
+    expect(open.provider).toBe('lean');
+    const fresh = new ModelRouter({ providers: [served('lean', 'llama-4'), even], env: {} });
+    fresh.restoreLetters(rows('lean', 'llama-3.3-70b', 'A'.repeat(30)));
+    expect(fresh.available({ closed: true }).map((p: { id: string }) => p.id)).toEqual(['lean', 'even']);
+  });
+});
+
 describe('ModelRouter', () => {
   it('fails over on 429 and cools the provider down', async () => {
     let now = 1000;

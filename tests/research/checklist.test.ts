@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
@@ -615,8 +615,30 @@ describe('item-level checklist with a kind check and code-measured values', () =
       expect(router.calls).toHaveLength(2);
       expect(router.calls[0]).toMatchObject({ tier: 'fast', task: 'kind-second' });
       expect(router.userText('kind-second')).toContain('Price of this item: 2000 CZK\nMedian price of its comparable items: 25000 CZK');
-      expect(router.userText('kind-second')).toContain('B) a part or an accessory of it and not spare part');
+      expect(router.userText('kind-second')).toMatch(/^[A-E]\) a part or an accessory of it and not spare part/m);
+      expect(router.userText('kind-second')).toContain('U) cannot tell from these sentences');
       expect(router.calls[1].avoid).toEqual(['p1']);
+    });
+
+    it('shows the five kinds under rotated letters, so over three votes each kind sits under three different letters', async () => {
+      const { router, options } = second(seq({ kind: 'A', span: 'S1' }, { kind: 'B', span: 'S2' }, { kind: 'U' }));
+      await hardenKind(judged, { value: 2000 }, options);
+      const orders = router.calls.filter((call) => call.task === 'kind-second').slice(0, 3).map((call) => call.choice!.ids!.join(''));
+      expect(orders).toHaveLength(3);
+      for (const id of 'ABCDE') expect(new Set(orders.map((order) => order.indexOf(id))).size).toBe(3);
+      expect(orders.every((order) => [...order].sort().join('') === 'ABCDE')).toBe(true);
+      expect(router.calls[0].choice).toMatchObject({ field: 'kind', options: 5 });
+    });
+
+    it('never rejects on a no that only one provider family gave: the kind becomes unknown, to confirm', async () => {
+      const router = fakeRouter({ 'kind-second': { kind: 'B', span: 'S2' } }, { providers: ['p1'] });
+      const hardened = await hardenKind(judged, { value: 2000 }, { cut: 9000, median: 25000, judge: new ChecklistJudge({ router }), pageText, kind });
+      expect(hardened[0]).toMatchObject({ answer: 'unknown', quote: 'A round widget', reason: SINGLE_KIND_REASON, second: { answer: 'unknown', single: true } });
+      const sameVendor = fakeRouter({ 'kind-second': { kind: 'B', span: 'S2' } }, { providers: ['p1', 'p2'], models: { p1: 'gpt-oss-120b', p2: 'openai/gpt-oss-20b' } });
+      const again = await hardenKind(judged, { value: 2000 }, { cut: 9000, median: 25000, judge: new ChecklistJudge({ router: sameVendor }), pageText, kind });
+      expect(again[0]).toMatchObject({ answer: 'unknown', second: { single: true } });
+      const two = await hardenKind(judged, { value: 2000 }, second({ kind: 'B', span: 'S2' }).options);
+      expect(two[0]).toMatchObject({ answer: 'no', reason: LOW_PRICE_REASON });
     });
 
     it('answers no on a majority of B to E, with the sentence the voters picked', async () => {

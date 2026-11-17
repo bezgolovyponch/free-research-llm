@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY, PAID_REASON, PURPOSE_CLASS, STRATEGIES, capabilityOf, familyOf, purposePlan, localCapability, providerStats, rankRole, routeFor, usageInfo } from '../../src/llm/ranking.mjs';
+import { CAPABILITY, LETTER_ALPHA, LETTER_MIN_PER_OPTION, PAID_REASON, PURPOSE_CLASS, STRATEGIES, capabilityOf, chiSquareP, familyOf, independentFamilies, letterBias, letterTallies, purposePlan, localCapability, providerStats, rankRole, replyFamily, routeFor, sameFamily, usageInfo } from '../../src/llm/ranking.mjs';
 import { paidDailyTokens, paidProviderIds } from '../../src/llm/presets.mjs';
 
 const now = Date.parse('2026-10-19T12:00:00Z');
@@ -195,6 +195,54 @@ describe('router ranking', () => {
     expect(plan.orders.volume.indexOf('pollinations')).toBeLessThan(plan.orders.volume.indexOf('cerebras'));
     expect(plan.orders.volume.at(-1)).toBe('groq');
     expect(plan.reserved).toBe('groq');
+  });
+});
+
+describe('independent families and the letter-frequency check', () => {
+  it('treats one provider, or one vendor on two providers, as one family', () => {
+    expect(replyFamily('openai/gpt-oss-120b', 'groq')).toEqual({ stack: 'groq', vendor: 'gpt-oss' });
+    expect(sameFamily(replyFamily('llama-3.3-70b', 'groq'), replyFamily('qwen-3-32b', 'groq'))).toBe(true);
+    expect(sameFamily(replyFamily('openai/gpt-oss-120b', 'groq'), replyFamily('gpt-oss-120b', 'cerebras'))).toBe(true);
+    expect(sameFamily(replyFamily('llama-3.3-70b', 'groq'), replyFamily('gemini-flash', 'gemini'))).toBe(false);
+    expect(sameFamily(replyFamily(null, ''), replyFamily(null, ''))).toBe(true);
+    expect(sameFamily(replyFamily('a', 'x'), null)).toBe(false);
+    expect(independentFamilies([replyFamily('llama-3.3-70b', 'groq'), replyFamily('llama-4', 'cloudflare'), replyFamily('gemini-flash', 'gemini'), replyFamily('gemma-3', 'gemini')]).map((family) => family.stack)).toEqual(['groq', 'gemini']);
+  });
+
+  it('gives the chi-square upper tail at the textbook critical values', () => {
+    expect(chiSquareP(3.841, 1)).toBeCloseTo(0.05, 3);
+    expect(chiSquareP(5.991, 2)).toBeCloseTo(0.05, 3);
+    expect(chiSquareP(9.21, 2)).toBeCloseTo(0.01, 3);
+    expect(chiSquareP(16.812, 6)).toBeCloseTo(0.01, 3);
+    expect(chiSquareP(0, 3)).toBe(1);
+    expect(chiSquareP(200, 2)).toBeLessThan(1e-12);
+  });
+
+  it('counts the chosen letters per provider, model, task and number of options from the call ledger', () => {
+    const rows = [
+      { provider: 'a', model: 'm', task: 'trace', letter: 'A', options: 3 },
+      { provider: 'a', model: 'm', task: 'trace', letter: 'c', options: 3 },
+      { provider: 'a', model: 'm', task: 'trace', letter: 'D', options: 3 },
+      { provider: 'a', model: 'm', task: 'trace', options: 3 },
+      { provider: 'a', model: 'm', task: 'trace', letter: 'B', options: 4 },
+      { provider: 'a', model: 'other', task: 'trace', letter: 'B', options: 3 },
+      { provider: 'router', task: 'trace', letter: 'A', options: 3 },
+      { provider: 'a', model: 'm', letter: 'A', options: 3 },
+    ];
+    const tallies = letterTallies(rows);
+    expect([...tallies.values()].map((tally) => [tally.model, tally.options, tally.counts])).toEqual([['m', 3, [1, 0, 1]], ['m', 4, [0, 1, 0, 0]], ['other', 3, [0, 1, 0]]]);
+  });
+
+  it('flags a model at alpha 0.01 once it has 10 answers per option, and tests nothing below that', () => {
+    const tally = (counts: number[]) => new Map([['k', { provider: 'a', model: 'm', task: 'trace', options: counts.length, counts }]]);
+    expect([LETTER_ALPHA, LETTER_MIN_PER_OPTION]).toEqual([0.01, 10]);
+    expect(letterBias(tally([24, 3, 3]))[0]).toMatchObject({ n: 30, chi2: 29.4, tested: true, biased: true });
+    expect(letterBias(tally([24, 3, 3]))[0].p).toBeLessThan(0.0001);
+    expect(letterBias(tally([13, 9, 8]))[0]).toMatchObject({ n: 30, chi2: 1.4, tested: true, biased: false });
+    expect(letterBias(tally([16, 7, 7]))[0]).toMatchObject({ chi2: 5.4, biased: false });
+    expect(letterBias(tally([18, 6, 6]))[0]).toMatchObject({ chi2: 9.6, biased: true });
+    expect(letterBias(tally([23, 3, 3]))[0]).toMatchObject({ n: 29, tested: false, p: null, biased: false });
+    expect(letterBias(tally([20, 0]))[0]).toMatchObject({ n: 20, tested: true, biased: true });
   });
 });
 

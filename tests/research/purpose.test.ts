@@ -483,6 +483,10 @@ describe('a result the asker obtains or uses has a value side and a total-cost s
     expect(goal.questions.map((q: { q: string }) => q.q)).toEqual(['Can a child walk the whole route?']);
     expect(goal.obstacles).toEqual([{ obstacle: 'The route has exposed sections', checker: 'official', threshold: null, soft: true }, { obstacle: 'Too long for young children', checker: 'page', threshold: null, soft: false, trace: { id: 'C2', text: 'that suit young children' } }]);
     expect(router.userText('refine')).toContain(`Goal: ${VALUE_GOAL}\nIt comes from: ${purpose.text}\n[C1] Find hiking trails near the city\n[C2] that suit young children\nAsk "how?" of the purpose`);
+    const script = { refine: reply, restates: { restates: ['B'] }, 'obstacle-stated': (request: Ask) => ({ anchor: request.messages[1].content.includes('Condition: Too long') ? pickLetter(request, (text) => text.includes('young children')) : 'N' }) };
+    const alone = await valueSide({ router: fakeRouter(script, { providers: ['p1'] }), embedder: fakeEmbedder() }, { purpose, anchors });
+    expect(alone.obstacles.map((o: { soft: boolean }) => o.soft)).toEqual([true, true]);
+    expect(alone.questions).toHaveLength(2);
     const bare = await valueSide({ router: fakeRouter({ refine: FAIL }) }, { purpose, anchors });
     expect(bare).toMatchObject({ goal: VALUE_GOAL, protected: true, questions: [], obstacles: 'missing' });
   });
@@ -642,6 +646,25 @@ describe('the critique returns operations that code applies or refuses', () => {
     expect(different.ops.refused[0].why).toBe('the two goals were not voted to be one objective');
     const split = await applyOps({ router: fakeRouter({ 'same-goal': seq({ same: 'A' }, { same: 'B' }, FAIL) }) }, tree, [{ op: 'merge', a: 'G1', b: 'G2' }]);
     expect(split.goals).toHaveLength(3);
+  });
+
+  it('with one provider family a vote merges nothing, hardens nothing and drops nothing: each becomes open', async () => {
+    const alone = { providers: ['p1'] };
+    const merge = await applyOps({ router: fakeRouter({ 'same-goal': { same: 'A' } }, alone) }, tree, [{ op: 'merge', a: 'G1', b: 'G2' }]);
+    expect(merge.goals.map((g: { id: string }) => g.id)).toEqual(['G1', 'G2', 'G3']);
+    expect(merge.ops.refused[0].why).toBe('the two goals were not voted to be one objective');
+    const duplicates = await mergeDuplicates({ router: fakeRouter({ 'same-goal': { same: 'A' } }, alone), embedder: fakeEmbedder() }, tree);
+    expect(duplicates.goals).toHaveLength(3);
+    const statements = [{ id: 'C1', text: 'a scenic location' }, { id: 'C2', text: 'low entry cost' }];
+    const against = await traceGoal({ router: fakeRouter({ trace: (request: Ask) => ({ anchor: pickLetter(request, (text) => text === 'low entry cost'), relation: 'X' }) }, alone), embedder: fakeEmbedder() }, { goal: 'Pay as much as possible', anchor: 'C2' }, statements);
+    expect(against).toMatchObject({ state: 'proposed', trace: null, single: true, leaning: { id: 'C2' } });
+    expect(against.reason).toContain('one independent judgement only');
+    const voted = await traceGoal({ router: fakeRouter({ trace: (request: Ask) => ({ anchor: pickLetter(request, (text) => text === 'low entry cost'), relation: 'X' }) }), embedder: fakeEmbedder() }, { goal: 'Pay as much as possible', anchor: 'C2' }, statements);
+    expect(voted.state).toBe('conflict');
+    const consumes = await consumesVote({ router: fakeRouter({ consumes: { consumes: false } }, alone) }, { text: 'p' }, statements);
+    expect(consumes).toMatchObject({ value: true, decided: false, single: true });
+    const piece = await splitPiece({ router: fakeRouter({ 'requirement-split': { more: true, second: 'and cheap' } }, alone) }, 'scenic and cheap');
+    expect(piece).toMatchObject({ parts: ['scenic and cheap'], single: true });
   });
 
   it('finds duplicates among the 2 nearest neighbours of each goal and merges them', async () => {

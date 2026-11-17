@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { clausesOf } from './clauses.mjs';
 import { currencyOf } from './acceptance.mjs';
-import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
+import { SAMPLE_TEMPERATURE, SINGLE_REASON, agreeAcrossSamples, agreed, ask, closedVote, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
 
 export const PURPOSE = JSON.parse(readFileSync(new URL('./purpose.json', import.meta.url), 'utf8'));
 export const TREE_VERSION = 4;
@@ -100,8 +100,8 @@ export async function splitPiece(ctx, piece) {
     return at === null ? { error: `"second" must be words copied exactly from the piece, starting at one of its words after the first: ${text}` } : { value: { at } };
   };
   const result = await vote({ router: ctx.router, task: 'requirement-split', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => String(value.at), budget: ctx.budget, stage: PURPOSE_STAGE });
-  const at = result.value?.at ?? 0;
-  return { parts: at > 0 ? [text.slice(0, at).trim(), text.slice(at).trim()] : [text], votes: result.tally };
+  const at = agreed(result)?.at ?? 0;
+  return { parts: at > 0 ? [text.slice(0, at).trim(), text.slice(at).trim()] : [text], votes: result.tally, ...(result.single ? { single: true } : {}) };
 }
 
 export async function groupSpans(ctx, spans) {
@@ -249,7 +249,8 @@ export async function consumesVote(ctx, purpose, anchors) {
   ];
   const schema = (data) => (typeof data?.consumes === 'boolean' ? { value: data.consumes } : { error: '"consumes" must be true or false' });
   const result = await vote({ router: ctx.router, task: 'consumes', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => String(value), budget: ctx.budget, stage: PURPOSE_STAGE });
-  return { value: result.value ?? true, decided: result.value !== null, votes: result.tally };
+  const voted = agreed(result);
+  return { value: voted ?? true, decided: voted !== null, votes: result.tally, ...(result.single ? { single: true } : {}) };
 }
 
 export async function tensionsAsked(ctx, anchors) {
@@ -587,7 +588,7 @@ export async function traceGoal(ctx, goal, candidates) {
   if (relation === 'S') return { ...goal, state: 'kept', trace, votes: result.tally };
   if (relation === 'R') return { ...goal, state: 'kept', trace, restates: true, votes: result.tally };
   if (relation === 'X') return { ...goal, state: 'conflict', trace, reason: `contradicts ${trace.id}: ${trace.text}`, votes: result.tally };
-  return { ...goal, state: 'proposed', trace: null, reason: result.none ? 'traces to no clause, hint, purpose or implication: confirm or drop it' : 'no majority on what it traces to: confirm or drop it', votes: result.tally };
+  return { ...goal, state: 'proposed', trace: null, reason: result.none ? 'traces to no clause, hint, purpose or implication: confirm or drop it' : result.single ? `${SINGLE_REASON}: confirm or drop it` : 'no majority on what it traces to: confirm or drop it', votes: result.tally, ...(result.single ? { single: true, leaning: result.leaning ? { id: result.leaning.id, text: result.leaning.text } : null } : {}) };
 }
 
 async function traceAndRefine(ctx, entry, { candidates, notes, said, cited = null }) {
@@ -597,18 +598,15 @@ async function traceAndRefine(ctx, entry, { candidates, notes, said, cited = nul
   return refined ? { ...traced, ...refined } : { unrefined: traced };
 }
 
-const samePrompt = ({ query, candidate }) => [
-  { role: 'system', content: 'You compare two goals by meaning, in any language. A: they are one objective, stated twice. B: they are two different objectives. Answer with JSON only: {"same":"A|B"}.' },
-  { role: 'user', content: `Goal 1: ${query}\nGoal 2: ${candidate.text}` },
+export const SAME_OPTIONS = [{ id: 'A', text: 'they are one objective, stated twice' }, { id: 'B', text: 'they are two different objectives' }];
+
+const samePrompt = ({ query, candidate, options }) => [
+  { role: 'system', content: 'You compare two goals by meaning, in any language. Pick the one option that fits. Answer with JSON only: {"same":"<letter>"}.' },
+  { role: 'user', content: `Goal 1: ${query}\nGoal 2: ${candidate.text}\n\nThe two goals:\n${optionLines(options, null)}` },
 ];
 
-const sameSchema = (data) => {
-  const same = oneOf(data?.same, ['A', 'B']);
-  return same ? { value: same } : { error: '"same" must be A or B' };
-};
-
 export async function sameGoal(ctx, a, b) {
-  const result = await retrieveThenVerify({ query: a.goal, candidates: [{ id: b.id, text: b.goal }], fixed: true, pairwise: true, router: ctx.router, prompt: samePrompt, schema: sameSchema, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
+  const result = await retrieveThenVerify({ query: a.goal, candidates: [{ id: b.id, text: b.goal }], fixed: true, pairwise: true, options: SAME_OPTIONS, field: 'same', router: ctx.router, prompt: samePrompt, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
   const value = result.pairs[0]?.value ?? null;
   return value === null ? null : value === 'A';
 }
@@ -628,7 +626,7 @@ export async function mergeDuplicates(ctx, tree) {
     if (goal.protected || !goals.includes(goal)) continue;
     const others = goals.filter((other) => other !== goal && !other.protected && !judged.has([goal.id, other.id].sort().join('|')));
     if (!others.length) continue;
-    const result = await retrieveThenVerify({ query: goal.goal, candidates: others.map((other) => ({ id: other.id, text: other.goal })), k: 2, pairwise: true, embedder: ctx.embedder, router: ctx.router, prompt: samePrompt, schema: sameSchema, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
+    const result = await retrieveThenVerify({ query: goal.goal, candidates: others.map((other) => ({ id: other.id, text: other.goal })), k: 2, pairwise: true, options: SAME_OPTIONS, field: 'same', embedder: ctx.embedder, router: ctx.router, prompt: samePrompt, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
     for (const pair of result.pairs) {
       judged.add([goal.id, pair.candidate.id].sort().join('|'));
       const other = goals.find((entry) => entry.id === pair.candidate.id);
@@ -806,16 +804,12 @@ export const NUMBER_KINDS = { A: 'a quantity used as a limit, target or amount',
 
 async function numberKind(ctx, text, run) {
   const marked = `${text.slice(0, run.at)}[[${run.raw}]]${text.slice(run.at + run.raw.length)}`;
-  const messages = [
-    { role: 'system', content: `You read one sentence, in any language, with one number marked by [[ ]]. Say what the marked number is: ${Object.entries(NUMBER_KINDS).map(([letter, label]) => `${letter} ${label}`).join('; ')}. Answer with JSON only: {"kind":"A|B|C"}.` },
-    { role: 'user', content: `Sentence: ${marked}` },
+  const prompt = (options) => [
+    { role: 'system', content: 'You read one sentence, in any language, with one number marked by [[ ]]. Pick the one option that says what the marked number is. Answer with JSON only: {"kind":"<letter>"}.' },
+    { role: 'user', content: `Sentence: ${marked}\n\nThe marked number is:\n${optionLines(options, null)}` },
   ];
-  const schema = (data) => {
-    const kind = oneOf(data?.kind, Object.keys(NUMBER_KINDS));
-    return kind ? { value: kind } : { error: '"kind" must be A, B or C' };
-  };
-  const result = await vote({ router: ctx.router, task: 'number-kind', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: TREE_STAGE });
-  return result.value;
+  const result = await closedVote({ router: ctx.router, task: 'number-kind', tier: 'fast', options: Object.entries(NUMBER_KINDS).map(([id, label]) => ({ id, text: label })), field: 'kind', seed: marked, prompt, n: 3, quorum: 2, budget: ctx.budget, stage: TREE_STAGE });
+  return agreed(result)?.id ?? null;
 }
 
 export async function settleNumbers(ctx, node, textField, allowed) {
@@ -876,7 +870,7 @@ export async function voteHardness(ctx, { requirementText, userWords } = {}) {
     return kind ? { value: kind } : { error: '"kind" must be constraint or criterion' };
   };
   const result = await vote({ router: ctx.router, task: 'hardness', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: TREE_STAGE });
-  return result.value === 'CONSTRAINT';
+  return agreed(result) === 'CONSTRAINT';
 }
 
 export function requirementAnchors(anchors) {
