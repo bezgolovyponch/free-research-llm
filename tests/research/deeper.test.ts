@@ -19,6 +19,11 @@ const unknownItem = (answer = 'unknown') => ({ url: ITEM_URL, checks: [{ id: CHE
 const itemPage = (links) => ({ text: 'Our shop', status: 200, links });
 const yes = (quote) => [{ id: CHECK_ID, answer: 'yes', quote, hard: true, clause: 'ships abroad' }];
 
+const EUROPAGES_ITEM_URL = 'https://www.europages.nl/nl/company/jonathan-frips-22341946/products/vetements-occasion-friperie-vintage-36522';
+const EUROPAGES_ANOTHER_COMPANY_URL = 'https://www.europages.nl/nl/company/striebel-textil-123/products/some-product';
+const EUROPAGES_SAME_COMPANY_OTHER_URL = 'https://www.europages.nl/nl/company/jonathan-frips-22341946/products/another-product';
+const EUROPAGES_PROFILE_URL = 'https://www.europages.nl/nl/company/jonathan-frips-22341946';
+
 describe('DeeperReader', () => {
   it('reads the item page for its links, then a same-host link, and keeps the deeper quote and source', async () => {
     const { reader, readPage, judge } = setup(
@@ -137,5 +142,73 @@ describe('DeeperReader company pages', () => {
     await new DeeperReader({ judge, readPage }).readDeeperForUnknown(item, locationList, {});
     expect(readPage.mock.calls.map((c) => c[0])).toEqual([ITEM_URL, CONTACT_URL]);
     expect(item.checks[0]).toMatchObject({ answer: 'yes', source: CONTACT_URL });
+  });
+});
+
+describe('DeeperReader entity prefix filtering', () => {
+  const unknownItemAt = (url: string, answer = 'unknown') => ({
+    url,
+    checks: [{ id: CHECK_ID, hard: true, answer, clause: 'ships abroad' }],
+  });
+
+  it('skips a link to another company\'s product page on the same Europages host, even when its text carries the check\'s words', async () => {
+    const { reader, readPage } = setup({
+      [EUROPAGES_ITEM_URL]: itemPage([{ url: EUROPAGES_ANOTHER_COMPANY_URL, text: 'Shipping countries' }]),
+    });
+    const item = unknownItemAt(EUROPAGES_ITEM_URL);
+    await reader.readDeeperForUnknown(item, checklist, {});
+    expect(readPage.mock.calls.map((c) => c[0])).toEqual([EUROPAGES_ITEM_URL, EUROPAGES_PROFILE_URL]);
+    expect(item.checks[0].answer).toBe('unknown');
+  });
+
+  it('reads a link to the same company\'s other product page on Europages', async () => {
+    const { reader, readPage } = setup({
+      [EUROPAGES_ITEM_URL]: itemPage([{ url: EUROPAGES_SAME_COMPANY_OTHER_URL, text: 'Shipping countries' }]),
+      [EUROPAGES_SAME_COMPANY_OTHER_URL]: { text: 'We ship to 30 countries', status: 200, links: [] },
+    }, {
+      [EUROPAGES_SAME_COMPANY_OTHER_URL]: [{ id: CHECK_ID, answer: 'yes', quote: 'We ship to 30 countries', hard: true, clause: 'ships abroad' }],
+    });
+    const item = unknownItemAt(EUROPAGES_ITEM_URL);
+    await reader.readDeeperForUnknown(item, checklist, {});
+    expect(readPage.mock.calls.map((c) => c[0])).toEqual([EUROPAGES_ITEM_URL, EUROPAGES_SAME_COMPANY_OTHER_URL]);
+    expect(item.checks[0]).toMatchObject({ answer: 'yes', source: EUROPAGES_SAME_COMPANY_OTHER_URL });
+  });
+
+  it('reads the company profile page for an unknown location check even when the item page has no link to it', async () => {
+    const locationCheck = 'supplier located in nl|Is this provider located in the Netherlands?';
+    const locationList = [{ clause: 'supplier located in nl', items: [{ question: 'Is this provider located in the Netherlands?', hard: true }] }];
+
+    const readPage = vi.fn(async (url) => {
+      if (url === EUROPAGES_ITEM_URL) return itemPage([{ url: EUROPAGES_ANOTHER_COMPANY_URL, text: 'Netherlands location' }]);
+      if (url === EUROPAGES_PROFILE_URL) return { text: 'Adres: Keizersgracht 1, Amsterdam', status: 200, links: [] };
+      return null;
+    });
+    const judge = {
+      judge: vi.fn(async (page) =>
+        page.url === EUROPAGES_PROFILE_URL
+          ? [{ id: locationCheck, answer: 'yes', quote: 'Keizersgracht 1, Amsterdam', hard: true, clause: 'supplier located in nl' }]
+          : [],
+      ),
+    };
+    const item = {
+      url: EUROPAGES_ITEM_URL,
+      checks: [{ id: locationCheck, hard: true, answer: 'unknown', clause: 'supplier located in nl' }],
+    };
+    await new DeeperReader({ judge, readPage }).readDeeperForUnknown(item, locationList, {});
+    expect(readPage).toHaveBeenCalledWith(EUROPAGES_PROFILE_URL);
+    expect(item.checks[0]).toMatchObject({ answer: 'yes', source: EUROPAGES_PROFILE_URL });
+  });
+});
+
+describe('DeeperReader entity prefix without a language segment', () => {
+  it('keeps the reads inside the company when its path has no language part', async () => {
+    const item = 'https://supplier-directory.example/company/acme-77/products/bales';
+    const own = 'https://supplier-directory.example/company/acme-77/shipping';
+    const other = 'https://supplier-directory.example/company/other-88/shipping';
+    const { reader, readPage } = setup({ [item]: itemPage([{ url: other, text: 'Shipping countries' }, { url: own, text: 'Shipping countries' }]), [own]: { text: 'We ship to 30 countries', status: 200, links: [] } }, { [own]: yes('We ship to 30 countries') });
+    const checked = { url: item, checks: [{ id: CHECK_ID, hard: true, answer: 'unknown', clause: 'ships abroad' }] };
+    await reader.readDeeperForUnknown(checked, checklist, {});
+    expect(readPage.mock.calls.map((c) => c[0])).not.toContain(other);
+    expect(checked.checks[0]).toMatchObject({ answer: 'yes', source: own });
   });
 });
