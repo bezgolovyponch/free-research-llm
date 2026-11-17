@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyCalibration, applyModel, calibrationPrompt, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
 import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
+import { fakeRouter, seq } from '../helpers/fakes';
 
 const question = 'Find plots for a glamping site under 30000 EUR, at most 15 km from the sea, hottest month under 29 °C, with a strong price trend';
 const sample = (criteria: object[], terms = ['plot', 'terreno']) => normalizeSample({ concept: 'cheap coastal glamping land', kind: { label: 'plot of land', terms }, criteria });
@@ -450,6 +451,138 @@ describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
     const project: Record<string, any> = { id: own.id, question: carQuestion, guidance: '', acceptance: { itemCount: 20 } };
     await new DecisionModeler({ router, cases: bank } as never).build(project);
     expect(project.decisionModel.caseIds).not.toContain(own.id);
+  });
+
+  describe('checklist built from purpose tree', () => {
+    const purposeTree = {
+      goals: [
+        {
+          id: 'G1',
+          state: 'kept',
+          goal: 'Within 300 km of Prague',
+          questions: [
+            { id: 'Q1', q: 'Is this listing within 300 km of Prague?', checker: 'code', threshold: { op: '<=', value: 300, unit: 'km', hard: true, source: 'asked' } },
+            { id: 'Q2', q: 'Is the distance stated on the page?', checker: 'page', threshold: null },
+          ],
+        },
+        {
+          id: 'G2',
+          state: 'kept',
+          goal: 'Price up to 65000 CZK',
+          questions: [
+            { id: 'Q3', q: 'Is the price at most 65000 CZK?', checker: 'page', threshold: { op: '<=', value: 65000, unit: 'CZK', hard: true, source: 'asked' } },
+          ],
+        },
+        {
+          id: 'G3',
+          state: 'proposed',
+          goal: 'Invented goal',
+          questions: [
+            { id: 'Q4', q: 'Is it invented?', checker: 'page', threshold: null },
+          ],
+        },
+        {
+          id: 'G4',
+          state: 'kept',
+          goal: 'Proven quality',
+          questions: [
+            { id: 'Q5', q: 'Do independent sources confirm the quality?', checker: 'consensus', threshold: null },
+          ],
+        },
+      ],
+    };
+
+    it('builds checklist from stored purposeTree fixture (source tree)', async () => {
+      const decisionProposal = { concept: 'c', kind: { label: 'car', terms: ['hatchback'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
+      const router = {
+        complete: async (req: { purpose: string }) => {
+          if (req.purpose === 'decision-model') {
+            return { provider: 'test', data: decisionProposal };
+          }
+          throw new Error('should not call checklist');
+        },
+      };
+      const project = {
+        id: 'tree-checklist',
+        question: carQuestion,
+        guidance: '',
+        acceptance: { itemCount: 20 },
+        purposeTree,
+        scoping: { notes: [] },
+      };
+      const modeler = new DecisionModeler({ router } as never);
+      const model = await modeler.build(project);
+      expect(model.checklist).toBeDefined();
+      expect(model.checklist!.length).toBe(3);
+      const clauses = model.checklist!.map((c) => c.clause);
+      expect(clauses).toContain('Within 300 km of Prague');
+      expect(clauses).toContain('Price up to 65000 CZK');
+      expect(clauses).toContain('Proven quality');
+      const hardChecks = model.checklist!.flatMap((c) => c.items.filter((i) => i.hard));
+      expect(hardChecks.length).toBe(2);
+      expect(hardChecks.map((i) => i.question)).toContain('Is this listing within 300 km of Prague?');
+      expect(hardChecks.map((i) => i.question)).toContain('Is the price at most 65000 CZK?');
+      const distanceItem = model.checklist!.find((c) => c.clause === 'Within 300 km of Prague')!.items.find((i) => i.numeric);
+      expect(distanceItem!.numeric).toMatchObject({ measure: 'distanceKm', op: '<=', value: 300, unit: 'km' });
+      const priceItem = model.checklist!.find((c) => c.clause === 'Price up to 65000 CZK')!.items.find((i) => i.numeric);
+      expect(priceItem!.numeric).toMatchObject({ measure: 'priceEur', op: '<=', value: 65000, unit: 'CZK' });
+    });
+
+    it('falls back to ChecklistModeler when no purposeTree', async () => {
+      const decisionProposal = { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
+      const checklistProposal = {
+        items: [
+          { clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } },
+        ],
+      };
+      let checklistCalls = 0;
+      const router = {
+        complete: async (req: { purpose: string }) => {
+          if (req.purpose === 'decision-model') {
+            return { provider: 'test', data: decisionProposal };
+          }
+          if (req.purpose === 'checklist') {
+            checklistCalls++;
+            return { provider: 'test', data: checklistProposal };
+          }
+          throw new Error('unexpected purpose: ' + req.purpose);
+        },
+      };
+      const project = { id: 'no-tree', question, guidance: '', acceptance: { expected: '20 plots' } };
+      const modeler = new DecisionModeler({ router } as never);
+      const model = await modeler.build(project);
+      expect(checklistCalls).toBe(3);
+      expect(model.checklist).toBeDefined();
+      expect(model.checklist![0].clause).toBe('sea');
+    });
+
+    it('empty tree never replaces a good model checklist', async () => {
+      const decisionProposal = { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
+      const fallbackProposal = {
+        items: [
+          { clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } },
+        ],
+      };
+      let checklistCalls = 0;
+      const router = {
+        complete: async (req: { purpose: string }) => {
+          if (req.purpose === 'decision-model') {
+            return { provider: 'test', data: decisionProposal };
+          }
+          if (req.purpose === 'checklist') {
+            checklistCalls++;
+            return { provider: 'test', data: fallbackProposal };
+          }
+          throw new Error('unexpected purpose: ' + req.purpose);
+        },
+      };
+      const project = { id: 'empty-tree', question, guidance: '', acceptance: { expected: '20 plots' }, purposeTree: { goals: [] }, scoping: { notes: [] } };
+      const modeler = new DecisionModeler({ router } as never);
+      const model = await modeler.build(project);
+      expect(checklistCalls).toBe(3);
+      expect(model.checklist).toBeDefined();
+      expect(model.checklist![0].clause).toBe('sea');
+    });
   });
 
   it('a title prefix is not a model', () => {

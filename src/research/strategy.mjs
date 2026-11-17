@@ -1,5 +1,7 @@
 import { plain } from './itemgate.mjs';
-import { SEA_WORDS } from './brief.mjs';
+function seaWords() {
+  return /\b(?:sea|ocean|coast(?:al)?|beach|seaside|shore|seafront)\b/;
+}
 import { PERCEIVED_MAX_C } from './cci.mjs';
 import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
@@ -57,7 +59,7 @@ export const GLAMPING_LOW_ENTRY = {
     { id: 'kind', label: 'a plot of land for sale', words: /\b(?:plot|land|terreno|parcel)/i, measure: 'item gate on every listing (kind, sale, single page)' },
     { id: 'price', label: 'price within the budget', words: /\d[\d.,\s]*(?:€|eur|euro|zł|zl|pln|kč|kc|czk|\$|usd|£|gbp|₺|(?<![a-z])tl(?![a-z])|try|₫|vnđ|vnd)|(?:€|eur|euro|zł|zl|pln|kč|kc|czk|\$|usd|£|gbp|₺|(?<![a-z])tl(?![a-z])|try|₫|vnđ|vnd)\s?\d|\bmax\b|budget/i, measure: 'price read from the listing, converted at ECB rates' },
     { id: 'region', label: 'in the countries you named', words: null, measure: 'country from the site address, language or listing text' },
-    { id: 'sea', label: 'sea within an e-bike ride', words: SEA_WORDS, measure: 'distance to the OpenStreetMap coastline from the listing location' },
+    { id: 'sea', label: 'sea within an e-bike ride', words: seaWords(), measure: 'distance to the OpenStreetMap coastline from the listing location' },
     { id: 'season', label: 'camping months a year', words: /\bmonths?\b|season|climate|weather/i, measure: 'Camping Climate Index (Ma 2021) from Open-Meteo daily weather of 2025 in the 0.25° cell of the listing: months with a mean index above 3 (acceptable, good or optimal in Ma 2021 Table 4; an adverse-weather day is set to 3, unfavorable)' },
     { id: 'noAc', label: 'mild: no air conditioning', words: /\bmild\b|air ?condition|temperature|heat/i, measure: 'hottest month average daily high at most 32.2 °C (perceived maximum, Fisichelli et al. 2015, cited by Ma 2021), days above 34 °C counted as exceptions' },
     { id: 'trend', label: 'strong price increase trend', words: /price increase|\btrend\b|appreciat|grow/i, measure: 'Eurostat house price index of the country vs the EU average (country level, not land)' },

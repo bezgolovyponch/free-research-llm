@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, confirmTree, consumesVote, costSide, coverageOf, coveredAnchors, critique, dismissNotModelled, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, requirementsOf, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide } from '../../src/research/purpose.mjs';
+import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, confirmTree, consumesVote, costSide, coverageOf, coveredAnchors, critique, dismissNotModelled, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, requirementsOf, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide, voteHardness } from '../../src/research/purpose.mjs';
 import { CallBudget, STAGE_CAPS } from '../../src/research/semantic.mjs';
 import { clausesOf } from '../../src/research/strategy.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
@@ -938,5 +938,77 @@ describe('the whole tree', () => {
     expect(partial.tree.dropped).toEqual([{ goal: 'Goal number three', reason: UNREFINED, trace: { id: 'C1', text: 'eight things at once' } }]);
     expect(partial.tree.unrefined).toEqual(['Goal number three']);
     expect(missing).toContain('1 goal(s) not refined into measurable questions: Goal number three');
+  });
+});
+
+describe('voteHardness with stub router', () => {
+  const ctx = { router: fakeRouter({ hardness: { kind: 'constraint' } }), budget: new CallBudget(), log: () => {} };
+  const ctxCriterion = { router: fakeRouter({ hardness: { kind: 'criterion' } }), budget: new CallBudget(), log: () => {} };
+  const userWords = 'Find cars within 300km from Prague up to 65000CZK';
+
+  it('explicit limit (within 300 km) -> constraint/hard', async () => {
+    expect(await voteHardness(ctx, { requirementText: 'within 300 km of Prague', userWords })).toBe(true);
+  });
+
+  it('explicit limit (max 65000 CZK) -> constraint/hard', async () => {
+    expect(await voteHardness(ctx, { requirementText: 'price up to 65000 CZK', userWords })).toBe(true);
+  });
+
+  it('hint describing the kind -> criterion/soft', async () => {
+    expect(await voteHardness(ctxCriterion, { requirementText: 'hatchback preferred', userWords })).toBe(false);
+  });
+
+  it('location preference hint -> criterion/soft', async () => {
+    expect(await voteHardness(ctxCriterion, { requirementText: 'prefer locations near Prague', userWords })).toBe(false);
+  });
+
+  it('supplier outside a location HINT is not rejected by the verdict (hint is soft)', async () => {
+    const isHard = await voteHardness(ctxCriterion, { requirementText: 'supplier located in NL, DE, UK', userWords: 'Find suppliers in NL or DE' });
+    expect(isHard).toBe(false);
+  });
+});
+
+describe('composite goal combine truth table', () => {
+  function combineGoal(answers: ('yes' | 'no' | 'unknown')[], refine: 'AND' | 'OR'): 'yes' | 'no' | 'unknown' {
+    const hardAnswers = answers;
+    if (refine === 'AND') {
+      if (hardAnswers.every((a) => a === 'yes')) return 'yes';
+      if (hardAnswers.some((a) => a === 'no')) return 'no';
+      return 'unknown';
+    }
+    if (refine === 'OR') {
+      if (hardAnswers.some((a) => a === 'yes')) return 'yes';
+      if (hardAnswers.every((a) => a === 'no')) return 'no';
+      return 'unknown';
+    }
+    return 'unknown';
+  }
+
+  it('AND: all hard yes -> yes', () => {
+    expect(combineGoal(['yes', 'yes', 'yes'], 'AND')).toBe('yes');
+  });
+
+  it('AND: any hard no -> no', () => {
+    expect(combineGoal(['yes', 'no', 'yes'], 'AND')).toBe('no');
+    expect(combineGoal(['no', 'unknown'], 'AND')).toBe('no');
+  });
+
+  it('AND: else unknown', () => {
+    expect(combineGoal(['yes', 'unknown'], 'AND')).toBe('unknown');
+    expect(combineGoal(['unknown', 'unknown'], 'AND')).toBe('unknown');
+  });
+
+  it('OR: any yes -> yes', () => {
+    expect(combineGoal(['no', 'yes', 'no'], 'OR')).toBe('yes');
+    expect(combineGoal(['yes', 'unknown'], 'OR')).toBe('yes');
+  });
+
+  it('OR: all no -> no', () => {
+    expect(combineGoal(['no', 'no', 'no'], 'OR')).toBe('no');
+  });
+
+  it('OR: else unknown', () => {
+    expect(combineGoal(['unknown', 'unknown'], 'OR')).toBe('unknown');
+    expect(combineGoal(['no', 'unknown'], 'OR')).toBe('unknown');
   });
 });

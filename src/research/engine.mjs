@@ -27,6 +27,10 @@ import { buildCandidates, candidateDeliverables, lowPriceCut, lowPriceStats, sho
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
 import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
+import { runScoping } from './scoping.mjs';
+import { buildPurposeTree, TREE_VERSION } from './purpose.mjs';
+import { CallBudget } from './semantic.mjs';
+import { Embedder } from '../llm/embedder.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
@@ -455,11 +459,55 @@ export class ResearchEngine {
     const template = templateById(project.templateId);
     this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
+
+    const needsPurposeTree = !project.purposeTree ||
+      project.purposeTree.version !== TREE_VERSION ||
+      project.purposeTree.question !== project.question ||
+      project.purposeTree.guidance !== String(project.guidance ?? '');
+
+    let purposeTree = project.purposeTree;
+    if (needsPurposeTree) {
+      this.emit(project, 'phase', 'building purpose tree from question and scoping notes');
+      const ctx = {
+        router: this.router,
+        search: this.search,
+        embedder: this.embedder ?? new Embedder({ env: process.env }),
+        budget: new CallBudget(),
+        log: (msg) => this.emit(project, 'decision', msg),
+      };
+      const { phase: treePhase, tree, anchors } = await buildPurposeTree(ctx, {
+        question: project.question,
+        guidance: project.guidance ?? '',
+        notes: project.scoping?.notes ?? [],
+      });
+      if (tree) {
+        purposeTree = { ...tree, question: project.question, guidance: String(project.guidance ?? ''), version: TREE_VERSION, at: new Date().toISOString() };
+        project.purposeTree = purposeTree;
+        this.emit(project, 'tree', `purpose tree built: ${tree.goals?.length ?? 0} goals (phase: ${treePhase})`);
+      } else {
+        this.emit(project, 'warn', `purpose tree not built: ${treePhase}`);
+      }
+    } else {
+      this.emit(project, 'tree', `reusing stored purpose tree (${purposeTree.goals?.length ?? 0} goals)`);
+    }
+
+    const purposeGoals = purposeTree?.goals?.filter((g) => g.state === 'kept').map((g) => g.goal).join('; ') || '';
+
     const ask = async (feedback) => {
       const reply = await this.router.complete({
         purpose: 'decompose',
         tier: 'deep',
-        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback, listsItems: Boolean(project.acceptance?.itemCount) }), project.guidance),
+        messages: withGuidance(decomposePrompt({
+          question: project.question,
+          template,
+          constraints: project.constraints,
+          dataSummary: project.data?.text,
+          expected: project.acceptance?.expected,
+          brief: this.briefOf(project).text,
+          feedback,
+          listsItems: Boolean(project.acceptance?.itemCount),
+          purposeGoals,
+        }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
       const fixes = repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
@@ -680,23 +728,33 @@ export class ResearchEngine {
     await this.ensureDecisionModel(project);
     const purpose = project.decisionModel?.purpose ?? '';
     const kind = project.decisionModel?.kind ?? null;
-    const object = kind ? [kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
-    const hint = project.guidance ?? '';
     const brief = project.brief ?? this.briefOf(project);
     const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
-    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages, object, hint }) }).catch(() => null);
-    const queries = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 4).slice(0, DOMAIN_QUERIES);
-    if (!queries.length) return true;
-    const found = await this.search.search(queries, { maxSources: DOMAIN_SOURCES }).catch(() => []);
-    const sources = (Array.isArray(found) ? found : []).map((source, index) => ({ ...source, id: `D${index + 1}` }));
-    const replies = [];
-    for (let index = 0; index < sources.length; index += DOMAIN_PAGES_PER_CALL) {
-      const batch = sources.slice(index, index + DOMAIN_PAGES_PER_CALL);
-      const answer = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainFindingsPrompt({ question: project.question, purpose, sources: batch }) }).catch(() => null);
-      replies.push(answer);
-    }
-    const findings = mergeFindings(replies, sources);
-    const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [] });
+    const titles = (project.sweep?.pages ?? []).flatMap((page) => (page.listings ?? []).map((l) => String(l.title ?? ''))).filter(Boolean);
+    const requirements = project.nodes?.flatMap((node) => node.question ?? []).filter(Boolean) ?? [];
+    const ctx = {
+      router: this.router,
+      search: this.search,
+      embedder: this.embedder ?? new Embedder({ env: process.env }),
+      budget: new CallBudget(),
+      log: (msg) => this.emit(project, 'decision', msg),
+    };
+    const { scoping } = await runScoping(ctx, {
+      question: project.question,
+      purpose: purpose || project.question,
+      kind: kind?.label ?? '',
+      regions: brief.regions ?? [],
+      markets: brief.regions?.map((code) => countryByCode(code)?.name ?? code) ?? [],
+      languages,
+      rows: project.candidates?.kept ?? [],
+      titles,
+      requirements,
+    });
+    project.scoping = scoping;
+    const understanding = domainUnderstanding(
+      scoping.sources.map((source) => ({ claims: [{ text: source.spanQuote ?? '', value: null, unit: '', sourceIds: [], quote: source.spanQuote ?? '' }], text: source.spanQuote ?? '', url: source.url, title: source.title })),
+      { hint: project.guidance ?? '', sources: scoping.sources, members: isUmbrella(kind) ? kind.members : [] }
+    );
     const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
     const matchedTitles = Number(project.decisionModel?.kind?.verified?.matched ?? 0);
     const sweptListings = (project.sweep?.pages ?? []).reduce((n, page) => n + (page.listings?.length ?? 0), 0);

@@ -6,9 +6,11 @@ import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mj
 import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 import { MAX_MEMBERS, MIN_MEMBERS, memberTerms, sameMember } from './concept.mjs';
+import { voteHardness, thresholdsOf } from './purpose.mjs';
+import { CallBudget } from './semantic.mjs';
 
 export { CHECKLIST_VERSION };
-export const DECISION_MODEL_VERSION = 4;
+export const DECISION_MODEL_VERSION = 5;
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
 export const CASES_RETRIEVED = 2;
@@ -484,9 +486,63 @@ export class DecisionModeler {
         }
       }
     }
-    const checklist = await this.checklistModeler.build(question, guidance);
+    const budget = new CallBudget();
+    let checklist = null;
+    if (project.purposeTree?.goals?.length) {
+      const { tree: treeWithThresholds } = thresholdsOf(project.purposeTree, { question, guidance, notes: project.scoping?.notes ?? [] });
+      checklist = await this.buildChecklistFromTree(treeWithThresholds, project.scoping?.notes ?? [], this.router, budget, question, guidance);
+    } else {
+      checklist = await this.checklistModeler.build(question, guidance);
+    }
     project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
     return project.decisionModel;
+  }
+
+  async buildChecklistFromTree(purposeTree, scopingNotes, router, budget, question, guidance) {
+    const notesById = new Map(scopingNotes.map((note) => [note.id, note]));
+    const userWords = `${question}\n${guidance}`;
+    const clusters = [];
+    for (const goal of purposeTree.goals ?? []) {
+      if (goal.state !== 'kept' || !goal.questions?.length) continue;
+      const clause = goal.goal.slice(0, 200);
+      let cluster = clusters.find((c) => c.clause === clause);
+      if (!cluster) {
+        cluster = { clause, items: [], refine: goal.refine ?? 'AND', goalId: goal.id, goalHard: goal.hard ?? false };
+        clusters.push(cluster);
+      }
+      for (const q of goal.questions) {
+        const checker = q.checker;
+        let hard = false;
+        let scope = 'item';
+        if (q.threshold?.hard === true) {
+          hard = true;
+        } else if (checker === 'page') {
+          const ctx = { router, budget, log: () => {} };
+          hard = await voteHardness(ctx, { requirementText: q.q, userWords });
+        } else if (['consensus', 'statistic', 'official'].includes(checker)) {
+          scope = 'domain';
+          hard = false;
+        }
+        const numeric = q.threshold ? { measure: this.mapCheckerToMeasure(checker, q.q, q.threshold.unit), op: q.threshold.op, value: q.threshold.value, unit: q.threshold.unit } : undefined;
+        cluster.items.push({ clause, question: q.q, hard, numeric, checker, scope, goalId: goal.id, questionId: q.id });
+      }
+    }
+    return clusters;
+  }
+
+  mapCheckerToMeasure(checker, questionText = '', unit = '') {
+    const text = (questionText + ' ' + unit).toLowerCase();
+    if (text.includes('km') || text.includes('distance') || text.includes('far') || text.includes('near') || text.includes('within')) return 'distanceKm';
+    if (text.includes('m2') || text.includes('m²') || text.includes('area') || text.includes('size') || text.includes('hectare') || text.includes('ha')) return 'areaM2';
+    if (text.includes('coast') || text.includes('sea') || text.includes('ocean') || text.includes('shore')) return 'coastKm';
+    if (text.includes('beach')) return 'beachKm';
+    if (text.includes('lake') || text.includes('reservoir')) return 'lakeKm';
+    if (text.includes('month') || text.includes('workable') || text.includes('season')) return 'workableMonths';
+    if (text.includes('comfortable') || text.includes('optimal')) return 'comfortableMonths';
+    if (text.includes('day') || text.includes('hottest') || text.includes('coldest') || text.includes('temperature') || text.includes('°c') || text.includes('celsius')) return 'hottestC';
+    if (text.includes('explore') || text.includes('beach') || text.includes('viewpoint') || text.includes('attraction') || text.includes('reserve') || text.includes('trail')) return 'explorePoints';
+    if (text.includes('stay') || text.includes('lodging') || text.includes('campsite') || text.includes('accommodation')) return 'staysNearby';
+    return 'priceEur';
   }
 }

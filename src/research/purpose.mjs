@@ -838,6 +838,19 @@ export function thresholdsOf(tree, { question = '', guidance = '', answers = [],
   return { tree: { ...tree, goals, thresholds }, thresholds };
 }
 
+export async function voteHardness(ctx, { requirementText, userWords } = {}) {
+  const messages = [
+    { role: 'system', content: 'You read one requirement from a research question, in any language. Decide whether it states a hard constraint that must be satisfied (a veto if violated) or a soft criterion that only scores and orders. A hard constraint is an explicit limit: a number with a unit (max price, max distance, minimum area), a range, a radius, or an exclusive word from the user\'s own text (required, must, only, exactly, mandatory, no, not, without, exclude, forbidden). A preference, example, quality, or hint is soft. Answer with JSON only: {"kind":"constraint|criterion"}.' },
+    { role: 'user', content: `Requirement: ${requirementText}\n\nUser's own words (question + guidance):\n${userWords}` },
+  ];
+  const schema = (data) => {
+    const kind = oneOf(data?.kind, ['CONSTRAINT', 'CRITERION']);
+    return kind ? { value: kind } : { error: '"kind" must be constraint or criterion' };
+  };
+  const result = await vote({ router: ctx.router, task: 'hardness', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: TREE_STAGE });
+  return result.value === 'CONSTRAINT';
+}
+
 export function requirementAnchors(anchors) {
   return (anchors ?? []).filter((anchor) => anchor.kind === 'clause');
 }
@@ -940,4 +953,20 @@ export async function buildPurposeTree(ctx, { question, guidance = '', answers =
   const embedNote = ctx.embedder?.failureNote?.() ?? '';
   if (embedNote) ctx.log?.(embedNote);
   return { phase: needsConfirmation(tree) ? 'needs-confirmation' : 'tree-ready', tree, anchors };
+}
+
+export function combineGoalAnswers(answers, refine) {
+  const hardAnswers = answers.filter((a) => a.hard === true).map((a) => a.answer);
+  if (hardAnswers.length === 0) return 'unknown';
+  if (refine === 'AND') {
+    if (hardAnswers.every((a) => a === 'yes')) return 'yes';
+    if (hardAnswers.some((a) => a === 'no')) return 'no';
+    return 'unknown';
+  }
+  if (refine === 'OR') {
+    if (hardAnswers.some((a) => a === 'yes')) return 'yes';
+    if (hardAnswers.every((a) => a === 'no')) return 'no';
+    return 'unknown';
+  }
+  return 'unknown';
 }
