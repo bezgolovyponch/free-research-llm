@@ -112,6 +112,12 @@ const DOMAIN_QUERIES = 8;
 const DOMAIN_SOURCES = 12;
 const DOMAIN_PAGES_PER_CALL = 4;
 const HUB_SOURCES = 15;
+export const HUB_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function hubSearchStale(project, now) {
+  const at = Date.parse(project?.hubSearchedAt ?? '');
+  return !Number.isFinite(at) || now - at >= HUB_REFRESH_MS;
+}
 
 const KNOWLEDGE_SOURCES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8'));
 const MAKE_LANGUAGES = KNOWLEDGE_SOURCES.makeLanguages ?? {};
@@ -630,7 +636,7 @@ export class ResearchEngine {
   async searchHubs(project) {
     const brief = project.brief ?? this.briefOf(project);
     if (brief.located !== false) return 0;
-    if (project.hubSources) return project.hubSources.length;
+    if (project.hubSources && !hubSearchStale(project, this.now())) return project.hubSources.length;
     if (this.demo || !this.router || !this.search?.search) return 0;
     const hubs = hubsFrom(project.domain, project.guidance);
     if (!hubs.length) return 0;
@@ -662,6 +668,7 @@ export class ResearchEngine {
       }
     }
     project.hubSources = sources;
+    project.hubSearchedAt = new Date(this.now()).toISOString();
     this.emit(project, 'candidates', `hub search: ${sources.length} page(s) from ${hubs.join(', ')}`);
     return sources.length;
   }
