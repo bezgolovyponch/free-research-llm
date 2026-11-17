@@ -1,5 +1,6 @@
 import { plain } from './itemgate.mjs';
 import { headlinePrice, parseAmounts } from './acceptance.mjs';
+import { SEA_WORDS } from './constants.mjs';
 
 export const COUNTRIES = [
   ['AT', 'Austria', ['osterreich'], 'EU'],
@@ -77,7 +78,7 @@ const ONE_COUNTRY_LANGUAGES = { pt: 'PT', el: 'GR', tr: 'TR', vi: 'VN', hr: 'HR'
 const GROUPS = { EU: /\b(?:eu|european union|e\.u\.)\b/ };
 const GENERIC_TLDS = new Set(['co', 'io', 'ai', 'me', 'tv', 'cc', 'fm', 'ly', 'to', 'gg', 'app', 'eu']);
 const TLD_ALIASES = { uk: 'GB' };
-export const SEA_WORDS = /\b(?:sea|ocean|coast(?:al)?|beach|seaside|shore|seafront)\b/;
+export { SEA_WORDS } from './constants.mjs';
 const COAST_ON_PAGE = /\b(?:sea|ocean|coast|coastal|beach|seaside|seafront|sea view|praia|playa|plage|spiaggia|mar|deniz|denize|sahil|plaj|bai bien|gan bien|thalassa|paralia|strand|kust|mora|uvala|uvale|pogled na more|plaza|plazi|bord de mer|vista mare|frente mar|denize sifir)\b/;
 const NEWS_PATH = /\/(?:news|noticias|noticia|blog|tin-tuc|tin-thi-truong|haber|actualite|articles?|magazine|guide|guides|deco)(?:\/|$|-)/i;
 const MIN_TEXT_MENTIONS = 2;

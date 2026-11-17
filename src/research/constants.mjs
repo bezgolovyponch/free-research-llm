@@ -1,0 +1,1 @@
+export const SEA_WORDS = /\b(?:sea|ocean|coast(?:al)?|beach|seaside|shore|seafront)\b/;

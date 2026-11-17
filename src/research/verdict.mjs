@@ -94,6 +94,20 @@ export function itemEvidence(item, hardIds, spec) {
   return { belief, plausibility, open: unknownIds };
 }
 
+function allHardCheckIds(checklist, kind) {
+  const ids = [...new Set(checklist?.flatMap?.((cluster) => cluster.items?.filter((ci) => ci.hard && ci.scope !== 'domain').map((ci) => cluster.clause + "|" + ci.question) ?? []) ?? [])];
+  if (checklist && kind?.label) {
+    const kindId = kindCluster(kind).items[0].question;
+    const id = 'kind|' + kindId;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function hardChecksOf(item, hardIds) {
+  return (item.checks ?? []).filter((c) => hardIds.includes(c.id));
+}
+
 export function verdict(items, spec, checklist, kind = null) {
   const goalChecksMap = new Map();
   for (const cluster of checklist ?? []) {
@@ -103,22 +117,37 @@ export function verdict(items, spec, checklist, kind = null) {
   }
 
   const hasGoalStructure = goalChecksMap.size > 0;
-  const goalHardIds = hasGoalStructure ? [...goalChecksMap.entries()].filter(([, v]) => v.goalHard).map(([id]) => `goal|${id}`) : [];
+  const goalHardGoalIds = hasGoalStructure ? [...goalChecksMap.entries()].filter(([, v]) => v.goalHard).map(([id]) => id) : [];
+  const allHardIds = allHardCheckIds(checklist, kind);
+  const goalHardCheckIds = new Set();
+  for (const goalId of goalHardGoalIds) {
+    for (const cluster of checklist ?? []) {
+      if (cluster.goalId === goalId) {
+        for (const ci of cluster.items ?? []) {
+          if (ci.hard && ci.scope !== 'domain') {
+            goalHardCheckIds.add(cluster.clause + "|" + ci.question);
+          }
+        }
+      }
+    }
+  }
+  const nonGoalHardIds = allHardIds.filter((id) => !goalHardCheckIds.has(id));
 
   const itemsWithTier = items.map((item) => {
     let tier;
     if (hasGoalStructure) {
       const byGoal = goalChecksOf(item, checklist);
       tier = "confirmed";
-      if (goalHardIds.length > 0) {
-        for (const goalId of goalHardIds) {
-          const gid = goalId.replace('goal|', '');
-          const g = byGoal.get(gid);
-          const goalInfo = goalChecksMap.get(gid);
+      let hasAnyHardCheck = false;
+
+      if (goalHardGoalIds.length > 0) {
+        for (const goalId of goalHardGoalIds) {
+          const g = byGoal.get(goalId);
+          const goalInfo = goalChecksMap.get(goalId);
           if (!g) {
-            tier = "not-judged";
-            break;
+            continue;
           }
+          hasAnyHardCheck = true;
           const combined = combineGoalChecks(g.checks, goalInfo.refine);
           if (combined === "no") {
             tier = "rejected";
@@ -128,17 +157,32 @@ export function verdict(items, spec, checklist, kind = null) {
             tier = "to-confirm";
           }
         }
-        if (tier === "confirmed" && !qualifies(item, spec)) tier = "rejected";
-      } else {
-        tier = qualifies(item, spec) ? "confirmed" : "rejected";
+      }
+
+      const hardChecks = hardChecksOf(item, nonGoalHardIds);
+      if (hardChecks.length > 0) {
+        hasAnyHardCheck = true;
+        if (tier !== "rejected") {
+          if (hardChecks.some((c) => c.answer === "no")) {
+            tier = "rejected";
+          } else if (tier === "confirmed" && hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "")) {
+            tier = "to-confirm";
+          }
+        }
+      }
+
+      if (!hasAnyHardCheck) {
+        tier = "not-judged";
+      } else if (tier === "confirmed" && !qualifies(item, spec)) {
+        tier = "rejected";
       }
     } else {
-      tier = itemTier(item, hardIdsOf(checklist, kind), spec);
+      tier = itemTier(item, allHardIds, spec);
     }
-    const support = itemEvidence(item, hardIdsOf(checklist, kind), spec);
+    const support = itemEvidence(item, allHardIds, spec);
     return { ...item, tier, support };
   });
-  
+
   const tiers = {
     confirmed: itemsWithTier.filter((i) => i.tier === "confirmed"),
     "to-confirm": itemsWithTier.filter((i) => i.tier === "to-confirm"),
@@ -180,7 +224,7 @@ export function verdict(items, spec, checklist, kind = null) {
         const g = goalChecksOf(i, checklist).get(goalId);
         return g && combineGoalChecks(g.checks, goalInfo.refine) === "unknown";
       }).length;
-      return { id: `goal|${goalId}`, clause: goalInfo.clause, yes, no, unknown, goalHard: goalInfo.goalHard };
+      return { id: `goal|${goalId}`, clause: goalInfo.clause, yes, no, unknown };
     });
 
     const judgedItems = items.filter((i) => goalChecksOf(i, checklist).size > 0);
@@ -190,8 +234,8 @@ export function verdict(items, spec, checklist, kind = null) {
 
     const openGoals = [...new Set(tiers["to-confirm"].flatMap((i) => {
       const byGoal = goalChecksOf(i, checklist);
-      return [...byGoal.entries()].filter(([, g]) => {
-        const goalInfo = goalChecksMap.get(g[0]);
+      return [...byGoal.entries()].filter(([goalId, g]) => {
+        const goalInfo = goalChecksMap.get(goalId);
         return goalInfo && combineGoalChecks(g.checks, goalInfo.refine) === "unknown";
       }).map(([id]) => `goal|${id}`);
     }))];
@@ -200,9 +244,18 @@ export function verdict(items, spec, checklist, kind = null) {
       return goal?.clause ?? id;
     }).join(", ") : "";
 
-    perCheck = perGoal;
+    const hardPerCheck = nonGoalHardIds.map((id) => {
+      const clause = items[0]?.checks?.find((c) => c.id === id)?.clause ?? id;
+      const relevant = items.filter((i) => (i.checks ?? []).some((c) => c.id === id));
+      const yes = relevant.filter((i) => (i.checks ?? []).some((c) => c.id === id && c.answer === "yes")).length;
+      const no = relevant.filter((i) => (i.checks ?? []).some((c) => c.id === id && c.answer === "no")).length;
+      const unknown = relevant.filter((i) => (i.checks ?? []).some((c) => c.id === id && (c.answer === "unknown" || c.answer === undefined || c.answer === ""))).length;
+      return { id, clause, yes, no, unknown };
+    });
+
+    perCheck = [...perGoal, ...hardPerCheck];
   } else {
-    const hardIds = hardIdsOf(checklist, kind);
+    const hardIds = allHardIds;
     perCheck = hardIds.map((id) => {
       const clause = items[0]?.checks?.find((c) => c.id === id)?.clause ?? id;
       const relevant = items.filter((i) => (i.checks ?? []).some((c) => c.id === id));
