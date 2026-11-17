@@ -400,37 +400,64 @@ function groupListingsByEntity(listings) {
   return entityGroups;
 }
 
-async function readEntityWebsite(profileUrl, readPage) {
-  if (!readPage) return null;
+const ENTITY_PATH = /^((?:\/[a-z]{2})?\/(?:company|companies|firma|firmen|empresa|entreprise|societe|azienda|bedrijf|supplier|suppliers|seller|vendor|store)\/([^/]+))/i;
+const LEGAL_FORMS = new Set(['bv', 'ltd', 'limited', 'gmbh', 'srl', 'spa', 'sas', 'sarl', 'zoo', 'sro', 'inc', 'llc', 'company', 'group', 'uab', 'nv']);
+const SOCIAL_HOST = /(?:^|\.)(?:facebook|instagram|linkedin|twitter|x|youtube|tiktok|pinterest)\.com$/;
+const DIRECTORY_HOST = /europages|visable/;
+const PLACE_WITH_COUNTRY = /^(.*),\s*([A-Z]{2})$/;
+
+export function entityProfile(url) {
+  let parsed;
   try {
-    const page = await readPage(profileUrl);
-    if (!page || !page.text) return null;
-    const entities = entitiesFromJsonLd(page.text, profileUrl);
-    for (const e of entities) {
-      if (e.url && e.url !== profileUrl) {
-        return e.url;
-      }
-    }
-    const anchors = page.text.match(/<a\s[^>]*href\s*=\s*["'](https?:\/\/[^"']+)["']/gi);
-    if (anchors) {
-      for (const a of anchors) {
-        const match = a.match(/href\s*=\s*["'](https?:\/\/[^"']+)["']/i);
-        if (match) {
-          const url = match[1];
-          const host = hostOf(url);
-          if (host) {
-            return url;
-          }
-        }
-      }
-    }
+    parsed = new URL(String(url ?? ''));
   } catch {
     return null;
+  }
+  const match = parsed.pathname.match(ENTITY_PATH);
+  if (!match) return null;
+  return { profileUrl: `${parsed.origin}${match[1]}`, name: match[2].replace(/-\d+$/, '').replace(/-/g, ' ').trim() };
+}
+
+function nameTokens(name) {
+  return plain(name).split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !LEGAL_FORMS.has(word));
+}
+
+export function ownWebsite(results, name, excluded = new Set()) {
+  const tokens = nameTokens(name);
+  if (!tokens.length) return null;
+  for (const result of results ?? []) {
+    let hostname;
+    try {
+      hostname = new URL(String(result?.url ?? '')).hostname;
+    } catch {
+      continue;
+    }
+    const host = hostname.replace(/^www\./, '');
+    const domain = registrableDomain(host);
+    if (!tokens.some((token) => domain.split('.')[0].includes(token))) continue;
+    if (DIRECTORY_HOST.test(host) || SOCIAL_HOST.test(host) || KNOWN_B2B_MARKETPLACES.has(domain) || excluded.has(host)) continue;
+    return `https://${hostname}/`;
   }
   return null;
 }
 
-export async function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '', members = [], regions = [], readPage = null } = {}) {
+async function directoryDeliverable({ name, profileUrl, nodeId, country = '', city = '' }, { readPage, findWebsite, excluded }) {
+  const entity = { name, country, city, website: false };
+  if (readPage) {
+    const page = await readPage(profileUrl).catch(() => null);
+    const place = String(page?.place ?? '').match(PLACE_WITH_COUNTRY);
+    if (place) {
+      entity.city = entity.city || place[1].trim();
+      entity.country = entity.country || place[2];
+    }
+  }
+  const website = findWebsite ? ownWebsite(await findWebsite(name).catch(() => []), name, excluded) : null;
+  if (website) entity.website = true;
+  return { title: text(name, 200), url: website ?? profileUrl, value: null, unit: '', nodeId, evidence: profileUrl, entity };
+}
+
+export async function entityDeliverables(nodes, { terms = [], not = [], kindLabel = '', members = [], regions = [], readPage = null, kindTerms = [], findWebsite = null } = {}) {
+  const kindSet = new Set((kindTerms ?? []).map((term) => plain(String(term ?? '')).trim()).filter(Boolean));
   const wanted = (terms ?? []).filter(Boolean);
   const banned = (not ?? []).map((phrase) => plain(phrase).trim()).filter(Boolean);
   const anchors = new Set([anchorWords(kindLabel), ...(members ?? []).map((member) => anchorWords([member?.label ?? '', ...memberTerms(member)].join(' ')))].flatMap((set) => [...set]));
@@ -476,6 +503,7 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
   }
   const hosts = new Map();
   const entityMap = new Map();
+  const excluded = new Set([...directories, ...marketplaces]);
   for (const page of pages) {
     const isDirectory = directories.has(page.host);
     const isMarketplace = marketplaces.has(page.host);
@@ -496,60 +524,37 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
         }
       }
     }
-    if (!ok) continue;
-    if (!anchoredTerm(matched, anchors)) continue;
-    if (wordMatch(page.pageText, banned)) continue;
+    const kindHit = matched.length >= 2 && matched.some((term) => kindSet.has(term));
+    if (!(ok && anchoredTerm(matched, anchors)) && !kindHit) continue;
+    if (wordMatch(String(page.source.title ?? ''), banned)) continue;
     if (isDirectory) {
+      const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
+      const add = (key, deliverable) => {
+        if (region) deliverable.region = region.text;
+        entityMap.set(key, deliverable);
+      };
       const entities = entitiesFromJsonLd(page.source.text ?? '', page.url);
-      let entitiesAdded = 0;
       for (const entity of entities) {
         const entityHost = entity.url ? hostOf(entity.url) : '';
-        const entityKey = entityHost || normalizeName(entity.name);
+        const profile = entityHost ? null : entityProfile(entity.profileUrl) ?? (entity.profileUrl ? { profileUrl: entity.profileUrl, name: entity.name } : null);
+        const entityKey = profile?.profileUrl ?? (entityHost || normalizeName(entity.name));
         if (entityMap.has(entityKey)) continue;
-        let finalUrl = entity.url;
-        let evidenceUrl = page.url;
-        if (entity.profileUrl && entity.profileUrl !== entity.url && !entityHost) {
-          const websiteUrl = await readEntityWebsite(entity.profileUrl, readPage);
-          if (websiteUrl) {
-            finalUrl = websiteUrl;
-            evidenceUrl = entity.profileUrl;
-          } else {
-            finalUrl = entity.profileUrl;
-            evidenceUrl = entity.profileUrl;
-          }
-        } else if (entity.url) {
-          evidenceUrl = page.url;
+        if (profile) {
+          add(entityKey, await directoryDeliverable({ name: entity.name || profile.name, profileUrl: profile.profileUrl, nodeId: page.node.id, country: entity.country, city: entity.city }, { readPage, findWebsite, excluded }));
+          continue;
         }
-        const deliverable = {
-          title: text(entity.name, 200),
-          url: finalUrl ? (finalUrl.endsWith('/') ? finalUrl : finalUrl) : `${page.parsed.protocol}//${page.host}/`,
-          value: null,
-          unit: '',
-          nodeId: page.node.id,
-          evidence: evidenceUrl,
-          entity: { name: entity.name, country: entity.country, city: entity.city }
-        };
-        const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
-        if (region) deliverable.region = region.text;
-        entityMap.set(entityKey, deliverable);
-        entitiesAdded++;
+        add(entityKey, { title: text(entity.name, 200), url: entity.url || `${page.parsed.protocol}//${page.host}/`, value: null, unit: '', nodeId: page.node.id, evidence: page.url, entity: { name: entity.name, country: entity.country, city: entity.city } });
       }
-      if (entitiesAdded === 0 && page.source.listings?.length) {
-        const entityGroups = groupListingsByEntity(page.source.listings);
-        for (const [entityKey, listings] of entityGroups) {
-          const representative = listings[0];
-          const deliverable = {
-            title: text(representative.title, 200),
-            url: representative.url.endsWith('/') ? representative.url : representative.url,
-            value: null,
-            unit: '',
-            nodeId: page.node.id,
-            evidence: page.url,
-            entity: { name: representative.title, country: '', city: '' }
-          };
-          const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
-          if (region) deliverable.region = region.text;
-          entityMap.set(entityKey, deliverable);
+      if (!entities.length && page.source.listings?.length) {
+        for (const [groupKey, listings] of groupListingsByEntity(page.source.listings)) {
+          const profile = entityProfile(listings[0].url);
+          const entityKey = profile?.profileUrl ?? groupKey;
+          if (entityMap.has(entityKey)) continue;
+          if (profile) {
+            add(entityKey, await directoryDeliverable({ name: profile.name, profileUrl: profile.profileUrl, nodeId: page.node.id }, { readPage, findWebsite, excluded }));
+            continue;
+          }
+          add(entityKey, { title: text(listings[0].title, 200), url: listings[0].url, value: null, unit: '', nodeId: page.node.id, evidence: page.url, entity: { name: listings[0].title, country: '', city: '' } });
         }
       }
     } else {
@@ -560,7 +565,8 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
     }
   }
   const entityDeliverablesArr = [...entityMap.values()].map((d) => ({ hits: 0, deliverable: d }));
-  const allDeliverables = [...hosts.values(), ...entityDeliverablesArr].sort((a, b) => (b.hits ?? 0) - (a.hits ?? 0));
+  const withoutWebsite = (entry) => (entry.deliverable.entity?.website === false ? 1 : 0);
+  const allDeliverables = [...hosts.values(), ...entityDeliverablesArr].sort((a, b) => withoutWebsite(a) - withoutWebsite(b) || (b.hits ?? 0) - (a.hits ?? 0));
   return allDeliverables.map((entry) => entry.deliverable);
 }
 
