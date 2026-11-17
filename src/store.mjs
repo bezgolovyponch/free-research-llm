@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ProjectJournal, diffProject, emptyShadow, journalEntry, keptRows, lostPieces, replayJournal, shadowOf } from './journal.mjs';
+import { runOutcome } from './research/verdict.mjs';
 
 const ID_PATTERN = /^[a-z0-9-]{6,64}$/;
 const DEFAULT_MAX_CACHED = 8;
@@ -47,6 +48,7 @@ function summarize(p) {
     templateId: p.templateId,
     phase: p.phase,
     verdict: p.report?.verdict ?? null,
+    outcome: runOutcome(p),
     demo: Boolean(p.demo),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,

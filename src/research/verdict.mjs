@@ -218,3 +218,10 @@ export function verdictInvariants(project, { memo = true } = {}) {
 
   return reasons;
 }
+
+export function runOutcome(project) {
+  const asked = project?.acceptanceResult?.totalAsked ?? 0;
+  const confirmed = project?.acceptanceResult?.validCount ?? 0;
+  if (project?.phase !== 'done') return { state: project?.phase, confirmed, asked };
+  return { state: asked > 0 && confirmed < asked ? 'short' : 'met', confirmed, asked };
+}
