@@ -1,8 +1,18 @@
 import { kindCluster } from './checklist.mjs';
 
+const KIND_PURPOSE_ID = 'purpose-kind';
+
+function judgedAsAskedKind(item) {
+  return (item.checks ?? []).some((c) => c.clause === 'kind' && String(c.id ?? '').startsWith('kind|') && c.answer === 'yes' && Boolean(c.quote));
+}
+
+function purposeMet(item, criterion) {
+  return criterion.passed || (criterion.id === KIND_PURPOSE_ID && judgedAsAskedKind(item));
+}
+
 export function qualifies(item, spec) {
   const entity = Boolean(item.evidence);
-  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => c.passed));
+  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => purposeMet(item, c)));
 }
 
 export function itemTier(item, hardIds, spec) {

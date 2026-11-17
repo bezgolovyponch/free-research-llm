@@ -3,6 +3,16 @@
 How this app was built, what each session decided, and what is still open. Newest first.
 Run-time history of your own researches is in the app (**History** tab) and in `data/logs/`.
 
+## Session 2026-11-17 · supplier research ends with 0 valid items (branch `fix/supplier-zero-valid`, base `main` 6ef4b73)
+
+Asked: find why the suppliers research (b2f5b7) keeps ending with no valid results and remove the cause.
+
+- **Cause, read from the stored run (2026-11-17, 45 delivered items, 0 confirmed, 5 to confirm, 40 rejected).** 43 items came from Europages hubs, so each carried the hub page as `evidence`. `AcceptanceChecker.inspect` took the evidence text first, so the purpose checks ("page mentions Ralph Lauren…", "page shows wholesale") read the directory page that lists dozens of companies, while the checklist judge read the item's own page. 20 of the 40 rejected items had no hard "no": the purpose gate on the wrong page was their only failure (JS31 passed every hard check on its own page and was rejected). The kind purpose check matched only the English word of the question, so Dutch, Italian and German supplier pages failed it. Rejected items never reach deeper reads, so their unknowns were never resolved.
+- **Fixes.** (1) `inspect` judges an item on its own live page; same-site evidence is used only when the item is a site homepage; a cross-site page only when the own page is not live. It records `pageUrl`, and the checklist judge, the second kind vote and the check cache read that page. (2) `qualifies`: the kind purpose check also passes when the kind judge answered yes with a quote from the page, in any language; the names check is unchanged. (3) Deeper reads add the item site's about, contact and imprint pages after the links that carry the check's words.
+- **Replay on the stored run (live re-read of the 45 own pages, stored judge answers, no model calls, no deeper reads):** 0 → 1 confirmed, 5 → 12 to confirm, 40 → 32 rejected; 44 of 45 judged on their own page.
+- **Gate:** `npm run quality` PASSED (1712 tests, 28 e2e, flakes 13 files × 3).
+- **Still open:** no full live rerun, so the final count after deeper reads is not measured; on Europages product pages the location stays the most common open check, because company profile links (`/company/<slug>`) are not recognised as company pages; the external verifier was not run for this change.
+
 ## Session 2026-11-16 (night) · scoping coverage (branch `feat/scoping-coverage`, stacked on `feat/purpose-structure` e38e016, not pushed)
 
 Asked (`data/SCOPING-BRIEF.md`, spec `data/handoff-b/specs/scoping-coverage.md`): source role by a closed vote; a value and a cost perspective always present; at least 4 distinct hosts across 2 perspectives or one more query round with the "scoping thin: N hosts" log line; the replay reads question, hints and regions from the stored project; the coverage invariant and its replay metric; golden assertions on the stored replay outputs; find out why the second-opinion rate is low; lesson F42.

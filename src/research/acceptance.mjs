@@ -317,6 +317,20 @@ function registrableDomain(host) {
   return labels.slice(secondLevelSuffix ? -3 : -2).join('.');
 }
 
+function sameSite(a, b) {
+  const hostA = hostOf(a);
+  const hostB = hostOf(b);
+  return Boolean(hostA) && Boolean(hostB) && registrableDomain(hostA) === registrableDomain(hostB);
+}
+
+function isSiteRoot(url) {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, '') === '';
+  } catch {
+    return false;
+  }
+}
+
 function productPath(parsed) {
   const path = parsed.pathname.toLowerCase().replace(/\/+$/, '');
   const segments = path.split('/').filter(Boolean);
@@ -632,26 +646,19 @@ export class AcceptanceChecker {
     const entity = Boolean(item.evidence);
     const root = this.readPage ? await this.readPage(item.url) : { text: '', status: 0, links: [] };
     const rootLive = pageIsLive(root, item, located, entity);
-    let pageText = '';
-    let links = [];
-    let live = false;
-    if (entity && item.evidence && item.evidence !== item.url && this.readPage) {
-      const evidence = await this.readPage(item.evidence).catch(() => null);
-      if (pageIsLive(evidence, item, located, true)) {
-        pageText = String(evidence.text ?? '');
-        links = evidence.links ?? [];
-        live = true;
-      }
-    }
-    if (!pageText && rootLive) {
-      pageText = String(root.text ?? '');
-      links = root.links ?? [];
-      live = true;
-    }
+    const evidence = entity && item.evidence !== item.url && this.readPage ? await this.readPage(item.evidence).catch(() => null) : null;
+    const evidenceLive = Boolean(evidence) && pageIsLive(evidence, item, located, true);
+    const evidenceDetailsHomepage = evidenceLive && isSiteRoot(item.url) && sameSite(item.evidence, item.url);
+    const shownUrl = evidenceDetailsHomepage ? item.evidence : rootLive ? item.url : evidenceLive ? item.evidence : null;
+    const shown = shownUrl === item.url ? root : shownUrl ? evidence : null;
+    const pageText = shown ? String(shown.text ?? '') : '';
+    const links = shown ? shown.links ?? [] : [];
+    const live = Boolean(shown);
     const amounts = parseAmounts(pageText);
     return {
       ...item,
       live,
+      pageUrl: shownUrl ?? item.url,
       pageText,
       links,
       listing: located ? looksLikeListing(item.url) : !kind?.terms?.length || kindOnPage(pageText, kind),

@@ -15,17 +15,27 @@ function sameHost(url1, url2) {
   }
 }
 
+const COMPANY_PAGE = /\b(?:about|about-us|who-we-are|company-profile|contact|contact-us|impressum|imprint|kontakt|ueber-uns|uber-uns|over-ons|chi-siamo|contatti|o-nas|qui-sommes-nous|quienes-somos|legal-notice)\b/i;
+
+function lastSegment(url) {
+  try {
+    return new URL(url).pathname.split('/').filter(Boolean).pop() ?? '';
+  } catch {
+    return '';
+  }
+}
+
 async function findRelevantLinks(links, itemUrl, keyWords, max = 3) {
-  const relevant = [];
+  const matching = [];
+  const companyPages = [];
   for (const link of links ?? []) {
     const fullUrl = link.url.startsWith('http') ? link.url : new URL(link.url, itemUrl).href;
-    if (!sameHost(fullUrl, itemUrl)) continue;
+    if (!sameHost(fullUrl, itemUrl) || fullUrl === itemUrl) continue;
     const combined = `${link.text} ${link.url}`.toLowerCase();
-    if (keyWords.some((kw) => combined.includes(kw.toLowerCase()))) {
-      relevant.push(fullUrl);
-    }
+    if (keyWords.some((kw) => combined.includes(kw.toLowerCase()))) matching.push(fullUrl);
+    else if (COMPANY_PAGE.test(`${link.text ?? ''} ${lastSegment(fullUrl)}`)) companyPages.push(fullUrl);
   }
-  return [...new Set(relevant)].slice(0, max);
+  return [...new Set([...matching, ...companyPages])].slice(0, max);
 }
 
 function onlyCheck(checklist, checkId) {

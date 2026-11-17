@@ -347,3 +347,27 @@ describe("stored answers of the 0c750f fixture under the quote rule and the pric
     expect(item.tier).toBe("confirmed");
   });
 });
+
+describe("purpose gate", () => {
+  const kindId = "kind|Is this page one wholesale clothing supplier offered as asked?";
+  const item = (kindAnswer: { answer: string; quote: string }) => ({
+    live: true,
+    evidence: "https://hub.example/list",
+    purpose: [{ id: "purpose-names-1", passed: true }, { id: "purpose-kind", passed: false }],
+    checks: [{ id: kindId, clause: "kind", hard: true, ...kindAnswer }],
+  });
+
+  it("accepts the asked kind on a page in another language when the kind judge quoted the page", () => {
+    expect(qualifies(item({ answer: "yes", quote: "Groothandel in tweedehands kleding" }), {})).toBe(true);
+  });
+
+  it("still rejects the page when the kind judge did not confirm it with a quote", () => {
+    expect(qualifies(item({ answer: "yes", quote: "" }), {})).toBe(false);
+    expect(qualifies(item({ answer: "unknown", quote: "" }), {})).toBe(false);
+  });
+
+  it("never lets the kind judge stand in for a failed names check", () => {
+    const failedNames = { ...item({ answer: "yes", quote: "Groothandel" }), purpose: [{ id: "purpose-names-1", passed: false }] };
+    expect(qualifies(failedNames, {})).toBe(false);
+  });
+});

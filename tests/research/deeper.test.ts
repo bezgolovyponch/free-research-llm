@@ -125,3 +125,17 @@ describe('deeperOrder', () => {
   });
 });
 
+describe('DeeperReader company pages', () => {
+  const LOCATION_ID = 'supplier located in nl|Is this provider located in the Netherlands?';
+  const locationList = [{ clause: 'supplier located in nl', items: [{ question: 'Is this provider located in the Netherlands?', hard: true }] }];
+  const CONTACT_URL = 'https://shop.example.org/contact';
+
+  it('reads the contact page for a check whose words no link carries', async () => {
+    const readPage = vi.fn(async (url: string) => (url === ITEM_URL ? itemPage([{ url: '/products/bales', text: 'Bales' }, { url: CONTACT_URL, text: 'Contact' }]) : { text: 'Adres: Keizersgracht 1, Amsterdam', status: 200, links: [] }));
+    const judge = { judge: vi.fn(async (page: { url: string }) => (page.url === CONTACT_URL ? [{ id: LOCATION_ID, answer: 'yes', quote: 'Keizersgracht 1, Amsterdam', hard: true, clause: 'supplier located in nl' }] : [])) };
+    const item = { url: ITEM_URL, checks: [{ id: LOCATION_ID, hard: true, answer: 'unknown', clause: 'supplier located in nl' }] };
+    await new DeeperReader({ judge, readPage }).readDeeperForUnknown(item, locationList, {});
+    expect(readPage.mock.calls.map((c) => c[0])).toEqual([ITEM_URL, CONTACT_URL]);
+    expect(item.checks[0]).toMatchObject({ answer: 'yes', source: CONTACT_URL });
+  });
+});

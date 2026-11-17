@@ -88,6 +88,30 @@ describe('valid items only', () => {
     expect(listing.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 0 });
   });
 
+  it('judges a directory-found item on its own live page, not on the directory page that lists many companies', async () => {
+    const hub = 'https://www.europages.it/aziende/second-hand.html';
+    const product = 'https://www.europages.it/it/company/js31-22335895/products/wholesale-used-clothing-36354594';
+    const pages: Record<string, { status: number; text: string }> = {
+      [hub]: { status: 200, text: 'Second Hand B2B Companies and Suppliers. Wakted BV distributor of vintage clothing. '.repeat(10) },
+      [product]: { status: 200, text: 'Groothandel in tweedehands kleding. Premium merken: Armani, Ralph Lauren, Barbour. '.repeat(10) },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const purpose = purposeChecks({ question: 'Find wholesale suppliers with brands similar to Ralph Lauren, Moncler, North Face, Barbour' });
+    const result = await checker.evaluate({ itemCount: 1, urlsLive: true, mustMention: [] }, [{ url: product, evidence: hub, title: 'JS31' }], { located: false, purpose });
+    expect(result.items[0].pageUrl).toBe(product);
+    expect(result.items[0].purpose.find((c: { id: string }) => c.id === 'purpose-names-1')).toMatchObject({ passed: true });
+  });
+
+  it('judges a supplier homepage on the deeper page of its own site that was found as evidence', async () => {
+    const pages: Record<string, { status: number; text: string }> = {
+      'https://supplier.example/': { status: 200, text: 'Welcome to our shop. '.repeat(20) },
+      'https://supplier.example/wholesale-bales': { status: 200, text: 'Ralph Lauren and Barbour wholesale bales. '.repeat(10) },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const result = await checker.evaluate({ itemCount: 1, urlsLive: true, mustMention: [] }, [{ url: 'https://supplier.example/', evidence: 'https://supplier.example/wholesale-bales', title: 'x' }], { located: false });
+    expect(result.items[0].pageUrl).toBe('https://supplier.example/wholesale-bales');
+  });
+
   it('says how many of the delivered items it inspected when the list is longer than the check needs', async () => {
     const urls = Array.from({ length: 10 }, (_, i) => `https://a.example/anuncio/plot-ID1iZBr${i}`);
     const checker = new AcceptanceChecker({ readPage: async () => ({ status: 200, text: 'Rustic plot for sale 18 000 EUR near the coast '.repeat(20) }) });
