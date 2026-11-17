@@ -15,17 +15,48 @@ function sameHost(url1, url2) {
   }
 }
 
+const COMPANY_PAGE = /\b(?:about|about-us|who-we-are|company-profile|contact|contact-us|impressum|imprint|kontakt|ueber-uns|uber-uns|over-ons|chi-siamo|contatti|o-nas|qui-sommes-nous|quienes-somos|legal-notice)\b/i;
+
+function lastSegment(url) {
+  try {
+    return new URL(url).pathname.split('/').filter(Boolean).pop() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+const ENTITY_PATH = /^((?:\/[a-z]{2})?\/(?:company|companies|firma|firmen|empresa|entreprise|societe|azienda|bedrijf|supplier|suppliers|seller|vendor|store)\/[^/]+)/i;
+
+function entityPrefix(url) {
+  try {
+    return new URL(url).pathname.match(ENTITY_PATH)?.[1] ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function insideEntity(url, prefix) {
+  const path = new URL(url).pathname.replace(/\/+$/, '');
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
 async function findRelevantLinks(links, itemUrl, keyWords, max = 3) {
-  const relevant = [];
+  const prefix = entityPrefix(itemUrl);
+  const matching = [];
+  const companyPages = [];
+  if (prefix) {
+    const profile = `${new URL(itemUrl).origin}${prefix}`;
+    if (profile !== itemUrl.replace(/\/+$/, '')) companyPages.push(profile);
+  }
   for (const link of links ?? []) {
     const fullUrl = link.url.startsWith('http') ? link.url : new URL(link.url, itemUrl).href;
-    if (!sameHost(fullUrl, itemUrl)) continue;
+    if (!sameHost(fullUrl, itemUrl) || fullUrl === itemUrl) continue;
+    if (prefix && !insideEntity(fullUrl, prefix)) continue;
     const combined = `${link.text} ${link.url}`.toLowerCase();
-    if (keyWords.some((kw) => combined.includes(kw.toLowerCase()))) {
-      relevant.push(fullUrl);
-    }
+    if (keyWords.some((kw) => combined.includes(kw.toLowerCase()))) matching.push(fullUrl);
+    else if (COMPANY_PAGE.test(`${link.text ?? ''} ${lastSegment(fullUrl)}`)) companyPages.push(fullUrl);
   }
-  return [...new Set(relevant)].slice(0, max);
+  return [...new Set([...matching, ...companyPages])].slice(0, max);
 }
 
 function onlyCheck(checklist, checkId) {
@@ -65,7 +96,7 @@ export class DeeperReader {
     if (unknownHard.length === 0) return item;
     const page = await this.readPage(item.url).catch(() => null);
     const links = page?.links ?? [];
-    if (links.length === 0) return item;
+    if (links.length === 0 && !entityPrefix(item.url)) return item;
     for (const check of unknownHard) {
       const keyWords = extractKeyWords(check.clause + ' ' + check.id.split('|').pop());
       const relevantUrls = await findRelevantLinks(links, item.url, keyWords);

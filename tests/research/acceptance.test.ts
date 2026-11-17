@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, INSPECT_PER_ASKED, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, INSPECT_PER_ASKED, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, entityProfile, ownWebsite, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -86,6 +86,30 @@ describe('valid items only', () => {
     expect(result.items[0].live).toBe(true);
     const listing = await checker.evaluate({ itemCount: 1, urlsLive: true, mustMention: [] }, [{ url: 'https://zagumi.com/wholesale', title: 'x' }], { located: true });
     expect(listing.checks.find((c: { id: string }) => c.id === 'count')).toMatchObject({ value: 0 });
+  });
+
+  it('judges a directory-found item on its own live page, not on the directory page that lists many companies', async () => {
+    const hub = 'https://www.europages.it/aziende/second-hand.html';
+    const product = 'https://www.europages.it/it/company/js31-22335895/products/wholesale-used-clothing-36354594';
+    const pages: Record<string, { status: number; text: string }> = {
+      [hub]: { status: 200, text: 'Second Hand B2B Companies and Suppliers. Wakted BV distributor of vintage clothing. '.repeat(10) },
+      [product]: { status: 200, text: 'Groothandel in tweedehands kleding. Premium merken: Armani, Ralph Lauren, Barbour. '.repeat(10) },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const purpose = purposeChecks({ question: 'Find wholesale suppliers with brands similar to Ralph Lauren, Moncler, North Face, Barbour' });
+    const result = await checker.evaluate({ itemCount: 1, urlsLive: true, mustMention: [] }, [{ url: product, evidence: hub, title: 'JS31' }], { located: false, purpose });
+    expect(result.items[0].pageUrl).toBe(product);
+    expect(result.items[0].purpose.find((c: { id: string }) => c.id === 'purpose-names-1')).toMatchObject({ passed: true });
+  });
+
+  it('judges a supplier homepage on the deeper page of its own site that was found as evidence', async () => {
+    const pages: Record<string, { status: number; text: string }> = {
+      'https://supplier.example/': { status: 200, text: 'Welcome to our shop. '.repeat(20) },
+      'https://supplier.example/wholesale-bales': { status: 200, text: 'Ralph Lauren and Barbour wholesale bales. '.repeat(10) },
+    };
+    const checker = new AcceptanceChecker({ readPage: async (url: string) => pages[url] ?? { text: '', status: 404 } });
+    const result = await checker.evaluate({ itemCount: 1, urlsLive: true, mustMention: [] }, [{ url: 'https://supplier.example/', evidence: 'https://supplier.example/wholesale-bales', title: 'x' }], { located: false });
+    expect(result.items[0].pageUrl).toBe('https://supplier.example/wholesale-bales');
   });
 
   it('says how many of the delivered items it inspected when the list is longer than the check needs', async () => {
@@ -290,7 +314,7 @@ describe('listing price on the page', () => {
       }],
     }];
     expect((await entityDeliverables(dustFactory as never, { terms, kindLabel })).map((d: { url: string }) => d.url)).toEqual(['https://dustfactoryvintage.com/']);
-    expect(await entityDeliverables(dustFactory as never, { terms, not, kindLabel })).toEqual([]);
+    expect((await entityDeliverables(dustFactory as never, { terms, not, kindLabel })).map((d: { url: string }) => d.url)).toEqual(['https://dustfactoryvintage.com/']);
   });
 
   it('marks each delivered supplier with its region verdict for an entity list and delivers the same rows', async () => {
@@ -680,7 +704,6 @@ describe('entityDeliverables with directory pages', () => {
       url: `https://www.example-dir.com/company/entity-${i}/products/product-a`,
       title: `Entity ${i + 1} - Product A`,
     }));
-    // Add second product for each entity to satisfy the ≥2 links rule
     for (let i = 0; i < 5; i++) {
       listings.push({
         url: `https://www.example-dir.com/company/entity-${i}/products/product-b`,
@@ -706,21 +729,8 @@ describe('entityDeliverables with directory pages', () => {
       readPage: async () => ({ text: '', status: 404 }),
     });
     expect(deliverables).toHaveLength(5);
-    const titles = deliverables.map((d: { title: string }) => d.title).sort();
-    const expectedTitles = Array.from({ length: 5 }, (_, i) => `Entity ${i + 1} - Product A`).sort();
-    expect(titles).toEqual(expectedTitles);
-    const urls = deliverables.map((d: { url: string }) => d.url).sort();
-    expect(urls).toEqual([
-      'https://www.example-dir.com/company/entity-0/products/product-a',
-      'https://www.example-dir.com/company/entity-1/products/product-a',
-      'https://www.example-dir.com/company/entity-2/products/product-a',
-      'https://www.example-dir.com/company/entity-3/products/product-a',
-      'https://www.example-dir.com/company/entity-4/products/product-a',
-    ].sort());
-    for (const d of deliverables) {
-      expect(d.evidence).toBe('https://www.example-dir.com/wholesale-clothing');
-      expect(d.nodeId).toBe('D1');
-    }
+    expect(deliverables.map((d: { url: string }) => d.url).sort()).toEqual(Array.from({ length: 5 }, (_, i) => `https://www.example-dir.com/company/entity-${i}`));
+    expect(deliverables.every((d: { title: string; evidence: string; url: string; entity: { website: boolean } }) => d.title === 'entity' && d.evidence === d.url && d.entity.website === false)).toBe(true);
   });
 });
 
@@ -885,5 +895,42 @@ describe('acceptance summary K < N', () => {
     const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
     expect(result!.validCount).toBe(1);
     expect(result!.totalAsked).toBe(5);
+  });
+});
+
+describe('supplier websites from directory profiles', () => {
+  const listings = ['a', 'b'].map((p) => ({ url: `https://www.europages.nl/nl/company/wakted-bv-22364007/products/${p}-36518614`, title: `Grade A vintage clothing wholesale bales ${p}` }));
+  const nodes = [{ id: 'hubs', sources: [{ url: 'https://www.europages.nl/nl/bedrijven/vintage.html', title: 'Vintage wholesale', text: 'vintage clothing wholesale bales graded A', listings: [...listings, ...Array.from({ length: 10 }, (_, i) => ({ url: `https://www.europages.nl/nl/company/other-${i}/products/x`, title: 'other' }))] }] }];
+  const options = { terms: ['wholesale', 'bales'], kindTerms: ['wholesale', 'bales'], kindLabel: 'wholesale clothing supplier' };
+
+  it('reads the company name and profile from a directory path', () => {
+    expect(entityProfile('https://www.europages.nl/nl/company/wakted-bv-22364007/products/a-1')).toEqual({ profileUrl: 'https://www.europages.nl/nl/company/wakted-bv-22364007', name: 'wakted bv' });
+    expect(entityProfile('https://supplier.example/about')).toBeNull();
+  });
+
+  it('accepts only a website whose domain carries the company name and is not a social or directory host', () => {
+    expect(ownWebsite([{ url: 'https://www.facebook.com/wakted' }, { url: 'https://www.wakted.com/en' }], 'wakted bv')).toBe('https://www.wakted.com/');
+    expect(ownWebsite([{ url: 'https://www.facebook.com/wakted' }, { url: 'https://www.europages.nl/wakted' }], 'wakted bv')).toBeNull();
+  });
+
+  it('delivers the company website with the profile as evidence and the country from the profile', async () => {
+    const readPage = async () => ({ status: 200, text: 'x'.repeat(300), place: 'Sint-Pieters-Leeuw, BE' });
+    const found = await entityDeliverables(nodes as never, { ...options, readPage, findWebsite: async (name: string) => (name === 'wakted bv' ? [{ url: 'https://www.wakted.com/en' }] : []) });
+    expect(found[0]).toMatchObject({ title: 'wakted bv', url: 'https://www.wakted.com/', evidence: 'https://www.europages.nl/nl/company/wakted-bv-22364007', entity: { country: 'BE', city: 'Sint-Pieters-Leeuw', website: true } });
+  });
+
+  it('delivers the profile, never a product page, when no website is found', async () => {
+    const found = await entityDeliverables(nodes as never, { ...options, findWebsite: async () => [{ url: 'https://www.facebook.com/wakted' }] });
+    const wakted = found.find((d: { title: string }) => d.title === 'wakted bv');
+    expect(wakted).toMatchObject({ url: 'https://www.europages.nl/nl/company/wakted-bv-22364007', entity: { website: false } });
+    expect(found.some((d: { url: string }) => d.url.includes('/products/'))).toBe(false);
+  });
+
+  it('keeps a supplier page that says wholesale and bales, and one that names retail only in its text', async () => {
+    const page = (url: string, title: string, text: string) => [{ id: 'hubs', sources: [{ url, title, text }] }];
+    const lynch = await entityDeliverables(page('https://lynchvintagewholesale.co.uk/', 'Lynch Vintage', 'We sell vintage clothing wholesale in bales of 25 kg.') as never, { terms: ['wholesale', 'bales'], kindTerms: ['wholesale', 'bales'], kindLabel: 'wholesale clothing supplier' });
+    expect(lynch.map((d: { url: string }) => d.url)).toEqual(['https://lynchvintagewholesale.co.uk/']);
+    const retail = await entityDeliverables(page('https://dust.example/', 'Dust Vintage', 'Wholesale bales for retail shops.') as never, { terms: ['wholesale', 'bales'], kindTerms: ['wholesale', 'bales'], not: ['retail'], kindLabel: 'wholesale clothing supplier' });
+    expect(retail).toHaveLength(1);
   });
 });

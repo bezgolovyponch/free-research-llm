@@ -112,6 +112,12 @@ const DOMAIN_QUERIES = 8;
 const DOMAIN_SOURCES = 12;
 const DOMAIN_PAGES_PER_CALL = 4;
 const HUB_SOURCES = 15;
+export const HUB_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function hubSearchStale(project, now) {
+  const at = Date.parse(project?.hubSearchedAt ?? '');
+  return !Number.isFinite(at) || now - at >= HUB_REFRESH_MS;
+}
 
 const KNOWLEDGE_SOURCES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8'));
 const MAKE_LANGUAGES = KNOWLEDGE_SOURCES.makeLanguages ?? {};
@@ -630,7 +636,7 @@ export class ResearchEngine {
   async searchHubs(project) {
     const brief = project.brief ?? this.briefOf(project);
     if (brief.located !== false) return 0;
-    if (project.hubSources) return project.hubSources.length;
+    if (project.hubSources && !hubSearchStale(project, this.now())) return project.hubSources.length;
     if (this.demo || !this.router || !this.search?.search) return 0;
     const hubs = hubsFrom(project.domain, project.guidance);
     if (!hubs.length) return 0;
@@ -662,6 +668,7 @@ export class ResearchEngine {
       }
     }
     project.hubSources = sources;
+    project.hubSearchedAt = new Date(this.now()).toISOString();
     this.emit(project, 'candidates', `hub search: ${sources.length} page(s) from ${hubs.join(', ')}`);
     return sources.length;
   }
@@ -1599,7 +1606,7 @@ export class ResearchEngine {
     project.kindRejected = project.kindRejected ?? [];
     const kindRejectedSet = new Set(project.kindRejected);
     const deliverables = (brief.located === false
-      ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage })
+      ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage, kindTerms: project.decisionModel?.kind?.terms ?? [], findWebsite: this.search?.search ? (name) => this.search.search([`"${name}"`], { maxSources: 5 }) : null })
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
       .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
     project.report.deliverables = deliverables;
@@ -1626,7 +1633,7 @@ export class ResearchEngine {
 
           this.throwIfCancelled(project);
 
-          const cacheKey = `${item.url}::${fingerprint}`;
+          const cacheKey = `${item.pageUrl ?? item.url}::${fingerprint}`;
           const cached = checkCache[cacheKey];
           let checks;
           let isCached = false;
@@ -1636,7 +1643,7 @@ export class ResearchEngine {
             item.checklist = cached.summary;
             isCached = true;
           } else {
-            const page = await readPage(item.url).catch(() => null);
+            const page = await readPage(item.pageUrl ?? item.url).catch(() => null);
             const pageText = page?.text ?? '';
             if (!pageText) {
               item.checks = [];
@@ -1659,7 +1666,7 @@ export class ResearchEngine {
             const entry = checkCache[cacheKey];
             if (entry?.kindSecond?.cut === prices.cut && entry.kindSecond.median === prices.median) checks = entry.kindSecond.checks;
             else {
-              const page = await readPage(item.url).catch(() => null);
+              const page = await readPage(item.pageUrl ?? item.url).catch(() => null);
               checks = await hardenKind(checks, item, { cut: prices.cut, median: prices.median, judge: this.checklistJudge, pageText: page?.text ?? '', kind: project.decisionModel?.kind ?? null });
               if (entry) entry.kindSecond = { cut: prices.cut, median: prices.median, checks };
             }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf } from "../../src/research/verdict.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome } from "../../src/research/verdict.mjs";
 import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
 import { lowPriceStats } from "../../src/research/candidates.mjs";
 import { fakeRouter } from "../helpers/fakes";
@@ -345,5 +345,47 @@ describe("stored answers of the 0c750f fixture under the quote rule and the pric
     expect(router.calls).toEqual([]);
     expect(JSON.stringify(project.acceptanceResult.items[0].checks)).toBe(before);
     expect(item.tier).toBe("confirmed");
+  });
+});
+
+describe("purpose gate", () => {
+  const kindId = "kind|Is this page one wholesale clothing supplier offered as asked?";
+  const item = (kindAnswer: { answer: string; quote: string }) => ({
+    live: true,
+    evidence: "https://hub.example/list",
+    purpose: [{ id: "purpose-names-1", passed: true }, { id: "purpose-kind", passed: false }],
+    checks: [{ id: kindId, clause: "kind", hard: true, ...kindAnswer }],
+  });
+
+  it("accepts the asked kind on a page in another language when the kind judge quoted the page", () => {
+    expect(qualifies(item({ answer: "yes", quote: "Groothandel in tweedehands kleding" }), {})).toBe(true);
+  });
+
+  it("still rejects the page when the kind judge did not confirm it with a quote", () => {
+    expect(qualifies(item({ answer: "yes", quote: "" }), {})).toBe(false);
+    expect(qualifies(item({ answer: "unknown", quote: "" }), {})).toBe(false);
+  });
+
+  it("never lets the kind judge stand in for a failed names check", () => {
+    const failedNames = { ...item({ answer: "yes", quote: "Groothandel" }), purpose: [{ id: "purpose-names-1", passed: false }] };
+    expect(qualifies(failedNames, {})).toBe(false);
+  });
+});
+
+describe("runOutcome", () => {
+  const done = (totalAsked: number, validCount: number) => ({ phase: "done", acceptanceResult: { totalAsked, validCount } });
+
+  it("is short when a finished research delivered fewer items than asked", () => {
+    expect(runOutcome(done(20, 1))).toEqual({ state: "short", confirmed: 1, asked: 20 });
+  });
+
+  it("is met when every asked item is confirmed, or no count was asked", () => {
+    expect(runOutcome(done(20, 20)).state).toBe("met");
+    expect(runOutcome(done(0, 0)).state).toBe("met");
+    expect(runOutcome({ phase: "done" }).state).toBe("met");
+  });
+
+  it("keeps the phase while the research has not finished", () => {
+    expect(runOutcome({ phase: "researching", acceptanceResult: { totalAsked: 20, validCount: 1 } }).state).toBe("researching");
   });
 });
