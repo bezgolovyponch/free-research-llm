@@ -272,3 +272,14 @@ describe('ProjectStore journal, snapshots and refusals', () => {
   });
 });
 
+
+describe('ProjectStore.list outcome', () => {
+  it('lists a finished research that delivered fewer items than asked as short, not done', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-store-'));
+    const store = new ProjectStore({ dir });
+    await store.save({ id: 'supplier-short', question: 'Find 20 suppliers', phase: 'done', acceptanceResult: { totalAsked: 20, validCount: 1, score: 0.5 } });
+    const [listed] = await new ProjectStore({ dir }).list();
+    expect(listed.outcome).toEqual({ state: 'short', confirmed: 1, asked: 20 });
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});

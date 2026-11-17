@@ -8,7 +8,7 @@ import { ProviderError } from '../../src/llm/provider.mjs';
 import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
-import { ResearchCancelled, ResearchEngine, TEAM_TTL_MS, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
+import { HUB_REFRESH_MS, ResearchCancelled, ResearchEngine, TEAM_TTL_MS, hubSearchStale, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
 import { LOW_PRICE_REASON, checklistFingerprint } from '../../src/research/checklist.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
@@ -1920,6 +1920,30 @@ describe('hub search', () => {
     expect(await engine.searchHubs(project)).toBe(1);
     expect(router.calls).toHaveLength(1);
     expect(asked).toHaveLength(2);
+  });
+
+  it('searches the trade hubs again once the stored hub search is a week old', async () => {
+    const router = hubRouter();
+    const { asked, search } = hubSearch();
+    let clock = Date.parse('2026-11-05T16:00:00Z');
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }), now: () => clock } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers in the Netherlands and Germany' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['the biggest sorting plants stand in the Netherlands and Germany'] };
+    await engine.searchHubs(project);
+    expect(project.hubSearchedAt).toBe('2026-11-05T16:00:00.000Z');
+    clock += HUB_REFRESH_MS - 1;
+    await engine.searchHubs(project);
+    expect(router.calls).toHaveLength(1);
+    clock += 1;
+    await engine.searchHubs(project);
+    expect(router.calls).toHaveLength(2);
+    expect(asked.length).toBe(4);
+  });
+
+  it('treats a stored hub search without a date as stale', () => {
+    expect(hubSearchStale({ hubSources: [] }, Date.parse('2026-11-17T00:00:00Z'))).toBe(true);
+    expect(hubSearchStale({ hubSearchedAt: '2026-11-16T00:00:00Z' }, Date.parse('2026-11-17T00:00:00Z'))).toBe(false);
   });
 
   it('deduplicates pages across the per-hub searches by url', async () => {
