@@ -1626,7 +1626,7 @@ export class ResearchEngine {
 
           this.throwIfCancelled(project);
 
-          const cacheKey = `${item.url}::${fingerprint}`;
+          const cacheKey = `${item.pageUrl ?? item.url}::${fingerprint}`;
           const cached = checkCache[cacheKey];
           let checks;
           let isCached = false;
@@ -1636,7 +1636,7 @@ export class ResearchEngine {
             item.checklist = cached.summary;
             isCached = true;
           } else {
-            const page = await readPage(item.url).catch(() => null);
+            const page = await readPage(item.pageUrl ?? item.url).catch(() => null);
             const pageText = page?.text ?? '';
             if (!pageText) {
               item.checks = [];
@@ -1659,7 +1659,7 @@ export class ResearchEngine {
             const entry = checkCache[cacheKey];
             if (entry?.kindSecond?.cut === prices.cut && entry.kindSecond.median === prices.median) checks = entry.kindSecond.checks;
             else {
-              const page = await readPage(item.url).catch(() => null);
+              const page = await readPage(item.pageUrl ?? item.url).catch(() => null);
               checks = await hardenKind(checks, item, { cut: prices.cut, median: prices.median, judge: this.checklistJudge, pageText: page?.text ?? '', kind: project.decisionModel?.kind ?? null });
               if (entry) entry.kindSecond = { cut: prices.cut, median: prices.median, checks };
             }
