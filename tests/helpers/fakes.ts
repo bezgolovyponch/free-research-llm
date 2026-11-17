@@ -1,14 +1,28 @@
 export const FAIL = Symbol('fail');
 
-type Request = { task?: string; tier?: string; purpose?: string; temperature?: number; avoid?: string[]; messages: { role: string; content: string }[] };
+type Choice = { field: string; options: number; ids?: unknown[] };
+type Request = { task?: string; tier?: string; purpose?: string; temperature?: number; avoid?: string[]; choice?: Choice; messages: { role: string; content: string }[] };
 type Handler = (request: Request, index: number) => unknown;
 type Script = Record<string, unknown>;
+
+const LETTERS = 'ABCDEFGHIJKLM';
 
 export function seq(...replies: unknown[]): Handler {
   return (_request, index) => replies[Math.min(index, replies.length - 1)];
 }
 
-export function fakeRouter(script: Script = {}, { providers = ['p1', 'p2', 'p3'] }: { providers?: string[] } = {}) {
+export function shownLetter(choice: Choice | undefined, id: unknown) {
+  const at = (choice?.ids ?? []).findIndex((known) => String(known).toUpperCase() === String(id).trim().toUpperCase());
+  return at < 0 ? null : LETTERS[at];
+}
+
+function asShown(data: unknown, choice?: Choice) {
+  if (!choice?.ids || !data || typeof data !== 'object' || Array.isArray(data)) return data;
+  const letter = shownLetter(choice, (data as Record<string, unknown>)[choice.field]);
+  return letter ? { ...(data as Record<string, unknown>), [choice.field]: letter } : data;
+}
+
+export function fakeRouter(script: Script = {}, { providers = ['p1', 'p2', 'p3'], models = {} }: { providers?: string[]; models?: Record<string, string> } = {}) {
   const calls: Request[] = [];
   const outcomes: { provider: string; model?: string; purpose: string; passed: boolean }[] = [];
   const counts: Record<string, number> = {};
@@ -27,7 +41,7 @@ export function fakeRouter(script: Script = {}, { providers = ['p1', 'p2', 'p3']
       if (data === FAIL || data === undefined) throw new Error(`no model answered ${task}`);
       const avoided = new Set(request.avoid ?? []);
       const provider = providers.find((id) => !avoided.has(id)) ?? providers[0];
-      return { provider, model: `${provider}-model`, data };
+      return { provider, model: models[provider] ?? `${provider}-model`, data: asShown(data, request.choice) };
     },
     recordOutcome(outcome: { provider: string; model?: string; purpose: string; passed: boolean }) {
       outcomes.push(outcome);

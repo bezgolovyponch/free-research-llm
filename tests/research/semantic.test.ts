@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CallBudget, EXHAUSTIVE_CAP, STAGE_CAPS, agreeAcrossSamples, ask, matchPrompt, optionLines, retrieveThenVerify, vote } from '../../src/research/semantic.mjs';
+import { CallBudget, EXHAUSTIVE_CAP, STAGE_CAPS, agreeAcrossSamples, agreed, ask, matchPrompt, optionLines, retrieveThenVerify, rotate, turnOf, vote } from '../../src/research/semantic.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, lettersOf, pickLetter, seq } from '../helpers/fakes';
 
 const messages = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'user' }];
@@ -58,9 +58,52 @@ describe('vote', () => {
   it('gives null without a majority, and an invalid vote counts for nothing', async () => {
     const split = fakeRouter({ check: seq({ answer: 'yes' }, { answer: 'no' }, { answer: 'maybe' }) });
     const result = await vote({ router: split, task: 'check', messages, schema: yesNo });
-    expect(result.value).toBeNull();
-    expect(split.outcomes.every((o) => o.passed === false)).toBe(true);
+    expect([result.value, result.single]).toEqual([null, undefined]);
+    expect(split.outcomes.map((o) => [o.provider, o.passed])).toEqual([['p3', false], ['p3', false]]);
     expect((await vote({ router: fakeRouter({ check: FAIL }), task: 'check', messages, schema: yesNo })).value).toBeNull();
+  });
+
+  it('reaches no quorum from two identical replies of one provider: the result is one judgement, marked single', async () => {
+    const router = fakeRouter({ check: { answer: 'yes' } }, { providers: ['p1'] });
+    const result = await vote({ router, task: 'check', messages, schema: yesNo });
+    expect(result).toMatchObject({ value: 'yes', single: true, tally: { '"yes"': 1 } });
+    expect(agreed(result)).toBeNull();
+    expect(result.replies.map((reply) => reply.provider)).toEqual(['p1']);
+    expect(result.repeats.map((reply) => [reply.provider, reply.value])).toEqual([['p1', 'yes']]);
+    expect(router.calls).toHaveLength(2);
+    expect(router.outcomes).toEqual([]);
+  });
+
+  it('counts two providers that serve one vendor as one family, and two models of one provider as one family', async () => {
+    const sameVendor = fakeRouter({ check: { answer: 'yes' } }, { providers: ['p1', 'p2'], models: { p1: 'openai/gpt-oss-120b', p2: 'gpt-oss-20b' } });
+    const one = await vote({ router: sameVendor, task: 'check', messages, schema: yesNo });
+    expect([one.single, agreed(one), one.replies.length, one.repeats.length]).toEqual([true, null, 1, 1]);
+    let turn = 0;
+    const twoModels = { complete: async () => ({ provider: 'p1', model: ['llama-3.3-70b', 'qwen-3-32b'][turn++ % 2], data: { answer: 'yes' } }) };
+    const again = await vote({ router: twoModels, task: 'check', messages, schema: yesNo });
+    expect([again.single, agreed(again)]).toEqual([true, null]);
+  });
+
+  it('reaches the quorum from two provider families, and asks once when the router knows only one family can answer', async () => {
+    const two = fakeRouter({ check: { answer: 'no' } }, { providers: ['p1', 'p2'], models: { p1: 'llama-3.3-70b', p2: 'gemini-flash' } });
+    const result = await vote({ router: two, task: 'check', messages, schema: yesNo });
+    expect([result.value, result.single, agreed(result)]).toEqual(['no', undefined, 'no']);
+    expect(two.outcomes.map((o) => [o.provider, o.passed])).toEqual([['p1', true], ['p2', true]]);
+    const known = Object.assign(fakeRouter({ check: { answer: 'no' } }, { providers: ['p1'] }), { families: () => [{ stack: 'p1', vendor: 'llama' }] });
+    const lone = await vote({ router: known, task: 'check', messages, schema: yesNo });
+    expect([lone.value, lone.single, known.calls.length]).toEqual(['no', true, 1]);
+  });
+
+  it('records no outcome against any provider on a 1:1:1 split, and none on a 1:1 split of two families', async () => {
+    const three = fakeRouter({ check: seq({ answer: 'a' }, { answer: 'b' }, { answer: 'c' }) });
+    const any = (data: { answer?: string }) => ({ value: data.answer });
+    const result = await vote({ router: three, task: 'check', messages, schema: any });
+    expect([result.value, result.single, result.tally]).toEqual([null, undefined, { '"a"': 1, '"b"': 1, '"c"': 1 }]);
+    expect(three.outcomes).toEqual([]);
+    const two = fakeRouter({ check: seq({ answer: 'yes' }, { answer: 'no' }, { answer: 'no' }) }, { providers: ['p1', 'p2'] });
+    const split = await vote({ router: two, task: 'check', messages, schema: yesNo });
+    expect([split.value, split.single, split.replies.length, split.repeats.length]).toEqual([null, undefined, 2, 1]);
+    expect(two.outcomes).toEqual([]);
   });
 });
 
@@ -69,7 +112,8 @@ describe('call budget', () => {
     const budget = new CallBudget({ tree: 3 });
     const router = fakeRouter({ check: { answer: 'yes' } });
     expect((await vote({ router, task: 'check', messages, schema: yesNo, budget, stage: 'tree' })).value).toBe('yes');
-    expect((await vote({ router, task: 'check', messages, schema: yesNo, budget, stage: 'tree' })).value).toBeNull();
+    const cut = await vote({ router, task: 'check', messages, schema: yesNo, budget, stage: 'tree' });
+    expect([agreed(cut), cut.single]).toEqual([null, true]);
     expect(await ask({ router, task: 'check', messages, schema: yesNo, budget, stage: 'tree' })).toBeNull();
     expect(router.calls).toHaveLength(3);
     expect(budget.report()).toEqual({ tree: { used: 3, cap: 3, skipped: 3 } });
@@ -89,8 +133,31 @@ describe('retrieveThenVerify', () => {
     expect(result.exhaustive).toBe(false);
     expect(result.picked.text).toBe('delta');
     expect(embedder.calls[0]).toMatchObject({ candidates: ['beta', 'gamma', 'delta', 'epsilon'], k: 2 });
-    expect(seen[0]).toEqual({ alpha: 'A', delta: 'B', epsilon: 'C', 'none of these': 'N' });
-    expect(seen[1]).toEqual({ delta: 'A', epsilon: 'B', alpha: 'C', 'none of these': 'N' });
+    expect(Object.keys(seen[0]).sort()).toEqual(['alpha', 'delta', 'epsilon', 'none of these']);
+    expect(seen.map((letters) => letters['none of these'])).toEqual(['N', 'N']);
+    const cycle = ['alpha', 'delta', 'epsilon'];
+    const first = (letters: Record<string, string>) => cycle.findIndex((text) => letters[text] === 'A');
+    expect(first(seen[1])).toBe((first(seen[0]) + 1) % 3);
+    for (const letters of seen) expect(cycle.map((_, at) => letters[cycle[(first(letters) + at) % 3]])).toEqual(['A', 'B', 'C']);
+  });
+
+  it('rotates the options by one letter per vote from a start fixed by the question, so over three votes each option sits under three letters', async () => {
+    const orders = async (query: string) => {
+      const seen: Record<string, string>[] = [];
+      const router = fakeRouter({ match: (request, index) => { seen.push(lettersOf(request)); return { pick: 'ABC'[index] }; } });
+      await retrieveThenVerify({ query, candidates: candidates.slice(0, 3), embedder: fakeEmbedder(), router, prompt, task: 'match' });
+      expect(router.calls.map((call) => call.choice)).toEqual(seen.map((letters) => ({ field: 'pick', options: 3, ids: [0, 1, 2].sort((a, b) => letters[candidates[a].text].localeCompare(letters[candidates[b].text])) })));
+      return seen;
+    };
+    const seen = await orders('q');
+    expect(seen).toHaveLength(3);
+    for (const text of ['alpha', 'beta', 'gamma']) expect(new Set(seen.map((letters) => letters[text]))).toEqual(new Set(['A', 'B', 'C']));
+    expect(await orders('q')).toEqual(seen);
+    const starts = new Set<string>();
+    for (const query of ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']) starts.add((await orders(query))[0].alpha);
+    expect(starts).toEqual(new Set(['A', 'B', 'C']));
+    expect(rotate([{ id: 1, text: 'x' }, { id: 2, text: 'y' }, { id: 3, text: 'z' }], 4).map((option) => [option.letter, option.id])).toEqual([['A', 2], ['B', 3], ['C', 1]]);
+    expect(turnOf('q')).toBe(turnOf('q'));
   });
 
   it('returns no pick without a majority, on the none option, and on an invalid letter', async () => {
@@ -124,13 +191,28 @@ describe('retrieveThenVerify', () => {
     expect(router.calls).toHaveLength(4);
   });
 
-  it('keeps fixed options and their own letters for a closed selection', async () => {
+  it('shows every fixed option without ranking, rotates their letters like any closed choice, and maps the letter back to the option', async () => {
     const ladder = [{ id: 'A', letter: 'A', text: 'this one' }, { id: 'D', letter: 'D', text: 'another one' }];
     const router = fakeRouter({ ladder: { applies: 'D' } });
     const result = await retrieveThenVerify({ query: 'q', candidates: ladder, fixed: true, none: 'U', field: 'applies', router, prompt, task: 'ladder' });
     expect(result.picked.id).toBe('D');
-    expect(lettersOf(router.calls[0])).toEqual({ 'this one': 'A', 'another one': 'D', 'none of these': 'U' });
-    expect(lettersOf(router.calls[1])).toEqual(lettersOf(router.calls[0]));
+    const [first, second] = router.calls.map((call) => lettersOf(call));
+    expect(Object.values(first).sort()).toEqual(['A', 'B', 'U']);
+    expect([second['this one'], second['another one'], second['none of these']]).toEqual([first['another one'], first['this one'], 'U']);
+  });
+
+  it('gives no pick and names its leaning when only one provider family answered', async () => {
+    const router = fakeRouter({ match: (request) => ({ pick: pickLetter(request, (text) => text === 'beta') }) }, { providers: ['p1'] });
+    const result = await retrieveThenVerify({ query: 'q', candidates, embedder: fakeEmbedder(), router, prompt, task: 'match' });
+    expect([result.picked, result.none, result.single, result.leaning.text]).toEqual([null, false, true, 'beta']);
+    const pairPrompt = ({ query, candidate, options }: { query: string; candidate: { text: string }; options: { letter: string; text: string }[] }) => [{ role: 'system', content: 'pair' }, { role: 'user', content: `${query} vs ${candidate.text}\n${optionLines(options, null)}` }];
+    const same = [{ id: 'A', text: 'the same' }, { id: 'B', text: 'different' }];
+    const alone = fakeRouter({ pair: { same: 'A' } }, { providers: ['p1'] });
+    const pairs = await retrieveThenVerify({ query: 'q', candidates: candidates.slice(0, 1), fixed: true, pairwise: true, options: same, field: 'same', router: alone, prompt: pairPrompt, task: 'pair' });
+    expect(pairs.pairs.map((pair: { value: unknown; single?: boolean }) => [pair.value, pair.single])).toEqual([[null, true]]);
+    expect(pairs.picked).toEqual([]);
+    const two = await retrieveThenVerify({ query: 'q', candidates: candidates.slice(0, 1), fixed: true, pairwise: true, options: same, field: 'same', router: fakeRouter({ pair: { same: 'A' } }), prompt: pairPrompt, task: 'pair' });
+    expect(two.pairs.map((pair: { value: unknown }) => pair.value)).toEqual(['A']);
   });
 });
 

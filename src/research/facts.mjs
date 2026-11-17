@@ -86,20 +86,17 @@ export async function matchSubject(ctx, fact, { subject, kind, cache = null }) {
   if (cache?.has(cacheKey)) return cache.get(cacheKey);
   const result = await retrieveThenVerify({ query: fact.quote, candidates: subjectLadder(subject, kind), fixed: true, none: 'U', field: 'applies', router: ctx.router, prompt: subjectPrompt, keyOf: (id) => id ?? 'U', task: 'subject-match', budget: ctx.budget, stage: STAGE });
   const level = result.picked?.id ?? null;
-  const verdict = APPLIES.includes(level) ? { applies: true, level, tally: result.tally } : { applies: false, level: level ?? (result.none ? 'U' : null), tally: result.tally };
+  const verdict = APPLIES.includes(level) ? { applies: true, level, tally: result.tally } : { applies: false, level: level ?? (result.none ? 'U' : null), tally: result.tally, ...(result.single ? { single: true } : {}) };
   cache?.set(cacheKey, verdict);
   return verdict;
 }
 
-const claimPrompt = ({ query, candidate }) => [
-  { role: 'system', content: 'You compare two quoted statements from different sources, by meaning and in any language. A: they make the same claim and agree. B: they make the same claim and contradict each other. C: they make different claims. Answer with JSON only: {"relation":"A|B|C"}.' },
-  { role: 'user', content: `Statement 1: ${query}\nStatement 2: ${candidate.text}` },
-];
+export const CLAIM_OPTIONS = [{ id: 'A', text: 'they make the same claim and agree' }, { id: 'B', text: 'they make the same claim and contradict each other' }, { id: 'C', text: 'they make different claims' }];
 
-const claimSchema = (data) => {
-  const relation = oneOf(data?.relation, ['A', 'B', 'C']);
-  return relation ? { value: relation } : { error: '"relation" must be A, B or C' };
-};
+const claimPrompt = ({ query, candidate, options }) => [
+  { role: 'system', content: 'You compare two quoted statements from different sources, by meaning and in any language. Pick the one option that fits. Answer with JSON only: {"relation":"<letter>"}.' },
+  { role: 'user', content: `Statement 1: ${query}\nStatement 2: ${candidate.text}\n\nThe two statements:\n${optionLines(options, null)}` },
+];
 
 export async function clusterClaims(ctx, facts) {
   const parent = facts.map((_, index) => index);
@@ -109,7 +106,7 @@ export async function clusterClaims(ctx, facts) {
   for (const [index, fact] of facts.entries()) {
     const others = facts.map((other, at) => ({ other, at })).filter(({ other, at }) => at !== index && other.for === fact.for && other.host !== fact.host && other.quote !== fact.quote && !judged.has([index, at].sort().join('|')));
     if (!others.length) continue;
-    const result = await retrieveThenVerify({ query: fact.quote, candidates: others.map(({ other, at }) => ({ id: at, text: other.quote })), k: NEAREST_CLAIMS, pairwise: true, embedder: ctx.embedder, router: ctx.router, prompt: claimPrompt, schema: claimSchema, task: 'claim-pair', budget: ctx.budget, stage: STAGE });
+    const result = await retrieveThenVerify({ query: fact.quote, candidates: others.map(({ other, at }) => ({ id: at, text: other.quote })), k: NEAREST_CLAIMS, pairwise: true, embedder: ctx.embedder, router: ctx.router, options: CLAIM_OPTIONS, field: 'relation', prompt: claimPrompt, task: 'claim-pair', budget: ctx.budget, stage: STAGE });
     for (const pair of result.pairs) {
       judged.add([index, pair.candidate.id].sort().join('|'));
       if (pair.value !== 'A' && pair.value !== 'B') continue;
