@@ -333,9 +333,9 @@ describe('purpose replay: one run with fakes', () => {
     expect(byId.sources).toMatchObject({ value: '4 kept from 4 host(s) across 3 perspective(s), 0 dropped', target: '>= 4 hosts across >= 2 perspectives', pass: true });
     expect(byId.roles).toMatchObject({ value: '0 knowledge, 0 without a voted role, of 0 off-market drop(s)', pass: true });
     expect(byId['second-opinion']).toMatchObject({ value: '4 of 4; 0 disagree, 0 not judged, 0 answered by the same provider', pass: true });
-    expect(byId.coverage.value).toMatch(/^1 of \d+ requirement\(s\) in a kept goal; not modelled: C\d+ /);
-    expect(byId.coverage).toMatchObject({ target: 'every requirement in a kept goal', pass: false });
-    expect(run.tree.notModelled.length).toBe(run.anchors.length - 1);
+    expect(byId.coverage.value).toMatch(/^(\d+) of \1 requirement\(s\) in a kept goal/);
+    expect(byId.coverage).toMatchObject({ target: 'every requirement in a kept goal', pass: true });
+    expect(run.tree.notModelled).toEqual([]);
     const stored = JSON.parse(await fs.readFile(path.join(out, 'car-0-scope-sources.json'), 'utf8'));
     expect(stored.diversity).toEqual({ hosts: 4, perspectives: 3, minHosts: 4, minPerspectives: 2, rounds: 1 });
     expect(stored.kept.every((source: { role: string; perspectives: string[] }) => source.role === 'knowledge' && source.perspectives.length === 3)).toBe(true);
@@ -387,11 +387,11 @@ describe('purpose replay: one run with fakes', () => {
       return { run, byId: Object.fromEntries(metrics.map((row: { id: string }) => [row.id, row])) };
     };
     const library = await replay('library', { consumes: { consumes: false } });
-    expect(library.run.tree.goals.map((goal: { role?: string }) => goal.role ?? '')).toEqual(['']);
+    expect(library.run.tree.goals.map((goal: { role?: string }) => goal.role ?? '').every((role: string) => role === '')).toBe(true);
     expect(library.byId.tensions).toMatchObject({ baseline: '-', value: '0 voted pair(s), 0 goal(s), 0 cited explanation(s), 0 research gap(s)', target: 'no tension goal', pass: true });
     expect(library.byId['value-cost']).toMatchObject({ value: 'consumes no: neither side', pass: true });
     const trail = await replay('trail', { consumes: { consumes: true } });
-    expect(trail.run.tree.goals.map((goal: { role?: string }) => goal.role ?? '')).toEqual(['', 'value', 'cost']);
+    expect(trail.run.tree.goals.map((goal: { role?: string }) => goal.role ?? '')).toEqual(['', 'value', 'cost', '']);
     expect(trail.byId.tensions).toMatchObject({ target: 'no tension goal', pass: true });
     expect(trail.byId['value-cost']).toMatchObject({ value: 'consumes yes: value side 1 question(s), cost side 3 of 3 phases with 3 question(s)', pass: true });
     const voted = await replay('trail', { consumes: { consumes: true }, tensions: { pairs: [['C1', 'C1']] } });

@@ -11,9 +11,12 @@ function purposeMet(item, criterion) {
   return criterion.passed || (criterion.id === KIND_PURPOSE_ID && judgedAsAskedKind(item));
 }
 
-export function qualifies(item, spec) {
+export const NAMED_PURPOSE_PREFIX = 'purpose-names-';
+
+export function qualifies(item, spec, { namesVeto = true } = {}) {
   const entity = Boolean(item.evidence);
-  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => purposeMet(item, c)));
+  const vetoes = (item.purpose ?? []).filter((c) => namesVeto || !String(c.id ?? '').startsWith(NAMED_PURPOSE_PREFIX));
+  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && vetoes.every((c) => purposeMet(item, c)));
 }
 
 export function itemTier(item, hardIds, spec) {
@@ -173,7 +176,7 @@ export function verdict(items, spec, checklist, kind = null) {
 
       if (!hasAnyHardCheck) {
         tier = "not-judged";
-      } else if (tier === "confirmed" && !qualifies(item, spec)) {
+      } else if (tier === "confirmed" && !qualifies(item, spec, { namesVeto: false })) {
         tier = "rejected";
       }
     } else {

@@ -624,3 +624,28 @@ describe("runOutcome", () => {
     expect(runOutcome({ phase: "researching", acceptanceResult: { totalAsked: 20, validCount: 1 } }).state).toBe("researching");
   });
 });
+
+describe("named brands in the question under a purpose tree", () => {
+  const kind = { label: "supplier", terms: ["supplier"] };
+  const kindId = "kind|Is this page one supplier offered as asked?";
+  const kindChecklist = { clause: "kind", items: [{ question: "Is this page one supplier offered as asked?", hard: true, numeric: null }] };
+  const item = () => ({
+    live: true,
+    evidence: "https://supplier.test/about",
+    purpose: [{ id: "purpose-names-1", passed: false }],
+    checks: [
+      { id: kindId, answer: "yes", quote: "We are a supplier", hard: true, clause: "kind" },
+      { id: "brands|Does it offer brands comparable to the named ones?", answer: "unknown", hard: false, clause: "brands" },
+    ],
+  });
+
+  it("does not reject an item for not naming the example brands when the purpose tree owns the requirement", () => {
+    const tree = [kindChecklist, { clause: "brands", goalId: "G1", items: [{ question: "Does it offer brands comparable to the named ones?", hard: false, numeric: null }] }];
+    expect(verdict([item()], { itemCount: 1 }, tree, kind).tiers.confirmed).toBe(1);
+  });
+
+  it("still rejects it on the clause checklist that has no purpose tree", () => {
+    expect(qualifies(item(), { itemCount: 1 })).toBe(false);
+    expect(qualifies(item(), { itemCount: 1 }, { namesVeto: false })).toBe(true);
+  });
+});

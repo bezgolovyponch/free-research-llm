@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, confirmTree, consumesVote, costSide, coverageOf, coveredAnchors, critique, dismissNotModelled, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, requirementsOf, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide, voteHardness } from '../../src/research/purpose.mjs';
+import { COST_GOAL, COST_PHASES, COST_ROLE, METHOD_ALTERNATIVE, PURPOSE, TENSION_ROLE, TREE_VERSION, UNREFINED, VALUE_GOAL, VALUE_ROLE, anchorsOf, applyOps, buildPurposeTree, confirmTree, coverAskedClauses, consumesVote, costSide, coverageOf, coveredAnchors, critique, dismissNotModelled, draftGoals, drawImplications, drawPurpose, ensureTensions, explainTensions, measurableQuestions, mergeDuplicates, needsConfirmation, notModelledOf, numbersIn, openEntries, purposeCap, refineGoal, requirementsOf, splitPiece, splitPoint, tensionGoalsOf, tensionsAsked, thresholdsOf, traceGoal, traceables, treeCap, valueForCost, valueForCostOf, valueSide, voteHardness } from '../../src/research/purpose.mjs';
 import { CallBudget, STAGE_CAPS } from '../../src/research/semantic.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fakes';
 
@@ -26,7 +26,7 @@ describe('the stored knowledge holds only the Admiralty scales, and the engine n
     const source = readFileSync(new URL('../../src/research/purpose.mjs', import.meta.url), 'utf8');
     expect(source).not.toMatch(/\b(cheap\w*|plots?|cars?|cloth\w*|garments?|glamping|ralph|lauren|moncl\w*|north face|barbour|suppliers?|wholesale)\b/i);
     expect(source).not.toMatch(/conflictAsked|ensureAskedConflict|CONFLICT_GOAL|CONFLICT_ROLE|conflictGoalOf|mechanisms|conflictObstacle|valueRange/);
-    expect(TREE_VERSION).toBe(3);
+    expect(TREE_VERSION).toBe(4);
   });
 });
 
@@ -852,7 +852,9 @@ describe('the whole tree', () => {
       ['G4', VALUE_GOAL, 'kept', 'value'],
       ['G5', COST_GOAL, 'kept', 'cost'],
       ['G6', 'Meet both at once: "at a low entry price" and "with a long service life"', 'kept', 'tension'],
+      ['G7', 'Find a tent to buy', 'kept', ''],
     ]);
+    expect(tree.goals[6]).toMatchObject({ trace: { id: 'C1', kind: 'clause', text: 'Find a tent to buy' }, basis: 'asked clause not covered by a drafted goal' });
     expect(tree.goals[1]).toMatchObject({ restates: true, restated: 1, trace: { id: 'C2', text: 'at a low entry price' } });
     expect(tree.goals[1].questions.map((q: { q: string; checker: string }) => [q.q, q.checker])).toEqual([['Where does the price stand among comparable items?', 'code']]);
     expect(router.userText('refine', 1)).toContain('It comes from: at a low entry price');
@@ -870,12 +872,12 @@ describe('the whole tree', () => {
     expect(tree.ops.refused.map((entry: { why: string }) => entry.why)).toEqual([`"${tension.goal}" is a protected tension goal`, `"${VALUE_GOAL}" is a protected value goal`, `"${COST_GOAL}" is a protected cost goal`]);
     expect(tree.goals.filter((g: { state: string; trace: unknown }) => g.state === 'kept' && !g.trace)).toEqual([]);
     expect(tree.thresholds).toEqual([{ node: 'Q1', goal: 'G1', op: '>=', value: 5, unit: 'years', source: 'assumption', hard: false }]);
-    expect(openEntries(tree).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['C1', 'not-modelled'], ['G3', 'goal'], ['Q1', 'threshold']]);
-    expect(tree.notModelled).toEqual([{ id: 'C1', kind: 'clause', text: 'Find a tent to buy' }]);
-    expect(log).toContain('1 requirement(s) not modelled by any kept goal: C1 Find a tent to buy; the tree cannot be confirmed until each is dismissed');
+    expect(openEntries(tree).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['G3', 'goal'], ['Q1', 'threshold']]);
+    expect(tree.notModelled).toEqual([]);
+    expect(log).toContain('1 asked clause(s) not covered by any drafted goal became goals of their own: C1');
     expect(tree.unrefined).toEqual([]);
     expect(tree.confirmedAt).toBeNull();
-    expect(budget.caps.tree).toBe(72);
+    expect(budget.caps.tree).toBe(84);
     expect(budget.report().tree.skipped).toBe(0);
     expect(log.filter((line) => line.startsWith('tree budget: 72 calls for 6 goal(s) (12 a goal, at least 60)'))).toHaveLength(2);
     expect(log.filter((line) => line.startsWith('embeddings unavailable'))).toHaveLength(1);
@@ -888,12 +890,12 @@ describe('the whole tree', () => {
     const question = 'Find open-source libraries that read documents, actively maintained, well documented';
     const script = (consumes: unknown) => ({ ...base, tensions: { pairs: [] }, purpose: { who: 'a developer', outcome: 'a library to build on', why: 'a deadline', anchors: ['C1'] }, consumes, goals: { goals: [{ goal: 'Actively maintained', anchor: 'C2', notes: [] }] }, trace: (request: Ask) => ({ anchor: pickLetter(request, (text) => text.includes('maintained')), relation: 'S' }), refine: refined, 'cost-phase': phaseQuestion });
     const without = await buildPurposeTree({ router: fakeRouter(script({ consumes: false })), embedder: fakeEmbedder(), budget: new CallBudget() }, { question });
-    expect(without.tree.goals.map((g: { goal: string }) => g.goal)).toEqual(['Actively maintained']);
+    expect(without.tree.goals.map((g: { goal: string; trace: { id: string } }) => [g.goal, g.trace.id])).toEqual([['Actively maintained', 'C2'], ['Find open-source libraries that read documents', 'C1'], ['well documented', 'C3']]);
     expect(without.tree.consumes).toMatchObject({ value: false, decided: true });
     expect(without.tree.valueForCost).toBeNull();
     expect(tensionGoalsOf(without.tree)).toEqual([]);
-    expect(without.tree.notModelled.map((entry: { id: string }) => entry.id)).toEqual(['C1', 'C3']);
-    expect(without.phase).toBe('needs-confirmation');
+    expect(without.tree.notModelled).toEqual([]);
+    expect(without.phase).toBe('tree-ready');
     const named = ['Libraries that read documents', 'Actively maintained', 'Well documented'];
     const traceEach = (request: Ask) => ({ anchor: pickLetter(request, (text) => text.toLowerCase().endsWith(request.messages[1].content.split('\n')[0].toLowerCase().split(' ').pop()!)), relation: 'S' });
     const covering = await buildPurposeTree({ router: fakeRouter({ ...script({ consumes: false }), goals: { goals: named.map((goal, index) => ({ goal, anchor: `C${index + 1}`, notes: [] })) }, trace: traceEach }), embedder: fakeEmbedder(), budget: new CallBudget() }, { question });
@@ -902,13 +904,13 @@ describe('the whole tree', () => {
     expect(covering.phase).toBe('tree-ready');
     const router = fakeRouter(script({ consumes: true }));
     const withSides = await buildPurposeTree({ router, embedder: fakeEmbedder(), budget: new CallBudget() }, { question });
-    expect(withSides.tree.goals.map((g: { goal: string; role?: string }) => [g.goal, g.role ?? ''])).toEqual([['Actively maintained', ''], [VALUE_GOAL, 'value'], [COST_GOAL, 'cost']]);
+    expect(withSides.tree.goals.map((g: { goal: string; role?: string }) => [g.goal, g.role ?? ''])).toEqual([['Actively maintained', ''], [VALUE_GOAL, 'value'], [COST_GOAL, 'cost'], ['Find open-source libraries that read documents', ''], ['well documented', '']]);
     expect(withSides.tree.goals[2].questions.map((q: { phase: string; q: string }) => [q.phase, q.q])).toEqual([['pre-transaction', 'What does the pre-transaction phase take?'], ['transaction', 'What does the transaction phase take?'], ['post-transaction', 'What does the post-transaction phase take?']]);
     expect(tensionGoalsOf(withSides.tree)).toEqual([]);
     const log: string[] = [];
     const undecided = await buildPurposeTree({ router: fakeRouter(script(seq({ consumes: true }, { consumes: false }, FAIL))), embedder: fakeEmbedder(), budget: new CallBudget(), log: (line: string) => log.push(line) }, { question });
     expect(undecided.tree.consumes).toMatchObject({ value: true, decided: false });
-    expect(undecided.tree.goals.map((g: { role?: string }) => g.role ?? '')).toEqual(['', 'value', 'cost']);
+    expect(undecided.tree.goals.map((g: { role?: string }) => g.role ?? '')).toEqual(['', 'value', 'cost', '', '']);
     expect(log).toContain('value and cost sides: no majority on whether the result consumes resources of the asker; both sides are kept');
   });
 
@@ -1028,5 +1030,26 @@ describe('askedNumber', () => {
     const { thresholdsOf } = await import('../../src/research/purpose.mjs');
     const tree = { goals: [{ id: 'G1', goal: 'g', questions: [{ id: 'Q1', q: 'Does the reliability score reach 300 points?', checker: 'page', threshold: { op: '>=', value: 300, unit: 'points' } }, { id: 'Q2', q: 'Is it within 300 km?', checker: 'code', threshold: { op: '<=', value: 300, unit: 'km' } }] }] };
     expect(thresholdsOf(tree, { question }).thresholds.map((t: { node: string; source: string; hard: boolean }) => [t.node, t.source, t.hard])).toEqual([['Q1', 'assumption', false], ['Q2', 'asked', true]]);
+  });
+});
+
+describe('coverAskedClauses', () => {
+  const measurable = { q: 'Does the supplier list brands in the same price segment as the named ones?', checker: 'page', threshold: null, note: null };
+  const anchors = [{ id: 'C1', kind: 'clause', text: 'brands similar to the named ones' }, { id: 'C2', kind: 'clause', text: 'proven good quality' }, { id: 'H1', kind: 'hint', text: 'suppliers in NL, DE' }];
+  const tree = { goals: [{ id: 'G1', goal: 'Proven quality', state: 'kept', trace: { id: 'C2', kind: 'clause', text: 'proven good quality' }, questions: [{ id: 'Q1', q: 'Do buyers report the grading as accurate?', checker: 'consensus', threshold: null }] }], notModelled: [{ id: 'C1', kind: 'clause', text: 'brands similar to the named ones' }, { id: 'H1', kind: 'hint', text: 'suppliers in NL, DE' }] };
+
+  it('turns an asked clause no drafted goal covers into a goal traced to that clause, and leaves hints to the user', async () => {
+    const router = fakeRouter({ refine: { refine: 'AND', questions: [measurable], obstacles: [] }, restates: { restates: [] } });
+    const out = await coverAskedClauses({ router }, tree, anchors, { question: 'q' });
+    expect(out.goals.map((g: { id: string; trace: { id: string } }) => [g.id, g.trace.id])).toEqual([['G1', 'C2'], ['G2', 'C1']]);
+    expect(out.goals[1].questions.map((q: { id: string; q: string }) => [q.id, q.q])).toEqual([['Q2', measurable.q]]);
+    expect(out.notModelled).toEqual([]);
+  });
+
+  it('leaves the tree as it is when the clause cannot be refined or the user dismissed it', async () => {
+    const router = fakeRouter({ refine: { refine: 'AND', questions: [], obstacles: [] }, restates: { restates: [] } });
+    expect(await coverAskedClauses({ router }, tree, anchors)).toBe(tree);
+    const dismissed = { ...tree, notModelled: [{ ...tree.notModelled[0], dismissedAt: 't' }] };
+    expect(await coverAskedClauses({ router: fakeRouter({}) }, dismissed, anchors)).toBe(dismissed);
   });
 });

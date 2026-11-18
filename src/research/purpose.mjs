@@ -4,7 +4,7 @@ import { currencyOf } from './acceptance.mjs';
 import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
 
 export const PURPOSE = JSON.parse(readFileSync(new URL('./purpose.json', import.meta.url), 'utf8'));
-export const TREE_VERSION = 3;
+export const TREE_VERSION = 4;
 export const TENSION_ROLE = 'tension';
 export const VALUE_ROLE = 'value';
 export const COST_ROLE = 'cost';
@@ -943,6 +943,21 @@ export function needsConfirmation(tree) {
   return Boolean(tree) && (coverageOpen(tree).length > 0 || (!tree.confirmedAt && openEntries(tree).length > 0));
 }
 
+export async function coverAskedClauses(ctx, tree, anchors, { notes = [], said = '', question = '', guidance = '', answers = [] } = {}) {
+  const open = (tree.notModelled ?? []).filter((entry) => entry.kind === 'clause' && !entry.dismissedAt);
+  if (!open.length) return tree;
+  if (ctx.budget?.caps) ctx.budget.caps[TREE_STAGE] = (ctx.budget.caps[TREE_STAGE] ?? 0) + open.length * TREE_CALLS_PER_GOAL;
+  const added = [];
+  for (const anchor of open) {
+    const refined = await refineGoal(ctx, { goal: anchor.text, anchorText: anchor.text, notes: notes.slice(0, MAX_NOTES_SHOWN), said });
+    if (refined) added.push({ goal: anchor.text, state: 'kept', trace: { id: anchor.id, kind: anchor.kind, text: anchor.text }, notes: [], refine: refined.refine ?? 'AND', questions: refined.questions ?? [], obstacles: refined.obstacles ?? 'missing', basis: 'asked clause not covered by a drafted goal' });
+  }
+  if (!added.length) return tree;
+  ctx.log?.(`${added.length} asked clause(s) not covered by any drafted goal became goals of their own: ${added.map((goal) => goal.trace.id).join(', ')}`);
+  const numbered = thresholdsOf(numberTree({ ...tree, goals: [...tree.goals, ...added] }), { question, guidance, answers, notes }).tree;
+  return { ...numbered, notModelled: notModelledOf(numbered, anchors) };
+}
+
 export async function buildPurposeTree(ctx, { question, guidance = '', answers = [], notes = [], drawn = null }) {
   const said = [question, guidance, ...answers].join('\n');
   const { anchors, ...requirements } = drawn?.requirements ?? (await requirementsOf(ctx, question, guidance));
@@ -972,6 +987,7 @@ export async function buildPurposeTree(ctx, { question, guidance = '', answers =
   tree = ensureTensions(tree);
   tree = thresholdsOf(tree, { question, guidance, answers, notes }).tree;
   tree.notModelled = notModelledOf(tree, anchors);
+  tree = await coverAskedClauses(ctx, tree, anchors, { notes, said, question, guidance, answers });
   if (tree.notModelled.length) ctx.log?.(`${tree.notModelled.length} requirement(s) not modelled by any kept goal: ${tree.notModelled.map((entry) => `${entry.id} ${entry.text}`).join(' | ')}; the tree cannot be confirmed until each is dismissed`);
   tree.valueForCost = valueForCostOf(tree);
   tree.unrefined = [...dropped.filter((entry) => entry.reason === UNREFINED).map((entry) => entry.goal), ...tree.goals.filter((goal) => !(goal.questions ?? []).length && goal.role !== TENSION_ROLE).map((goal) => goal.goal)];
