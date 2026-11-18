@@ -3,7 +3,7 @@ import { clausesOf } from './clauses.mjs';
 import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
 
 export const PURPOSE = JSON.parse(readFileSync(new URL('./purpose.json', import.meta.url), 'utf8'));
-export const TREE_VERSION = 2;
+export const TREE_VERSION = 3;
 export const TENSION_ROLE = 'tension';
 export const VALUE_ROLE = 'value';
 export const COST_ROLE = 'cost';
@@ -45,6 +45,11 @@ const OPEN_STATES = ['proposed', 'conflict'];
 const QUESTION_LETTERS = 'ABCDEFGH';
 const lines = (rows) => rows.map((row) => `[${row.id}] ${row.text}`).join('\n');
 const noteLines = (notes) => lines(notes.map((note) => ({ id: note.id, text: `${note.label}: ${String(note.quote).slice(0, 160)}` })));
+
+export function aboutSubject(ctx) {
+  const subject = String(ctx?.subject ?? '').trim();
+  return subject ? `Everything here is about ${subject}: read every requirement word in that sense, never in another trade. ` : '';
+}
 
 export function treeCap(goals) {
   return Math.max(TREE_MIN_CAP, Math.max(0, Number(goals) || 0) * TREE_CALLS_PER_GOAL);
@@ -219,7 +224,7 @@ export async function drawPurpose(ctx, anchors) {
 export async function drawImplications(ctx, anchors, purpose) {
   const known = new Set(anchors.map((anchor) => anchor.id));
   const messages = [
-    { role: 'system', content: `You ask "why is that important" of a purpose. List at most 5 attributes the purpose makes preferable, each with its direction: "low" (less is better), "high" (more is better) or "match" (must fit a given value). "anchor" is the id of the clause or hint it follows from. Attributes of at most 6 words. Answer with JSON only: {"implications":[{"attribute":"...","direction":"low|high|match","anchor":"C5"}]}.` },
+    { role: 'system', content: `${aboutSubject(ctx)}You ask "why is that important" of a purpose. List at most 5 attributes the purpose makes preferable, each with its direction: "low" (less is better), "high" (more is better) or "match" (must fit a given value). "anchor" is the id of the clause or hint it follows from. Attributes of at most 6 words. Answer with JSON only: {"implications":[{"attribute":"...","direction":"low|high|match","anchor":"C5"}]}.` },
     { role: 'user', content: `Purpose: ${purpose.text}\n\nClauses and hints:\n${lines(anchors)}` },
   ];
   const schema = (data) => {
@@ -324,7 +329,7 @@ async function explainTension(ctx, goal, { notes, said }) {
   const userNumbers = numbersIn(said);
   const allowedFor = (entry) => new Set([...userNumbers, ...shown.filter((note) => entry.notes.includes(note.id)).flatMap((note) => numbersIn(note.quote))]);
   const messages = [
-    { role: 'system', content: `You explain how two requirements that pull against each other can still both hold, using only the notes given. At most ${MAX_EXPLANATIONS} explanations of at most 20 words, each a different one, each with the ids of the notes it rests on and one "test": a question a checker can answer to see whether the explanation applies to one result, with one checker of page (stated on the item's page), code (computed or compared across items), consensus (independent sources agree), statistic (a published figure), official (a registry or plan). Never give an explanation no note supports, and write no number a cited note does not state. Give an empty list when the notes explain nothing. Answer with JSON only: {"explanations":[{"explanation":"...","notes":["N2"],"test":"...","checker":"consensus"}]}.` },
+    { role: 'system', content: `${aboutSubject(ctx)}You explain how two requirements that pull against each other can still both hold, using only the notes given. At most ${MAX_EXPLANATIONS} explanations of at most 20 words, each a different one, each with the ids of the notes it rests on and one "test": a question a checker can answer to see whether the explanation applies to one result, with one checker of page (stated on the item's page), code (computed or compared across items), consensus (independent sources agree), statistic (a published figure), official (a registry or plan). Never give an explanation no note supports, and write no number a cited note does not state. Give an empty list when the notes explain nothing. Answer with JSON only: {"explanations":[{"explanation":"...","notes":["N2"],"test":"...","checker":"consensus"}]}.` },
     { role: 'user', content: `${goal.goal}\n\nNotes:\n${noteLines(shown)}` },
   ];
   let rounds = 0;
@@ -369,7 +374,7 @@ export async function draftGoals(ctx, { anchors, purpose, implications = [], not
   const known = new Set([...anchors.map((anchor) => anchor.id), 'P', ...implications.map((entry) => entry.id)]);
   const noteIds = new Set(shown.map((note) => note.id));
   const messages = [
-    { role: 'system', content: `You list the goals a result must reach (Goal-Question-Metric). At most ${MAX_GOALS} goals of at most 12 words, no numbers. "anchor" is the id the goal comes from: a clause (C), a hint (H), the purpose (P) or an implication (I). "notes" are the ids of scoping notes the goal uses. Do not add goals nobody asked for. Answer with JSON only: {"goals":[{"goal":"...","anchor":"C3","notes":["N2"]}]}.` },
+    { role: 'system', content: `${aboutSubject(ctx)}You list the goals a result must reach (Goal-Question-Metric). At most ${MAX_GOALS} goals of at most 12 words, no numbers. "anchor" is the id the goal comes from: a clause (C), a hint (H), the purpose (P) or an implication (I). "notes" are the ids of scoping notes the goal uses. Do not add goals nobody asked for. Answer with JSON only: {"goals":[{"goal":"...","anchor":"C3","notes":["N2"]}]}.` },
     { role: 'user', content: `Clauses and hints:\n${lines(anchors)}\n\n[P] ${purpose.text}\n${implications.length ? `\nImplications:\n${lines(implications.map((entry) => ({ id: entry.id, text: `${entry.attribute}: ${entry.direction}` })))}\n` : ''}${shown.length ? `\nScoping notes:\n${noteLines(shown)}` : ''}` },
   ];
   const userNumbers = numbersIn([said, ...anchors.map((anchor) => anchor.text)].join('\n'));
@@ -438,7 +443,7 @@ export async function measurableQuestions(ctx, questions, { goal, anchorText = '
 
 export async function refineGoal(ctx, { goal, anchorText = '', notes = [], said = '', cited = null, method = '' }) {
   const { noteIds, allowedFor } = leafRules({ notes, said, cited });
-  const system = `You refine one goal into questions a checker can answer. "refine": "AND" when every question must hold, "OR" when one is enough. At most 3 questions, each with exactly one checker: page (stated on the item's page), code (computed or compared across items), consensus (independent sources agree), statistic (a published figure), official (a registry or plan). At most 2 obstacles: conditions that defeat the goal. A number goes only in "threshold", never in the text; use null when no number was given. Answer with JSON only: {"refine":"AND|OR","questions":[{"q":"...","checker":"page","threshold":{"op":"<=","value":0,"unit":"..."},"note":"N2"}],"obstacles":[{"obstacle":"...","checker":"page","threshold":null}]}.`;
+  const system = `${aboutSubject(ctx)}You refine one goal into questions a checker can answer. "refine": "AND" when every question must hold, "OR" when one is enough. At most 3 questions, each with exactly one checker: page (stated on the item's page), code (computed or compared across items), consensus (independent sources agree), statistic (a published figure), official (a registry or plan). At most 2 obstacles: conditions that defeat the goal. A number goes only in "threshold", never in the text; use null when no number was given. Answer with JSON only: {"refine":"AND|OR","questions":[{"q":"...","checker":"page","threshold":{"op":"<=","value":0,"unit":"..."},"note":"N2"}],"obstacles":[{"obstacle":"...","checker":"page","threshold":null}]}.`;
   const user = `Goal: ${goal}\nIt comes from: ${anchorText}${method ? `\n${method}` : ''}${notes.length ? `\n\nNotes:\n${noteLines(notes)}` : ''}`;
   const parse = (data) => {
     const refine = oneOf(data?.refine, ['AND', 'OR']);
@@ -498,7 +503,7 @@ export async function valueSide(ctx, { purpose, anchors, notes = [], said = '' }
 
 async function costPhase(ctx, phase, { purpose, anchors, notes, said }) {
   const { noteIds, allowedFor } = leafRules({ notes, said, cited: [] });
-  const system = `You refine one goal, the total cost to obtain and use a result, for one phase of total cost of ownership: ${phase.id} (${phase.covers}). At most 2 questions about the costs of this phase that apply to this request, in its own terms. "paid": "A" when the question asks what is paid for an item itself, which code measures from the items and comparable items; "B" for any other cost, then with one checker of consensus (independent sources agree), page (stated on the item's page) or official (a registry or tariff). At most 1 obstacle: a cost of this phase that would defeat the purpose, with one checker of page, code, consensus, statistic, official. A number goes only in "threshold", never in the text; use null when no number was given. Answer with JSON only: {"questions":[{"q":"...","paid":"A|B","checker":"consensus","threshold":{"op":"<=","value":0,"unit":"..."},"note":"N2"}],"obstacles":[{"obstacle":"...","checker":"page","threshold":null}]}.`;
+  const system = `${aboutSubject(ctx)}You refine one goal, the total cost to obtain and use a result, for one phase of total cost of ownership: ${phase.id} (${phase.covers}). At most 2 questions about the costs of this phase that apply to this request, in its own terms. "paid": "A" when the question asks what is paid for an item itself, which code measures from the items and comparable items; "B" for any other cost, then with one checker of consensus (independent sources agree), page (stated on the item's page) or official (a registry or tariff). At most 1 obstacle: a cost of this phase that would defeat the purpose, with one checker of page, code, consensus, statistic, official. A number goes only in "threshold", never in the text; use null when no number was given. Answer with JSON only: {"questions":[{"q":"...","paid":"A|B","checker":"consensus","threshold":{"op":"<=","value":0,"unit":"..."},"note":"N2"}],"obstacles":[{"obstacle":"...","checker":"page","threshold":null}]}.`;
   const user = `Goal: ${COST_GOAL}\nPurpose: ${purpose.text}\n\nRequirements and hints:\n${lines(anchors)}${notes.length ? `\n\nNotes:\n${noteLines(notes)}` : ''}`;
   const parse = (data) => {
     const questions = (Array.isArray(data?.questions) ? data.questions : []).slice(0, 2).map((entry) => {
@@ -675,7 +680,7 @@ export async function critique(ctx, tree, candidates, { said = '' } = {}) {
   const ids = new Set(nodesOf(tree).map((node) => node.id));
   const anchorIds = new Set(candidates.map((candidate) => candidate.id));
   const messages = [
-    { role: 'system', content: `You review a goal tree (critique and revise). Return operations only, never a rewritten tree. Allowed: {"op":"merge","a":"G2","b":"G5"} two goals that are one objective; {"op":"drop","id":"G4","reason":"A|B|C"} with ${Object.entries(DROP_REASONS).map(([letter, text]) => `${letter} ${text}`).join(', ')}; {"op":"add","goal":"...","anchor":"C3"} a missing goal and the statement id it comes from; {"op":"checker","id":"Q3","checker":"page|code|consensus|statistic|official"} a question with the wrong checker. Answer with JSON only: {"ops":[...]}.` },
+    { role: 'system', content: `${aboutSubject(ctx)}You review a goal tree (critique and revise). Return operations only, never a rewritten tree. Allowed: {"op":"merge","a":"G2","b":"G5"} two goals that are one objective; {"op":"drop","id":"G4","reason":"A|B|C"} with ${Object.entries(DROP_REASONS).map(([letter, text]) => `${letter} ${text}`).join(', ')}; {"op":"add","goal":"...","anchor":"C3"} a missing goal and the statement id it comes from; {"op":"checker","id":"Q3","checker":"page|code|consensus|statistic|official"} a question with the wrong checker. Answer with JSON only: {"ops":[...]}.` },
     { role: 'user', content: `Statements:\n${lines(candidates)}\n\nTree:\n${treeLines(tree)}` },
   ];
   const allowed = new Set(numbersIn(said));
@@ -827,7 +832,7 @@ export function thresholdsOf(tree, { question = '', guidance = '', answers = [],
     const cited = noteById.get(node.note) ?? (goal.notes ?? []).map((id) => noteById.get(id)).find((note) => note && numbersIn(note.quote).includes(node.threshold.value));
     const confirmed = node.threshold.confirmed === true;
     const source = said.has(node.threshold.value) ? 'asked' : cited && numbersIn(cited.quote).includes(node.threshold.value) ? 'sourced' : 'assumption';
-    const threshold = { ...node.threshold, source, ...(source === 'sourced' ? { url: cited.url, note: cited.id } : {}), hard: source !== 'assumption' || confirmed };
+    const threshold = { ...node.threshold, source, ...(source === 'sourced' ? { url: cited.url, note: cited.id } : {}), hard: source === 'asked' || confirmed };
     thresholds.push({ node: node.id, goal: goal.id, ...threshold });
     return { ...out, threshold };
   };

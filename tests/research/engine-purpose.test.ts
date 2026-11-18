@@ -10,7 +10,7 @@ vi.mock('../../src/research/purpose.mjs', async (importOriginal) => {
   return { ...original, buildPurposeTree: async () => { built.calls += 1; return built.result; } };
 });
 
-const { ResearchEngine } = await import('../../src/research/engine.mjs');
+const { ResearchEngine, purposeSubject } = await import('../../src/research/engine.mjs');
 const { TREE_VERSION } = await import('../../src/research/purpose.mjs');
 const { ProjectStore } = await import('../../src/store.mjs');
 
@@ -90,3 +90,11 @@ describe('ensurePurposeTree', () => {
     expect(built.calls).toBe(0);
   });
 });
+
+describe('purposeSubject', () => {
+  it('joins the kind label, its terms and the domain terms once each, at most six', () => {
+    expect(purposeSubject({ decisionModel: { kind: { label: 'used clothing', terms: ['vintage bales', 'used clothing'] } }, domain: { terms: ['credential', 'grade a', 'kg', 'bundles', 'wholesale'] } })).toBe('used clothing, vintage bales, credential, grade a, kg, bundles');
+    expect(purposeSubject({})).toBe('');
+  });
+});
+

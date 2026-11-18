@@ -284,6 +284,12 @@ export function needsSiteFit(strategy, decisionModel) {
 export const FACT_PAGES = 400;
 export const FACT_READS_AT_ONCE = 6;
 
+export function purposeSubject(project) {
+  const kind = project.decisionModel?.kind ?? null;
+  const terms = [...new Set([kind?.label, ...(kind?.terms ?? []), ...(project.domain?.terms ?? [])].map((term) => String(term ?? '').trim()).filter(Boolean))];
+  return terms.length ? terms.slice(0, 6).join(', ') : '';
+}
+
 export class ResearchEngine {
   constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null, now = () => Date.now() }) {
     this.now = now;
@@ -737,6 +743,7 @@ export class ResearchEngine {
       search: this.search,
       embedder: this.embedder ?? new Embedder({ env: process.env }),
       budget: new CallBudget(),
+      subject: purposeSubject(project),
       log: (msg) => this.emit(project, 'decision', msg),
     };
     const { phase: treePhase, tree } = await buildPurposeTree(ctx, {

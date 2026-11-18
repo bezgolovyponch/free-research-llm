@@ -29,10 +29,11 @@ async function main() {
   }
 
   const projectPath = path.join(ROOT, 'data', 'projects', projectId + '.json');
-  const project = JSON.parse(await fs.readFile(projectPath, 'utf8'));
+  const copied = path.join(outDir, 'data', projectId + '.json');
+  const project = JSON.parse(await fs.readFile(await fs.access(copied).then(() => copied, () => projectPath), 'utf8'));
 
-  await fs.mkdir(path.join(outDir, 'data', 'projects'), { recursive: true });
-  await fs.writeFile(path.join(outDir, 'data', 'projects', projectId + '.json'), JSON.stringify(project, null, 1));
+  await fs.mkdir(path.join(outDir, 'data'), { recursive: true });
+  await fs.writeFile(copied, JSON.stringify(project, null, 1));
 
   const secrets = new KeychainSecrets();
   await secrets.fillMissing(process.env);
@@ -44,6 +45,7 @@ async function main() {
 
   await engine.ensurePurposeTree(project);
   await engine.checkAcceptance(project);
+  await engine.store.save(project, { reason: 'purpose witness' });
   const acceptanceResult = project.acceptanceResult;
   const verdictResult = acceptanceResult.verdict ?? verdict(acceptanceResult.items, project.acceptance, project.decisionModel?.checklist ?? null, project.decisionModel?.kind ?? null);
 
@@ -61,8 +63,8 @@ async function main() {
   }
 
   const purposeTreeGoals = [];
-  if (purposeResult.tree?.goals) {
-    for (const goal of purposeResult.tree.goals) {
+  if (project.purposeTree?.goals) {
+    for (const goal of project.purposeTree.goals) {
       if (goal.state === 'kept') {
         purposeTreeGoals.push({
           id: goal.id,

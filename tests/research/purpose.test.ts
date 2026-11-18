@@ -26,7 +26,7 @@ describe('the stored knowledge holds only the Admiralty scales, and the engine n
     const source = readFileSync(new URL('../../src/research/purpose.mjs', import.meta.url), 'utf8');
     expect(source).not.toMatch(/\b(cheap\w*|plots?|cars?|cloth\w*|garments?|glamping|ralph|lauren|moncl\w*|north face|barbour|suppliers?|wholesale)\b/i);
     expect(source).not.toMatch(/conflictAsked|ensureAskedConflict|CONFLICT_GOAL|CONFLICT_ROLE|conflictGoalOf|mechanisms|conflictObstacle|valueRange/);
-    expect(TREE_VERSION).toBe(2);
+    expect(TREE_VERSION).toBe(3);
   });
 });
 
@@ -503,7 +503,7 @@ describe('numbers live in a structured field and are compared with the user numb
     expect(numbersIn('within 300km, up to 65 000 CZK or 65,000 and 1,5 %')).toEqual([300, 65000, 65, 65000, 1.5]);
   });
 
-  it('labels a threshold asked, sourced from the cited quote, or an assumption that is never hard', () => {
+  it('labels a threshold asked, sourced from the cited quote, or an assumption; only an asked one is hard', () => {
     const notes = [{ id: 'N1', url: 'https://stats.example.org/a', quote: 'Bales weigh 450 kg on average.', label: 'bale weight' }];
     const tree = { goals: [{ id: 'G1', goal: 'Stay near the city', notes: ['N1'], questions: [
       { id: 'Q1', q: 'Is it within the distance?', checker: 'code', threshold: { op: '<=', value: 300, unit: 'km' }, note: null },
@@ -512,7 +512,7 @@ describe('numbers live in a structured field and are compared with the user numb
       { id: 'Q4', q: 'Is it stated?', checker: 'page', threshold: null, note: null },
     ], obstacles: [{ id: 'O1', obstacle: 'No road nearby', checker: 'official', threshold: { op: '>', value: 500, unit: 'm' } }] }] };
     const { thresholds, tree: out } = thresholdsOf(tree, { question: 'plots within 300km of the city, price up to 65000CZK', notes });
-    expect(thresholds.map((t: { node: string; source: string; hard: boolean }) => [t.node, t.source, t.hard])).toEqual([['Q1', 'asked', true], ['Q2', 'sourced', true], ['Q3', 'assumption', false], ['O1', 'assumption', false]]);
+    expect(thresholds.map((t: { node: string; source: string; hard: boolean }) => [t.node, t.source, t.hard])).toEqual([['Q1', 'asked', true], ['Q2', 'sourced', false], ['Q3', 'assumption', false], ['O1', 'assumption', false]]);
     expect(thresholds[1]).toMatchObject({ url: 'https://stats.example.org/a', note: 'N1' });
     expect(out.thresholds).toEqual(thresholds);
     expect(openEntries(out).map((e: { id: string; kind: string }) => [e.id, e.kind])).toEqual([['Q3', 'threshold'], ['O1', 'threshold']]);
@@ -843,7 +843,7 @@ describe('the whole tree', () => {
     const { phase, tree, anchors } = await buildPurposeTree({ router, embedder, budget, log: (line: string) => log.push(line) }, { question, notes });
     expect(anchors.map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual(['C1 Find a tent to buy', 'C2 at a low entry price', 'C3 with a long service life']);
     expect(phase).toBe('needs-confirmation');
-    expect(tree.version).toBe(2);
+    expect(tree.version).toBe(TREE_VERSION);
     expect(tree.requirements).toMatchObject({ grouping: { grouped: true, valid: 2 }, pieces: [{ text: 'Find a tent to buy', split: false }, { text: 'at a low entry price', split: false }, { text: 'with a long service life', split: false }] });
     expect(tree.goals.map((g: { id: string; goal: string; state: string; role?: string }) => [g.id, g.goal, g.state, g.role ?? ''])).toEqual([
       ['G1', 'A long service life', 'kept', ''],
@@ -1006,3 +1006,13 @@ describe('composite goal combine truth table', () => {
     expect(combineGoal(['no', 'unknown'], 'OR')).toBe('unknown');
   });
 });
+
+describe('aboutSubject', () => {
+  it('names the subject so requirement words are read in its trade, and says nothing without one', async () => {
+    const { aboutSubject } = await import('../../src/research/purpose.mjs');
+    expect(aboutSubject({ subject: 'used clothing, vintage bales' })).toBe('Everything here is about used clothing, vintage bales: read every requirement word in that sense, never in another trade. ');
+    expect(aboutSubject({ subject: '  ' })).toBe('');
+    expect(aboutSubject(null)).toBe('');
+  });
+});
+

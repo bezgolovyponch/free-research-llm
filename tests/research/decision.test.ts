@@ -504,10 +504,11 @@ describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
     it('builds checklist from stored purposeTree fixture (source tree)', async () => {
       const decisionProposal = { concept: 'c', kind: { label: 'car', terms: ['hatchback'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
       const router = {
-        complete: async (req: { purpose: string }) => {
+        complete: async (req: { purpose: string; task?: string; messages: Array<{ content: string }> }) => {
           if (req.purpose === 'decision-model') {
             return { provider: 'test', data: decisionProposal };
           }
+          if (req.task === 'measure') { const lines = req.messages[0].content.split('\n'); const wanted = req.messages.at(-1)!.content.includes('Unit: km') ? 'distanceKm' : 'priceEur'; return { provider: 'test', data: { measure: lines.find((l) => l.endsWith(`: ${wanted}`))!.slice(0, 1) } }; }
           throw new Error('should not call checklist');
         },
       };
@@ -611,3 +612,52 @@ describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
     expect(applyCalibration(kind, reply, [...cars, ...wheels], { itemTitles: wheels }).kind.not).toEqual(['parts', 'accessories', 'kola']);
   });
 });
+
+describe('checklist hardness from the user\'s words', () => {
+  const measureOrHardness = (hard: string) => ({
+    complete: async (req: { task?: string; messages: Array<{ content: string }> }) => {
+      if (req.task === 'hardness') return { provider: 'test', data: { kind: hard } };
+      if (req.task === 'measure') return { provider: 'test', data: { measure: 'Z' } };
+      throw new Error(`unexpected call ${req.task}`);
+    },
+  });
+  const tree = {
+    goals: [
+      { id: 'G1', state: 'kept', goal: 'Within 300 km of Prague', refine: 'AND', trace: { id: 'C1', text: 'within 300km from prague' }, questions: [{ id: 'Q1', q: 'Is the listing located within the asked area?', checker: 'page', threshold: null }] },
+      { id: 'G2', state: 'kept', goal: 'Suppliers in the hinted countries', refine: 'AND', trace: { id: 'H1', text: 'suppliers in NL, DE, UK' }, questions: [{ id: 'Q2', q: 'Is the supplier in Germany?', checker: 'page', threshold: null }] },
+      { id: 'G3', state: 'kept', goal: 'Value for the purpose', refine: 'AND', trace: { kind: 'rule', text: 'value' }, questions: [{ id: 'Q3', q: 'Does it deliver within 24 hours?', checker: 'page', threshold: null }, { id: 'Q4', q: 'Is the sell-through lift at least 10%?', checker: 'statistic', threshold: { op: '>=', value: 10, unit: '%', source: 'sourced', hard: false } }] },
+      { id: 'G4', state: 'kept', goal: 'Proven quality', refine: 'AND', trace: { id: 'C2', text: 'proven good quality' }, questions: [{ id: 'Q5', q: 'Do independent sources agree on its quality?', checker: 'consensus', threshold: null }] },
+    ],
+  };
+  const build = async (hard: string) => {
+    const { DecisionModeler } = await import('../../src/research/decision.mjs');
+    const modeler = new DecisionModeler({ router: measureOrHardness(hard) } as never);
+    const clusters = await modeler.buildChecklistFromTree(tree, [], measureOrHardness(hard), null, 'q', 'hint');
+    return Object.fromEntries(clusters.flatMap((c: { items: Array<{ questionId: string; hard: boolean; scope: string }> }) => c.items.map((i) => [i.questionId, [i.hard, i.scope]])));
+  };
+
+  it('makes a question hard only when its goal traces to a clause of the question that states a constraint', async () => {
+    expect(await build('constraint')).toEqual({ Q1: [true, 'item'], Q2: [false, 'item'], Q3: [false, 'item'], Q4: [false, 'domain'], Q5: [false, 'domain'] });
+  });
+
+  it('keeps every question soft when the clause is only a preference', async () => {
+    expect(Object.values(await build('criterion')).every(([hard]) => hard === false)).toBe(true);
+  });
+
+  it('recognises only question clauses as anchors that can make a goal hard', async () => {
+    const { isClauseAnchor } = await import('../../src/research/decision.mjs');
+    expect([{ id: 'C1' }, { id: 'C12' }, { id: 'H1' }, { id: 'I2' }, { id: 'P' }, { kind: 'rule', text: 'value' }, null].map(isClauseAnchor)).toEqual([true, true, false, false, false, false, false]);
+  });
+
+  it('maps the voted letter back to the measure it lists', async () => {
+    const { voteMeasure } = await import('../../src/research/decision.mjs');
+    const router = { complete: async (req: { messages: Array<{ content: string }> }) => ({ provider: 'test', data: { measure: req.messages[0].content.split('\n').find((l) => l.endsWith(': distanceKm'))!.slice(0, 1) } }) };
+    expect(await voteMeasure({ router }, { text: 'Is it within 300 km of Prague?', unit: 'km' })).toBe('distanceKm');
+  });
+
+  it('keeps no numeric check when no measurable quantity matches the question', async () => {
+    const { voteMeasure } = await import('../../src/research/decision.mjs');
+    expect(await voteMeasure({ router: measureOrHardness('constraint') }, { text: 'Is the sell-through lift at least 10%?', unit: '%' })).toBeNull();
+  });
+});
+
