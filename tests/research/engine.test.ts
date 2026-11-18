@@ -2696,9 +2696,9 @@ describe('a kind no needs a second family on the deeper page', () => {
       return { content: JSON.stringify(prompt.includes('Item page text:') ? [] : { answer: 'ok', claims: [], confidence: 'high' }), model: `${id}-fast`, provider: id, usage: {} };
     },
   });
-  const run = async (aboutAnswer: string, stored: unknown[] = [], ids = ['alpha', 'beta']) => {
+  const run = async (aboutAnswer: string, stored: unknown[] = [], ids = ['alpha', 'beta'], links = [{ url: '/about', text: 'About us' }]) => {
     second.length = 0;
-    const search = { ...fakeSearch, async readPage(url: string) { return url.endsWith('/about') ? { status: 200, text: about, links: [] } : { status: 200, text: home, links: [{ url: '/about', text: 'About us' }] }; } };
+    const search = { ...fakeSearch, async readPage(url: string) { return url.endsWith('/about') ? { status: 200, text: about, links: [] } : { status: 200, text: home, links }; } };
     const router = new ModelRouter({ providers: ids.map((id) => family(id, aboutAnswer)) });
     const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
     const project = await engine.createProject({ question: 'Find used clothing wholesalers' });
@@ -2738,6 +2738,13 @@ describe('a kind no needs a second family on the deeper page', () => {
     expect(kind).toMatchObject({ answer: 'unknown', reason: SINGLE_KIND_OPINION, second: { single: true } });
     expect(project.kindRejected).toEqual([]);
     expect(project.log.some((l: { message: string }) => l.message.startsWith('kind second opinion 1/30: first=no second=unknown'))).toBe(true);
+  });
+
+  it('never rejects on the one judgement of the home page when no other page of the item can be read: the kind is to confirm', async () => {
+    const { project, kind } = await run('B', [], ['alpha', 'beta'], []);
+    expect(second).toEqual([]);
+    expect(kind).toMatchObject({ answer: 'unknown', quote: '', reason: SINGLE_KIND_OPINION, leaning: { answer: 'no' } });
+    expect(project.kindRejected).toEqual([]);
   });
 
   it('forgets rejections recorded under an older judge version, so those items are judged again', async () => {

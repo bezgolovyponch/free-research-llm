@@ -174,7 +174,8 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
     const checklistAnswers = [checklistReply, checklistReply, checklistReply];
     let decisionCalls = 0;
     let checklistCalls = 0;
-    const router = { complete: async (req: { temperature: number; purpose: string }) => {
+    const router = { complete: async (req: { temperature: number; purpose: string; task?: string }) => {
+      if (req.task === 'concept-frame') return null;
       calls.push(req);
       if (req.purpose === 'checklist') {
         const next = checklistAnswers.shift();
@@ -347,28 +348,35 @@ describe('decision model version', () => {
 describe('the concept feeds the decision model', () => {
   const proposal = { concept: 'c', kind: { label: 'seller', terms: ['seller'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
   const written = { items: [{ clause: 'graded a', question: 'Is it graded A?', hard: true, numeric: null }] };
-  const router = { complete: async (req: { purpose: string }) => ({ provider: 'test', data: req.purpose === 'checklist' ? written : proposal }) };
-  const concept = { at: 't1', question: 'Find sellers of coats, proven quality', expected: '', criteria: [{ id: 'E1', text: 'quality is proven', quote: 'proven quality', examples: [] }] };
+  const frame = { population: { quote: 'sellers of coats', label: 'seller' }, concept: [{ quote: 'proven quality', text: 'quality is proven', examples: [] }] };
+  const routerWith = (framed: unknown) => ({ complete: async (req: { purpose: string; task?: string }) => ({ provider: 'test', model: 'm', data: req.task === 'concept-frame' ? framed : req.purpose === 'checklist' ? written : proposal }) });
+  const router = routerWith(frame);
+  const question = 'Find sellers of coats, proven quality';
 
   it('builds the hard checks from the requirements of the asker and keeps the model-written question as appraisal', async () => {
     const { DecisionModeler } = await import('../../src/research/decision.mjs');
-    const project: Record<string, any> = { id: 'p', question: concept.question, guidance: 'graded A', acceptance: { itemCount: 20 }, concept };
+    const project: Record<string, any> = { id: 'p', question, guidance: 'graded A', acceptance: { itemCount: 20, expected: '20 links' } };
     const model = await new DecisionModeler({ router } as never).build(project);
-    expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['appraisal', 'graded a', false]]);
-    expect(model.conceptAt).toBe('t1');
+    expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['eligibility', '20 links', true], ['appraisal', 'graded a', false]]);
+    expect(model.requirements.map((r: { id: string; quote: string; unframed?: boolean }) => [r.id, r.quote, Boolean(r.unframed)])).toEqual([['E1', 'proven quality', false], ['E2', '20 links', true]]);
+    expect(model.kind).toMatchObject({ label: 'seller', asked: 'sellers of coats' });
+    expect(model.framing.population.quote).toBe('sellers of coats');
+    expect(model.missing).toEqual(['Find sellers of coats']);
+    expect(modelText(model)).toContain('[E1] must: quality is proven');
   });
 
-  it('is stale when the concept was framed again, and keeps the model-written checklist when there is no concept', async () => {
+  it('is stale when the expected result changes, and keeps the model-written checklist when no model frames the request', async () => {
     const { DecisionModeler } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router } as never);
-    const project: Record<string, any> = { id: 'p', question: concept.question, guidance: '', acceptance: { itemCount: 20 }, concept };
+    const project: Record<string, any> = { id: 'p', question, guidance: '', acceptance: { itemCount: 20, expected: '' } };
     await modeler.build(project);
     expect(modeler.fresh(project)).toBe(true);
-    expect(modeler.fresh({ ...project, concept: { ...concept, at: 't2' } })).toBe(false);
-    const plain: Record<string, any> = { id: 'q', question: concept.question, guidance: '', acceptance: { itemCount: 20 } };
-    const model = await modeler.build(plain);
+    expect(modeler.fresh({ ...project, acceptance: { itemCount: 20, expected: 'recently posted' } })).toBe(false);
+    const plain: Record<string, any> = { id: 'q', question, guidance: '', acceptance: { itemCount: 20 } };
+    const model = await new DecisionModeler({ router: routerWith({ concept: [{ quote: 'not in the request', text: 'x' }] }) } as never).build(plain);
+    expect(model.requirements).toEqual([]);
+    expect(model.framing).toBeNull();
     expect(model.checklist.map((c: { clause: string; items: Array<{ hard: boolean }> }) => [c.clause, c.items[0].hard])).toEqual([['graded a', true]]);
-    expect(modeler.fresh(plain)).toBe(true);
   });
 });
 

@@ -5,10 +5,10 @@ import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
 import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
-import { MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, memberTerms, sameMember } from './concept.mjs';
+import { MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
 
 export { CHECKLIST_VERSION };
-export const DECISION_MODEL_VERSION = 7;
+export const DECISION_MODEL_VERSION = 8;
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
 export const CASES_RETRIEVED = 2;
@@ -316,6 +316,8 @@ export function modelText(model) {
   if (model.concept) lines.push(`Concept: ${model.concept}`);
   if (model.criteria?.length) lines.push(`Decision model (code measures each listing): ${model.criteria.map((c) => `${MEASURES[c.measure].label} ${c.op} ${c.value} ${MEASURES[c.measure].unit} (${c.source})`).join('; ')}`);
   if (model.noLimit?.length) lines.push(`Asked but no limit stated, so not checked: ${model.noLimit.map((c) => MEASURES[c.measure].label).join('; ')}`);
+  const framed = conceptText(conceptOf(model));
+  if (framed) lines.push(framed);
   if (model.missing?.length) lines.push(`Not modelled yet (no code check): ${model.missing.join('; ')}`);
   if (model.checklist?.length) {
     lines.push(`Checklist (each item judged on its own page):`);
@@ -450,7 +452,7 @@ export class DecisionModeler {
 
   fresh(project) {
     const m = project.decisionModel;
-    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && (m.conceptAt ?? null) === (project.concept?.at ?? null) && m.agreement?.samples >= 2 && !isDegenerate(m));
+    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && (m.expected ?? '') === String(project.acceptance?.expected ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
   }
 
   async build(project, { force = false } = {}) {
@@ -484,8 +486,16 @@ export class DecisionModeler {
         }
       }
     }
-    const checklist = conceptChecklist(project.concept, await this.checklistModeler.build(question, guidance));
-    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, conceptAt: project.concept?.at ?? null, rebuildWeaker };
+    const expected = String(project.acceptance?.expected ?? '');
+    const framed = await frameConcept({ router: this.router }, { question, expected }).catch(() => null);
+    const checklist = conceptChecklist(framed, await this.checklistModeler.build(question, guidance));
+    const requirements = framed?.criteria ?? [];
+    const framing = framed ? { population: framed.population, limits: framed.limits, ranks: framed.ranks, context: framed.context, method: framed.method, samples: framed.samples } : null;
+    const covered = (text) => requirements.some((requirement) => quoteFound(text, requirement.quote) || quoteFound(requirement.quote, text));
+    finalModel = { ...finalModel, missing: (finalModel.missing ?? []).filter((text) => !covered(text)) };
+    const asked = conceptKindLabel(framed);
+    if (asked && finalModel.kind) finalModel = { ...finalModel, kind: { ...finalModel.kind, asked } };
+    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, expected, requirements, framing, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
     return project.decisionModel;
   }

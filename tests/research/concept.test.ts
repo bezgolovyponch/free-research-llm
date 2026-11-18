@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, agreeFrames, askedWithUnit, conceptChecklist, conceptExamples, conceptFresh, conceptKindLabel, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
+import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, agreeFrames, askedWithUnit, conceptChecklist, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
 import { fakeRouter, seq } from '../helpers/fakes';
 
 describe('concept card', () => {
@@ -141,7 +141,7 @@ describe('concept framing', () => {
     expect(unframed).toEqual(['proven good quality', 'assortiment for the appropriate retail second hand shop business in Czech Republic', '20 direct links to the providers with proof']);
   });
 
-  it('asks three samples, returns nothing when none quotes the request, and is fresh only for the same words', async () => {
+  it('asks three samples, returns nothing when none quotes the request, and is read back from the decision model', async () => {
     const router = fakeRouter({ [FRAME_TASK]: seq(full, { concept: [{ quote: 'not in the request', text: 'x' }] }, { concept: [] }, full) });
     const concept = await frameConcept({ router }, said);
     expect(router.count(FRAME_TASK)).toBe(FRAME_SAMPLES + 1);
@@ -149,9 +149,11 @@ describe('concept framing', () => {
     expect(router.userText(FRAME_TASK)).toContain(`Expected result: ${expected}`);
     expect(concept.samples).toBe(2);
     expect(await frameConcept({ router: fakeRouter({}) }, said)).toBeNull();
-    expect(conceptFresh({ ...concept }, said)).toBe(true);
-    expect(conceptFresh({ ...concept }, { question, expected: 'other' })).toBe(false);
-    expect(conceptFresh(null, said)).toBe(false);
+    const model = { question, expected, requirements: concept.criteria, framing: { population: concept.population, ranks: concept.ranks } };
+    expect(conceptOf(model)).toMatchObject({ question, expected, criteria: concept.criteria, population: concept.population, ranks: concept.ranks });
+    expect(conceptKindLabel(conceptOf(model))).toBe('wholesale branded second hand clothing providers');
+    expect(conceptOf({ question, criteria: [] })).toBeNull();
+    expect(conceptOf(null)).toBeNull();
     expect(conceptText(null)).toBe('');
     expect(conceptKindLabel(null)).toBe('');
     expect(framePrompt({ question: 'q' })[1].content).toBe('Request: q');

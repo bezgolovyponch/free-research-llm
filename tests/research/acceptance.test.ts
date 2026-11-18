@@ -414,9 +414,9 @@ describe('purpose checks from the user\'s words', () => {
     expect(checks[0].label).toBe('Page mentions one of: "Ralph Lauren", "Monclair", "North face", "Barbour" (your words)');
   });
 
-  it('asks for no named word on the page once the concept holds the class those names stand for', () => {
-    expect(purposeChecks({ ...WHOLESALE, concept: { criteria: [{ id: 'E1', text: 'brands of the class the examples stand for', examples: ['Ralph Lauren'] }] } }).filter((check: { id: string }) => check.id.startsWith('purpose-names-'))).toEqual([]);
-    expect(purposeChecks({ ...WHOLESALE, concept: { criteria: [] } })).toHaveLength(1);
+  it('asks for no named word on the page once the decision model holds the class those names stand for', () => {
+    expect(purposeChecks({ ...WHOLESALE, decisionModel: { requirements: [{ id: 'E1', text: 'brands of the class the examples stand for', examples: ['Ralph Lauren'] }] } }).filter((check: { id: string }) => check.id.startsWith('purpose-names-'))).toEqual([]);
+    expect(purposeChecks({ ...WHOLESALE, decisionModel: { requirements: [] } })).toHaveLength(1);
   });
 
   it('invents nothing from descriptions, counts, distances or prices the question also states', () => {
