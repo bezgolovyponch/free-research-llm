@@ -421,3 +421,12 @@ describe('a hard check that was never answered', () => {
     expect(itemTier({ ...item, checks: [] }, hardIds, {})).toBe('not-judged');
   });
 });
+
+describe('an item whose page could not be judged', () => {
+  it('is not judged, never to confirm or rejected, while every hard check is marked not judged', () => {
+    const hardIds = ['a|is it a?', 'b|is it b?'];
+    const unread = { live: true, listing: true, checks: hardIds.map((id) => ({ id, hard: true, answer: 'unknown', quote: '', notJudged: true })) };
+    expect(itemTier(unread, hardIds, {})).toBe('not-judged');
+    expect(itemTier({ ...unread, checks: [unread.checks[0], { id: 'b|is it b?', hard: true, answer: 'yes', quote: 'it is b' }] }, hardIds, {})).toBe('to-confirm');
+  });
+});

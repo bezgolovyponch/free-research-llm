@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences } from '../../src/research/checklist.mjs';
-import { FAIL, fakeRouter, seq } from '../helpers/fakes';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, NOT_RANKED_REASON, notJudged, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences } from '../../src/research/checklist.mjs';
+import { FAIL, fakeEmbedder, fakeRouter, seq } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
@@ -831,5 +831,49 @@ describe('screening a requirement of the asker by meaning', () => {
     expect(await answers({})).toEqual([['no', 'priceEur: 500000 EUR'], ['unknown', '']]);
     expect(await answers({ price, row: { site: { coastKm: 3.2 } } })).toEqual([['yes', 'priceEur: 10000 EUR'], ['yes', 'coastKm: 3.2 km']]);
     expect(await answers({ price: () => undefined })).toEqual([['unknown', ''], ['unknown', '']]);
+  });
+});
+
+describe('a page longer than one reading', () => {
+  const filler = Array.from({ length: 400 }, (_, i) => `Menu entry number ${i} of the shop navigation.`).join(' ');
+  const fact = 'We stock Cedar Wear and Betula coats in bulk for shops.';
+  const page = `${filler} ${fact}`;
+  const question = 'Does it stock coats in bulk?';
+  const checklist = [{ clause: 'bulk', items: [{ clause: 'bulk', question, hard: true }] }];
+  const kind = { label: 'seller', terms: ['seller'] };
+  const spans = sentenceSpans(page, { limit: 40000 });
+  const last = spans.length - 1;
+
+  it('is judged on the sentences the embedder ranks nearest to the question, wherever they stand on the page', async () => {
+    expect(page.indexOf(fact)).toBeGreaterThan(6000);
+    const seen: string[] = [];
+    const router = fakeRouter({ '': (request: { messages: Array<{ content: string }> }) => {
+      seen.push(request.messages[1].content);
+      return request.messages[1].content.includes('This page offers:') ? { kind: 'A', span: spans[last].id } : [{ id: 'q1', answer: 'yes', spans: [spans[last].id] }];
+    } });
+    const embedder = fakeEmbedder(() => [last, 0, 1]);
+    const checks = await new ChecklistJudge({ router, embedder }).judge({ url: 'u' }, page, checklist, kind);
+    expect(checks.find((check: { id: string }) => check.id === `bulk|${question}`)).toMatchObject({ answer: 'yes', quote: fact });
+    expect(checks.find((check: { clause: string }) => check.clause === 'kind')).toMatchObject({ answer: 'yes', quote: fact });
+    expect(seen.every((text) => text.includes(fact))).toBe(true);
+    expect(embedder.calls.length).toBe(2);
+    expect(notJudged(checks)).toBe(false);
+  });
+
+  it('is not judged at all when no sentence ranking answers: no model reads the opening', async () => {
+    for (const embedder of [null, fakeEmbedder(null)]) {
+      const router = fakeRouter({ '': () => { throw new Error('the opening must not be judged'); } });
+      const checks = await new ChecklistJudge({ router, embedder }).judge({ url: 'u' }, page, checklist, kind);
+      expect(router.calls).toHaveLength(0);
+      expect(checks.map((check: { answer: string; notJudged?: boolean; reason?: string }) => [check.answer, check.notJudged, check.reason])).toEqual([['unknown', true, NOT_RANKED_REASON], ['unknown', true, NOT_RANKED_REASON]]);
+      expect(notJudged(checks)).toBe(true);
+    }
+    expect(notJudged(null)).toBe(false);
+  });
+
+  it('still judges a page that fits in one reading without any embedder', async () => {
+    const router = fakeRouter({ '': (request: { messages: Array<{ content: string }> }) => (request.messages[1].content.includes('This page offers:') ? { kind: 'A', span: 'S1' } : [{ id: 'q1', answer: 'yes', spans: ['S1'] }]) });
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'u' }, fact, checklist, kind);
+    expect(checks.map((check: { answer: string }) => check.answer)).toEqual(['yes', 'yes']);
   });
 });
