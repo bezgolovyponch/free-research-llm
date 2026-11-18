@@ -5,7 +5,7 @@ import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
 import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
-import { MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
+import { MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
 import { MEASURES, compare } from './measures.mjs';
 
 export { CHECKLIST_VERSION };
@@ -466,7 +466,7 @@ export class DecisionModeler {
     const covered = (text) => requirements.some((requirement) => quoteFound(text, requirement.quote) || quoteFound(requirement.quote, text));
     finalModel = { ...finalModel, missing: (finalModel.missing ?? []).filter((text) => !covered(text)) };
     const asked = conceptKindLabel(framed);
-    if (asked && finalModel.kind) finalModel = { ...finalModel, kind: { ...finalModel.kind, asked } };
+    if (asked && finalModel.kind) finalModel = { ...finalModel, kind: { ...finalModel.kind, asked, described: conceptDescribed(framed), examples: conceptExamples(framed) } };
     project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, expected, requirements, framing, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
     return project.decisionModel;
