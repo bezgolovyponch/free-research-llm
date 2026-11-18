@@ -657,5 +657,13 @@
     "signal": "Suppliers b2f5b7 live on ba474ac: 7 of 20 confirmed; vintagebulk.nl, palletliquidation.eu and ukusedclothes.com rejected by one kind judgement on the home page (quotes like \"BEST SELLERS & NIEUW BINNEN\"), stored in kindRejected for good; tumodakids sl, wakted bv and liberty global exports delivered from europages.nl and europages.it",
     "cause": "a single model answer on the least informative page decided the kind and was never revisited; vote() replaced the caller avoid list, so no second family was asked; entity keys were the profile url, which differs per language host",
     "prevention": "a kind no is read again on the company page by another family before it counts (engine.test \"a kind no needs a second family\"), kindRejected keeps the judge version, vote keeps the caller avoid list (semantic.test), directoryEntityKey joins the same company id across language hosts (entitypath.test)"
+  },
+  {
+    "id": "F48",
+    "title": "a list research ended short of its count because the supplier pool came from one cached search",
+    "touches": ["src/research/engine.mjs", "tests/research/engine.test.ts", "scripts/hub-witness.mjs"],
+    "signal": "Suppliers b2f5b7 live on ba474ac: 7 of 20 confirmed from 21 delivered; the hub search had run once per hinted country (15 pages each) on 2026-11-17 and was reused for 7 days; 8 of 28 pages were spam or off-topic",
+    "cause": "searchHubs searched once and cached the result for a week, whatever the result count; nothing searched again when the run ended short",
+    "prevention": "searchHubs runs rounds until the pool not rejected by the kind judge reaches 3x the asked count, snowballs queries from suppliers the judge accepted, pages directories, ranks pages by BM25 without dropping other languages, and ignores the cache when short (engine.test hub rounds)"
   }
 ]

@@ -1892,7 +1892,7 @@ describe('hub search', () => {
       lastErrors: [],
       async search(queries: string[]) {
         asked.push(queries);
-        return [{ kind: 'web', title: 'Supplier', url: 'https://shop.example/a', domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing sold in bales' }];
+        return [{ kind: 'web', title: 'Supplier', url: 'https://shop.example/a', domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' }];
       },
       describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
     };
@@ -1906,6 +1906,7 @@ describe('hub search', () => {
     const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers in the Netherlands and Germany' });
     project.brief = { ...engine.briefOf(project), located: false };
     project.domain = { ready: true, terms: ['grade A'], where: ['the biggest sorting plants stand in the Netherlands and Germany'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
     project.guidance = 'suppliers in NL, DE, UK';
     const found = await engine.searchHubs(project);
     expect(found).toBe(1);
@@ -1916,13 +1917,13 @@ describe('hub search', () => {
     expect(router.calls[0].messages[1].content).toContain('United Kingdom');
     expect(router.calls[0].messages[1].content).toContain('4 search queries');
     expect(router.calls[0].messages[1].content).toMatch(/bales|per kg|B2B|export/i);
-    expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('hub search: 1 page(s) from Germany, Netherlands, United Kingdom'))).toBe(true);
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('hub round 1: 2 queries, 1 new pages, 1 new hosts'))).toBe(true);
     expect(await engine.searchHubs(project)).toBe(1);
     expect(router.calls).toHaveLength(1);
     expect(asked).toHaveLength(2);
   });
 
-  it('searches the trade hubs again once the stored hub search is a week old', async () => {
+  it('searches the trade hubs again once the stored hub search is a week old, but does not repeat queries', async () => {
     const router = hubRouter();
     const { asked, search } = hubSearch();
     let clock = Date.parse('2026-11-05T16:00:00Z');
@@ -1930,6 +1931,7 @@ describe('hub search', () => {
     const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers in the Netherlands and Germany' });
     project.brief = { ...engine.briefOf(project), located: false };
     project.domain = { ready: true, terms: ['grade A'], where: ['the biggest sorting plants stand in the Netherlands and Germany'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
     await engine.searchHubs(project);
     expect(project.hubSearchedAt).toBe('2026-11-05T16:00:00.000Z');
     clock += HUB_REFRESH_MS - 1;
@@ -1938,7 +1940,8 @@ describe('hub search', () => {
     clock += 1;
     await engine.searchHubs(project);
     expect(router.calls).toHaveLength(2);
-    expect(asked.length).toBe(4);
+    expect(asked.length).toBe(2);
+    expect(project.log.some((l) => l.type === 'candidates' && l.message.includes('no new queries'))).toBe(true);
   });
 
   it('treats a stored hub search without a date as stale', () => {
@@ -1954,7 +1957,7 @@ describe('hub search', () => {
       lastErrors: [],
       async search(queries: string[]) {
         asked.push(queries);
-        return [{ kind: 'web', title: 'Supplier', url: 'https://shop.example/a', domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing sold in bales' }];
+        return [{ kind: 'web', title: 'Supplier', url: 'https://shop.example/a', domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' }];
       },
       describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
     };
@@ -1962,11 +1965,275 @@ describe('hub search', () => {
     const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers in the Netherlands and Germany' });
     project.brief = { ...engine.briefOf(project), located: false };
     project.domain = { ready: true, terms: ['grade A'], where: ['the biggest sorting plants stand in the Netherlands and Germany'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
     project.guidance = 'suppliers in NL, DE, UK';
     const found = await engine.searchHubs(project);
     expect(found).toBe(1);
     expect(project.hubSources).toHaveLength(1);
     expect(asked).toHaveLength(2);
+  });
+
+  it('stops rounds when pool target is reached', async () => {
+    const routerCalls = [];
+    const router = {
+      calls: routerCalls,
+      complete: async (req) => {
+        routerCalls.push(req);
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: 'vintage groothandel round 1' }, { country: 'DE', language: 'German', query: 'Vintage Großhandel round 1' }] } };
+      },
+    };
+    let searchCall = 0;
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries) {
+        searchCall++;
+        return [
+          { kind: 'web', title: 'Supplier 1', url: `https://shop.example/${searchCall}a`, domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' },
+          { kind: 'web', title: 'Supplier 2', url: `https://shop.example/${searchCall}b`, domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' },
+          { kind: 'web', title: 'Supplier 3', url: `https://shop.example/${searchCall}c`, domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' },
+        ];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers', expected: '10 suppliers' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['Netherlands', 'Germany'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
+    project.acceptance = { ...project.acceptance, itemCount: 2 };
+    await engine.searchHubs(project);
+    expect(routerCalls.length).toBe(1);
+    expect(project.log.some((l) => l.message.includes('pool target reached'))).toBe(true);
+  });
+
+  it('stops rounds at the round cap', async () => {
+    const routerCalls = [];
+    const router = {
+      calls: routerCalls,
+      complete: async (req) => {
+        routerCalls.push(req);
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: `vintage groothandel round ${routerCalls.length + 1}` }] } };
+      },
+    };
+    let searchCall = 0;
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries) {
+        searchCall++;
+        return [{ kind: 'web', title: 'Supplier', url: `https://shop.example/${searchCall}`, domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' }];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers', expected: '100 suppliers' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['Netherlands'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
+    project.acceptance = { ...project.acceptance, itemCount: 20 };
+    await engine.searchHubs(project);
+    expect(routerCalls.length).toBe(4);
+    expect(project.log.some((l) => l.message.includes('hub round 4'))).toBe(true);
+  });
+
+  it('stops rounds when a round adds no new pages', async () => {
+    const routerCalls = [];
+    const router = {
+      calls: routerCalls,
+      complete: async (req) => {
+        routerCalls.push(req);
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: `vintage groothandel round ${routerCalls.length + 1}` }] } };
+      },
+    };
+    let searchCall = 0;
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries) {
+        searchCall++;
+        if (searchCall <= 2) {
+          return [{ kind: 'web', title: 'Supplier', url: `https://shop.example/${searchCall}`, domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' }];
+        }
+        return [];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers', expected: '100 suppliers' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['Netherlands'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
+    project.acceptance = { ...project.acceptance, itemCount: 20 };
+    await engine.searchHubs(project);
+    expect(routerCalls.length).toBe(3);
+    expect(project.log.some((l) => l.message.includes('no new pages added, stopping'))).toBe(true);
+  });
+
+  it('includes accepted entity names in snowball queries', async () => {
+    const routerCalls = [];
+    const router = {
+      calls: routerCalls,
+      complete: async (req) => {
+        routerCalls.push(req);
+        const prompt = req.messages[1].content;
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: 'vintage groothandel' }] } };
+      },
+    };
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries) {
+        return [{ kind: 'web', title: 'Supplier', url: 'https://shop.example/1', domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' }];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers', expected: '10 suppliers' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['Netherlands'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
+    project.acceptance = { ...project.acceptance, itemCount: 5 };
+    project.acceptanceResult = { items: [
+      { title: 'Accepted Supplier', url: 'https://accepted.example/', checks: [{ clause: 'kind', answer: 'yes', quote: 'We sell graded bales to shops.' }] },
+      { title: 'Rejected Blog', url: 'https://blog.example/', checks: [{ clause: 'kind', answer: 'no', quote: 'My favourite finds' }] },
+    ] } as never;
+    await engine.searchHubs(project);
+    const prompt = routerCalls[0].messages[1].content;
+    expect(prompt).toContain('Accepted Supplier');
+    expect(prompt).not.toContain('Rejected Blog');
+  });
+
+  it('does not repeat queries across rounds', async () => {
+    const routerCalls = [];
+    const router = {
+      calls: routerCalls,
+      complete: async (req) => {
+        routerCalls.push(req);
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: 'vintage groothandel' }] } };
+      },
+    };
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries) {
+        return [{ kind: 'web', title: 'Supplier', url: 'https://shop.example/1', domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' }];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers', expected: '100 suppliers' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['Netherlands'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
+    project.acceptance = { ...project.acceptance, itemCount: 20 };
+    await engine.searchHubs(project);
+    await engine.searchHubs(project);
+    const allQueries = project.hubQueries?.map((q) => q.query) ?? [];
+    const uniqueQueries = [...new Set(allQueries)];
+    expect(allQueries.length).toBe(uniqueQueries.length);
+  });
+
+  it('caps directory paging at 3 pages per directory per round', async () => {
+    const routerCalls = [];
+    const router = {
+      calls: routerCalls,
+      complete: async (req) => {
+        routerCalls.push(req);
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: 'vintage groothandel' }] } };
+      },
+    };
+    let fetchHtmlCall = 0;
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries) {
+        return [{ kind: 'web', title: 'Directory', url: 'https://dir.example/page1', domain: 'dir.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' }];
+      },
+      async fetchHtml(url) {
+        fetchHtmlCall++;
+        if (fetchHtmlCall <= 3) {
+          return `<html><a rel="next" href="https://dir.example/page${fetchHtmlCall + 1}">Next</a>wholesale vintage clothing grade A sold in bales</html>`;
+        }
+        return `<html>wholesale vintage clothing grade A sold in bales</html>`;
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers', expected: '10 suppliers' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['Netherlands'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
+    project.acceptance = { ...project.acceptance, itemCount: 5 };
+    await engine.searchHubs(project);
+    expect(fetchHtmlCall).toBeLessThanOrEqual(3);
+  });
+
+  it('ranks hub pages by BM25 relevance and keeps pages in another language, never dropping one', async () => {
+    const routerCalls = [];
+    const router = {
+      calls: routerCalls,
+      complete: async (req) => {
+        routerCalls.push(req);
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: 'vintage groothandel' }] } };
+      },
+    };
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries) {
+        return [
+          { kind: 'web', title: 'Bad', url: 'https://bad.example/', domain: 'bad.example', snippet: 's', text: 'CBD oil products for sale netlify spam' },
+          { kind: 'web', title: 'Groothandel', url: 'https://groothandel.example/', domain: 'groothandel.example', snippet: 's', text: 'Tweedehands kleding per kilo in balen voor winkels' },
+          { kind: 'web', title: 'Good', url: 'https://good.example/', domain: 'good.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' },
+        ];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }) } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['Netherlands'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
+    await engine.searchHubs(project);
+    expect(project.hubSources.map((source: { url: string }) => source.url)).toEqual(['https://good.example/', 'https://bad.example/', 'https://groothandel.example/']);
+  });
+
+  it('does not search again when pool target is reached even if cache is stale', async () => {
+    const routerCalls = [];
+    const router = {
+      calls: routerCalls,
+      complete: async (req) => {
+        routerCalls.push(req);
+        return { provider: 'p', model: 'm', data: { queries: [{ country: 'NL', language: 'Dutch', query: 'vintage groothandel' }] } };
+      },
+    };
+    let searchCall = 0;
+    const search = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries) {
+        searchCall++;
+        return [
+          { kind: 'web', title: 'Supplier 1', url: `https://shop.example/${searchCall}a`, domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' },
+          { kind: 'web', title: 'Supplier 2', url: `https://shop.example/${searchCall}b`, domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' },
+          { kind: 'web', title: 'Supplier 3', url: `https://shop.example/${searchCall}c`, domain: 'shop.example', snippet: 's', text: 'wholesale vintage clothing grade A sold in bales' },
+        ];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    let clock = Date.parse('2026-11-05T16:00:00Z');
+    const engine = new ResearchEngine({ router: router as never, search, store: new ProjectStore({ dir }), now: () => clock } as never);
+    const project = await engine.createProject({ question: 'Find wholesale vintage clothing suppliers', expected: '20 suppliers' });
+    project.brief = { ...engine.briefOf(project), located: false };
+    project.domain = { ready: true, terms: ['grade A'], where: ['Netherlands'] };
+    project.decisionModel = { kind: { label: 'wholesale clothing provider', terms: ['vintage', 'clothing', 'wholesale'], not: [] }, criteria: [] };
+    project.acceptance = { ...project.acceptance, itemCount: 1 };
+    await engine.searchHubs(project);
+    expect(routerCalls.length).toBe(1);
+    clock += HUB_REFRESH_MS + 1;
+    await engine.searchHubs(project);
+    expect(routerCalls.length).toBe(1);
   });
 
   it('does not look for hubs when the kind has its own listing portal', async () => {

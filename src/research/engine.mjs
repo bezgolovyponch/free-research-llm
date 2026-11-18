@@ -31,7 +31,7 @@ import { runScoping } from './scoping.mjs';
 import { buildPurposeTree, TREE_VERSION } from './purpose.mjs';
 import { CallBudget } from './semantic.mjs';
 import { Embedder } from '../llm/embedder.mjs';
-import { listingKey } from '../search/listings.mjs';
+import { listingKey, nextPageUrl } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, asksSea, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
@@ -39,7 +39,7 @@ import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, me
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { applySchema, schemaPrompt, schemaSample, verifySchema } from '../search/schema.mjs';
-import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage } from './evidence.mjs';
+import { diverseOrder, evidenceQuery, retrievalVerdict, selectEvidence, topicCoverage, bm25, passages } from './evidence.mjs';
 import { compactProject, compactSources } from './compact.mjs';
 import { plain, screenItems } from './itemgate.mjs';
 import { DEFAULT_LANES, MAX_LANES, runInLanes } from './lanes.mjs';
@@ -117,10 +117,26 @@ const DOMAIN_SOURCES = 12;
 const DOMAIN_PAGES_PER_CALL = 4;
 const HUB_SOURCES = 15;
 export const HUB_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+const POOL_FACTOR = 3;
+const HUB_MAX_ROUNDS = 4;
+const HUB_PAGES_PER_DIRECTORY = 3;
 
 export function hubSearchStale(project, now) {
   const at = Date.parse(project?.hubSearchedAt ?? '');
   return !Number.isFinite(at) || now - at >= HUB_REFRESH_MS;
+}
+
+export function hubRelevance(source, kindLabel, domainTerms) {
+  const query = `${kindLabel} ${domainTerms.join(' ')}`.trim();
+  const docPassages = passages(`${source.title ?? ''} ${source.text ?? ''}`);
+  if (!query || !docPassages.length) return 0;
+  return Math.max(0, ...bm25(docPassages, query));
+}
+
+export function acceptedSuppliers(project) {
+  return (project.acceptanceResult?.items ?? [])
+    .filter((item) => (item.checks ?? []).some((check) => check.clause === 'kind' && check.answer === 'yes' && check.quote))
+    .map((item) => ({ name: item.title, host: item.url ? hostOf(item.url) : '' }));
 }
 
 const KNOWLEDGE_SOURCES = JSON.parse(readFileSync(new URL('./knowledgesources.json', import.meta.url), 'utf8'));
@@ -662,41 +678,125 @@ export class ResearchEngine {
   async searchHubs(project) {
     const brief = project.brief ?? this.briefOf(project);
     if (brief.located !== false) return 0;
-    if (project.hubSources && !hubSearchStale(project, this.now())) return project.hubSources.length;
+    const itemCount = project.acceptance?.itemCount ?? 0;
+    const targetPool = Math.max(1, itemCount * POOL_FACTOR);
+    project.hubSources = project.hubSources ?? [];
+    const isShortResult = project.hubSources.length < targetPool;
+    if (!hubSearchStale(project, this.now()) && !isShortResult) return project.hubSources.length;
     if (this.demo || !this.router || !this.search?.search) return 0;
     const hubs = hubsFrom(project.domain, project.guidance);
     if (!hubs.length) return 0;
-    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: hubQueryPrompt({ object: project.decisionModel?.kind?.label ?? '', terms: project.domain?.terms ?? [], hubs }) }).catch(() => null);
-    const queries = (reply?.data?.queries ?? [])
-      .map((query) => ({ country: query?.country ?? null, query: String(query?.query ?? query ?? '').trim() }))
-      .filter((query) => query.query)
-      .slice(0, hubs.length * HUB_QUERIES);
-    if (!queries.length) {
-      project.hubSources = [];
-      return 0;
-    }
-    const groups = new Map();
-    for (const query of queries) {
-      const key = query.country || 'shared';
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(query.query);
-    }
-    const sources = [];
-    const seen = new Set();
-    let nonce = 0;
-    for (const groupQueries of groups.values()) {
-      const found = await this.search.search(groupQueries, { maxSources: HUB_SOURCES }).catch(() => []);
-      for (const source of found) {
-        const key = source?.url ?? `n${nonce++}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        sources.push(source);
+
+    project.hubQueries = project.hubQueries ?? [];
+    const askedQueries = new Set(project.hubQueries.map((q) => q.query));
+    const seenUrls = new Set(project.hubSources.map((s) => s.url));
+    let totalNewPages = 0;
+    let totalNewHosts = 0;
+    let round = 0;
+
+    const maxRounds = itemCount > 0 ? HUB_MAX_ROUNDS : 1;
+    while (round < maxRounds) {
+      round++;
+      const acceptedEntities = acceptedSuppliers(project);
+      const rejected = new Set((project.kindRejected ?? []).map((entry) => (typeof entry === 'object' ? entry.url : entry)));
+      const eligibleCount = project.hubSources.filter((source) => !rejected.has(source.url)).length;
+
+      if (itemCount > 0 && eligibleCount >= targetPool) {
+        this.emit(project, 'candidates', `hub round ${round}: pool target reached (${eligibleCount} >= ${targetPool})`);
+        break;
+      }
+
+      const snowballTerms = acceptedEntities.map((e) => e.name).filter(Boolean).slice(0, 5);
+      const kindLabel = project.decisionModel?.kind?.label ?? '';
+      const domainTerms = project.domain?.terms ?? [];
+
+      const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: hubQueryPrompt({ object: kindLabel, terms: [...domainTerms, ...snowballTerms], hubs }) }).catch(() => null);
+      const queries = (reply?.data?.queries ?? [])
+        .map((query) => ({ country: query?.country ?? null, query: String(query?.query ?? query ?? '').trim() }))
+        .filter((query) => query.query && !askedQueries.has(query.query))
+        .slice(0, hubs.length * HUB_QUERIES);
+
+      if (!queries.length) {
+        this.emit(project, 'candidates', `hub round ${round}: no new queries`);
+        break;
+      }
+
+      for (const query of queries) askedQueries.add(query.query);
+
+      const groups = new Map();
+      for (const query of queries) {
+        const key = query.country || 'shared';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(query.query);
+      }
+
+      const roundSources = [];
+      const roundHosts = new Set();
+      let roundNewPages = 0;
+
+      for (const groupQueries of groups.values()) {
+        const found = await this.search.search(groupQueries, { maxSources: HUB_SOURCES }).catch(() => []);
+        for (const source of found) {
+          const url = source?.url ?? `n${Date.now()}-${Math.random()}`;
+          if (seenUrls.has(url)) continue;
+          seenUrls.add(url);
+
+          const host = hostOf(url);
+          roundSources.push(source);
+          roundHosts.add(host);
+          roundNewPages++;
+        }
+      }
+
+      for (const source of roundSources) {
+        const url = source.url;
+        let pagesFetched = 1;
+        let currentHtml = source.text;
+        let currentUrl = url;
+
+        while (pagesFetched < HUB_PAGES_PER_DIRECTORY) {
+          const next = nextPageUrl(currentHtml, currentUrl, { isHtml: true });
+          if (!next || next === currentUrl) break;
+          try {
+            const nextHtml = await this.search.fetchHtml(next);
+            if (!nextHtml) break;
+            const nextSource = { ...source, url: next, text: nextHtml };
+            const nextHost = hostOf(next);
+            if (!seenUrls.has(next)) {
+              seenUrls.add(next);
+              roundSources.push(nextSource);
+              roundHosts.add(nextHost);
+              roundNewPages++;
+            }
+            currentHtml = nextHtml;
+            currentUrl = next;
+            pagesFetched++;
+          } catch {
+            break;
+          }
+        }
+      }
+
+      project.hubSources = [...project.hubSources, ...roundSources]
+        .map((source) => ({ source, relevance: hubRelevance(source, kindLabel, domainTerms) }))
+        .sort((x, y) => y.relevance - x.relevance)
+        .map(({ source }) => source);
+      project.hubQueries = [...project.hubQueries, ...queries.map((q) => ({ query: q.query, country: q.country, round }))];
+      project.hubSearchedAt = new Date(this.now()).toISOString();
+
+      totalNewPages += roundNewPages;
+      totalNewHosts += roundHosts.size;
+
+      this.emit(project, 'candidates', `hub round ${round}: ${queries.length} queries, ${roundNewPages} new pages, ${roundHosts.size} new hosts`);
+
+      if (roundNewPages === 0) {
+        this.emit(project, 'candidates', `hub round ${round}: no new pages added, stopping`);
+        break;
       }
     }
-    project.hubSources = sources;
-    project.hubSearchedAt = new Date(this.now()).toISOString();
-    this.emit(project, 'candidates', `hub search: ${sources.length} page(s) from ${hubs.join(', ')}`);
-    return sources.length;
+
+
+    return project.hubSources.length;
   }
 
   purposeTreeFresh(project) {
