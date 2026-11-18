@@ -14,6 +14,7 @@ jobs:
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -27,15 +28,14 @@ jobs:
   dependencies:
     name: Dependency audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
 
       - name: Report vulnerable dependencies of high severity or above
-        run: pnpm audit --audit-level=high
+        run: npm audit --audit-level=high
