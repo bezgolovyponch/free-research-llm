@@ -649,3 +649,29 @@ describe("named brands in the question under a purpose tree", () => {
     expect(qualifies(item(), { itemCount: 1 }, { namesVeto: false })).toBe(true);
   });
 });
+
+describe("soft goals in the score", () => {
+  const checklist = [
+    { clause: "kind", items: [{ question: "Is this one car?", hard: true, numeric: null }] },
+    { clause: "Prioritize value", goalId: "G1", goalHard: false, items: [{ question: "Is the value stated?", hard: false, numeric: null }, { question: "Is price <= 65000?", hard: true, numeric: { measure: "priceEur", op: "<=", value: 65000, unit: "CZK" } }] },
+    { clause: "Hatchback asked", goalId: "G2", goalHard: true, items: [{ question: "Is it a hatchback?", hard: true, numeric: null }] },
+  ];
+  const item = {
+    live: true,
+    listing: true,
+    inRange: true,
+    purpose: [],
+    checks: [
+      { id: "kind|Is this one car?", answer: "yes", quote: "car", hard: true, clause: "kind" },
+      { id: "Prioritize value|Is the value stated?", answer: "unknown", hard: false, clause: "Prioritize value" },
+      { id: "Prioritize value|Is price <= 65000?", answer: "yes", hard: true, clause: "Prioritize value" },
+      { id: "Hatchback asked|Is it a hatchback?", answer: "yes", quote: "hatchback", hard: true, clause: "Hatchback asked" },
+    ],
+  };
+
+  it("lists only checks that can veto, each once: hard goals and hard items outside them, never a soft goal", () => {
+    const result = verdict([item], { itemCount: 1 }, checklist, null);
+    expect(result.tiers.confirmed).toBe(1);
+    expect(result.perCheck.map((c: { id: string; yes: number }) => [c.id, c.yes])).toEqual([["goal|G2", 1], ["kind|Is this one car?", 1], ["Prioritize value|Is price <= 65000?", 1]]);
+  });
+});
