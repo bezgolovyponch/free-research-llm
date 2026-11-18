@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, agreeFrames, askedWithUnit, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
+import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, ASKED_LIMIT, agreeFrames, askedWithUnit, conceptChecklist, definedByHint, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
 import { fakeRouter, seq } from '../helpers/fakes';
 
 describe('concept card', () => {
@@ -189,6 +189,25 @@ describe('eligibility criteria fed into the decision model checklist', () => {
   it('keeps the questions a model wrote as appraisal that never vetoes, except a limit whose number the asker wrote', () => {
     const appraisal = conceptChecklist(concept, modelWritten).slice(2);
     expect(appraisal.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([[APPRAISAL, 'graded a', false], [APPRAISAL, 'distance', true], [APPRAISAL, 'sea', false], [APPRAISAL, 'value', false]]);
+  });
+
+  it('keeps a limit a hint gives when the hint defines a word of the request, labelled with its source, and only then', () => {
+    const criteria = [
+      { measure: 'coastKm', op: '<=', value: 20, source: 'guidance', quote: 'about 20 km', clause: 'within 300 km' },
+      { measure: 'areaM2', op: '>=', value: 500, source: 'guidance', quote: 'at least 500 m2', clause: 'a large garden' },
+    ];
+    const extra = [...modelWritten, { clause: 'area', items: [{ clause: 'area', question: 'Is it at least 500 m2?', hard: true, numeric: { measure: 'areaM2', op: '>=', value: 500, unit: 'm2' } }] }];
+    const appraisal = conceptChecklist(concept, extra, { criteria }).slice(2);
+    expect(appraisal.map((c: { clause: string; items: Array<{ hard: boolean; limitSource?: string }> }) => [c.clause, c.items[0].hard, c.items[0].limitSource])).toEqual([
+      ['graded a', false, undefined],
+      ['distance', true, ASKED_LIMIT],
+      ['sea', true, 'your hint "about 20 km", which defines "within 300 km" of your request'],
+      ['value', false, undefined],
+      ['area', false, undefined],
+    ]);
+    expect(definedByHint({ measure: 'coastKm', op: '<=', value: 20 }, [{ ...criteria[0], source: 'question' }], concept.question)).toBe('');
+    expect(definedByHint({ measure: 'coastKm', op: '<=', value: 21 }, criteria, concept.question)).toBe('');
+    expect(definedByHint(null, null, '')).toBe('');
   });
 
   it('counts a number as the limit of the asker only with the unit written beside it', () => {

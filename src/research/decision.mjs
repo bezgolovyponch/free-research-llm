@@ -488,7 +488,7 @@ export class DecisionModeler {
     }
     const expected = String(project.acceptance?.expected ?? '');
     const framed = await frameConcept({ router: this.router }, { question, expected }).catch(() => null);
-    const checklist = conceptChecklist(framed, await this.checklistModeler.build(question, guidance));
+    const checklist = conceptChecklist(framed, await this.checklistModeler.build(question, guidance), { criteria: finalModel.criteria ?? [] });
     const requirements = framed?.criteria ?? [];
     const framing = framed ? { population: framed.population, limits: framed.limits, ranks: framed.ranks, context: framed.context, method: framed.method, samples: framed.samples } : null;
     const covered = (text) => requirements.some((requirement) => quoteFound(text, requirement.quote) || quoteFound(requirement.quote, text));
