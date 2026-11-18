@@ -381,12 +381,25 @@ export function askedWithUnit(text, value, unit) {
   return false;
 }
 
-export function conceptChecklist(concept, checklist = null) {
+export const ASKED_LIMIT = 'your words';
+
+export function definedByHint(numeric, criteria, question) {
+  const defining = (criteria ?? []).find((criterion) => criterion.source === 'guidance' && criterion.measure === numeric?.measure && criterion.op === numeric?.op && Number(criterion.value) === Number(numeric?.value) && squeeze(criterion.clause) && spanIn(question, criterion.clause));
+  return defining ? `your hint "${squeeze(defining.quote)}", which defines "${squeeze(defining.clause)}" of your request` : '';
+}
+
+export function conceptChecklist(concept, checklist = null, { criteria = [] } = {}) {
   if (!concept?.criteria?.length) return checklist ?? null;
   const asked = `${concept.question}\n${concept.expected}`;
-  const limit = (item) => Boolean(item.hard && item.numeric?.measure && askedWithUnit(asked, item.numeric.value, item.numeric.unit));
+  const limitSource = (item) => {
+    if (!item.hard || !item.numeric?.measure) return '';
+    return askedWithUnit(asked, item.numeric.value, item.numeric.unit) ? ASKED_LIMIT : definedByHint(item.numeric, criteria, concept.question);
+  };
   const eligibility = concept.criteria.map((criterion) => ({ clause: criterion.text, role: ELIGIBILITY, criterion: criterion.id, quote: criterion.quote, items: [{ clause: criterion.text, question: criterionQuestion(criterion), hard: true, criterion: criterion.id, examples: criterion.examples ?? [] }] }));
-  const appraisal = (checklist ?? []).map((cluster) => ({ ...cluster, role: APPRAISAL, items: cluster.items.map((item) => ({ ...item, hard: limit(item) })) }));
+  const appraisal = (checklist ?? []).map((cluster) => ({ ...cluster, role: APPRAISAL, items: cluster.items.map((item) => {
+    const source = limitSource(item);
+    return { ...item, hard: Boolean(source), ...(source ? { limitSource: source } : {}) };
+  }) }));
   return [...eligibility, ...appraisal];
 }
 
