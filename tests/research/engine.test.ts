@@ -2737,6 +2737,19 @@ describe('a kind no needs a second family on the deeper page', () => {
   });
 });
 
+describe('the brief marks a kind of business', () => {
+  it('sets kind.entity when the item is not sold on listing pages, and clears it for a listed item', async () => {
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }) });
+    const project = await engine.createProject({ question: 'Find 20 wholesale clothing suppliers' });
+    project.decisionModel = { kind: { label: 'wholesale clothing supplier', terms: ['wholesale clothing'], validated: { pages: 4, terms: [], at: 't' } }, criteria: [] } as never;
+    expect(engine.briefOf(project).located).toBe(false);
+    expect(project.decisionModel!.kind.entity).toBe(true);
+    project.decisionModel = { kind: { label: 'hatchback', terms: ['hatchback'] }, criteria: [] } as never;
+    engine.briefOf(project);
+    expect(project.decisionModel!.kind.entity).toBe(engine.briefOf(project).located === false);
+  });
+});
+
 describe('kind hardening and the migration of stored answers', () => {
   const offer = 'Used goods offer: mixed second-hand clothing sorted by hand into cream and A grade, packed in pressed bales, sold by the kilogram to shops and market traders. Minimum order one bale; pallets loaded at our warehouse every weekday.';
   const demo = (chat: (prompt: string) => unknown) => ({
@@ -2776,7 +2789,7 @@ describe('kind hardening and the migration of stored answers', () => {
     expect([cheap.tier, cheap.valid]).toEqual(['rejected', false]);
     expect(usual.checks.find((c) => c.clause === 'kind')).toMatchObject({ answer: 'yes', quote: offer.split('. ')[0] + '.' });
     expect([usual.tier, usual.valid]).toEqual(['confirmed', true]);
-    expect(project.kindRejected).toEqual([{ url: cheap.url, judgeVersion: 3 }]);
+    expect(project.kindRejected).toEqual([{ url: cheap.url, judgeVersion: JUDGE_VERSION }]);
     expect(secondPrompts).toHaveLength(2);
     expect(secondPrompts[0]).toContain('Price of this item: 20 EUR/kg');
     expect(secondPrompts[0]).toMatch(/Median price of its comparable items: \d+ EUR\/kg/);

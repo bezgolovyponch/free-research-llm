@@ -565,6 +565,7 @@ export class ResearchEngine {
     const strategy = brief.kind ? strategyFor(project.templateId) : null;
     const foundation = strategy ? withModelRules(foundationOf(strategy, project, { exclude: brief.seaImpossible ? [{ id: 'sea', reason: 'no coastline in the countries you named' }] : [] }), model) : null;
     const located = Boolean(template.itemKind) ? true : model?.kind?.validated ? false : (!kind || listedKind(kind));
+    if (model?.kind) model.kind.entity = located === false;
     const seaAsked = asksSea(foundation, brief.coastal) || Boolean(model?.criteria?.some((c) => c.measure === 'coastKm'));
     project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief({ ...brief, located }), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
