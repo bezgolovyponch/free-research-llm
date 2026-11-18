@@ -359,7 +359,7 @@ describe('the concept feeds the decision model', () => {
     const model = await new DecisionModeler({ router } as never).build(project);
     expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['eligibility', '20 links', true], ['appraisal', 'graded a', false]]);
     expect(model.requirements.map((r: { id: string; quote: string; unframed?: boolean }) => [r.id, r.quote, Boolean(r.unframed)])).toEqual([['E1', 'proven quality', false], ['E2', '20 links', true]]);
-    expect(model.kind).toMatchObject({ label: 'seller', asked: 'sellers of coats' });
+    expect(model.kind).toMatchObject({ label: 'seller', asked: 'sellers of coats', described: 'Find sellers of coats', examples: [] });
     expect(model.framing.population.quote).toBe('sellers of coats');
     expect(model.missing).toEqual(['Find sellers of coats']);
     expect(modelText(model)).toContain('[E1] must: quality is proven');

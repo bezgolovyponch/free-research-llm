@@ -269,15 +269,20 @@ export function kindCluster(kind) {
   const not = (kind.not ?? []).length ? ` and not ${kind.not.join(', ')}` : '';
   const kinds = isUmbrella(kind) ? `, of one of these kinds: ${kind.members.map((member) => member.label).join(', ')}` : '';
   if (kind.entity) {
+    const described = String(kind.described ?? '').trim();
+    const examples = (kind.examples ?? []).length ? `; the asker's examples: ${kind.examples.join(', ')}, and similar ones count` : '';
+    const offer = described ? `a single business that offers what the asker described ("${described}"${examples})${kinds}, on its own website or its own profile page` : `one ${label}${kinds}: a single business, on its own website or its own profile page`;
+    const other = described ? `a wanted ad, or a business that does not offer what the asker described${not}` : `a wanted ad, or a business that is not ${label}${not}`;
     const options = [
-      { letter: 'A', text: `one ${label}${kinds}: a single business, on its own website or its own profile page` },
+      { letter: 'A', text: offer },
       { letter: 'B', text: `a directory, list or search page of several businesses` },
       { letter: 'C', text: 'an article, guide, course, news or blog page' },
-      { letter: 'D', text: `a wanted ad, or a business that is not ${label}${not}` },
+      { letter: 'D', text: other },
       { letter: 'E', text: 'something else' },
       { letter: 'U', text: 'cannot tell from these sentences' },
     ];
-    return { clause: 'kind', options, items: [{ question: `Is this page one ${label}${kinds}, a single business on its own site or profile (not a directory of several, an article, or a wanted ad${not})?`, hard: true, numeric: null }] };
+    const question = described ? `Is this page a single business that offers what the asker described ("${described}")${kinds}, on its own site or profile (not a directory of several, an article, or a wanted ad${not})?` : `Is this page one ${label}${kinds}, a single business on its own site or profile (not a directory of several, an article, or a wanted ad${not})?`;
+    return { clause: 'kind', options, items: [{ question, hard: true, numeric: null }] };
   }
   const options = [
     { letter: 'A', text: `one ${label}, offered as asked${kinds}` },

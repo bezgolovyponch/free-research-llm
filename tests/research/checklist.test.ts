@@ -738,6 +738,17 @@ describe('kind options for a research that looks for businesses', () => {
     const asked = kindCluster({ label: 'wholesale clothing supplier', asked: 'wholesale branded second hand clothing providers', terms: ['wholesale'], entity: true });
     expect(asked.options[0].text).toBe('one wholesale branded second hand clothing providers: a single business, on its own website or its own profile page');
     expect(asked.options[3].text).toBe('a wanted ad, or a business that is not wholesale branded second hand clothing providers');
+    expect(cluster.options.map((o: { text: string }) => o.text).join(' ')).not.toContain('whatever range of goods');
+  });
+
+  it('asks whether the business offers what the asker described, with the examples as anchors, so a business with other goods is not the asked kind', () => {
+    const kind = { label: 'wholesale clothing supplier', asked: 'providers', described: 'Find the sellers of coats like Alpha Coats', examples: ['Alpha Coats', 'Betula'], not: ['retail'], terms: ['wholesale'], entity: true };
+    const cluster = kindCluster(kind);
+    expect(cluster.options[0].text).toBe('a single business that offers what the asker described ("Find the sellers of coats like Alpha Coats"; the asker\'s examples: Alpha Coats, Betula, and similar ones count), on its own website or its own profile page');
+    expect(cluster.options[3].text).toBe('a wanted ad, or a business that does not offer what the asker described and not retail');
+    expect(cluster.items[0].question).toBe('Is this page a single business that offers what the asker described ("Find the sellers of coats like Alpha Coats"), on its own site or profile (not a directory of several, an article, or a wanted ad and not retail)?');
+    expect(kindCluster({ ...kind, examples: [] }).options[0].text).toBe('a single business that offers what the asker described ("Find the sellers of coats like Alpha Coats"), on its own website or its own profile page');
+    expect(kindCluster({ ...kind, entity: false }).options[0].text).toBe('one providers, offered as asked');
     expect(cluster.options[1].text).toBe('a directory, list or search page of several businesses');
   });
 

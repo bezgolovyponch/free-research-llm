@@ -292,6 +292,12 @@ function piecesOf(said) {
   return pieces;
 }
 
+function describedBy(head, said) {
+  const pieces = String(said[head.source] ?? '').split(/,|;/).map(squeeze).filter(Boolean).map((piece) => ({ quote: piece, source: head.source, ...spanIn(said[head.source], piece) }));
+  const around = pieces.find((piece) => piece.at <= head.at && piece.end >= head.end) ?? pieces.find((piece) => overlaps(piece, head));
+  return (around?.quote ?? head.quote).slice(0, CRITERION_TEXT_CHARS);
+}
+
 const sourceRank = (element) => ASKED.findIndex(([source]) => source === element.source);
 const inOrder = (a, b) => sourceRank(a) - sourceRank(b) || a.at - b.at;
 const holds = (element, piece) => element.source === piece.source && element.at <= piece.at && element.end >= piece.end;
@@ -319,7 +325,7 @@ export function agreeFrames(samples, { question, expected = '' }) {
     question: String(question ?? ''),
     expected: String(expected ?? ''),
     samples: samples.length,
-    population: head ? { label: head.text, quote: head.quote, source: head.source, samples: head.samples } : null,
+    population: head ? { label: head.text, quote: head.quote, source: head.source, samples: head.samples, described: describedBy(head, said) } : null,
     criteria: numbered(CRITERION, 'E'),
     limits: numbered(LIMIT, 'L'),
     ranks: numbered(RANK, 'R'),
@@ -345,6 +351,10 @@ export function conceptOf(model) {
 
 export function conceptKindLabel(concept) {
   return squeeze(concept?.population?.quote).slice(0, KIND_LABEL_CHARS);
+}
+
+export function conceptDescribed(concept) {
+  return squeeze(concept?.population?.described ?? concept?.population?.quote);
 }
 
 export function conceptExamples(concept) {

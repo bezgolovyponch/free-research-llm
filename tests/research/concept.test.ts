@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, agreeFrames, askedWithUnit, conceptChecklist, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
+import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, agreeFrames, askedWithUnit, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
 import { fakeRouter, seq } from '../helpers/fakes';
 
 describe('concept card', () => {
@@ -115,6 +115,9 @@ describe('concept framing', () => {
   it('frames the population in the asker\'s words, the class with its examples, and what ranks apart from what is required', () => {
     const concept = agreeFrames([frameSample(full, said).value, frameSample(full, said).value], said);
     expect(conceptKindLabel(concept)).toBe('wholesale branded second hand clothing providers');
+    expect(conceptDescribed(concept)).toBe('Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren');
+    expect(conceptDescribed({ population: { quote: 'red things' } })).toBe('red things');
+    expect(conceptDescribed(null)).toBe('');
     expect(concept.criteria.map((c: { id: string; quote: string }) => `${c.id} ${c.quote}`)).toEqual(['E1 branded second hand clothing', 'E2 similar to Ralph Lauren, Monclair, North face, Barbour', 'E3 proven good quality']);
     expect(conceptExamples(concept)).toEqual(['Ralph Lauren', 'Monclair', 'North face', 'Barbour']);
     expect(concept.ranks.map((r: { quote: string }) => r.quote)).toEqual(['highest price/value ratio']);
