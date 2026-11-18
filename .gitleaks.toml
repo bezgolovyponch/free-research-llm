@@ -4,3 +4,10 @@ useDefault = true
 [allowlist]
 description = "construct.json stores sha256 hashes of baseline files, including .claude/rules/secrets.md"
 paths = [ '''^construct\.json$''' ]
+
+[[allowlists]]
+description = "KEYS.md documents off switches such as FRL_POLLINATIONS=0, which hold no secret"
+paths = [ '''^KEYS\.md$''' ]
+regexTarget = "line"
+regexes = [ '''Off: `FRL_[A-Z_]+=0`''' ]
+condition = "AND"
