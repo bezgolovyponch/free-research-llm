@@ -4,6 +4,7 @@ import { templateById } from './research/templates.mjs';
 import { ROOT_ID, childrenOf } from './research/tree.mjs';
 import { actionPlan, resultStatus } from './research/gaps.mjs';
 import { ACTION_LABEL, itemRows, piecesRows, plotRows } from './workbook.mjs';
+import { headlineOf } from './research/verdict.mjs';
 
 function bullets(items) {
   return items?.length ? items.map((i) => `- ${i}`).join('\n') : '- none';
@@ -93,10 +94,36 @@ export function resultsJson(project) {
   };
 }
 
+function mustHaveTable(ar) {
+  if (!ar?.verdict?.perCheck?.length) return '';
+  const lines = ['## Must-have checks', '', '| Check | Yes | No | Unknown | Judged |', '|---|---|---|---|---|'];
+  for (const pc of ar.verdict.perCheck) {
+    const judged = pc.yes + pc.no + pc.unknown;
+    lines.push(`| ${pc.clause} | ${pc.yes} | ${pc.no} | ${pc.unknown} | ${judged} |`);
+  }
+  return lines.join('\n');
+}
+
+function preconditionsList(ar) {
+  if (!ar?.preconditions?.length) return '';
+  const lines = ['## Preconditions', ''];
+  for (const pc of ar.preconditions) {
+    const pct = Math.round(pc.value * 100);
+    const status = pc.passed ? '✓' : '✗';
+    lines.push(`- ${status} **${pc.label}**: ${pct}% — ${pc.detail}`);
+  }
+  return lines.join('\n');
+}
+
 export function toMarkdown(project) {
   const r = project.report;
+  const ar = project.acceptanceResult;
+  const headline = ar?.verdict ? headlineOf(ar.verdict) : null;
   const out = [`# ${project.question}`, '', `_Template: ${templateById(project.templateId).label} · phase: ${project.phase} · updated ${project.updatedAt ?? ''}_${project.demo ? ' · **DEMO MODE — scripted model, not real research**' : ''}`, ''];
   if (project.decision) out.push(`**Decision:** ${project.decision}`, '', `**Success criteria:** ${project.successCriteria || '—'}`, '');
+  if (headline) {
+    out.push('## Headline', '', `**${headline.headline}**`, '', `_${headline.plausibility}_`, '');
+  }
   if (r) {
     out.push('## Verdict', '', `**${r.verdict}** (confidence: ${r.confidence})`, '', r.summary, '');
     if (r.keyNumbers.length) {
@@ -109,6 +136,12 @@ export function toMarkdown(project) {
     out.push('## Risks', '', bullets(r.risks), '', '## Open questions', '', bullets(r.openQuestions), '');
     if (r.nextSteps.length) out.push('## Next steps', '', ...r.nextSteps.map((s, i) => `${i + 1}. **${s.step}** — ${s.why}${s.how ? ` _How:_ ${s.how}` : ''}`), '');
     out.push(`_Evidence quality: ${r.evidenceQuality.verified}/${r.evidenceQuality.total} nodes verified or supported; weak: ${r.evidenceQuality.weak.join(', ') || 'none'}._`, '');
+  }
+  if (ar) {
+    const mh = mustHaveTable(ar);
+    if (mh) out.push(mh, '');
+    const pc = preconditionsList(ar);
+    if (pc) out.push(pc, '');
   }
   const plan = actionPlan(project);
   if (r?.bestEstimate) out.splice(out.indexOf('## Verdict') + 4, 0, `**Best estimate:** ${r.bestEstimate.value} ${r.bestEstimate.unit}${r.bestEstimate.low || r.bestEstimate.high ? ` (range ${r.bestEstimate.low || '?'}–${r.bestEstimate.high || '?'})` : ''}${r.bestEstimate.basis ? ` · rests on ${r.bestEstimate.basis}` : ''}`, '');

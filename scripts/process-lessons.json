@@ -752,6 +752,23 @@
     "prevention": "Ship new decision layers behind a comparison against the stable result on all reference researches (criteria count, hard checks count, confirmed items that fit) — never replace. A new layer must be additive: it provides extra goals/checks that the stable layer can optionally use, but the stable checklist from decisionModel.criteria + decisionModel.checklist remains the source of truth for validity. The comparison gate runs on every reference research in CI and fails if the new layer changes any confirmed item that fits or drops any hard check that the stable layer enforced."
   },
   {
+    "id": "F55",
+    "title": "A headline that averages unrelated checks hides the verdict; must-haves are non-compensatory (ELECTRE TRI veto, Roy 1991; conjunctive rule), preconditions are reported apart",
+    "touches": [
+      "src/research/verdict.mjs",
+      "src/research/acceptance.mjs",
+      "src/research/result.mjs",
+      "src/report.mjs",
+      "public/index.html",
+      "tests/research/verdict.test.ts",
+      "tests/research/acceptance.test.ts",
+      "scripts/headline-replay.mjs"
+    ],
+    "signal": "The acceptance score (arithmetic mean of all checks) was shown as the headline, so 8 checks averaging 0.5 looked like '50% met' even when 0 of 20 items passed every must-have; preconditions (count, links live, value range, mustMention) were mixed into the same list as hard checklist vetoes",
+    "cause": "scoreOf() averaged checklist vetoes, kind checks, and preconditions together; the UI and report showed one flat list of checks with percentages, and the memo read the mean as the verdict",
+    "prevention": "Headline is now confirmedCount/asked ('2 of 20 meet every must-have') plus plausibility ('up to N of M'). Checks are split: mustHave (hard checklist items, code criteria, kind) and preconditions (count, live, range, mustMention) — preconditions never enter the headline. Piece-grade log-odds is labelled 'research support', never 'probability' of the answer. UI and markdown report show headline, must-have table with per-check counts 'x of y judged items', and preconditions list separately. Replay script scripts/headline-replay.mjs prints old vs new headline and verifies criteria count and hard-check count are identical before/after."
+  },
+  {
     "id": "F56",
     "title": "a 2-of-3 vote could be one provider answering twice, and no change to the engine could be told from noise",
     "touches": [

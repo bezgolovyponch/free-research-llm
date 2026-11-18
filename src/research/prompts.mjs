@@ -412,7 +412,7 @@ JSON shape: {"reply":"short answer to the user","actions":[],"spec":{}}${feedbac
 
 function computedText(m) {
   const pct = (p) => `${Math.round(p * 100)}%`;
-  const lines = [`- type: ${m.kind} · overall evidence probability ${pct(m.probability)} · drivers: ${m.drivers.map((d) => `${d.id} ${pct(d.probability)}`).join(', ')}`];
+  const lines = [`- type: ${m.kind} · overall evidence probability ${pct(m.probability)} · drivers: ${m.drivers.map((d) => `${d.id} ${pct(d.researchSupport ?? d.probability)}`).join(', ')}`];
   if (m.changedSince.length) lines.push(`- changed since the memo was written: ${m.changedSince.join(', ')}`);
   if (m.regraded.length) lines.push(`- graded lower because the answer says the evidence does not settle it: ${m.regraded.join(', ')}`);
   for (const a of m.actions ?? []) lines.push(`- action (${pct(a.probability)}, impact ${a.impact}/5): ${a.action} [${a.nodeIds.join(', ') || 'no piece cited'}]`);

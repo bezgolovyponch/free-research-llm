@@ -1616,6 +1616,39 @@ function renderNotes(){
   const rc=$("btnRecheckSupport");if(rc)rc.addEventListener("click",async()=>{rc.disabled=true;try{const res=await api("/api/projects/"+p.id+"/recheck-support",{method:"POST",body:{}});toast(res.message||"Recheck started");}catch(e){toast(e.message);rc.disabled=false;}});
   box.querySelectorAll("tr[data-lease-url]").forEach(tr=>tr.addEventListener("click",e=>{if(e.target.closest("a"))return;e.stopPropagation();openPip(tr.dataset.leaseUrl);}));
 }
+function mustHaveHtml(ar) {
+  if (!ar?.verdict?.perCheck?.length) return '';
+  const lines = ['<div class="card"><h2>Must-have checks</h2>', '<table class="rtable" style="margin-top:6px"><tr><th>Check</th><th>Yes</th><th>No</th><th>Unknown</th><th>Judged</th></tr>'];
+  for (const pc of ar.verdict.perCheck) {
+    const judged = pc.yes + pc.no + pc.unknown;
+    lines.push(`<tr><td>${esc(pc.clause)}</td><td class="y">${pc.yes}</td><td class="n">${pc.no}</td><td>${pc.unknown}</td><td>${judged}</td></tr>`);
+  }
+  lines.push('</table></div>');
+  return lines.join('');
+}
+
+function preconditionsHtml(ar) {
+  if (!ar?.preconditions?.length) return '';
+  const lines = ['<div class="card"><h2>Preconditions</h2>'];
+  for (const pc of ar.preconditions) {
+    const pct = Math.round(pc.value * 100);
+    const status = pc.passed ? '✓' : '✗';
+    lines.push(`<div class="check"><span class="${pc.passed ? 'y' : 'n'}">${status}</span><span>${esc(pc.label)} <b>${pct}%</b> <span class="small faint">${esc(pc.detail)}</span></span></div>`);
+  }
+  lines.push('</div>');
+  return lines.join('');
+}
+
+function headlineHtml(ar) {
+  if (!ar?.verdict) return '';
+  const { tiers, asked } = ar.verdict;
+  const confirmed = tiers.confirmed;
+  const toConfirm = tiers.toConfirm;
+  const headline = confirmed + " of " + asked + " meet every must-have";
+  const plausibility = "up to " + (confirmed + toConfirm) + " of " + asked + " could meet every must-have";
+  return `<div class="card"><div class="small faint">Headline</div><div class="verdict" style="font-size:20px">${esc(headline)}</div><div class="small muted" style="margin-top:4px">${esc(plausibility)}</div></div>`;
+}
+
 function renderResults(){
   const p=STATE.project;const box=$("resultsBody");if(!box)return;
   const ar=p.acceptanceResult;const r=p.report;const good=p.nodes.filter(n=>["verified","supported"].includes(n.status));const weak=p.nodes.filter(n=>!["verified","supported","covered","pending","researching"].includes(n.status));
@@ -1624,17 +1657,21 @@ function renderResults(){
   if(!r&&p.nodes.length)h+='<div class="card"><div class="small faint">Result</div><div class="verdict">No memo yet</div><p class="small muted" style="margin-top:4px">Press ▶ Run: the memo is always computed, even from weak pieces, and marked provisional. What is still open is listed below.</p></div>';
   const M=p.results&&p.results.model;const pc=x=>Math.round(x*100)+"%";const bar=x=>'<div class="rt-bar" style="height:8px;min-width:80px"><i style="width:'+Math.round(x*100)+'%;background:'+(x>=0.7?"var(--gr)":x>=0.45?"var(--am)":"var(--rd)")+'"></i></div>';
   if(M){
-    h+='<div class="card" id="computedResult"><div class="row"><div><div class="small faint">Computed result · from the current pieces · '+esc({plan:"action plan",decision:"decision",estimate:"estimate",list:"list"}[M.kind]||M.kind)+'</div><div class="verdict" style="font-size:20px">Evidence probability '+pc(M.probability)+"</div></div><span class=\"spacer\"></span>"+(M.changedSince.length||!r?'<button class="btn primary sm" id="resRewrite">Rewrite memo from current pieces</button>':"")+"</div>";
+    h+='<div class="card" id="computedResult"><div class="row"><div><div class="small faint">Computed result · from the current pieces · '+esc({plan:"action plan",decision:"decision",estimate:"estimate",list:"list"}[M.kind]||M.kind)+'</div><div class="verdict" style="font-size:20px">Research support '+pc(M.probability)+"</div></div><span class=\"spacer\"></span>"+(M.changedSince.length||!r?'<button class="btn primary sm" id="resRewrite">Rewrite memo from current pieces</button>':"")+"</div>";
     if(M.changedSince.length&&r)h+='<div class="notice" style="margin:8px 0 0">The memo below was written at '+esc(String(r.generatedAt||"").slice(11,16))+"; "+M.changedSince.length+" piece(s) changed since: "+esc(M.changedSince.join(", "))+". The computed result above already uses them.</div>";
     if(M.regraded.length)h+='<div class="small muted" style="margin-top:6px">Counted as weak because their answers say the evidence does not settle them: '+esc(M.regraded.join(", "))+". The next ▶ Run regrades them for good.</div>";
-    if(M.actions&&M.actions.length)h+='<table class="rtable" style="margin-top:8px"><tr><th>#</th><th>Action</th><th>Probability</th><th>Impact</th><th>Rests on</th></tr>'+M.actions.map((a,i)=>"<tr><td>"+(i+1)+"</td><td><b>"+esc(a.action)+"</b>"+(a.horizon?' <span class="small faint">'+esc(a.horizon)+"</span>":"")+(a.why?'<div class="small muted">'+esc(trunc(a.why,160))+"</div>":"")+"</td><td>"+bar(a.probability)+'<span class="small">'+pc(a.probability)+'</span></td><td class="small">'+a.impact+"/5</td><td class=\"small mono\">"+(a.nodeIds.map(id=>'<a href="#" data-node="'+esc(id)+'">'+esc(id)+"</a>").join(" ")||"–")+"</td></tr>").join("")+"</table>";
+    if(M.actions&&M.actions.length)h+='<table class="rtable" style="margin-top:8px"><tr><th>#</th><th>Action</th><th>Research support</th><th>Impact</th><th>Rests on</th></tr>'+M.actions.map((a,i)=>"<tr><td>"+(i+1)+"</td><td><b>"+esc(a.action)+"</b>"+(a.horizon?' <span class="small faint">'+esc(a.horizon)+"</span>":"")+(a.why?'<div class="small muted">'+esc(trunc(a.why,160))+"</div>":"")+"</td><td>"+bar(a.probability)+'<span class="small">'+pc(a.probability)+'</span></td><td class="small">'+a.impact+"/5</td><td class=\"small mono\">"+(a.nodeIds.map(id=>'<a href="#" data-node="'+esc(id)+'">'+esc(id)+"</a>").join(" ")||"–")+"</td></tr>").join("")+"</table>";
     if(M.options&&M.options.length)h+='<table class="rtable" style="margin-top:8px"><tr><th>Option</th><th>Probability</th><th>Consistent</th><th>Inconsistent</th></tr>'+M.options.map(o=>"<tr><td><b>"+esc(o.option)+"</b></td><td>"+bar(o.probability)+'<span class="small">'+pc(o.probability)+'</span></td><td class="small mono">'+esc(o.support.join(" ")||"–")+'</td><td class="small mono">'+esc(o.against.join(" ")||"–")+"</td></tr>").join("")+"</table>";
     if(M.estimate)h+='<div style="margin-top:8px"><b>Estimate:</b> '+esc(M.estimate.value)+" "+esc(M.estimate.unit)+" ("+esc(M.estimate.low||"?")+"–"+esc(M.estimate.high||"?")+") · probability "+pc(M.estimate.probability)+"</div>";
-    h+='<div class="small faint" style="margin-top:8px">Drivers: '+M.drivers.map(d=>'<a href="#" data-node="'+esc(d.id)+'">'+esc(d.id)+"</a> "+pc(d.probability)).join(" · ")+". Each piece's grade becomes a probability (verified 90%, supported 75%, weak 40%, unsupported or failed 15%; a piece not researched yet is left out), combined up the tree by weighted log-odds (Satopää et al., 2014); options are scored by consistent minus inconsistent evidence (Analysis of Competing Hypotheses).</div></div>";
+    h+='<div class="small faint" style="margin-top:8px">Drivers: '+M.drivers.map(d=>'<a href="#" data-node="'+esc(d.id)+'">'+esc(d.id)+"</a> "+pc(d.researchSupport ?? d.probability)).join(" · ")+". Each piece's grade becomes research support (verified 90%, supported 75%, weak 40%, unsupported or failed 15%; a piece not researched yet is left out), combined up the tree by weighted log-odds (Satopää et al., 2014); options are scored by consistent minus inconsistent evidence (Analysis of Competing Hypotheses).</div></div>";
   }
   if(r)h+='<div class="card"><div class="small faint">Result'+(st&&st.provisional?" · provisional":"")+'</div><div class="verdict">'+esc(r.verdict)+"</div>"+(be?'<div style="margin-top:6px"><b>Best estimate:</b> '+esc(be.value)+" "+esc(be.unit)+(be.low||be.high?' <span class="muted">(range '+esc(be.low||"?")+"–"+esc(be.high||"?")+")</span>":"")+(be.basis?' <span class="small faint">rests on '+esc(be.basis)+"</span>":"")+"</div>":"")+(st?'<div class="small muted" style="margin-top:4px">confidence by the checks: <b>'+esc(st.confidence)+"</b> · "+Math.round(st.coverage*100)+"% of pieces pass · "+st.counts.fix+" to fix · "+st.counts.research+" to research further · "+st.counts.clarify+" to clarify</div>":"")+"</div>";
+  if (ar) h += headlineHtml(ar);
   h+='<div class="card"><div class="row"><div><div class="small faint">Expected result</div><div class="verdict" style="color:'+(ar?(ar.score>=0.999?"var(--gr)":ar.score>0?"var(--am)":"var(--rd)"):"var(--faint)")+'">'+(ar?Math.round(ar.score*100)+"% met":"not checked yet")+'</div></div><span class="spacer"></span><div><div class="small faint">Memo verdict</div><div style="font-weight:750;max-width:420px">'+esc(r?r.verdict:"no memo yet")+"</div></div></div>";
-  if(ar)h+='<div style="margin-top:6px">'+ar.checks.map(c=>'<div class="check"><span class="'+(c.passed?"y":"n")+'">'+(c.passed?"✓":"✗")+"</span><span>"+esc(c.label)+" <b>"+Math.round(c.value*100)+"%</b></span></div>").join("")+"</div>";
+  if(ar) {
+    h += mustHaveHtml(ar);
+    h += preconditionsHtml(ar);
+  }
   const said=r?(r.modelVerdict!=null?r.modelVerdict:r.verdict):"";
   if(ar&&r&&ar.score>=0.99&&!/^\s*GO\b/i.test(said))h+='<div class="notice" id="notSettled" style="margin:10px 0 0">The expected-result checks pass, but they only test the count, the links and the price range. The memo verdict is <b>'+esc(trunc(said,80))+"</b>, so the question itself is not settled yet. Ask the Results chat what is missing.</div>";
   h+='<p class="small faint" style="margin-top:8px">'+good.length+"/"+p.nodes.length+" pieces pass the checks · ask about these results in the chat → <b>Results</b></p></div>";

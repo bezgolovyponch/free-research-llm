@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome } from "../../src/research/verdict.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome, headlineOf, scoreOf } from "../../src/research/verdict.mjs";
 import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
 import { lowPriceStats } from "../../src/research/candidates.mjs";
 import { fakeRouter } from "../helpers/fakes";
@@ -280,6 +280,51 @@ describe("verdict", () => {
     const unread = { acceptanceResult: { totalAsked: 20, items: [baseItem({ url: "a", checks: [] })] }, acceptance: { itemCount: 20 }, checklist: [{ clause: "c", items: [{ hard: true, question: "q1" }] }] };
     expect(acceptanceSummaryOf(unread)).toBe("0 of 20 confirmed · 1 not read");
     expect(acceptanceSummaryOf({ acceptance: { itemCount: 3 } })).toBe("0 of 3 confirmed");
+  });
+
+  describe("headlineOf", () => {
+    it("returns confirmed count over asked as headline", () => {
+      const vr = { tiers: { confirmed: 2, toConfirm: 3, rejected: 5, notJudged: 10 }, asked: 20 };
+      const h = headlineOf(vr);
+      expect(h.headline).toBe("2 of 20 meet every must-have");
+      expect(h.plausibility).toBe("up to 5 of 20 could meet every must-have");
+      expect(h.confirmed).toBe(2);
+      expect(h.toConfirm).toBe(3);
+      expect(h.asked).toBe(20);
+    });
+
+    it("handles zero confirmed", () => {
+      const vr = { tiers: { confirmed: 0, toConfirm: 5, rejected: 5, notJudged: 10 }, asked: 20 };
+      const h = headlineOf(vr);
+      expect(h.headline).toBe("0 of 20 meet every must-have");
+      expect(h.plausibility).toBe("up to 5 of 20 could meet every must-have");
+    });
+
+    it("handles all confirmed", () => {
+      const vr = { tiers: { confirmed: 20, toConfirm: 0, rejected: 0, notJudged: 0 }, asked: 20 };
+      const h = headlineOf(vr);
+      expect(h.headline).toBe("20 of 20 meet every must-have");
+      expect(h.plausibility).toBe("up to 20 of 20 could meet every must-have");
+    });
+  });
+
+  describe("scoreOf is NOT the headline", () => {
+    it("suppliers checks [0.1,1,0.25,0.57,0.62,0.18,0.56,0.36] must NOT produce 0.5 as headline; it must produce 2/20", () => {
+      // This test ensures the old arithmetic mean (scoreOf) is not used as the headline
+      const checks = [
+        { value: 0.1 }, { value: 1 }, { value: 0.25 }, { value: 0.57 },
+        { value: 0.62 }, { value: 0.18 }, { value: 0.56 }, { value: 0.36 }
+      ];
+      const oldMean = scoreOf(checks);
+      expect(oldMean).toBeCloseTo(0.455, 2); // The old mean would be ~0.455
+
+      // The new headline is based on confirmed count, not the mean
+      const vr = { tiers: { confirmed: 2, toConfirm: 3, rejected: 5, notJudged: 10 }, asked: 20 };
+      const h = headlineOf(vr);
+      expect(h.headline).toBe("2 of 20 meet every must-have");
+      expect(h.headline).not.toContain("0.5");
+      expect(h.headline).not.toContain("45%");
+    });
   });
 });
 

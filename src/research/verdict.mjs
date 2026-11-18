@@ -159,6 +159,16 @@ export function scoreOf(checks) {
   return checks.length ? checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length : 0;
 }
 
+export function headlineOf(verdictResult) {
+  const { tiers, asked } = verdictResult;
+  const confirmed = tiers.confirmed;
+  const toConfirm = tiers.toConfirm;
+  const headline = confirmed + " of " + asked + " meet every must-have";
+  const plausibilityConfirmed = Math.min(confirmed + toConfirm, asked);
+  const plausibility = "up to " + plausibilityConfirmed + " of " + asked + " could meet every must-have";
+  return { headline, plausibility, confirmed, toConfirm, asked };
+}
+
 export function verdictInvariants(project, { memo = true } = {}) {
   const reasons = [];
   const acceptanceResult = project.acceptanceResult;

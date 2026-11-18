@@ -704,24 +704,38 @@ export class AcceptanceChecker {
       item.softYes = (item.checks ?? []).filter((c) => c.hard !== true && c.answer === 'yes').length;
     }
 
-    const checks = [];
-    if (spec.itemCount) checks.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, verdictResult.validCount / spec.itemCount), detail: `${verdictResult.validCount} of ${deliverables.length} delivered pass every check; first ${items.length} inspected (${located ? 'a single listing page that opens' : 'a page that opens and describes the asked kind'}${spec.valueRange ? ', price in range' : ''})` });
-    if (spec.urlsLive) checks.push({ id: 'live', label: 'Links open a real page', value: good((i) => i.live), detail: `${items.filter((i) => i.live).length} of ${items.length} checked links are live` });
-    if (spec.valueRange) checks.push({ id: 'range', label: `Value within ${spec.valueRange.join('–')} ${spec.unit}`.trim(), value: good((i) => i.inRange), detail: `${items.filter((i) => i.inRange).length} of ${items.length} pages show a value in range` });
-    if (spec.mustMention.length) checks.push({ id: 'mentions', label: `Pages mention: ${spec.mustMention.join(', ')}`, value: items.length ? items.reduce((s, i) => s + (i.mentions ?? 0), 0) / target : 0, detail: 'share of required terms found on the pages' });
+    const mustHave = [];
+    const preconditions = [];
+
+    if (spec.itemCount) preconditions.push({ id: 'count', label: `At least ${spec.itemCount} valid items`, value: Math.min(1, verdictResult.validCount / spec.itemCount), detail: `${verdictResult.validCount} of ${deliverables.length} delivered pass every check; first ${items.length} inspected (${located ? 'a single listing page that opens' : 'a page that opens and describes the asked kind'}${spec.valueRange ? ', price in range' : ''})` });
+    if (spec.urlsLive) preconditions.push({ id: 'live', label: 'Links open a real page', value: good((i) => i.live), detail: `${items.filter((i) => i.live).length} of ${items.length} checked links are live` });
+    if (spec.valueRange) preconditions.push({ id: 'range', label: `Value within ${spec.valueRange.join('–')} ${spec.unit}`.trim(), value: good((i) => i.inRange), detail: `${items.filter((i) => i.inRange).length} of ${items.length} pages show a value in range` });
+    if (spec.mustMention.length) preconditions.push({ id: 'mentions', label: `Pages mention: ${spec.mustMention.join(', ')}`, value: items.length ? items.reduce((s, i) => s + (i.mentions ?? 0), 0) / target : 0, detail: 'share of required terms found on the pages' });
     for (const criterion of purpose) {
       const passed = items.filter((i) => (i.purpose ?? []).some((c) => c.id === criterion.id && c.passed)).length;
-      checks.push({ id: criterion.id, label: criterion.label, value: items.length ? passed / items.length : 0, detail: `${passed} of ${items.length} delivered pages show it` });
+      mustHave.push({ id: criterion.id, label: criterion.label, value: items.length ? passed / items.length : 0, detail: `${passed} of ${items.length} delivered pages show it` });
     }
     for (const pc of verdictResult.perCheck) {
       const rate = pc.yes / (pc.yes + pc.no + pc.unknown) || 0;
-      checks.push({ id: `checklist-${pc.id}`, label: `Checklist: ${pc.clause}`, value: rate, detail: `${pc.yes} of ${pc.yes + pc.no + pc.unknown} checked items pass this hard check` });
+      mustHave.push({ id: `checklist-${pc.id}`, label: `Checklist: ${pc.clause}`, value: rate, detail: `${pc.yes} of ${pc.yes + pc.no + pc.unknown} checked items pass this hard check`, yes: pc.yes, no: pc.no, unknown: pc.unknown, judged: pc.yes + pc.no + pc.unknown });
     }
-    const score = scoreOf(checks);
+
+    const allChecks = [...mustHave, ...preconditions];
+    const score = scoreOf(allChecks);
     const sortedItems = [...verdictResult.items].sort((a, b) => {
       if (a.valid !== b.valid) return a.valid ? -1 : 1;
       return b.softYes - a.softYes;
     });
-    return { score: Math.round(score * 1000) / 1000, checks: checks.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })), items: sortedItems, checkedAt: new Date().toISOString(), validCount: verdictResult.validCount, totalAsked: spec.itemCount ?? 0, verdict: verdictResult };
+    return {
+      score: Math.round(score * 1000) / 1000,
+      checks: allChecks.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })),
+      mustHave: mustHave.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })),
+      preconditions: preconditions.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })),
+      items: sortedItems,
+      checkedAt: new Date().toISOString(),
+      validCount: verdictResult.validCount,
+      totalAsked: spec.itemCount ?? 0,
+      verdict: verdictResult
+    };
   }
 }
