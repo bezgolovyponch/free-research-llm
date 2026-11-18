@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome } from "../../src/research/verdict.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome, headlineOf, scoreOf, verdictReport, verdictLines } from "../../src/research/verdict.mjs";
 import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
 import { lowPriceStats } from "../../src/research/candidates.mjs";
 import { fakeRouter } from "../helpers/fakes";
@@ -280,6 +280,65 @@ describe("verdict", () => {
     const unread = { acceptanceResult: { totalAsked: 20, items: [baseItem({ url: "a", checks: [] })] }, acceptance: { itemCount: 20 }, checklist: [{ clause: "c", items: [{ hard: true, question: "q1" }] }] };
     expect(acceptanceSummaryOf(unread)).toBe("0 of 20 confirmed · 1 not read");
     expect(acceptanceSummaryOf({ acceptance: { itemCount: 3 } })).toBe("0 of 3 confirmed");
+  });
+});
+
+describe("the single headline owner (C9, C10; from origin/fix/honest-headline c50e86c, 60c162b)", () => {
+  const checklist = [{ clause: "sells in bulk", items: [{ hard: true, question: "q1" }] }];
+  const id = "sells in bulk|q1";
+  const item = (url: string, check: object | null, overrides = {}) => ({ url, title: url, live: true, listing: true, inRange: true, purpose: [], checks: check ? [{ id, clause: "sells in bulk", hard: true, ...check }] : [], ...overrides });
+  const items = [
+    item("https://a.test/", { answer: "yes", quote: "minimum order 500 kg" }),
+    item("https://b.test/", { answer: "no", quote: "retail shop, single pieces only" }),
+    item("https://c.test/", { answer: "unknown", reason: "the page states no order size" }),
+    item("https://d.test/", null),
+    item("https://e.test/", { answer: "yes", quote: "bales of 45 kg" }, { live: false }),
+  ];
+  const spec = { itemCount: 20, urlsLive: true, valueRange: [0, 50], unit: "EUR/kg", mustMention: [] };
+  const computed = verdict(items, spec, checklist);
+  const checks = [
+    { id: "count", label: "At least 20 valid items", value: 0.05, passed: false, detail: "1 of 5 delivered pass every check" },
+    { id: "live", label: "Links open a real page", value: 1, passed: true, detail: "4 of 5 checked links are live" },
+    { id: "range", label: "Value within 0–50 EUR/kg", value: 1, passed: true, detail: "5 of 5 pages show a value in range" },
+    { id: `checklist-${id}`, label: "Checklist: sells in bulk", value: 0.5, passed: false, detail: "2 of 4 checked items pass this hard check" },
+  ];
+  const project = { acceptance: spec, checklist, acceptanceResult: { score: scoreOf(checks), checks, items: computed.items, totalAsked: 20, validCount: computed.validCount, verdict: computed } };
+
+  it("the headline counts the items that meet every must-have out of the number asked, with the reachable count beside it", () => {
+    expect(headlineOf({ tiers: { confirmed: 2, toConfirm: 3, rejected: 5, notJudged: 10 }, asked: 20 })).toEqual({ headline: "2 of 20 meet every must-have", upTo: "up to 5 of 20 could meet every must-have (2 confirmed + 3 to confirm)", confirmed: 2, toConfirm: 3, asked: 20 });
+    expect(headlineOf({ tiers: { confirmed: 15, toConfirm: 30, rejected: 0, notJudged: 0 }, asked: 20 }).upTo).toBe("up to 20 of 20 could meet every must-have (15 confirmed + 30 to confirm)");
+    expect(headlineOf({ tiers: { confirmed: 30, toConfirm: 4, rejected: 0, notJudged: 0 }, asked: 20 })).toMatchObject({ headline: "30 of 20 meet every must-have", upTo: "" });
+  });
+
+  it("a mean of unrelated checks is never the headline: checks averaging 64% with 1 of 20 confirmed read '1 of 20'", () => {
+    const report = verdictReport(project)!;
+    expect(Math.round(project.acceptanceResult.score * 100)).toBe(64);
+    expect(report.headline).toBe("1 of 20 meet every must-have");
+    expect(report.upTo).toBe("up to 2 of 20 could meet every must-have (1 confirmed + 1 to confirm)");
+    expect(verdictLines(report).join(" ")).not.toContain("64%");
+  });
+
+  it("requirements carry their share and counts; count, links and range are preconditions listed apart", () => {
+    const report = verdictReport(project)!;
+    expect(report.requirements).toEqual([{ id: `checklist-${id}`, label: "sells in bulk", share: 0.5, detail: "2 of 4 checked items pass this hard check", yes: 2, no: 1, unknown: 1, judged: 4 }]);
+    expect(report.preconditions.map((c) => c.id)).toEqual(["count", "live", "range"]);
+    expect(report.requirements.some((r) => ["count", "live", "range", "mentions"].includes(r.id))).toBe(false);
+  });
+
+  it("every item states the quote or the reason per requirement, so an excluded or open item says why", () => {
+    const byUrl = new Map(verdictReport(project)!.items.map((entry) => [entry.url, entry]));
+    expect(byUrl.get("https://a.test/")).toMatchObject({ tier: "confirmed", reasons: [{ requirement: "sells in bulk", answer: "yes", quote: "minimum order 500 kg" }] });
+    expect(byUrl.get("https://b.test/")).toMatchObject({ tier: "rejected", reasons: [{ answer: "no", quote: "retail shop, single pieces only" }] });
+    expect(byUrl.get("https://c.test/")).toMatchObject({ tier: "to-confirm", reasons: [{ answer: "unknown", reason: "the page states no order size" }] });
+    expect(byUrl.get("https://d.test/")).toMatchObject({ tier: "not-judged", reasons: [{ requirement: id, answer: "not judged", reason: "the page was not read" }] });
+    expect(byUrl.get("https://e.test/")!.reasons[0]).toEqual({ requirement: "the link opens a page", answer: "no", quote: "", reason: "the page did not open" });
+  });
+
+  it("a research that asked for no number of items states how many checks pass, and no result means no headline", () => {
+    const memoOnly = { acceptance: { mustMention: ["permit"] }, acceptanceResult: { score: 0.5, checks: [{ id: "mentions", label: "Pages mention: permit", value: 0.5, passed: false, detail: "share of required terms found on the pages" }], items: [], totalAsked: 0 } };
+    expect(verdictReport(memoOnly)).toMatchObject({ headline: "0 of 1 expected-result checks pass", upTo: "", requirements: [] });
+    expect(verdictReport({ acceptance: { itemCount: 3 } })).toBeNull();
+    expect(verdictLines(null)).toEqual([]);
   });
 });
 

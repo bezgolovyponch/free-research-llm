@@ -8,7 +8,7 @@ import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { currencyOf } from './acceptance.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
-import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
+import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf, verdictReport, verdictLines } from './verdict.mjs';
 import { notJudged } from './checklist.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
 import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
@@ -1478,11 +1478,12 @@ export class ResearchEngine {
     this.setPhase(project, 'synthesizing');
     this.emit(project, 'phase', 'writing the decision memo');
     await this.store.save(project, { reason: 'memo started' });
+    const deliverables = await this.checkAcceptance(project, pages, { memoNext: true });
     const template = templateById(project.templateId);
     const reply = await this.router.complete({
       purpose: 'synthesize',
       tier: 'deep',
-      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates) }), project.guidance),
+      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates), verdict: verdictLines(verdictReport(project)) }), project.guidance),
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
@@ -1505,8 +1506,8 @@ export class ResearchEngine {
       basis: basisOf(project.nodes),
       model: `${reply.provider}/${reply.model}`,
       generatedAt: new Date().toISOString(),
+      deliverables,
     };
-    await this.checkAcceptance(project, pages);
     this.planActions(project);
     if (project.report.claimCheck) {
       const passed = project.report.claimCheck.contradicted.length === 0;
@@ -1731,7 +1732,7 @@ export class ResearchEngine {
       ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage, kindTerms: project.decisionModel?.kind?.terms ?? [], findWebsite: this.search?.search ? (name) => this.search.search([`"${name}"`], { maxSources: 5 }) : null })
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
       .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
-    project.report.deliverables = deliverables;
+    if (project.report) project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage, convert });
     project.checkCache = project.checkCache ?? {};
@@ -1900,7 +1901,8 @@ export class ResearchEngine {
     }
 
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
-    if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
+    if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${verdictLines(verdictReport(project)).join(' · ')}`);
+    return deliverables;
   }
 
   async findDeeperPageForKind(item, readPage, kind) {
@@ -2376,7 +2378,6 @@ export class ResearchEngine {
     try {
       const project = await this.load(id);
       await this.synthesize(project, pages);
-      await this.checkAcceptance(project, pages, { memoNext: true });
       this.checkSpecs(project);
       this.planActions(project);
       const asked = project.acceptanceResult?.totalAsked ?? 0;

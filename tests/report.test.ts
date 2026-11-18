@@ -73,6 +73,32 @@ describe('results export', () => {
   });
 });
 
+describe('the result section of the report (C9, C10)', () => {
+  it('opens with the counted headline, lists each requirement with its share, the preconditions apart, and the reason for every excluded or open item', () => {
+    const id = 'sells in bulk|q1';
+    const check = (answer: string, extra: object) => [{ id, clause: 'sells in bulk', hard: true, answer, ...extra }];
+    const row = (url: string, tier: string, checks: object[]) => ({ url, title: url, tier, live: true, listing: true, inRange: true, purpose: [], checks });
+    const items = [row('https://a.test/', 'confirmed', check('yes', { quote: 'minimum order 500 kg' })), row('https://b.test/', 'rejected', check('no', { quote: 'single pieces only' })), row('https://c.test/', 'to-confirm', check('unknown', { reason: 'no order size stated' }))];
+    const project = {
+      question: 'Find 20 bulk sellers', templateId: 'general', phase: 'done', nodes: [], report: null,
+      acceptance: { itemCount: 20 }, checklist: [{ clause: 'sells in bulk', items: [{ hard: true, question: 'q1' }] }],
+      acceptanceResult: {
+        score: 0.19, totalAsked: 20, validCount: 1, items,
+        checks: [{ id: 'count', label: 'At least 20 valid items', value: 0.05, passed: false, detail: '1 of 3 delivered pass every check' }, { id: `checklist-${id}`, label: 'Checklist: sells in bulk', value: 0.333, passed: false, detail: '1 of 3 checked items pass this hard check' }],
+        verdict: { tiers: { confirmed: 1, toConfirm: 1, rejected: 1, notJudged: 0 }, asked: 20, validCount: 1, summary: '1 of 20 confirmed · 1 to confirm · 1 rejected', perCheck: [{ id, clause: 'sells in bulk', yes: 1, no: 1, unknown: 1 }], items },
+      },
+    };
+    const md = toMarkdown(project as never);
+    expect(md).toContain('## Result\n\n**1 of 20 meet every must-have**\n\n_up to 2 of 20 could meet every must-have (1 confirmed + 1 to confirm)_');
+    expect(md).toContain('| sells in bulk | 1 | 1 | 1 | 33% |');
+    expect(md).toContain('### Preconditions\n\n- ✗ At least 20 valid items: 1 of 3 delivered pass every check');
+    expect(md).toContain('| https://b.test/ | rejected | sells in bulk: no — "single pieces only" |');
+    expect(md).toContain('| https://c.test/ | to-confirm | sells in bulk: unknown — no order size stated |');
+    expect(md).not.toContain('| https://a.test/ |');
+    expect(md).not.toContain('% met');
+  });
+});
+
 describe('every tab as CSV', () => {
   it('zips one Excel-safe CSV per tab', async () => {
     const { sheetsCsvZip } = await import('../src/report.mjs');

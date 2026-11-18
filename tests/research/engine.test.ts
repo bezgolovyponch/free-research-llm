@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { qualifies } from '../../src/research/acceptance.mjs';
-import { itemTier } from '../../src/research/verdict.mjs';
+import { itemTier, verdictInvariants } from '../../src/research/verdict.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -2412,6 +2412,40 @@ describe('hub search', () => {
     expect(item.valid).toBe(false);
     const hardChecks = item.checks.filter((c) => c.hard === true);
     expect(hardChecks.every((c) => c.answer === 'yes')).toBe(false);
+  });
+
+  it('writes the memo after the verdict and from it: the memo prompt carries the computed headline and each requirement (C9, C10)', async () => {
+    const memoPrompts: string[] = [];
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo-fast', deep: 'demo-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
+      async chat({ messages, tier }) {
+        const fullPrompt = messages.map((m) => m.content).join('\n');
+        if (fullPrompt.includes(TASK_MARKERS.synthesize)) {
+          memoPrompts.push(fullPrompt);
+          return { content: JSON.stringify({ verdict: 'NO-GO', confidence: 'low', summary: 'none fits', nextSteps: [] }), model: 'demo-deep', provider: 'demo', usage: {} };
+        }
+        if (fullPrompt.includes('strict judge') || fullPrompt.includes('Item page text:')) return { content: JSON.stringify([{ id: 'q1', answer: 'no', spans: ['S1'] }]), model: 'demo-fast', provider: 'demo', usage: {} };
+        return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
+      },
+    };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearchForChecklist, store: new ProjectStore({ dir }), lanes: 2, modeler: new ChecklistModeler({ router, samples: 3 }) });
+    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with highest price/value ratio for a retail second hand shop business in Czech Republic' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 20, valueRange: [0, 50], unit: 'EUR/kg' } });
+    project.candidates = { kept: [{ title: 'Wholesale Supplier A', url: 'https://zagumi.com/anuncio/used-clothing-ID12345', value: 40, unit: 'EUR/kg', price: 40, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits all checks', why: ['wholesale', 'brands'], risks: [] } }], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
+    project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
+    project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
+    await engine.synthesize(project);
+    expect(memoPrompts).toHaveLength(1);
+    expect(memoPrompts[0]).toContain('VERDICT (computed by code from the delivered items before this memo; it is final):');
+    expect(memoPrompts[0]).toContain('- 0 of 20 meet every must-have; up to 0 of 20 could meet every must-have (0 confirmed + 0 to confirm)');
+    expect(memoPrompts[0]).toContain('- requirement: wholesale — 0 of 1 judged items meet it, 1 do not, 0 unknown');
+    expect(memoPrompts[0]).toContain('- precondition: At least 20 valid items — fails');
+    expect(project.report.deliverables.map((d: { url: string }) => d.url)).toEqual(['https://zagumi.com/anuncio/used-clothing-ID12345']);
+    expect(project.report.status.acceptanceContradiction).toBe(project.acceptanceResult!.verdict.summary);
+    expect(verdictInvariants(project)).toEqual([]);
   });
 
   it('on the first acceptance check, with no checklist yet, an unknown hard item is confirmed on a same-host page and the item becomes valid', async () => {

@@ -411,7 +411,7 @@ export class App {
 
   async saveHandoff(project, { reason, resume = {} } = {}) {
     const record = await this.handoffs.write(project, { reason, resume });
-    appendAppMessage(project, `Progress saved (${reason}). ${record.progress.passing}/${record.progress.total} pieces pass${record.expectedResult ? `, expected result ${Math.round(record.expectedResult.score * 100)}% met` : ''}. Next: ${record.nextSteps[0] ?? 'nothing pending'}. Full handoff: More → Handoff notes.`);
+    appendAppMessage(project, `Progress saved (${reason}). ${record.progress.passing}/${record.progress.total} pieces pass${record.expectedResult ? `, expected result: ${record.expectedResult.headline}` : ''}. Next: ${record.nextSteps[0] ?? 'nothing pending'}. Full handoff: More → Handoff notes.`);
     void this.logs.append('history', { projectId: project.id, type: 'handoff', message: `${reason} · ${record.progress.passing}/${record.progress.total} passing${record.resume.loopHoursLeft ? ` · loop resumes with ${record.resume.loopHoursLeft.toFixed(1)} h` : record.resume.wasRunning ? ' · run resumes on start' : ''}` });
     return record;
   }
