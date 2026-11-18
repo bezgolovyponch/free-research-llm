@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase } from '../../src/research/concept.mjs';
+import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, CRITERION, CONTEXT, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, agreeFrames, conceptExamples, conceptFresh, conceptKindLabel, conceptText, frameConcept, framePrompt, frameSample, spanIn } from '../../src/research/concept.mjs';
+import { fakeRouter, seq } from '../helpers/fakes';
 
 describe('concept card', () => {
   it('keeps the numbers the engine runs with', () => {
@@ -81,5 +82,78 @@ describe('concept card', () => {
     expect(pages[0]).toEqual({ id: 'P1', title: 'Page 1', url: 'https://example.test/1', text: 'Page 1 snippet body' });
     expect(pages.at(-1)?.id).toBe('P10');
     expect(conceptPages([{ title: 'x'.repeat(300), url: 'https://example.test/long', snippet: '', text: '' }])[0].title).toHaveLength(200);
+  });
+});
+
+describe('concept framing', () => {
+  const question = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio , proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
+  const expected = '20 direct links to the providers with proof';
+  const said = { question, expected };
+  const full = {
+    population: { quote: 'wholesale branded second hand clothing providers', label: 'wholesale provider' },
+    concept: [
+      { quote: 'branded second hand clothing', text: 'sells branded second hand clothing', examples: [] },
+      { quote: 'similar to Ralph Lauren, Monclair, North face, Barbour', text: 'brands of the class the examples stand for', examples: ['Ralph Lauren', 'Monclair', 'North face', 'Barbour', 'Gucci'] },
+      { quote: 'proven good quality', text: 'quality is proven', examples: [] },
+    ],
+    limits: [{ quote: '20 direct links' }],
+    ranks: [{ quote: 'highest price/value ratio', text: 'best price for value' }],
+    context: [{ quote: 'retail second hand shop business in Czech Republic', text: 'for a Czech retail shop' }],
+    method: [],
+  };
+
+  it('keeps an element only with words copied from the request, and an example only when the quote holds it', () => {
+    const sample = frameSample(full, said);
+    expect(sample.value.map((e: { role: string }) => e.role)).toEqual([POPULATION, CRITERION, CRITERION, CRITERION, LIMIT, RANK, CONTEXT]);
+    expect(sample.value[2].examples).toEqual(['Ralph Lauren', 'Monclair', 'North face', 'Barbour']);
+    expect(sample.value[4].source).toBe('expected');
+    expect(frameSample({ concept: [{ quote: 'ships within 24 hours', text: 'fast delivery' }] }, said).error).toContain('copied letter for letter');
+    expect(spanIn('a  B c', 'b C')).toEqual({ at: 2, end: 5 });
+    expect(spanIn('abc', '')).toBeNull();
+  });
+
+  it('frames the population in the asker\'s words, the class with its examples, and what ranks apart from what is required', () => {
+    const concept = agreeFrames([frameSample(full, said).value, frameSample(full, said).value], said);
+    expect(conceptKindLabel(concept)).toBe('wholesale branded second hand clothing providers');
+    expect(concept.criteria.map((c: { id: string; quote: string }) => `${c.id} ${c.quote}`)).toEqual(['E1 branded second hand clothing', 'E2 similar to Ralph Lauren, Monclair, North face, Barbour', 'E3 proven good quality']);
+    expect(conceptExamples(concept)).toEqual(['Ralph Lauren', 'Monclair', 'North face', 'Barbour']);
+    expect(concept.ranks.map((r: { quote: string }) => r.quote)).toEqual(['highest price/value ratio']);
+    expect(concept.context).toHaveLength(1);
+    expect(concept.criteria.some((c: { unframed?: boolean }) => c.unframed)).toBe(false);
+    expect(conceptText(concept)).toContain('[E2] must: brands of the class the examples stand for (the asker\'s examples of the class: Ralph Lauren, Monclair, North face, Barbour; a similar member counts)');
+  });
+
+  it('never lets one sample turn a requirement into a rank, a context or a method', () => {
+    const demoting = { ...full, concept: full.concept.slice(0, 2), method: [{ quote: 'proven good quality', text: 'how to research' }] };
+    const one = agreeFrames([frameSample(demoting, said).value], said);
+    expect(one.criteria.map((c: { quote: string }) => c.quote)).toContain('proven good quality');
+    expect(one.method).toEqual([]);
+    const two = agreeFrames([frameSample(demoting, said).value, frameSample(demoting, said).value, frameSample(full, said).value], said);
+    expect(two.method.map((m: { quote: string }) => m.quote)).toEqual(['proven good quality']);
+    const tied = agreeFrames([frameSample(demoting, said).value, frameSample(demoting, said).value, frameSample(full, said).value, frameSample(full, said).value], said);
+    expect(tied.criteria.map((c: { quote: string }) => c.quote)).toContain('proven good quality');
+  });
+
+  it('makes a piece of the request no sample framed a requirement of its own', () => {
+    const thin = { population: full.population, concept: full.concept.slice(0, 2), ranks: full.ranks };
+    const concept = agreeFrames([frameSample(thin, said).value, frameSample(thin, said).value], said);
+    const unframed = concept.criteria.filter((c: { unframed?: boolean }) => c.unframed).map((c: { quote: string }) => c.quote);
+    expect(unframed).toEqual(['proven good quality', 'assortiment for the appropriate retail second hand shop business in Czech Republic', '20 direct links to the providers with proof']);
+  });
+
+  it('asks three samples, returns nothing when none quotes the request, and is fresh only for the same words', async () => {
+    const router = fakeRouter({ [FRAME_TASK]: seq(full, { concept: [{ quote: 'not in the request', text: 'x' }] }, { concept: [] }, full) });
+    const concept = await frameConcept({ router }, said);
+    expect(router.count(FRAME_TASK)).toBe(FRAME_SAMPLES + 1);
+    expect(router.userText(FRAME_TASK)).toContain(`Request: ${question.replace(/\s+/g, ' ')}`);
+    expect(router.userText(FRAME_TASK)).toContain(`Expected result: ${expected}`);
+    expect(concept.samples).toBe(2);
+    expect(await frameConcept({ router: fakeRouter({}) }, said)).toBeNull();
+    expect(conceptFresh({ ...concept }, said)).toBe(true);
+    expect(conceptFresh({ ...concept }, { question, expected: 'other' })).toBe(false);
+    expect(conceptFresh(null, said)).toBe(false);
+    expect(conceptText(null)).toBe('');
+    expect(conceptKindLabel(null)).toBe('');
+    expect(framePrompt({ question: 'q' })[1].content).toBe('Request: q');
   });
 });

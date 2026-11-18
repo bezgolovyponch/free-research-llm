@@ -270,29 +270,34 @@ export class ChecklistModeler {
   }
 }
 
+export function askedKind(kind) {
+  return String(kind?.asked ?? '').trim() || kind?.label || '';
+}
+
 export function kindCluster(kind) {
+  const label = askedKind(kind);
   const not = (kind.not ?? []).length ? ` and not ${kind.not.join(', ')}` : '';
   const kinds = isUmbrella(kind) ? `, of one of these kinds: ${kind.members.map((member) => member.label).join(', ')}` : '';
   if (kind.entity) {
     const options = [
-      { letter: 'A', text: `one ${kind.label}${kinds}: a single business, on its own website or its own profile page, whatever range of goods it shows` },
+      { letter: 'A', text: `one ${label}${kinds}: a single business, on its own website or its own profile page` },
       { letter: 'B', text: `a directory, list or search page of several businesses` },
       { letter: 'C', text: 'an article, guide, course, news or blog page' },
-      { letter: 'D', text: `a wanted ad, or a business that is not ${kind.label}${not}` },
+      { letter: 'D', text: `a wanted ad, or a business that is not ${label}${not}` },
       { letter: 'E', text: 'something else' },
       { letter: 'U', text: 'cannot tell from these sentences' },
     ];
-    return { clause: 'kind', options, items: [{ question: `Is this page one ${kind.label}${kinds}, a single business on its own site or profile (not a directory of several, an article, or a wanted ad${not})?`, hard: true, numeric: null }] };
+    return { clause: 'kind', options, items: [{ question: `Is this page one ${label}${kinds}, a single business on its own site or profile (not a directory of several, an article, or a wanted ad${not})?`, hard: true, numeric: null }] };
   }
   const options = [
-    { letter: 'A', text: `one ${kind.label}, offered as asked${kinds}` },
+    { letter: 'A', text: `one ${label}, offered as asked${kinds}` },
     { letter: 'B', text: `a part or an accessory of it${not}` },
     { letter: 'C', text: 'several items or a list' },
     { letter: 'D', text: 'a wanted ad or a service' },
     { letter: 'E', text: 'something else' },
     { letter: 'U', text: 'cannot tell from these sentences' },
   ];
-  return { clause: 'kind', options, items: [{ question: `Is this page one ${kind.label} offered as asked${kinds} (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
+  return { clause: 'kind', options, items: [{ question: `Is this page one ${label} offered as asked${kinds} (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
 }
 
 async function shownSpans(spans, query, embedder) {
