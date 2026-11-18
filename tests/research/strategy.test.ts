@@ -199,8 +199,41 @@ describe('decision model from the user words', () => {
     const trends = { TR: { change: 41.5, inflation: 34.9, real: 4.9, year: '2025' } };
     const turkey = planFor({ ...nazare, countryCode: 'TR', country: 'Turkey', fit: { hpi: null } }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 2.9, trends });
     expect(turkey.checks.find((c: { id: string }) => c.id === 'trend')).toMatchObject({ ok: true, detail: 'Turkey +4.9% a year after inflation vs EU +2.9% (Eurostat, housing)' });
-    expect(turkey.why.join(' ')).toContain('(nominal +41.5%, inflation 34.9%, 2025)');
+    expect(turkey.why.join(' ')).toContain('house prices: Turkey +4.9% a year after inflation vs EU +2.9%');
     expect(planFor({ ...nazare, site: null }, GLAMPING_LOW_ENTRY, { euHpi: 2.9, trends: { PT: { change: 17.6, inflation: 2.2, real: 15.1, year: '2025' } } }).verdict).not.toContain('price series');
+  });
+
+  it('compares base-currency real trend (realInBase) with EU base-currency trend, shows both local and EUR detail', () => {
+    const trends = {
+      TR: { change: 41.5, inflation: 34.9, real: -10.7, realInBase: 3.2, realInBaseCagr: 2.8, realInBaseSince: '2022', inflation: 34.9, year: '2025', since: '2021' },
+      EU27_2020: { realInBase: 1.5, realInBaseCagr: 1.2 }
+    };
+    const turkey = planFor({ ...nazare, countryCode: 'TR', country: 'Turkey', fit: { hpi: null } }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 1.5, trends });
+    expect(turkey.checks.find((c: { id: string }) => c.id === 'trend')?.ok).toBe(true);
+    expect(turkey.checks.find((c: { id: string }) => c.id === 'trend')?.detail).toContain('in EUR after euro-area inflation');
+    expect(turkey.checks.find((c: { id: string }) => c.id === 'trend')?.detail).toBe('Turkey +2.8% a year in EUR after euro-area inflation 2022–2025 (last year +3.2% in EUR, -10.7% in local terms) vs EU +1.2% (Eurostat, housing)');
+    expect(turkey.why.join(' ')).toContain('in EUR after euro-area inflation');
+    expect(turkey.why.join(' ')).toContain('-10.7% in local terms');
+  });
+
+  it('euro country trend unchanged by FX (factor 1), base-currency equals local', () => {
+    const trends = {
+      PT: { change: 10, inflation: 2, real: 7.8, realInBase: 7.8, realInBaseCagr: 6.5, realInBaseSince: '2022', year: '2025', since: '2021' },
+      EU27_2020: { realInBase: 2.0, realInBaseCagr: 1.8 }
+    };
+    const portugal = planFor({ ...nazare, countryCode: 'PT', country: 'Portugal', fit: { hpi: null } }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 2.0, trends });
+    expect(portugal.checks.find((c: { id: string }) => c.id === 'trend')?.ok).toBe(true);
+    expect(portugal.checks.find((c: { id: string }) => c.id === 'trend')?.detail).toContain('in EUR after euro-area inflation');
+    expect(portugal.checks.find((c: { id: string }) => c.id === 'trend')?.detail).toContain('+7.8% in local terms');
+  });
+
+  it('missing FX falls back to local real with logged reason', () => {
+    const trends = {
+      TR: { change: 41.5, inflation: 34.9, real: -10.7, year: '2025', baseRealNote: 'missing FX or base inflation data, using local real trend' },
+      EU27_2020: { real: 1.5 }
+    };
+    const turkey = planFor({ ...nazare, countryCode: 'TR', country: 'Turkey', fit: { hpi: null } }, GLAMPING_LOW_ENTRY, { convert: toEur, euHpi: 1.5, trends });
+    expect(turkey.checks.find((c: { id: string }) => c.id === 'trend')?.detail).toContain('after inflation');
   });
 
   it('flags a low price per m² by the robust rule median − 2.5 MAD on log prices (Leys et al. 2013)', async () => {
