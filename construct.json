@@ -1,0 +1,240 @@
+{
+  "manifestVersion": 6,
+  "construct": "0.46.0",
+  "createdAt": "2026-11-18T13:39:40.024Z",
+  "preset": "node-backend",
+  "ai": "claude",
+  "review": null,
+  "harness": {
+    "command": "npm run quality"
+  },
+  "report": {
+    "usage": true
+  },
+  "contracts": {
+    "path": "contracts/api/openapi.yaml",
+    "types": "src/contracts/openapi.ts"
+  },
+  "vars": {
+    "projectName": "construct",
+    "scope": "@construct",
+    "nodeMajor": "24",
+    "contracts": "true",
+    "contractPath": "contracts/api/openapi.yaml",
+    "contractTypesOutput": "src/contracts/openapi.ts",
+    "compositionDir": "architecture/composition",
+    "harnessCommand": "npm run quality",
+    "packageManager": "pnpm",
+    "pnpmVersion": "12.4.2",
+    "reviewModel": "claude-sonnet-5",
+    "constructVersion": "0.46.0",
+    "contractTypesImport": "./openapi.js",
+    "contractPathFromConfig": "../contracts/api/openapi.yaml",
+    "appRoot": ""
+  },
+  "files": {
+    ".claude/agents/architect.md": "4aa2e01569635a2cfbb3a155d5c35e8b47a4421d2978d2eaad4e54cdd683f27a",
+    ".claude/agents/brief.md": "05d2eab5a0ce4f620e53e41ada7c4b0ea7c3cb7f42fbd5a2eaf4254e9c7ab557",
+    ".claude/agents/harness.md": "298fa216335692554475a1af3cbdc2e57a9a02ff4d01dd8842476262e3388d6f",
+    ".claude/agents/implementer.md": "747f0587c6667190cb3765ba00349d92ad37448705b14f0b88ece1e044008067",
+    ".claude/agents/review.md": "2923ff3190ea146df9112c60c4ce5c8dfc29a024bcb33e50c97e3db495ead27b",
+    ".claude/agents/scan.md": "cc3d0af035026783de32417cc822b601d7b8c5afb5410b70507e094ae689f3c1",
+    ".claude/commands/attached-discover.md": "c0e44ce4d2df5121d1c42c1d35284da5fc2edf5968d7b6514470ff42455b74da",
+    ".claude/commands/construct-discover.md": "c0f82f4bf232c68b2cbee7310331dabcf3268ffeb1cfc2e6a41f797e97766d1e",
+    ".claude/commands/plan.md": "eced60a4010c84288e0853ff2afc8f625badba423a692dc6e19806b9fc41f60d",
+    ".claude/commands/status.md": "0e12bce214e09c96c6d455ddc8d1c87da1030c7c95a495d2e8eb3a686898f379",
+    ".claude/eddies.json": "bf28ab44099f196db5358811b8d2eff80605398998203343ff19a72773362c9d",
+    ".claude/rules/conventions.md": "1df1e43e746de65fff26bba2b90f6def7bd1c1b716c65b13ca437669ef1ab7d1",
+    ".claude/rules/secrets.md": "01bb9a99baeca88b7969d116bf6a96b57527d5f38dd56bdcecf8770313f33153",
+    ".claude/rules/tests.md": "f1db64dea1193e23e61f3b5c3f50e9e1d8468968f600d329903e31e2e93a630a",
+    ".claude/settings.json": "4b2dfc5e91790a482e0e8564fec9196cbbf0c396776a4fe08a367a0cddb6b84b",
+    ".claude/skills/browser-lab/SKILL.md": "0fc7fee8b0b9c2d0929bbf39623351da625d53c4adc9f1d36e45c44332798768",
+    ".claude/skills/construct-atlas/SKILL.md": "f65c357b0577575f05fcaa0ee0ce7c489b545acc88d6e6b9689e28302184155d",
+    ".claude/skills/daemon/SKILL.md": "d298cfa8e508e6c5704d7457958aae448aed867b77fff34a75c09866b5a27b16",
+    ".claude/skills/implement/SKILL.md": "1c69e9d5dba559d06d106864579d8712e4adeab7fb20c1cec4ed2c1cfaa6fb2d",
+    ".claude/skills/intake/SKILL.md": "a13995b83db7f19280ebbb513c7b5def8d2b3ee84e27db3d7b79d78102fd07e6",
+    ".claude/skills/probe/SKILL.md": "c4b05d69ad535ba467c94f03eebcc0cf831f1feb2bbbc2641401baa788353414",
+    ".claude/skills/window-recipes/SKILL.md": "de6432684a1d9b16f57c18915365cb2ebc703a7d2a031705d785571ce6649976",
+    ".github/workflows/api-contract.yml": "f47486d08721eeb07e2c5af4ab754442fbe791e0f25ef0583614e2a54643a3cf",
+    ".github/workflows/security.yml": "e81b04407549c5dc68b80c30fbdfe59704d4b2c7479b2af175f8f6200b0e8b39",
+    ".gitignore": "c8cd3ca50829cb85fc351f236de479f4b65888cb572ae0cc2b0a43ebfeadf969",
+    ".gitleaks.toml": "dd3ffcaeb4e2f4a0b5ba98137796d2cd52f172d76a46af3f3a8b1a1143b72318",
+    ".nvmrc": "68ca3fba3b7e864770cb61aeb306d4bd4354b68ab4dd38450860c5d823e42a53",
+    ".vscode/settings.json": "ebe0b0a73dfb45bf5e8e07875cd4f730b884a0ec251dd77de76af4d1b7ed4e77",
+    "AGENTS.md": "8e978b8e02e8129f28c8e94ed2de5ba90fe06af42d1f5a63727584719415aa80",
+    "architecture/checklists.md": "8de2c0a741de5fdeda9fa10254cd17bd3df56bb143d63d27625295ce44030d39",
+    "architecture/decisions/README.md": "35ea243acfb5f48f5550c2a387cd68453616a9e1f035c1a2c56662eb3729c43b",
+    "architecture/decisions/window-allow-merge.md": "9c558c22430387edcc5d722a5211af39fc4ea2c83f16b319f573012f1bc6d7a3",
+    "architecture/open-questions.md": "3135c0bc8b4d7b3e53cf7bbee1e730fa7d87314f86cf9e6cab7e16396cd37328",
+    "architecture/owner-merges.md": "d8113937458ac110ce9c7b4852dbd9c912c575621162c308e8a6f7c199df02b9",
+    "architecture/principles.md": "a4f7df9189da8c8099a3137f5d3a4db979878a19a030c3c4f5aee52eeb3152a7",
+    "architecture/security-invariants.md": "de320ff7884c7d881f72c729cc2b3ce4d138c0b394184623b61b60242cf8318a",
+    "CLAUDE.md": "6cb4ac0995b267329a8300c84029f64320d29a8270813466fffc44bc1462cdc7",
+    "contracts/api/openapi.yaml": "c9b353de87a6599f0cbf9b8dedcc0c34d32e86942d793587a2abb13c82e799ca",
+    "eslint.config.mjs": "50685976ad7a6243bb2a8dab664f3535be9dea533ed69a0b19611149c5a88f81",
+    "package.json": "311b99cb8e84404dfa13dedcce570885e19b1749753de194b0329bfa89724ad7",
+    "pnpm-workspace.yaml": "63fcd34e2800ca49ef79ebcdb09ade6921567e0f02f2024755f15993628ad82f",
+    "redocly.yaml": "283723810d635f4fab4b954b5fa06b23a0b533f3ec914be633f79170be76d730",
+    "scripts/composition/check.ts": "e43b43089e39d13e03344170f2355a9e6a166d93f11922ac4ce5f458bbfb80f0",
+    "scripts/composition/files.ts": "d01a9045ef9f3f5bfdb8abeec062d152ea9afe903827f55d45eedc979f9bc146",
+    "scripts/composition/model.ts": "c5331c6af3527fbf71e80ec956f52c2af01ed3d7980a976bb093095d7a3dafef",
+    "scripts/composition/render.ts": "8df4b6098cbc0ee600bb930a4d9822a81d32af07b083d5a59cd54ec47f0d9eb9",
+    "scripts/composition/sync-docs.ts": "4514971c4d39b90e6080dd2057adfd5dd7cba3b6b8db2eb9af300aa5aed43c20",
+    "scripts/construct/browser-lab.mjs": "88d203980b3a7806ff4d20bcb4f0cc8356174ec89f5b825da410ab3aa3c0a271",
+    "scripts/construct/browser-witness.mjs": "964afd99cb70192c33256bde26e5463475a15d99c937aa2a9153a5f1929b091d",
+    "scripts/construct/check-acceptance.mjs": "7c24818e0940cea186c1bb2faca0db162e15b81f72f281f403ecf1919512faac",
+    "scripts/construct/check-baseline.mjs": "eae96c5d3e62de0b0206da7efd9de3d6174a78d81c45faf3f8a34c19b4fefa48",
+    "scripts/construct/daemon-adapter.schema.json": "f2a0a4e585b1f0db64a4ab98352e6981e1e0e5979c3ff163c41df958ead95a41",
+    "scripts/construct/daemon-run.mjs": "4300755128294732121a2e54c3187ec10c47d3715da387405c417a8f95008ab1",
+    "scripts/construct/daemon.mjs": "2e9ce130f6bd2535caec8333369b173887ffa1a1c7153e3aec2bf24a026656f9",
+    "scripts/construct/daemon.workflow": "5efa432f824e717c531124f6a4dcfc8b12ee82739a57797f449a03ddb093cab3",
+    "scripts/construct/eddies-measure.mjs": "dd5621abfc9dda567294293eeecce28cb13386403f5bdc2678f1692c8df2957a",
+    "scripts/construct/eddies.mjs": "f900b6cd07d022e957e9ff66977152b16340fb1e0d335bbd861d1a0f75872644",
+    "scripts/construct/environment-print.mjs": "032beeaa86b327d1a6f352d7a9ba4ae0712ae3c733abca1d7c4831eb41b793d6",
+    "scripts/construct/implement.workflow": "6d45ff476ca6671c6975229634ff67fb48b324aba4c3f37bd0888e369e1d6bc4",
+    "scripts/construct/shell-parser.mjs": "9667dfabbe03e612c53e68673b748b685f877d9b07a270c51a6af90cdca67ea9",
+    "scripts/construct/window-heartbeat.mjs": "4ea43fa4485323b1401cc5aaa2a2575fcd153276a886f0c5149b54bf5c2c284f",
+    "scripts/construct/window-hooks.mjs": "ba82c66bfa0ea327e146526da715171400cd15ca7f56ea71fd4dd3dffa00145e",
+    "scripts/contracts/types.mjs": "164ded0388bc0e74717e62aea9a9176ec1bcac27744f2f7ddd4dfdd1d9941f05",
+    "scripts/tests/composition/files.test.ts": "098d6026c0552598371fb6fa06bd59e603350d9628848a2d7e97642670455c06",
+    "scripts/tests/composition/model.test.ts": "65cec5b1dbe552fe65b5808156bc6a8f57ffd584e7a666d2976e66321ac846d8",
+    "scripts/tests/composition/render.test.ts": "2425a1b887e751442aac0d7e421f5915cb43d1a4d643007e02d9731241ff6e80",
+    "scripts/tests/contracts/security.test.ts": "243375a8b6130be9c4ab541b6ff23b83341f90b008aa9ed913acae835283fdd0",
+    "src/contracts/openapi.ts": "65b56303b82a568d151c1acd67ff194b091348bd53e1bba12342597e2b59bbbb",
+    "tsconfig.base.json": "040735e3e4af80365d0b48aac9729f779a1f8d97addee940f39b85d84e0424ad",
+    "tsconfig.build.json": "9790d398b7666608107fa172bc99c8363a7e0569f8ec793f8128abdd164bfc9f",
+    "tsconfig.json": "fdf79e52ec37a8bfe86710b0a3d8037f6ac0bea760c441548084c8d3798c7f82",
+    "vitest.config.ts": "de133c592e60be354f5d073f633e01b4633f07b5bbf35a566a40dc96876126e4"
+  },
+  "variants": {
+    ".gitignore": "default",
+    "AGENTS.md": "default",
+    "CLAUDE.md": "existing"
+  },
+  "blocks": {
+    ".gitignore": {
+      "ownedSha": "72f26f9a459a4c4bfd112453e94175b02357eb6376568afc45d0d8321696275b",
+      "vars": {
+        "projectName": "construct",
+        "scope": "@construct",
+        "nodeMajor": "24",
+        "contracts": "true",
+        "contractPath": "contracts/api/openapi.yaml",
+        "contractTypesOutput": "src/contracts/openapi.ts",
+        "compositionDir": "architecture/composition",
+        "harnessCommand": "npm run quality",
+        "packageManager": "pnpm",
+        "pnpmVersion": "12.4.2",
+        "reviewModel": "claude-sonnet-5",
+        "constructVersion": "0.46.0",
+        "contractTypesImport": "./openapi.js",
+        "contractPathFromConfig": "../contracts/api/openapi.yaml",
+        "appRoot": ""
+      }
+    },
+    "AGENTS.md": {
+      "ownedSha": "64908a705eae331d98ccc61c34228e97017c905bdccf00e85aed2bb74a0535a8",
+      "vars": {
+        "projectName": "construct",
+        "scope": "@construct",
+        "nodeMajor": "24",
+        "contracts": "true",
+        "contractPath": "contracts/api/openapi.yaml",
+        "contractTypesOutput": "src/contracts/openapi.ts",
+        "compositionDir": "architecture/composition",
+        "harnessCommand": "npm run quality",
+        "packageManager": "pnpm",
+        "pnpmVersion": "12.4.2",
+        "reviewModel": "claude-sonnet-5",
+        "constructVersion": "0.46.0",
+        "contractTypesImport": "./openapi.js",
+        "contractPathFromConfig": "../contracts/api/openapi.yaml",
+        "appRoot": ""
+      }
+    },
+    "CLAUDE.md": {
+      "ownedSha": "90fe34aa6579009f904b125c803171cc48f3c846bcbf68d7399761fa135fca10",
+      "vars": {
+        "projectName": "construct",
+        "scope": "@construct",
+        "nodeMajor": "24",
+        "contracts": "true",
+        "contractPath": "contracts/api/openapi.yaml",
+        "contractTypesOutput": "src/contracts/openapi.ts",
+        "compositionDir": "architecture/composition",
+        "harnessCommand": "npm run quality",
+        "packageManager": "pnpm",
+        "pnpmVersion": "12.4.2",
+        "reviewModel": "claude-sonnet-5",
+        "constructVersion": "0.46.0",
+        "contractTypesImport": "./openapi.js",
+        "contractPathFromConfig": "../contracts/api/openapi.yaml",
+        "appRoot": ""
+      }
+    }
+  },
+  "discovery": {
+    "baseSha": null,
+    "filledAt": null,
+    "markers": {
+      "product": {
+        "file": "AGENTS.md",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "module-map": {
+        "file": "AGENTS.md",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "commands": {
+        "file": "AGENTS.md",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "composition-roots": {
+        "file": "AGENTS.md",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "dependency-policy": {
+        "file": "AGENTS.md",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "high-effort-areas": {
+        "file": "AGENTS.md",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "composition": {
+        "file": "architecture/composition",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "security-invariants": {
+        "file": "architecture/security-invariants.md",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "defects-vs-variance": {
+        "file": "AGENTS.md",
+        "authoredBy": "unknown",
+        "sha": null
+      },
+      "open-questions": {
+        "file": "architecture/open-questions.md",
+        "authoredBy": "unknown",
+        "sha": null
+      }
+    }
+  },
+  "sync": null,
+  "policy": null,
+  "lanes": 3,
+  "serve": {
+    "command": "pnpm dev",
+    "url": "http://localhost:3000/",
+    "readyTimeoutMs": 30000
+  }
+}

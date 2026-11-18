@@ -227,3 +227,19 @@ node_modules
 .DS_Store
 test-results/
 playwright-report/
+
+# construct:begin
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.eslintcache
+.DS_Store
+.env
+.env.*
+!.env.example
+.construct/
+.claude/settings.local.json
+.pnpm-store/
+# construct:end
