@@ -421,6 +421,17 @@ export function criterionEvidence(findings) {
   return byCriterion;
 }
 
+export const DOMAIN_TEXT_MEMBERS = 12;
+
+export function domainText(domain) {
+  const members = (domain?.members ?? []).filter((member) => member.supported).slice(0, DOMAIN_TEXT_MEMBERS).map((member) => member.name);
+  const evidence = Object.entries(domain?.evidence ?? {}).flatMap(([criterion, entries]) => entries.slice(0, 2).map((entry) => `[${criterion}] "${entry.quote}"`));
+  return [
+    members.length ? `Learned from sources, members of the class your examples stand for: ${members.join(', ')}` : '',
+    evidence.length ? `Learned from sources, what the page of an eligible result states: ${evidence.join(' ')}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 export function domainUnderstanding(findings, { hint = '', sources = [], members = [] } = {}) {
   const list = Array.isArray(findings) ? findings.filter(Boolean) : [];
   const byAspect = (aspect) => list.filter((finding) => String(finding?.aspect ?? '') === aspect);

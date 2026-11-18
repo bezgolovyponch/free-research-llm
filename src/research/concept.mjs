@@ -338,8 +338,9 @@ export async function frameConcept(ctx, { question, expected = '' }) {
   return samples.length ? agreeFrames(samples, said) : null;
 }
 
-export function conceptFresh(concept, { question, expected = '' }) {
-  return Boolean(concept && concept.version === CONCEPT_VERSION && concept.question === String(question ?? '') && concept.expected === String(expected ?? ''));
+export function conceptOf(model) {
+  if (!model?.requirements?.length && !model?.framing) return null;
+  return { question: model.question ?? '', expected: model.expected ?? '', criteria: model.requirements ?? [], ...(model.framing ?? {}) };
 }
 
 export function conceptKindLabel(concept) {
@@ -374,7 +375,7 @@ export function conceptChecklist(concept, checklist = null) {
   if (!concept?.criteria?.length) return checklist ?? null;
   const asked = `${concept.question}\n${concept.expected}`;
   const limit = (item) => Boolean(item.hard && item.numeric?.measure && askedWithUnit(asked, item.numeric.value, item.numeric.unit));
-  const eligibility = concept.criteria.map((criterion) => ({ clause: criterion.text, role: ELIGIBILITY, criterion: criterion.id, quote: criterion.quote, items: [{ clause: criterion.text, question: criterionQuestion(criterion), hard: true, criterion: criterion.id }] }));
+  const eligibility = concept.criteria.map((criterion) => ({ clause: criterion.text, role: ELIGIBILITY, criterion: criterion.id, quote: criterion.quote, items: [{ clause: criterion.text, question: criterionQuestion(criterion), hard: true, criterion: criterion.id, examples: criterion.examples ?? [] }] }));
   const appraisal = (checklist ?? []).map((cluster) => ({ ...cluster, role: APPRAISAL, items: cluster.items.map((item) => ({ ...item, hard: limit(item) })) }));
   return [...eligibility, ...appraisal];
 }

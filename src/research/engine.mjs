@@ -6,6 +6,7 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
+import { currencyOf } from './acceptance.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
@@ -22,14 +23,13 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
-import { conceptExamples, conceptFresh, conceptKindLabel, conceptText, frameConcept } from './concept.mjs';
-import { CallBudget } from './semantic.mjs';
+import { conceptExamples, conceptOf, conceptText } from './concept.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, lowPriceCut, lowPriceStats, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
-import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
+import { domainFindingsPrompt, domainQueryPrompt, domainText, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
 import { listingKey, nextPageUrl } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
@@ -325,8 +325,8 @@ export class ResearchEngine {
     this.listeners = new Map();
     this.running = new Set();
     this.cancelled = new Set();
-    this.checklistJudge = new ChecklistJudge({ router });
     this.embedder = embedder;
+    this.checklistJudge = new ChecklistJudge({ router, embedder });
   }
 
   subscribe(projectId, listener) {
@@ -545,7 +545,7 @@ export class ResearchEngine {
     const located = Boolean(template.itemKind) ? true : model?.kind?.validated ? false : (!kind || listedKind(kind));
     if (model?.kind) model.kind.entity = located === false;
     const seaAsked = asksSea(foundation, brief.coastal) || Boolean(model?.criteria?.some((c) => c.measure === 'coastKm'));
-    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief({ ...brief, located }), conceptText(project.concept), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief({ ...brief, located }), strategy ? [foundationText(foundation), conceptText(conceptOf(model))].filter(Boolean).join('\n') : modelText(model), domainText(project.domain)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -631,33 +631,13 @@ export class ResearchEngine {
     return table;
   }
 
-  async ensureConcept(project) {
-    if (!this.router || this.demo || !project.acceptance?.itemCount) return project.concept ?? null;
-    const said = { question: project.question, expected: project.acceptance?.expected ?? '' };
-    if (conceptFresh(project.concept, said)) return project.concept;
-    const framed = await frameConcept({ router: this.router, budget: new CallBudget() }, said).catch(() => null);
-    if (!framed) {
-      this.emit(project, 'warn', 'concept not framed: no model returned a framing quoted from your words; eligibility criteria cannot be fixed until one does');
-      return project.concept ?? null;
-    }
-    project.concept = { ...framed, at: new Date().toISOString() };
-    this.emit(project, 'decision', `concept framed from your words (${framed.samples} sample(s)): ${conceptText(project.concept).split('\n').join(' · ')}`);
-    return project.concept;
-  }
-
-  askedKind(project) {
-    const asked = conceptKindLabel(project.concept);
-    if (asked && project.decisionModel?.kind) project.decisionModel.kind.asked = asked;
-    return project.decisionModel ?? null;
-  }
-
   async ensureDecisionModel(project) {
     await this.ensureArea(project);
-    await this.ensureConcept(project);
-    if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return this.askedKind(project);
+    if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
     try {
       const model = await this.modeler.build(project);
-      this.askedKind(project);
+      if (model?.requirements?.length) this.emit(project, 'decision', `requirements judged by meaning, from your words: ${conceptText(conceptOf(model)).split('\n').join(' · ')}`);
+      else if (model && this.router) this.emit(project, 'warn', 'no model framed the request in your own words: only the measured criteria and the model-written checklist apply');
       if (model) this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}`);
       return model;
     } catch (error) {
@@ -669,8 +649,7 @@ export class ResearchEngine {
   async rebuildDecisionModel(project) {
     if (!this.modeler || this.demo) return project.decisionModel ?? null;
     try {
-      await this.modeler.build(project, { force: true });
-      return this.askedKind(project);
+      return await this.modeler.build(project, { force: true });
     } catch (error) {
       this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
       return project.decisionModel ?? null;
@@ -804,14 +783,13 @@ export class ResearchEngine {
   async studyDomain(project) {
     if (!this.router || this.demo || !this.search?.search) return true;
     this.ensureItemCount(project);
-    await this.ensureConcept(project);
-    if (project.domain?.ready && (project.domain.conceptAt ?? null) === (project.concept?.at ?? null)) return true;
     await this.ensureDecisionModel(project);
-    const examples = conceptExamples(project.concept);
-    const criteria = project.concept?.criteria ?? [];
+    const examples = conceptExamples(conceptOf(project.decisionModel));
+    const criteria = project.decisionModel?.requirements ?? [];
+    if (project.domain?.ready && examples.join('|') === (project.domain.examples ?? []).join('|')) return true;
     const purpose = project.decisionModel?.purpose ?? '';
     const kind = project.decisionModel?.kind ?? null;
-    const object = kind ? [conceptKindLabel(project.concept) || kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : conceptKindLabel(project.concept);
+    const object = kind ? [kind.asked || kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
     const hint = project.guidance ?? '';
     const brief = project.brief ?? this.briefOf(project);
     const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
@@ -845,7 +823,7 @@ export class ResearchEngine {
           ? `portal listings: ${sweptListings}`
           : `listed kind: ${kind?.label ?? 'the item'}`;
     }
-    project.domain = { ...understanding, conceptAt: project.concept?.at ?? null, at: new Date().toISOString() };
+    project.domain = { ...understanding, examples, at: new Date().toISOString() };
     const learned = understanding.members.filter((member) => member.supported);
     if (examples.length) this.emit(project, 'decision', `class learned from your examples (${examples.join(', ')}): ${learned.length ? learned.map((member) => `${member.name} (${member.hosts.length} sites)`).join(', ') : 'no other member is named next to them on two sites yet'}`);
     const summary = [
@@ -1765,7 +1743,18 @@ export class ResearchEngine {
       const newChecklist = filterCountItems(project.decisionModel.checklist, askedCounts(project.acceptance));
       if (newChecklist) {
         project.checklist = newChecklist;
-        const fingerprint = checklistFingerprint(newChecklist);
+        const members = (project.domain?.members ?? []).filter((member) => member.supported).map((member) => member.name);
+        const labels = project.decisionModel?.labels ?? [];
+        const fingerprint = `${checklistFingerprint(newChecklist)}::${members.length}:${labels.length}`;
+        const rows = new Map((project.candidates?.kept ?? []).map((row) => [row.url, row]));
+        const price = (priced, unit) => {
+          if (priced.value === null || priced.value === undefined) return undefined;
+          const from = currencyOf(priced.unit ?? '');
+          const to = currencyOf(unit ?? '') || currencyOf(project.acceptance?.unit ?? '');
+          if (from === to) return Number(priced.value);
+          if (!from || !to || !convert) return undefined;
+          return convert(Number(priced.value), from, to) ?? undefined;
+        };
         const targetCount = project.acceptance?.itemCount ?? project.acceptanceResult.items.length;
         let judgedCount = 0;
         let confirmedCount = 0;
@@ -1792,12 +1781,7 @@ export class ResearchEngine {
               item.checks = [];
               continue;
             }
-            const ctx = {
-              trends: project.candidates?.sites?.trends ?? null,
-              euHpi: project.candidates?.sites?.euHpi ?? null,
-            };
-            const decisionCriteria = project.decisionModel?.criteria ?? [];
-            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null, decisionCriteria, ctx);
+            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null, { row: rows.get(item.url) ?? null, price, members, evidence: project.domain?.evidence ?? {}, labels, criteria: project.decisionModel?.criteria ?? [], measures: { trends: project.candidates?.sites?.trends ?? null, euHpi: project.candidates?.sites?.euHpi ?? null } });
             item.checklist = checklistSummary([item])[0];
             checkCache[cacheKey] = { checks, summary: item.checklist };
             const keys = Object.keys(checkCache);
@@ -1862,12 +1846,17 @@ export class ResearchEngine {
                 }
               }
             }
-            if (!secondOpinionUsed && !kindRejectedSet.has(item.url)) {
-              project.kindRejected.push({ url: item.url, judgeVersion: JUDGE_VERSION });
-              kindRejectedSet.add(item.url);
-              if (project.kindRejected.length > 500) {
-                project.kindRejected.shift();
+            if (!secondOpinionUsed && kindCheck.second?.answer === 'no') {
+              if (!kindRejectedSet.has(item.url)) {
+                project.kindRejected.push({ url: item.url, judgeVersion: JUDGE_VERSION });
+                kindRejectedSet.add(item.url);
+                if (project.kindRejected.length > 500) project.kindRejected.shift();
               }
+            } else if (!secondOpinionUsed) {
+              kindCheck.leaning = { answer: 'no', quote: kindCheck.quote };
+              kindCheck.answer = 'unknown';
+              kindCheck.quote = '';
+              kindCheck.reason = SINGLE_KIND_OPINION;
             }
           }
 

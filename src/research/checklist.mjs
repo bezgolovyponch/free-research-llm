@@ -1,6 +1,6 @@
 import { plain } from './itemgate.mjs';
 import { isUmbrella } from './concept.mjs';
-import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
+import { MAX_SPAN_CHARS, pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
 import { agreed, closedVote } from './semantic.mjs';
 import { MEASURES as DecisionMeasures, compare, adaptForChecklist } from './measures.mjs';
 
@@ -187,19 +187,20 @@ function getMeasures() {
   return adaptForChecklist(DecisionMeasures);
 }
 
+const finite = (raw) => (raw !== null && raw !== undefined && raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined);
+
 function finiteReading(measure, item, ctx) {
-  if (!measure) return undefined;
-  const raw = measure.read(item ?? {}, ctx);
-  return raw !== null && raw !== undefined && raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+  return measure ? finite(measure.read(item ?? {}, ctx)) : undefined;
 }
 
-export function measuredReading(item, numeric, { measures = getMeasures(), criteria = [], ctx = {} } = {}) {
+export function measuredReading(item, numeric, { measures = getMeasures(), criteria = [], ctx = {}, row = null, price = null } = {}) {
   if (!numeric?.measure || !numeric.op || numeric.value === null || numeric.value === undefined) return undefined;
-  const own = finiteReading(measures[numeric.measure], item, ctx);
+  const source = row ?? item;
+  const own = numeric.measure === PRICE_MEASURE && price ? finite(price(item ?? {}, numeric.unit)) : finiteReading(measures[numeric.measure], source, ctx);
   if (own !== undefined) return { value: own, measure: numeric.measure };
   for (const criterion of criteria ?? []) {
     if (!criterion?.measure || criterion.op !== numeric.op || criterion.value !== numeric.value) continue;
-    const stated = finiteReading(measures[criterion.measure], item, ctx);
+    const stated = finiteReading(measures[criterion.measure], source, ctx);
     if (stated !== undefined) return { value: stated, measure: criterion.measure };
   }
   return undefined;
@@ -207,6 +208,10 @@ export function measuredReading(item, numeric, { measures = getMeasures(), crite
 
 export function measuredValue(item, numeric, options = {}) {
   return measuredReading(item, numeric, options)?.value;
+}
+
+function readingOptions(context = {}, measures = getMeasures()) {
+  return { measures, criteria: context.criteria ?? [], ctx: context.measures ?? {}, row: context.row ?? null, price: context.price ?? null };
 }
 
 export function checklistSummary(items) {
@@ -300,15 +305,16 @@ export function kindCluster(kind) {
   return { clause: 'kind', options, items: [{ question: `Is this page one ${label} offered as asked${kinds} (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
 }
 
-async function shownSpans(spans, query, embedder) {
+async function shownSpans(spans, query, embedder, always = []) {
   const lineCount = (list) => {
-    const block = spansBlock(list, JUDGE_BLOCK_CHARS);
+    const block = spansBlock([...always, ...list], JUDGE_BLOCK_CHARS);
     return block ? block.split('\n').length : 0;
   };
-  const opening = lineCount(spans);
+  const room = (list) => Math.max(0, lineCount(list) - always.length);
+  const opening = room(spans);
   if (opening >= spans.length) return spans;
   const picked = await pickSpans(spans, query, embedder, opening);
-  return picked.slice(0, lineCount(picked));
+  return picked.slice(0, room(picked));
 }
 
 export class ChecklistJudge {
@@ -333,14 +339,14 @@ export class ChecklistJudge {
     }
   }
 
-  async answersFromPage(asked, spans) {
-    const shown = spans.length ? await shownSpans(spans, asked.map((q) => q.question).join(' '), this.embedder) : [];
+  async answersFromPage(asked, shown) {
     if (!shown.length) return new Map();
-    const reply = await this.complete(judgePrompt({ questions: asked, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
+    const reply = await this.complete(judgePrompt({ questions: asked.map((q) => ({ short: q.short, question: q.asked ?? q.question })), block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
     const validated = applyQuoteCheck(replyList(reply?.data), shown);
+    const by = { provider: reply?.provider ?? null, model: reply?.model ?? null };
     return new Map(asked.flatMap((q) => {
       const found = validated.find((r) => shortIdOf(r) === q.short);
-      return found ? [[q.short, found]] : [];
+      return found ? [[q.short, { ...found, ...by }]] : [];
     }));
   }
 
@@ -376,7 +382,16 @@ export class ChecklistJudge {
     return { answer: voted?.answer ?? 'unknown', quote: voted?.quote ?? '', tally: result.tally, ...(result.single ? { single: true } : {}) };
   }
 
-  async judge(item, pageText, checklist, kind = null, decisionCriteria = [], ctx = {}) {
+  async confirm(question, shown, first) {
+    const block = spansBlock(shown, JUDGE_BLOCK_CHARS);
+    const extra = (data, hit) => ({ value: { quote: hit ? quoteFromSpans(data?.spans ?? data?.span, shown) : '' } });
+    const result = await closedVote({ router: this.router, task: SECOND_TASK, tier: 'fast', options: SECOND_OPTIONS, field: 'answer', none: KIND_NONE, seed: `${question}|${block}`, prompt: (options) => confirmPrompt({ question, options, block }), extra, n: KIND_SECOND_VOTES, quorum: 1, keyOf: (id, more) => (id && more.quote ? id : 'unknown'), avoid: first.provider ? [first.provider] : undefined, exclude: [{ provider: first.provider, model: first.model }] });
+    const voted = agreed(result);
+    if (!voted) return { answer: null, quote: '' };
+    return voted.id && voted.extra.quote ? { answer: voted.id, quote: voted.extra.quote } : { answer: 'unknown', quote: '' };
+  }
+
+  async judge(item, pageText, checklist, kind = null, context = {}) {
     const checks = [];
     const numericItems = [];
     const qualitativeItems = [];
@@ -384,7 +399,7 @@ export class ChecklistJudge {
     const measures = getMeasures();
     for (const cluster of checklist) {
       for (const ci of cluster.items) {
-        const reading = measuredReading(item, ci.numeric, { measures, criteria: decisionCriteria, ctx });
+        const reading = measuredReading(item, ci.numeric, readingOptions(context, measures));
         if (reading) {
           numericItems.push({ cluster, item: ci, ...reading });
         } else {
@@ -398,29 +413,94 @@ export class ChecklistJudge {
       checks.push({ id: cluster.clause + '|' + ci.question, answer, quote: `${measure}: ${value} ${ci.numeric.unit}`, hard: ci.hard, clause: cluster.clause });
     }
 
-    const questions = qualitativeItems.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, hard: ci.hard, clause: cluster.clause }));
-    const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
+    const facts = rowSentences(context.row);
+    const pageSpans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
+    const kindCheck = kind?.label ? (this.router ? await this.judgeKind(pageSpans, kindCluster(kind)) : { id: `kind|${kindCluster(kind).items[0].question}`, answer: 'unknown', quote: '', hard: true, clause: 'kind' }) : null;
+    const notKind = kindCheck?.answer === 'no';
+
+    const questions = qualitativeItems.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, asked: criterionAsked(ci, context), hard: ci.hard, clause: cluster.clause, criterion: ci.criterion ?? null }));
 
     for (let at = 0; at < questions.length; at += JUDGE_QUESTIONS_PER_CALL) {
       const asked = questions.slice(at, at + JUDGE_QUESTIONS_PER_CALL);
-      const answers = await this.answersFromPage(asked, spans);
+      if (notKind) {
+        for (const q of asked) checks.push({ id: q.id, answer: 'unknown', quote: '', hard: q.hard, clause: q.clause, reason: NOT_KIND_REASON });
+        continue;
+      }
+      const picked = pageSpans.length ? await shownSpans(pageSpans, asked.map((q) => q.asked).join(' '), this.embedder, facts) : [];
+      const shown = [...facts, ...picked];
+      const answers = await this.answersFromPage(asked, shown);
       const missing = asked.filter((q) => !answers.has(q.short));
       if (missing.length) {
-        for (const [short, found] of await this.answersFromPage(missing, spans)) answers.set(short, found);
+        for (const [short, found] of await this.answersFromPage(missing, shown)) answers.set(short, found);
       }
       for (const q of asked) {
         const found = answers.get(q.short);
-        checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause });
+        const check = { id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause };
+        if (!q.criterion || check.answer === 'unknown') {
+          checks.push(q.criterion ? { ...check, criterion: q.criterion } : check);
+          continue;
+        }
+        const second = await this.confirm(q.asked, shown, { provider: found.provider, model: found.model });
+        if (second.answer === check.answer) checks.push({ ...check, criterion: q.criterion, second: { answer: second.answer, quote: second.quote } });
+        else if (second.answer === null) checks.push({ ...check, criterion: q.criterion, answer: 'unknown', quote: '', reason: SECOND_FAMILY_REASON, leaning: { answer: check.answer, quote: check.quote } });
+        else checks.push({ ...check, criterion: q.criterion, answer: 'unknown', quote: '', reason: SPLIT_REASON, split: { first: { answer: check.answer, quote: check.quote }, second: { answer: second.answer, quote: second.quote } } });
       }
     }
 
-    if (kind?.label) {
-      const kindCheck = this.router ? await this.judgeKind(spans, kindCluster(kind)) : { id: `kind|${kindCluster(kind).items[0].question}`, answer: 'unknown', quote: '', hard: true, clause: 'kind' };
-      checks.push(kindCheck);
-    }
+    if (kindCheck) checks.push(kindCheck);
 
     return checks;
   }
+}
+
+export const PRICE_MEASURE = 'priceEur';
+export const SECOND_TASK = 'criterion-second';
+export const SECOND_OPTIONS = [{ id: 'yes', text: 'the sentences show that the result meets the requirement' }, { id: 'no', text: 'the sentences show that the result does not meet it' }];
+export const SECOND_FAMILY_REASON = 'one independent judgement only: to confirm';
+export const SPLIT_REASON = 'two provider families read the page differently: to confirm';
+export const NOT_KIND_REASON = 'not asked: the page is not the asked kind';
+export const ROW_SPAN = 'F';
+export const ANCHORS_SHOWN = 12;
+export const EVIDENCE_SHOWN = 3;
+
+export function rowSentences(row) {
+  if (!row) return [];
+  const lines = [];
+  const add = (label, value, unit = '') => {
+    if (value !== null && value !== undefined && value !== '') lines.push(`${label}: ${value}${unit ? ` ${unit}` : ''}`);
+  };
+  add('Listing title', row.title);
+  add('Asking price', row.price ?? row.value, row.currency ?? row.unit);
+  add('Place', row.place);
+  add('Country', row.country);
+  add('Distance from the asked place', Number.isFinite(row.distanceKm) ? Math.round(row.distanceKm) : null, 'km');
+  add('Area', row.area, row.areaUnit);
+  add('Measured against the decision model', row.plan?.verdict);
+  for (const reason of row.plan?.why ?? []) add('Measured', reason);
+  return lines.map((text, index) => ({ id: `${ROW_SPAN}${index + 1}`, text: String(text).replace(/\s+/g, ' ').slice(0, MAX_SPAN_CHARS) }));
+}
+
+export function criterionAsked(ci, context = {}) {
+  if (!ci.criterion) return ci.question;
+  const members = (context.members ?? []).slice(0, ANCHORS_SHOWN);
+  const evidence = (context.evidence?.[ci.criterion] ?? []).slice(0, EVIDENCE_SHOWN);
+  const labels = (context.labels ?? []).filter((label) => label.criterion === ci.criterion);
+  const counted = labels.filter((label) => label.label === 'yes').map((label) => label.title);
+  const refused = labels.filter((label) => label.label === 'no').map((label) => label.title);
+  return [
+    ci.question,
+    ci.examples?.length && members.length ? `Sources name these next to the asker's examples, as members of the same class: ${members.join(', ')}.` : '',
+    evidence.length ? `Sources say the page of such a result shows it like this: ${evidence.map((entry) => `"${entry.quote}"`).join(' ')}` : '',
+    counted.length ? `The asker counted these as meeting it: ${counted.join('; ')}.` : '',
+    refused.length ? `The asker counted these as not meeting it: ${refused.join('; ')}.` : '',
+  ].filter(Boolean).join(' ');
+}
+
+export function confirmPrompt({ question, options, block }) {
+  return [
+    { role: 'system', content: 'You are a strict judge of one item page, shown as numbered sentences. Select the one option that says what the sentences show about the requirement, and give in "spans" the ids of the one or two sentences that show it. Never write the sentence itself. Answer with JSON only: {"answer":"<letter>","spans":["S12"]}' },
+    { role: 'user', content: `Item page text:\n${block}\n\nRequirement: ${question}\n\nThe sentences show:\n${options.map((option) => `${option.letter}) ${option.text}`).join('\n')}\n${KIND_NONE}) the sentences do not say` },
+  ];
 }
 
 export function judgePrompt({ questions, block }) {

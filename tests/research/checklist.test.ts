@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
@@ -856,18 +856,93 @@ describe('numeric checklist items answer from the measured plot row', () => {
   const coastCriterion = [{ measure: 'coastKm', op: '<=', value: 20 }];
 
   it('judges the sea item with the decision criterion measure it states when its own measure reads nothing', async () => {
-    const checks = await new ChecklistJudge({ router }).judge(row, '', sea, null, coastCriterion, {});
+    const checks = await new ChecklistJudge({ router }).judge(row, '', sea, null, { criteria: coastCriterion });
     expect(checks[0].answer).toBe('yes');
     expect(checks[0].quote).toContain('coastKm: 3.3');
   });
 
   it('compares the price converted to EUR, not the listing currency amount', async () => {
-    const checks = await new ChecklistJudge({ router }).judge(row, '', price, null, [], {});
+    const checks = await new ChecklistJudge({ router }).judge(row, '', price, null, {});
     expect(checks[0].answer).toBe('yes');
   });
 
   it('reads the camping months from the plot site climate', async () => {
-    const checks = await new ChecklistJudge({ router }).judge(row, '', climate, null, [], {});
+    const checks = await new ChecklistJudge({ router }).judge(row, '', climate, null, {});
     expect(checks[0].answer).toBe('yes');
+  });
+});
+
+describe('screening a requirement of the asker by meaning', () => {
+  const page = 'We are a seller of coats. We stock Cedar Wear and Betula coats in bulk. Our shop opens at nine.';
+  const question = 'Does this page show that the result meets this requirement of the request: "sells coats of makers like the named ones"?';
+  const checklist = [
+    { clause: 'coats of the class', role: 'eligibility', criterion: 'E1', items: [{ clause: 'coats of the class', question, hard: true, criterion: 'E1', examples: ['Alpha Coats', 'Betula'] }] },
+    { clause: 'graded', role: 'appraisal', items: [{ clause: 'graded', question: 'Is it graded?', hard: false }] },
+  ];
+  const kind = { label: 'seller', asked: 'sellers of coats', terms: ['seller'] };
+  const first = (answer: string, kindLetter = 'A') => (request: { messages: Array<{ content: string }> }) => {
+    const text = request.messages[1].content;
+    if (text.includes('This page offers:')) return { kind: kindLetter, span: 'S1' };
+    return [{ id: 'q1', answer, spans: ['S2'] }, { id: 'q2', answer: 'unknown', spans: [] }];
+  };
+  const idOf = (clause: string, q: string) => `${clause}|${q}`;
+  const criterionCheck = (checks: Array<{ id: string }>) => checks.find((check) => check.id === idOf('coats of the class', question)) as Record<string, any>;
+
+  it('counts a yes only when a second provider family reads the same from the page', async () => {
+    const router = fakeRouter({ '': first('yes'), [SECOND_TASK]: { answer: 'yes', spans: ['S2'] } });
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'u' }, page, checklist, kind);
+    expect(criterionCheck(checks)).toMatchObject({ answer: 'yes', quote: 'We stock Cedar Wear and Betula coats in bulk.', hard: true, criterion: 'E1', second: { answer: 'yes' } });
+    expect(router.calls.find((call) => call.task === SECOND_TASK)!.avoid).toEqual(['p1']);
+    expect(router.userText(SECOND_TASK)).toContain(`Requirement: ${question}`);
+    expect(checks.find((check: { clause: string }) => check.clause === 'kind')).toMatchObject({ answer: 'yes' });
+    expect(checks.find((check: { clause: string }) => check.clause === 'kind')!.id).toContain('one sellers of coats');
+  });
+
+  it('leaves it to confirm with the first reading when only one family answers, and when the two families differ', async () => {
+    const alone = fakeRouter({ '': first('yes'), [SECOND_TASK]: { answer: 'yes', spans: ['S2'] } }, { providers: ['p1'] });
+    expect(criterionCheck(await new ChecklistJudge({ router: alone }).judge({ url: 'u' }, page, checklist, kind))).toMatchObject({ answer: 'unknown', quote: '', reason: SECOND_FAMILY_REASON, leaning: { answer: 'yes', quote: 'We stock Cedar Wear and Betula coats in bulk.' } });
+    const differ = fakeRouter({ '': first('yes'), [SECOND_TASK]: { answer: 'no', spans: ['S3'] } });
+    expect(criterionCheck(await new ChecklistJudge({ router: differ }).judge({ url: 'u' }, page, checklist, kind))).toMatchObject({ answer: 'unknown', reason: SPLIT_REASON, split: { first: { answer: 'yes' }, second: { answer: 'no', quote: 'Our shop opens at nine.' } } });
+    const silent = fakeRouter({ '': first('no'), [SECOND_TASK]: { answer: 'U', spans: [] } });
+    expect(criterionCheck(await new ChecklistJudge({ router: silent }).judge({ url: 'u' }, page, checklist, kind))).toMatchObject({ answer: 'unknown', reason: SPLIT_REASON });
+  });
+
+  it('asks nothing more about a page that is not the asked kind', async () => {
+    const router = fakeRouter({ '': first('yes', 'C'), [SECOND_TASK]: { answer: 'yes', spans: ['S2'] } });
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'u' }, page, checklist, kind);
+    expect(router.calls).toHaveLength(1);
+    expect(criterionCheck(checks)).toMatchObject({ answer: 'unknown', reason: NOT_KIND_REASON });
+    expect(checks.at(-1)).toMatchObject({ clause: 'kind', answer: 'no' });
+  });
+
+  it('shows the judge the class learned from sources, what a page shows and the labels of the asker', () => {
+    const asked = criterionAsked(checklist[0].items[0], { members: ['Cedar Wear', 'Dune Outdoor'], evidence: { E1: [{ quote: 'We stock these makers.' }] }, labels: [{ criterion: 'E1', label: 'yes', title: 'Coat Depot' }, { criterion: 'E1', label: 'no', title: 'Rag Export' }, { criterion: 'E2', label: 'yes', title: 'Other' }] });
+    expect(asked).toBe(`${question} Sources name these next to the asker's examples, as members of the same class: Cedar Wear, Dune Outdoor. Sources say the page of such a result shows it like this: "We stock these makers." The asker counted these as meeting it: Coat Depot. The asker counted these as not meeting it: Rag Export.`);
+    expect(criterionAsked(checklist[1].items[0], { members: ['Cedar Wear'] })).toBe('Is it graded?');
+    expect(criterionAsked({ question: 'q', criterion: 'E9', examples: [] }, { members: ['Cedar Wear'] })).toBe('q');
+  });
+
+  it('lets the judge quote what the table measured on the row, next to the page', async () => {
+    const row = { title: 'Plot near the sea', price: 4900, currency: 'EUR', place: 'Aveiro', country: 'Portugal', distanceKm: 12.4, area: 3080, areaUnit: 'm²', plan: { verdict: 'fits every criterion', why: ['sea 3 km'] } };
+    expect(rowSentences(row).map((span: { id: string; text: string }) => `${span.id} ${span.text}`)).toEqual(['F1 Listing title: Plot near the sea', 'F2 Asking price: 4900 EUR', 'F3 Place: Aveiro', 'F4 Country: Portugal', 'F5 Distance from the asked place: 12 km', 'F6 Area: 3080 m²', 'F7 Measured against the decision model: fits every criterion', 'F8 Measured: sea 3 km']);
+    expect(rowSentences(null)).toEqual([]);
+    const router = fakeRouter({ '': (request: { messages: Array<{ content: string }> }) => (request.messages[1].content.includes('This page offers:') ? { kind: 'A', span: 'S1' } : [{ id: 'q1', answer: 'yes', spans: ['F8'] }]), [SECOND_TASK]: { answer: 'yes', spans: ['F8'] } });
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'u' }, page, [checklist[0]], kind, { row });
+    expect(criterionCheck(checks)).toMatchObject({ answer: 'yes', quote: 'Measured: sea 3 km' });
+    expect(router.calls[1].messages[1].content).toContain('[F8] Measured: sea 3 km');
+  });
+
+  it('compares a price limit in one currency, and reads a measured value from the table row', async () => {
+    const limits = [
+      { clause: 'price', items: [{ clause: 'price', question: 'Is the price at most 20000 EUR?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 20000, unit: 'EUR' } }] },
+      { clause: 'sea', items: [{ clause: 'sea', question: 'Is the sea within 20 km?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] },
+    ];
+    const judge = new ChecklistJudge({ router: null });
+    const item = { url: 'u', value: 500000, unit: 'TRY' };
+    const price = (priced: { value: number; unit: string }, unit: string) => (priced.unit === 'TRY' && unit === 'EUR' ? priced.value / 50 : undefined);
+    const answers = async (context: Record<string, unknown>) => (await judge.judge(item, '', limits, null, context)).map((check: { answer: string; quote: string }) => [check.answer, check.quote]);
+    expect(await answers({})).toEqual([['no', 'priceEur: 500000 EUR'], ['unknown', '']]);
+    expect(await answers({ price, row: { site: { coastKm: 3.2 } } })).toEqual([['yes', 'priceEur: 10000 EUR'], ['yes', 'coastKm: 3.2 km']]);
+    expect(await answers({ price: () => undefined })).toEqual([['unknown', ''], ['unknown', '']]);
   });
 });
