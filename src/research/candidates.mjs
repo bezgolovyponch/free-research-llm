@@ -209,8 +209,6 @@ function publicRow(row, verdict, unit) {
 export const MIN_PRICE_SAMPLE = 20;
 const MAD_SCALE = 1.4826;
 const LOW_PRICE_MADS = 2.5;
-export const HARD_SEA_KM = 20;
-export const HARD_CAMPING_MONTHS = 10;
 
 function firstFinite(...values) {
   return values.find((v) => Number.isFinite(v)) ?? null;
@@ -220,10 +218,13 @@ export function passesEveryHardCriterion(row, verdict, brief) {
   if (verdict?.reasons?.length || verdict?.missing?.length) return false;
   if (!brief?.regions?.length || !brief.regions.includes(verdict.country?.code ?? '')) return false;
   if (row?.gone || row?.goneStatus) return false;
-  const coastKm = firstFinite(row?.site?.coastKm, row?.coastKm, row?.distanceKm);
-  if (coastKm !== null && coastKm > HARD_SEA_KM) return false;
+  const rules = brief?.foundation?.rules ?? {};
+  const seaKm = firstFinite(rules.ebikeKm?.value);
+  const coastKm = firstFinite(row?.site?.coastKm, row?.coastKm);
+  if (seaKm !== null && coastKm !== null && coastKm > seaKm) return false;
+  const minMonths = firstFinite(rules.minWorkableMonths?.value);
   const months = firstFinite(row?.site?.climate?.workable, row?.workableMonths, row?.campingMonths);
-  if (months !== null && months < HARD_CAMPING_MONTHS) return false;
+  if (minMonths !== null && months !== null && months < minMonths) return false;
   return true;
 }
 

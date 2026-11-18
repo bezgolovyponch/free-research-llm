@@ -48,3 +48,50 @@ describe('ensureConcept', () => {
     expect(router.count('concept-frame')).toBe(0);
   });
 });
+
+describe('studyDomain with a concept', () => {
+  const frame = { population: { quote: 'sellers', label: 'seller' }, concept: [{ quote: 'coats like Alpha Coats, Betula', text: 'sells coats of makers like the named ones', examples: ['Alpha Coats', 'Betula'] }] };
+  const pages = [
+    { url: 'https://one.example/a', title: 'One', text: 'A seller of coats is a shop that sells coats in bulk. Shops stock Alpha Coats, Betula and Cedar Wear on the same rail.' },
+    { url: 'https://two.example/b', title: 'Two', text: 'A seller of coats is a store that sells coats in bulk. Collectors group Cedar Wear with Betula.' },
+  ];
+  const findings = (id: string, member: string, quote: string) => [
+    { aspect: 'object', statement: 'a seller of coats is a shop', quote: `A seller of coats is a ${id === 'D1' ? 'shop' : 'store'} that sells coats in bulk.`, sourceId: id },
+    { aspect: 'terms', statement: 'sells coats in bulk', quote: `A seller of coats is a ${id === 'D1' ? 'shop' : 'store'} that sells coats in bulk.`, sourceId: id },
+    { aspect: 'members', statement: member, quote, sourceId: id, member },
+  ];
+
+  function engineFor(seen: string[]) {
+    const router = {
+      complete: async (request: { task?: string; messages: Array<{ content: string }> }) => {
+        const text = request.messages.map((message) => message.content).join('\n');
+        if (request.task === 'concept-frame') return { provider: 'p1', model: 'm', data: frame };
+        if (text.includes('TASK=DOMAIN_QUERIES')) {
+          seen.push(text);
+          return { provider: 'p1', data: { queries: ['Alpha Coats Betula sellers', 'coat sellers list'] } };
+        }
+        if (text.includes('TASK=DOMAIN_FINDINGS')) {
+          seen.push(text);
+          return { provider: 'p1', data: { findings: [...findings('D1', 'Cedar Wear', 'Shops stock Alpha Coats, Betula and Cedar Wear on the same rail.'), ...findings('D2', 'Cedar Wear', 'Collectors group Cedar Wear with Betula.')] } };
+        }
+        return null;
+      },
+    };
+    return new ResearchEngine({ router: router as never, search: { search: async () => pages } as never, store: new ProjectStore({ dir }) });
+  }
+
+  it('starts the study from the examples, learns the other members of their class and studies again when the concept is new', async () => {
+    const seen: string[] = [];
+    const engine = engineFor(seen);
+    const p: Record<string, any> = project({ question: 'Find 20 sellers of coats like Alpha Coats, Betula', nodes: [], domain: { ready: true, terms: ['old'] } });
+    expect(await engine.studyDomain(p)).toBe(true);
+    expect(seen[0]).toContain('EXAMPLES THE ASKER NAMED:\nAlpha Coats, Betula');
+    expect(seen[1]).toContain('Aspect "members"');
+    expect(p.domain.members).toEqual([expect.objectContaining({ name: 'Cedar Wear', hosts: ['one.example', 'two.example'], supported: true })]);
+    expect(p.domain.conceptAt).toBe(p.concept.at);
+    expect(p.log.some((e: { message: string }) => e.message === 'class learned from your examples (Alpha Coats, Betula): Cedar Wear (2 sites)')).toBe(true);
+    const calls = seen.length;
+    expect(await engine.studyDomain(p)).toBe(true);
+    expect(seen).toHaveLength(calls);
+  });
+});
