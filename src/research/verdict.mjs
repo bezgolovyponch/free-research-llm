@@ -210,7 +210,7 @@ export function verdict(items, spec, checklist, kind = null) {
   let perCheck, vague, openClauseText;
 
   if (hasGoalStructure) {
-    const perGoal = [...goalChecksMap.entries()].map(([goalId, goalInfo]) => {
+    const perGoal = [...goalChecksMap.entries()].filter(([, goalInfo]) => goalInfo.goalHard).map(([goalId, goalInfo]) => {
       const relevant = items.filter((i) => {
         const g = goalChecksOf(i, checklist).get(goalId);
         return g && g.checks.length > 0;
