@@ -184,7 +184,7 @@ export function purposeChecks(project) {
   const question = String(project?.question ?? '');
   if (!question) return [];
   const words = plain(question);
-  const checks = nameLists(question).map((names, i) => ({ id: `purpose-names-${i + 1}`, type: 'any', names, label: `Page mentions one of: ${names.map((n) => `"${n}"`).join(', ')} (your words)` }));
+  const checks = (project?.concept?.criteria?.length ? [] : nameLists(question)).map((names, i) => ({ id: `purpose-names-${i + 1}`, type: 'any', names, label: `Page mentions one of: ${names.map((n) => `"${n}"`).join(', ')} (your words)` }));
   const kind = project?.decisionModel?.kind ?? project?.brief?.kind ?? null;
   if (isUmbrella(kind)) {
     const any = [...new Set([...(kind.terms ?? []), ...kind.members.flatMap(memberTerms)].map((term) => plain(String(term ?? '')).trim()).filter(Boolean))];

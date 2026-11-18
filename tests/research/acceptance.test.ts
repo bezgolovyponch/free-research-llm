@@ -414,6 +414,11 @@ describe('purpose checks from the user\'s words', () => {
     expect(checks[0].label).toBe('Page mentions one of: "Ralph Lauren", "Monclair", "North face", "Barbour" (your words)');
   });
 
+  it('asks for no named word on the page once the concept holds the class those names stand for', () => {
+    expect(purposeChecks({ ...WHOLESALE, concept: { criteria: [{ id: 'E1', text: 'brands of the class the examples stand for', examples: ['Ralph Lauren'] }] } }).filter((check: { id: string }) => check.id.startsWith('purpose-names-'))).toEqual([]);
+    expect(purposeChecks({ ...WHOLESALE, concept: { criteria: [] } })).toHaveLength(1);
+  });
+
   it('invents nothing from descriptions, counts, distances or prices the question also states', () => {
     expect(purposeChecks({ question: CAR.question })).toEqual([]);
     expect(purposeChecks({ question: 'Find at least 20 cars within 300km from prague, price up to 65000CZK or equivalent' })).toEqual([]);
@@ -761,7 +766,7 @@ describe('checklist-based acceptance', () => {
     const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
     const items = [{ url: 'https://example.com/supplier', checks: [
       { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
-      { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+      { id: 'wholesale|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
       { id: 'quality|Is quality proven?', hard: false, answer: 'yes', clause: 'quality' },
     ] }];
     const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
@@ -790,12 +795,12 @@ describe('checklist-based acceptance', () => {
     const items = [
       { url: 'https://example.com/supplier1', checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
-        { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+        { id: 'wholesale|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
         { id: 'quality|Is quality proven?', hard: false, answer: 'yes', clause: 'quality' },
       ] },
       { url: 'https://example.com/supplier2', checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
-        { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+        { id: 'wholesale|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
         { id: 'quality|Is quality proven?', hard: false, answer: 'no', clause: 'quality' },
       ] },
     ];

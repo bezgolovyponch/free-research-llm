@@ -409,3 +409,15 @@ describe("runOutcome", () => {
     expect(runOutcome({ phase: "researching", acceptanceResult: { totalAsked: 20, validCount: 1 } }).state).toBe("researching");
   });
 });
+
+describe('a hard check that was never answered', () => {
+  const hardIds = ['a|is it a?', 'b|is it b?'];
+  const item = { live: true, listing: true, checks: [{ id: 'a|is it a?', hard: true, answer: 'yes', quote: 'it is a' }] };
+
+  it('leaves the item to confirm and lists the check as open, instead of confirming it by silence', () => {
+    expect(itemTier(item, hardIds, {})).toBe('to-confirm');
+    expect(itemEvidence(item, hardIds, {}).open).toEqual(['b|is it b?']);
+    expect(itemTier({ ...item, checks: [...item.checks, { id: 'b|is it b?', hard: true, answer: 'yes', quote: 'it is b' }] }, hardIds, {})).toBe('confirmed');
+    expect(itemTier({ ...item, checks: [] }, hardIds, {})).toBe('not-judged');
+  });
+});

@@ -344,6 +344,34 @@ describe('decision model version', () => {
   });
 });
 
+describe('the concept feeds the decision model', () => {
+  const proposal = { concept: 'c', kind: { label: 'seller', terms: ['seller'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
+  const written = { items: [{ clause: 'graded a', question: 'Is it graded A?', hard: true, numeric: null }] };
+  const router = { complete: async (req: { purpose: string }) => ({ provider: 'test', data: req.purpose === 'checklist' ? written : proposal }) };
+  const concept = { at: 't1', question: 'Find sellers of coats, proven quality', expected: '', criteria: [{ id: 'E1', text: 'quality is proven', quote: 'proven quality', examples: [] }] };
+
+  it('builds the hard checks from the requirements of the asker and keeps the model-written question as appraisal', async () => {
+    const { DecisionModeler } = await import('../../src/research/decision.mjs');
+    const project: Record<string, any> = { id: 'p', question: concept.question, guidance: 'graded A', acceptance: { itemCount: 20 }, concept };
+    const model = await new DecisionModeler({ router } as never).build(project);
+    expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['appraisal', 'graded a', false]]);
+    expect(model.conceptAt).toBe('t1');
+  });
+
+  it('is stale when the concept was framed again, and keeps the model-written checklist when there is no concept', async () => {
+    const { DecisionModeler } = await import('../../src/research/decision.mjs');
+    const modeler = new DecisionModeler({ router } as never);
+    const project: Record<string, any> = { id: 'p', question: concept.question, guidance: '', acceptance: { itemCount: 20 }, concept };
+    await modeler.build(project);
+    expect(modeler.fresh(project)).toBe(true);
+    expect(modeler.fresh({ ...project, concept: { ...concept, at: 't2' } })).toBe(false);
+    const plain: Record<string, any> = { id: 'q', question: concept.question, guidance: '', acceptance: { itemCount: 20 } };
+    const model = await modeler.build(plain);
+    expect(model.checklist.map((c: { clause: string; items: Array<{ hard: boolean }> }) => [c.clause, c.items[0].hard])).toEqual([['graded a', true]]);
+    expect(modeler.fresh(plain)).toBe(true);
+  });
+});
+
 describe('mergeCalibrations', () => {
   it('keeps a word or model only when a majority of the calibration proposals name it', async () => {
     const { mergeCalibrations } = await import('../../src/research/decision.mjs');
