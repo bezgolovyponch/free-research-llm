@@ -534,11 +534,11 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
       }
     }
     const kindHit = matched.length >= 2 && matched.some((term) => kindSet.has(term));
-    if (!(ok && anchoredTerm(matched, anchors)) && !kindHit) continue;
-    if (wordMatch(String(page.source.title ?? ''), banned)) continue;
+    const named = ((ok && anchoredTerm(matched, anchors)) || kindHit) && !wordMatch(String(page.source.title ?? ''), banned);
     if (isDirectory) {
       const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
       const add = (key, deliverable) => {
+        deliverable.named = named;
         if (region) deliverable.region = region.text;
         const existing = entityMap.get(key);
         if (existing) {
@@ -576,13 +576,14 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
     } else {
       const hits = matched.length;
       const current = hostsMap.get(page.host);
-      if (current && current.hits >= hits) continue;
-      hostsMap.set(page.host, { hits, deliverable: entityDeliverable(page, regions) });
+      if (current && (Number(current.deliverable.named) > Number(named) || (current.deliverable.named === named && current.hits >= hits))) continue;
+      hostsMap.set(page.host, { hits, deliverable: { ...entityDeliverable(page, regions), named } });
     }
   }
   const entityDeliverablesArr = [...entityMap.values()].map((d) => ({ hits: 0, deliverable: d }));
   const withoutWebsite = (entry) => (entry.deliverable.entity?.website === false ? 1 : 0);
-  const allDeliverables = [...hostsMap.values(), ...entityDeliverablesArr].sort((a, b) => withoutWebsite(a) - withoutWebsite(b) || (b.hits ?? 0) - (a.hits ?? 0));
+  const unnamed = (entry) => (entry.deliverable.named ? 0 : 1);
+  const allDeliverables = [...hostsMap.values(), ...entityDeliverablesArr].sort((a, b) => unnamed(a) - unnamed(b) || withoutWebsite(a) - withoutWebsite(b) || (b.hits ?? 0) - (a.hits ?? 0));
   return allDeliverables.map((entry) => entry.deliverable);
 }
 

@@ -201,7 +201,7 @@ describe('checking delivered pages against a category', () => {
   it('delivers a seller of one kind, anchored on the words of that kind rather than the category label', async () => {
     const nodes = [{ id: 'A', sources: [{ url: 'https://porto-pipes.example/', title: 'Pipe repair and plumbing in Porto', text: 'Pipe repair, plumbing and boilers in Porto.' }] }];
     const terms = contractors.members.flatMap(memberTerms);
-    expect(await entityDeliverables(nodes as never, { terms, kindLabel: contractors.label })).toEqual([]);
+    expect((await entityDeliverables(nodes as never, { terms, kindLabel: contractors.label })).filter((d: { named: boolean }) => d.named)).toEqual([]);
     expect((await entityDeliverables(nodes as never, { terms, kindLabel: contractors.label, members: contractors.members })).map((d: { url: string }) => d.url)).toEqual(['https://porto-pipes.example/']);
   });
 
