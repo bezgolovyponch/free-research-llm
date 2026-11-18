@@ -637,7 +637,16 @@
   {
     "id": "F42",
     "title": "the market screen dropped knowledge sources, scoping rested on one host, the replay ran without the user's hints, and a requirement no goal covered passed the replay",
-    "touches": ["src/research/scoping.mjs", "src/research/purpose.mjs", "scripts/purpose-replay.mjs", "scripts/purpose-replay.questions.json", "tests/research/scoping.test.ts", "tests/research/purpose.test.ts", "tests/scripts/purpose-replay.test.ts", "tests/fixtures/replay/**"],
+    "touches": [
+      "src/research/scoping.mjs",
+      "src/research/purpose.mjs",
+      "scripts/purpose-replay.mjs",
+      "scripts/purpose-replay.questions.json",
+      "tests/research/scoping.test.ts",
+      "tests/research/purpose.test.ts",
+      "tests/scripts/purpose-replay.test.ts",
+      "tests/fixtures/replay/**"
+    ],
     "signal": "Suppliers replay on main a9b5adb (2026-11-16): scoping kept 2 of 12 sources and all 4 notes came from one host; sources that explain how to choose or grade were dropped as 'off-market: describes another market'. Replays of the purpose-structure branch the same day: suppliers 3 kept, 9 dropped; the counter-examples with no market at all, library 2 kept and trail 3 kept; second opinion 1 of 3, 2 of 8, 0 of 2. The questions file had guidance '' for a research whose stored project holds the user's hint. A replay table passed while requirements had no goal: the third suppliers replay listed two requirements as not modelled and still reached needs-confirmation only because of other open entries.",
     "cause": "One judgement asked every source for the market it describes and code dropped every 'another market' answer, although a source that explains how to judge holds wherever it was written. The market letter is the answer free models disagree on most (re-judged live on the stored kept sources: the verdicts that flipped were the market letter, a missing sentence id and 'not informative'), so the same screen made the second opinion low; the replay also counted a second answer that never came, or that came from the same provider, as disagreement, and re-judged with the kind instead of the subject the first screen used. Perspectives were only what a model proposed, queries were searched as one fused list, so nothing counted hosts or perspectives. The replay read its inputs from a hand-kept file. notModelled was computed and never checked: nothing blocked confirmation and no metric read it; a goal's own claim of its anchor counted as coverage without the trace vote, and a goal merged away took its requirement with it.",
     "prevention": "A source on subject gets a closed role vote on the sentences the judgement saw (sourceRole: knowledge or market, 3 votes, quorum 2); relevanceReason applies the market check only to a source voted market, and an undecided role never drops. Every drop made by the market check stores the voted role, and the replay row 'roles' fails on a knowledge or role-less off-market drop. A value perspective and a cost perspective are fixed by code (fixedPerspectives: names and basis from the value and cost sides, a model writes only the phrases, one phrase by code when none answers); composeQueries gives every perspective a query before any gets a second. Sources are searched per perspective (findSources), so each kept source names its perspectives; diversityOf needs 4 distinct hosts across 2 perspectives, otherwise runScoping composes one more round (unused phrases, or new ones asked with the tried phrases shown), only while the scoping budget has room, and logs 'scoping thin: N hosts' with what it did. The scoping budget is sized to its votes (scopingCap). With --projects the replay takes question, hints and regions only from the stored project (replayInputs, storedEntry) and refuses a research whose project is missing. A requirement is covered only by a kept goal with a question that the trace vote put on it, directly or through an implication agreed on that requirement, and not through an implication when its own goal could not be refined (coveredAnchors); absorb keeps the requirement of a merged goal. tree.notModelled entries are open entries, confirmTree refuses while one is not dismissed (dismissNotModelled), needsConfirmation stays true even with confirmedAt set, and the replay row 'coverage' fails on a listed or a silent requirement. The second opinion is asked with the screen's own purpose and subject and the first role, and reports agree, disagree, not judged and same provider apart, with every row written to 0-scope-second.json. Stored replay outputs are golden fixtures: a metric is only trusted after it was run on a stored output that is known to be wrong and failed there. Two follow-ups from the lead's review of the same change: the screen asked whether a source is about the bare kind word, so for a question about software libraries every page about lending libraries and none about the asked thing looked alike (10 of 12 dropped as off-subject); the screening subject is now the kind with the grouped requirement texts of the research (askedSubject, screeningSubject), candidate subject labels still win when a table exists, and the replay draws requirements and purpose once (drawRequirements) and gives them to scoping and to the tree. Hints went through no grouping, so one hint listing six countries was six hint anchors; hints now pass the same splitPiece and groupSpans as the question's pieces (groupedPieces), stored in tree.requirements.hints. The coverage invariant stays on clause anchors. The queries had the same fault as the screen: composed from the kind word, they searched 'library' plus a phrase and found lending libraries. Without a candidate table the subject labels of the queries now come from the requirements (requirementSubjects): one closed-format call writes a phrase of at most 6 words per requirement, code keeps it only when every word stands in the requirements and one in its own requirement, asks once more otherwise, and uses a translation into a market language only when the embedder ranks it nearest to its own phrase among the research's phrases (a translation code cannot check is not used; the checked phrase is used in that language instead). The kind label is the fallback only when the call fails; table labels still win. A fix to what a stage judges is traced to what the same stage searches for."
@@ -645,7 +654,14 @@
   {
     "id": "F47",
     "title": "every clause and hint a hard page question, 0 confirmed",
-    "touches": ["src/research/engine.mjs", "src/research/decision.mjs", "src/research/purpose.mjs", "src/research/scoping.mjs", "tests/research/decision.test.ts", "tests/research/purpose.test.ts"],
+    "touches": [
+      "src/research/engine.mjs",
+      "src/research/decision.mjs",
+      "src/research/purpose.mjs",
+      "src/research/scoping.mjs",
+      "tests/research/decision.test.ts",
+      "tests/research/purpose.test.ts"
+    ],
     "signal": "Suppliers b2f5b7: 0 of 20 confirmed, 25 rejected, hard 'brands similar to ...' unknown; cars 0c750f: 0 of 20 confirmed, hard 'listing is accurate and verified' unknown on 88 of 90. Every clause from the question and every hint became a hard page question; no goal-level decomposition, no checker diversity, no soft preferences.",
     "cause": "The purpose stages (scoping, purpose, decomposition) were implemented but only wired to scripts/purpose-replay.mjs. The live run still built the checklist from raw clauses via ChecklistModeler in decision.mjs:487, so every clause and hint became a hard page question with no code-enforced distinction between constraints and preferences.",
     "prevention": "Wire the purpose stages into the live engine: engine.studyDomain calls runScoping and stores project.scoping; engine.decompose builds project.purposeTree with buildPurposeTree before the piece tree and passes its goals to decomposePrompt; DecisionModeler.build uses the tree's questions (checker per question: page/code/consensus/statistic/official) for the checklist, not ChecklistModeler; hardness is decided by a closed vote on the requirement text (constraint|criterion), never a word list. The replay measures the targets. Covered by tests: decision builds checklist from stored-shape purposeTree fixture; hardness vote stub keeps limit hard, hint soft; supplier outside a location hint is not rejected; 'within 300 km' stays hard; composite goal combines by code; empty tree never replaces a good one; no tree -> old path unchanged."
@@ -653,7 +669,17 @@
   {
     "id": "F49",
     "title": "one kind no on a home page rejected real suppliers for good, and one company was delivered twice",
-    "touches": ["src/research/engine.mjs", "src/research/checklist.mjs", "src/research/semantic.mjs", "src/research/deeper.mjs", "src/research/entitypath.mjs", "src/research/acceptance.mjs", "tests/research/engine.test.ts", "tests/research/entitypath.test.ts", "tests/research/semantic.test.ts"],
+    "touches": [
+      "src/research/engine.mjs",
+      "src/research/checklist.mjs",
+      "src/research/semantic.mjs",
+      "src/research/deeper.mjs",
+      "src/research/entitypath.mjs",
+      "src/research/acceptance.mjs",
+      "tests/research/engine.test.ts",
+      "tests/research/entitypath.test.ts",
+      "tests/research/semantic.test.ts"
+    ],
     "signal": "Suppliers b2f5b7 live on ba474ac: 7 of 20 confirmed; vintagebulk.nl, palletliquidation.eu and ukusedclothes.com rejected by one kind judgement on the home page (quotes like \"BEST SELLERS & NIEUW BINNEN\"), stored in kindRejected for good; tumodakids sl, wakted bv and liberty global exports delivered from europages.nl and europages.it",
     "cause": "a single model answer on the least informative page decided the kind and was never revisited; vote() replaced the caller avoid list, so no second family was asked; entity keys were the profile url, which differs per language host",
     "prevention": "a kind no is read again on the company page by another family before it counts (engine.test \"a kind no needs a second family\"), kindRejected keeps the judge version, vote keeps the caller avoid list (semantic.test), directoryEntityKey joins the same company id across language hosts (entitypath.test)"
@@ -661,7 +687,11 @@
   {
     "id": "F48",
     "title": "a list research ended short of its count because the supplier pool came from one cached search",
-    "touches": ["src/research/engine.mjs", "tests/research/engine.test.ts", "scripts/hub-witness.mjs"],
+    "touches": [
+      "src/research/engine.mjs",
+      "tests/research/engine.test.ts",
+      "scripts/hub-witness.mjs"
+    ],
     "signal": "Suppliers b2f5b7 live on ba474ac: 7 of 20 confirmed from 21 delivered; the hub search had run once per hinted country (15 pages each) on 2026-11-17 and was reused for 7 days; 8 of 28 pages were spam or off-topic",
     "cause": "searchHubs searched once and cached the result for a week, whatever the result count; nothing searched again when the run ended short",
     "prevention": "searchHubs runs rounds until the pool not rejected by the kind judge reaches 3x the asked count, snowballs queries from suppliers the judge accepted, pages directories, ranks pages by BM25 without dropping other languages, and ignores the cache when short (engine.test hub rounds)"
@@ -669,7 +699,12 @@
   {
     "id": "F52",
     "title": "real suppliers rejected as 'several items or a list'",
-    "touches": ["src/research/checklist.mjs", "src/research/engine.mjs", "tests/research/checklist.test.ts", "tests/research/engine.test.ts"],
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/engine.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/engine.test.ts"
+    ],
     "signal": "Suppliers b2f5b7 live on 80822d2: 15 of 20 confirmed; gradedwholesale.com, dropy.com.pl and five europages company profiles rejected by the kind judge, every one with option C 'several items or a list'",
     "cause": "the kind options were written for listing pages (one unit, a part, several items); a business page always shows many goods",
     "prevention": "kindCluster gives a business kind (kind.entity, set by briefOf when located is false) options about one business, a directory, an article and a wanted ad (checklist.test 'kind options for a research that looks for businesses'); witness in docs/audits/entity-kind-proof.md"
@@ -677,7 +712,12 @@
   {
     "id": "F51",
     "title": "the price trend was measured in local money, not in the buyer's currency",
-    "touches": ["src/research/site.mjs", "src/research/strategy.mjs", "tests/research/site.test.ts", "tests/research/strategy.test.ts"],
+    "touches": [
+      "src/research/site.mjs",
+      "src/research/strategy.mjs",
+      "tests/research/site.test.ts",
+      "tests/research/strategy.test.ts"
+    ],
     "signal": "Plots b7772e: every one of 322 Turkish plots failed 'real price trend above the EU average' at Turkey -10.7% a year after Turkish inflation (2024), although the user buys in EUR",
     "cause": "trendOf deflated the local house price index by the same country's inflation and compared one year against the EU; no exchange rate and no euro-area inflation were used",
     "prevention": "trendOf converts with Eurostat ert_bil_eur_a (statinfo=AVG, currency=<listing currency>, national currency per euro) and deflates by euro-area HICP; the check compares multi-year growth in EUR over the same years with the EU (site.test 'price trend in the buyer's currency', strategy.test trend checks)"
@@ -685,9 +725,30 @@
   {
     "id": "F53",
     "title": "a research crawled at one call a minute while a better provider was idle",
-    "touches": ["src/llm/ranking.mjs", "src/llm/router.mjs", "tests/llm/ranking.test.ts", "tests/llm/router.test.ts"],
+    "touches": [
+      "src/llm/ranking.mjs",
+      "src/llm/router.mjs",
+      "tests/llm/ranking.test.ts",
+      "tests/llm/router.test.ts"
+    ],
     "signal": "Suppliers b2f5b7 2026-11-18 05:17-05:42Z: 20 of 90 pages judged; every judge call went to pollinations with a 45 s queue wait while nvidia (91% of answers passing the gates against 76%) was ready; Gemini benched 24 h",
     "cause": "time per answer left out the queue wait of a paced provider, so a 49 s answer ranked as 4 s; when Gemini's other models rested for their daily quota, its last model (retired, HTTP 404) benched the provider for 24 h instead of until the quota reset",
     "prevention": "providerStats counts waitMs in spentMs (ranking.test 'counts the time a paced provider kept a call waiting'); benchGoneModel rests until the earliest quota reset of the provider's resting models (router.test 'rests a provider whose last model is gone only until ...')"
+  },
+  {
+    "id": "F54",
+    "title": "a new decision layer replaced the stable criteria instead of feeding them",
+    "touches": [
+      "src/research/decision.mjs",
+      "src/research/checklist.mjs",
+      "src/research/purpose.mjs",
+      "src/research/engine.mjs",
+      "tests/research/decision.test.ts",
+      "tests/research/checklist.test.ts",
+      "tests/research/engine.test.ts"
+    ],
+    "signal": "PR #202 replaced the checklist built from the decision model (nodes, research data, criteria) with purpose-tree goals and made items hard only when traced to the user's literal words. Live suppliers b2f5b7: decisionModel.criteria = [], 26 checklist items all hard:false → nothing vetoes → '19/20 confirmed' while results do not fit. Plots: tree missing, report falls back to 3 generic checks.",
+    "cause": "The purpose-tree layer was shipped as a replacement for the stable criteria layer instead of as an additional signal that feeds into it. No comparison gate existed to verify that the new layer produced the same or better results (criteria count, hard checks count, confirmed items that fit) on reference researches before it became the only path.",
+    "prevention": "Ship new decision layers behind a comparison against the stable result on all reference researches (criteria count, hard checks count, confirmed items that fit) — never replace. A new layer must be additive: it provides extra goals/checks that the stable layer can optionally use, but the stable checklist from decisionModel.criteria + decisionModel.checklist remains the source of truth for validity. The comparison gate runs on every reference research in CI and fails if the new layer changes any confirmed item that fits or drops any hard check that the stable layer enforced."
   }
 ]
