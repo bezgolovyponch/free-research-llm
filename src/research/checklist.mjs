@@ -20,7 +20,7 @@ export function applyQuoteCheck(replies, spans) {
 }
 
 export const CHECKLIST_VERSION = 4;
-export const JUDGE_VERSION = 2;
+export const JUDGE_VERSION = 3;
 export const JUDGE_QUESTIONS_PER_CALL = 4;
 export const JUDGE_BLOCK_CHARS = 6000;
 export const JUDGE_PAGE_CHARS = 40000;
@@ -28,6 +28,7 @@ export const LOW_PRICE_REASON = 'priced far below comparable items: confirm it i
 export const KIND_ANSWERS = { A: 'yes', B: 'no', C: 'no', D: 'no', E: 'no', U: 'unknown' };
 
 export const KIND_SECOND_VOTES = 3;
+export const KIND_SECOND_OPINION_BUDGET = 30;
 
 const isKindYes = (check) => check?.clause === 'kind' && String(check.id).startsWith('kind|') && check.answer === 'yes';
 
@@ -295,19 +296,28 @@ export class ChecklistJudge {
     }
   }
 
+  async completeFull(messages) {
+    try {
+      return await this.router.complete({ purpose: 'checklist', tier: 'fast', temperature: 0, messages });
+    } catch {
+      return null;
+    }
+  }
+
   async judgeKind(spans, cluster) {
     const question = cluster.items[0];
     const check = { id: `${cluster.clause}|${question.question}`, answer: 'unknown', quote: '', hard: question.hard, clause: cluster.clause };
     const shown = await shownSpans(spans, question.question, this.embedder);
-    if (!shown.length) return check;
-    const reply = await this.complete(kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
+    if (!shown.length) return { ...check, provider: null };
+    const reply = await this.completeFull(kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
     const letter = String(reply?.data?.kind ?? '').trim().toUpperCase();
     const answer = KIND_ANSWERS[letter] ?? 'unknown';
     const quote = answer === 'unknown' ? '' : quoteFromSpans(reply?.data?.span ?? reply?.data?.spans, shown);
-    return quote ? { ...check, answer, quote, option: letter } : check;
+    const provider = reply?.provider ?? null;
+    return quote ? { ...check, answer, quote, option: letter, provider } : { ...check, provider };
   }
 
-  async judgeKindAgain(pageText, kind, { value, unit = '', median = null } = {}) {
+  async judgeKindAgain(pageText, kind, { value, unit = '', median = null, avoid = null } = {}) {
     const cluster = kindCluster(kind);
     const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
     const shown = spans.length ? await shownSpans(spans, cluster.items[0].question, this.embedder) : [];
@@ -319,7 +329,7 @@ export class ChecklistJudge {
       const quote = KIND_ANSWERS[letter] === 'unknown' ? '' : quoteFromSpans(data?.span ?? data?.spans, shown);
       return { value: { answer: quote ? KIND_ANSWERS[letter] : 'unknown', quote } };
     };
-    const result = await vote({ router: this.router, task: 'kind-second', tier: 'fast', messages: kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS), price }), schema, n: KIND_SECOND_VOTES, quorum: 2, key: (reply) => reply.answer });
+    const result = await vote({ router: this.router, task: 'kind-second', tier: 'fast', messages: kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS), price }), schema, n: KIND_SECOND_VOTES, quorum: 2, key: (reply) => reply.answer, avoid: avoid ? [avoid] : undefined });
     return { answer: result.value?.answer ?? 'unknown', quote: result.value?.quote ?? '', tally: result.tally };
   }
 
@@ -371,7 +381,10 @@ export class ChecklistJudge {
       }
     }
 
-    if (kind?.label) checks.push(this.router ? await this.judgeKind(spans, kindCluster(kind)) : { id: `kind|${kindCluster(kind).items[0].question}`, answer: 'unknown', quote: '', hard: true, clause: 'kind' });
+    if (kind?.label) {
+      const kindCheck = this.router ? await this.judgeKind(spans, kindCluster(kind)) : { id: `kind|${kindCluster(kind).items[0].question}`, answer: 'unknown', quote: '', hard: true, clause: 'kind' };
+      checks.push(kindCheck);
+    }
 
     return checks;
   }

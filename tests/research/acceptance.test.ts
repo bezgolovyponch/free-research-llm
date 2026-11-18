@@ -613,6 +613,16 @@ describe('entityDeliverables with directory pages', () => {
     expect(evidenceUrls[0]).toBe(EUROPAGES_URL);
   });
 
+  it('delivers one company once when the same directory lists it on two language hosts', async () => {
+    const source = (url: string) => ({ url, title: 'Balen gebruikte kleding', text: 'wholesale second hand clothing bales graded A ' + europagesHtml, listings: Array.from({ length: 10 }, (_, i) => ({ url: `${new URL(url).origin}/nl/company/entity-${i}` })) });
+    const nodes = [{ id: 'D1', sources: [source(EUROPAGES_URL), source(EUROPAGES_URL.replace('europages.nl', 'europages.it'))] }];
+    const deliverables = await entityDeliverables(nodes as never, { terms: ['wholesale second hand clothing', 'bales'], kindLabel: 'wholesale clothing provider', readPage: async () => ({ text: '', status: 404 }) });
+    const titles = deliverables.map((d: { title: string }) => d.title);
+    expect(titles.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(titles).size).toBe(titles.length);
+    expect(titles.filter((title: string) => title === 'Wakted BV')).toHaveLength(1);
+  });
+
   it('uses entity website URL directly when available in directory entry', async () => {
     const nodes = [
       {

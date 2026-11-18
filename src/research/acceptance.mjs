@@ -3,6 +3,7 @@ import { regionVerdict } from './brief.mjs';
 import { isUmbrella, memberTerms } from './concept.mjs';
 import { entitiesFromJsonLd } from '../search/listings.mjs';
 import { verdict, itemTier, hardIdsOf, scoreOf } from './verdict.mjs';
+import { ENTITY_PATH, directoryEntityKey } from './entitypath.mjs';
 export { qualifies } from './verdict.mjs';
 const CURRENCIES = {
   EUR: ['€', 'eur', 'euro'],
@@ -400,7 +401,6 @@ function groupListingsByEntity(listings) {
   return entityGroups;
 }
 
-const ENTITY_PATH = /^((?:\/[a-z]{2})?\/(?:company|companies|firma|firmen|empresa|entreprise|societe|azienda|bedrijf|supplier|suppliers|seller|vendor|store)\/([^/]+))/i;
 const LEGAL_FORMS = new Set(['bv', 'ltd', 'limited', 'gmbh', 'srl', 'spa', 'sas', 'sarl', 'zoo', 'sro', 'inc', 'llc', 'company', 'group', 'uab', 'nv']);
 const SOCIAL_HOST = /(?:^|\.)(?:facebook|instagram|linkedin|twitter|x|youtube|tiktok|pinterest)\.com$/;
 const DIRECTORY_HOST = /europages|visable/;
@@ -489,11 +489,20 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
   }
   for (const [host, set] of paths) if (set.size >= DIRECTORY_PATHS) directories.add(host);
   const domains = new Map();
+  const stems = new Map();
   for (const page of pages) {
     const domain = registrableDomain(page.host);
     const set = domains.get(domain) ?? new Set();
     set.add(page.host);
     domains.set(domain, set);
+    const stem = domain.split('.')[0];
+    const stemSet = stems.get(stem) ?? new Set();
+    stemSet.add(page.host);
+    stems.set(stem, stemSet);
+  }
+  const sharedDomainStems = new Set();
+  for (const [stem, hosts] of stems) {
+    if (hosts.size > 1) sharedDomainStems.add(stem);
   }
   const marketplaces = new Set();
   for (const [domain, hosts] of domains) {
@@ -501,7 +510,7 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
       for (const host of hosts) marketplaces.add(host);
     }
   }
-  const hosts = new Map();
+  const hostsMap = new Map();
   const entityMap = new Map();
   const excluded = new Set([...directories, ...marketplaces]);
   for (const page of pages) {
@@ -531,13 +540,20 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
       const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
       const add = (key, deliverable) => {
         if (region) deliverable.region = region.text;
-        entityMap.set(key, deliverable);
+        const existing = entityMap.get(key);
+        if (existing) {
+          const existingEvidences = new Set(existing.evidence ? [existing.evidence] : []);
+          if (deliverable.evidence) existingEvidences.add(deliverable.evidence);
+          existing.evidence = [...existingEvidences].join(' | ');
+        } else {
+          entityMap.set(key, deliverable);
+        }
       };
       const entities = entitiesFromJsonLd(page.source.text ?? '', page.url);
       for (const entity of entities) {
         const entityHost = entity.url ? hostOf(entity.url) : '';
         const profile = entityHost ? null : entityProfile(entity.profileUrl) ?? (entity.profileUrl ? { profileUrl: entity.profileUrl, name: entity.name } : null);
-        const entityKey = profile?.profileUrl ?? (entityHost || normalizeName(entity.name));
+        const entityKey = directoryEntityKey({ name: normalizeName(entity.name), profileUrl: profile?.profileUrl ?? entity.url ?? null, pageHost: page.host, sharedStems: sharedDomainStems, fallback: profile?.profileUrl ?? (entityHost || normalizeName(entity.name)) });
         if (entityMap.has(entityKey)) continue;
         if (profile) {
           add(entityKey, await directoryDeliverable({ name: entity.name || profile.name, profileUrl: profile.profileUrl, nodeId: page.node.id, country: entity.country, city: entity.city }, { readPage, findWebsite, excluded }));
@@ -548,7 +564,7 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
       if (!entities.length && page.source.listings?.length) {
         for (const [groupKey, listings] of groupListingsByEntity(page.source.listings)) {
           const profile = entityProfile(listings[0].url);
-          const entityKey = profile?.profileUrl ?? groupKey;
+          const entityKey = directoryEntityKey({ name: normalizeName(profile?.name ?? listings[0].title), profileUrl: profile?.profileUrl ?? listings[0].url ?? null, pageHost: page.host, sharedStems: sharedDomainStems, fallback: profile?.profileUrl ?? groupKey });
           if (entityMap.has(entityKey)) continue;
           if (profile) {
             add(entityKey, await directoryDeliverable({ name: profile.name, profileUrl: profile.profileUrl, nodeId: page.node.id }, { readPage, findWebsite, excluded }));
@@ -559,14 +575,14 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
       }
     } else {
       const hits = matched.length;
-      const current = hosts.get(page.host);
+      const current = hostsMap.get(page.host);
       if (current && current.hits >= hits) continue;
-      hosts.set(page.host, { hits, deliverable: entityDeliverable(page, regions) });
+      hostsMap.set(page.host, { hits, deliverable: entityDeliverable(page, regions) });
     }
   }
   const entityDeliverablesArr = [...entityMap.values()].map((d) => ({ hits: 0, deliverable: d }));
   const withoutWebsite = (entry) => (entry.deliverable.entity?.website === false ? 1 : 0);
-  const allDeliverables = [...hosts.values(), ...entityDeliverablesArr].sort((a, b) => withoutWebsite(a) - withoutWebsite(b) || (b.hits ?? 0) - (a.hits ?? 0));
+  const allDeliverables = [...hostsMap.values(), ...entityDeliverablesArr].sort((a, b) => withoutWebsite(a) - withoutWebsite(b) || (b.hits ?? 0) - (a.hits ?? 0));
   return allDeliverables.map((entry) => entry.deliverable);
 }
 

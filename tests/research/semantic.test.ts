@@ -156,3 +156,14 @@ describe('agreeAcrossSamples', () => {
     expect(same.calls).toHaveLength(2);
   });
 });
+
+describe('vote with a provider to avoid', () => {
+  it('passes the caller\'s avoid list to the first call and keeps it for the later ones', async () => {
+    const avoided: Array<string[] | undefined> = [];
+    const router = { complete: async (request: { avoid?: string[] }) => { avoided.push(request.avoid); return { provider: `p${avoided.length}`, data: { pick: 'A' } }; } };
+    const schema = (data: { pick?: string }) => (data?.pick ? { value: data.pick } : { error: 'pick' });
+    const result = await vote({ router, messages: [], schema, n: 3, quorum: 2, avoid: ['first'] } as never);
+    expect(result.value).toBe('A');
+    expect(avoided).toEqual([['first'], ['first', 'p1']]);
+  });
+});

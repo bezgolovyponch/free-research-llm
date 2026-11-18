@@ -9,7 +9,7 @@ import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { HUB_REFRESH_MS, ResearchCancelled, ResearchEngine, TEAM_TTL_MS, hubSearchStale, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
-import { LOW_PRICE_REASON, checklistFingerprint } from '../../src/research/checklist.mjs';
+import { JUDGE_VERSION, LOW_PRICE_REASON, checklistFingerprint } from '../../src/research/checklist.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 import { researchedNode } from '../helpers/research-shapes';
@@ -2410,6 +2410,66 @@ function netProvider(id: string, networkFailures = Number.POSITIVE_INFINITY) {
   };
 }
 
+describe('a kind no needs a second family on the deeper page', () => {
+  const home = 'BEST SELLERS. NEW IN. Shop the latest drops.';
+  const about = 'We are a used clothing wholesaler selling hand-sorted bales by the kilogram to shops.';
+  const second: string[] = [];
+  const family = (id: string, aboutAnswer: string) => ({
+    id,
+    ready: true,
+    describe: () => ({ id, label: id, state: 'ready', detail: '', configured: true, fast: `${id}-fast`, deep: `${id}-deep`, local: true, keyEnv: null, signup: '', modelCount: 1 }),
+    async chat({ messages }: { messages: { content: string }[] }) {
+      const prompt = messages.map((m) => m.content).join('\n');
+      if (prompt.includes('This page offers:')) {
+        if (prompt.includes('hand-sorted bales')) second.push(id);
+        return { content: JSON.stringify({ kind: prompt.includes('hand-sorted bales') ? aboutAnswer : 'B', span: 'S1' }), model: `${id}-fast`, provider: id, usage: {} };
+      }
+      return { content: JSON.stringify(prompt.includes('Item page text:') ? [] : { answer: 'ok', claims: [], confidence: 'high' }), model: `${id}-fast`, provider: id, usage: {} };
+    },
+  });
+  const run = async (aboutAnswer: string, stored: unknown[] = []) => {
+    second.length = 0;
+    const search = { ...fakeSearch, async readPage(url: string) { return url.endsWith('/about') ? { status: 200, text: about, links: [] } : { status: 200, text: home, links: [{ url: '/about', text: 'About us' }] }; } };
+    const router = new ModelRouter({ providers: [family('alpha', aboutAnswer), family('beta', aboutAnswer)] });
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Find used clothing wholesalers' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 1 } });
+    const row = { title: 'Seller', url: 'https://seller.example.org/', value: 10, unit: 'EUR/kg', price: 10, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits', why: [], risks: [] } };
+    project.candidates = { kept: [row], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
+    project.brief = { located: true, kind: { label: 'used clothing wholesaler', terms: ['used clothing'] }, regions: [] };
+    project.decisionModel = { kind: { label: 'used clothing wholesaler', terms: ['used clothing'] }, checklist: [] };
+    project.kindRejected = stored;
+    project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    await engine.checkAcceptance(project);
+    return { project, kind: project.acceptanceResult!.items[0].checks.find((c: { clause: string }) => c.clause === 'kind')! };
+  };
+
+  it('turns a home-page no into yes when another family reads the company page and quotes it', async () => {
+    const { project, kind } = await run('A');
+    expect(kind).toMatchObject({ answer: 'yes', quote: about });
+    expect(project.kindRejected).toEqual([]);
+    expect(project.log.some((l: { message: string }) => l.message.startsWith('kind second opinion 1/30: first=no second=yes'))).toBe(true);
+  });
+
+  it('asks the second opinion first of a family other than the one that said no', async () => {
+    const { kind } = await run('A');
+    expect(kind.provider).toBeTruthy();
+    expect(second[0]).not.toBe(kind.provider);
+  });
+
+  it('rejects and remembers the item under the current judge version only when both families say no', async () => {
+    const { project, kind } = await run('B');
+    expect(kind.answer).toBe('no');
+    expect(project.kindRejected).toEqual([{ url: 'https://seller.example.org/', judgeVersion: JUDGE_VERSION }]);
+  });
+
+  it('forgets rejections recorded under an older judge version, so those items are judged again', async () => {
+    const { project, kind } = await run('A', ['https://seller.example.org/', { url: 'https://seller.example.org/', judgeVersion: JUDGE_VERSION - 1 }]);
+    expect(kind.answer).toBe('yes');
+    expect(project.kindRejected).toEqual([]);
+  });
+});
+
 describe('kind hardening and the migration of stored answers', () => {
   const offer = 'Used goods offer: mixed second-hand clothing sorted by hand into cream and A grade, packed in pressed bales, sold by the kilogram to shops and market traders. Minimum order one bale; pallets loaded at our warehouse every weekday.';
   const demo = (chat: (prompt: string) => unknown) => ({
@@ -2449,7 +2509,7 @@ describe('kind hardening and the migration of stored answers', () => {
     expect([cheap.tier, cheap.valid]).toEqual(['rejected', false]);
     expect(usual.checks.find((c) => c.clause === 'kind')).toMatchObject({ answer: 'yes', quote: offer.split('. ')[0] + '.' });
     expect([usual.tier, usual.valid]).toEqual(['confirmed', true]);
-    expect(project.kindRejected).toEqual([cheap.url]);
+    expect(project.kindRejected).toEqual([{ url: cheap.url, judgeVersion: 3 }]);
     expect(secondPrompts).toHaveLength(2);
     expect(secondPrompts[0]).toContain('Price of this item: 20 EUR/kg');
     expect(secondPrompts[0]).toMatch(/Median price of its comparable items: \d+ EUR\/kg/);
