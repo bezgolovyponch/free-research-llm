@@ -8,7 +8,8 @@ import { FAIL, fakeEmbedder, fakeRouter, pickLetter, seq } from '../helpers/fake
 type Ask = { messages: { content: string }[] };
 
 const refined = { refine: 'AND', questions: [{ q: 'Is it stated?', checker: 'page', threshold: null, note: null }], obstacles: [{ obstacle: 'It is missing', checker: 'page', threshold: null }] };
-const split = (question: string, guidance = '') => anchorsOf({ router: fakeRouter({}) }, question, guidance);
+const apart = (request: Ask) => ({ groups: [...request.messages[1].content.matchAll(/^\[([ST]\d+)\]/gm)].map((match) => [match[1]]) });
+const split = (question: string, guidance = '') => anchorsOf({ router: fakeRouter({ requirements: apart }) }, question, guidance);
 const plotAnchors = await split('Find plots to buy, price up to 65000CZK');
 const smallShopAnchors = await split('wholesale providers, for a small shop');
 const shopAnchors = await split('Find wholesale providers, with the highest price/value ratio, for a small shop');
@@ -76,8 +77,8 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
     expect(twice.anchors.slice(1)).toEqual([{ id: 'H1', kind: 'hint', text: 'sold per kg', spans: ['T1'] }, { id: 'H2', kind: 'hint', text: 'graded A or cream', spans: ['T2'] }]);
     const undecided: string[] = [];
     const kept = await requirementsOf({ router: fakeRouter({}), log: (line: string) => undecided.push(line) }, 'Find wholesale providers', hint);
-    expect(kept.anchors.filter((anchor: { kind: string }) => anchor.kind === 'hint')).toHaveLength(5);
-    expect(undecided).toEqual(['requirements: no majority on grouping the 5 pieces of the hints by meaning; the punctuation split is kept']);
+    expect(kept.anchors.filter((anchor: { kind: string }) => anchor.kind === 'hint')).toEqual([{ id: 'H1', kind: 'hint', text: hint, spans: ['T1', 'T2', 'T3', 'T4', 'T5'] }]);
+    expect(undecided).toEqual(['requirements: fewer than two provider families grouped the 5 pieces of the hints by meaning; each sentence stays one requirement']);
     expect((await requirementsOf({ router: fakeRouter({}) }, 'Find wholesale providers')).hints).toBeUndefined();
   });
 
@@ -94,7 +95,7 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
     const chained = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, { groups: [['S1'], ['S2', 'S3']] }, { groups: [['S1', 'S2', 'S3']] }) }) }, 'one, two, three');
     expect(chained.map((anchor: { text: string }) => anchor.text)).toEqual(['one, two', 'three']);
     const twoValid = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, FAIL, { groups: [['S1'], ['S2', 'S3']] }) }) }, 'one, two, three');
-    expect(twoValid.map((anchor: { text: string }) => anchor.text)).toEqual(['one', 'two', 'three']);
+    expect(twoValid.map((anchor: { text: string }) => anchor.text)).toEqual(['one, two', 'three']);
   });
 
   it('merges two groups only when every pair across them is voted together: no group forms through a chain', async () => {
@@ -107,10 +108,63 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
     expect(await grouped([['S1', 'S2', 'S3', 'S4', 'S5']], [['S1', 'S2', 'S3', 'S4', 'S5']])).toEqual(['S1S2S3S4S5']);
   });
 
+  describe('a comma is a proposed cut: without agreement the asker\'s sentence stays whole', () => {
+    const asked = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio , proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
+    const list = { groups: [['S1', 'S2', 'S3', 'S4'], ['S5'], ['S6']] };
+    const cut = { groups: [['S1'], ['S2', 'S3', 'S4'], ['S5'], ['S6']] };
+    const spansOf = async (router: ReturnType<typeof fakeRouter>, log: string[] = []) => (await requirementsOf({ router, log: (line: string) => log.push(line) }, asked)).anchors.map((anchor: { spans: string[] }) => anchor.spans.join('+'));
+
+    it('keeps the list of examples in one requirement when two families disagree on where it starts', async () => {
+      const router = fakeRouter({ requirements: seq(list, cut, cut) }, { providers: ['p1', 'p2'] });
+      const stored = await requirementsOf({ router }, asked);
+      expect(stored.anchors.map((anchor: { spans: string[] }) => anchor.spans.join('+'))).toEqual(['S1+S2+S3+S4', 'S5', 'S6']);
+      expect(stored.anchors[0].text).toBe('Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio');
+      expect(stored.grouping).toMatchObject({ grouped: true, valid: 2, samples: [{ provider: 'p1', groups: list.groups }, { provider: 'p2', groups: cut.groups }] });
+      expect(await spansOf(fakeRouter({ requirements: seq(cut, list, list) }, { providers: ['p1', 'p2'] }))).toEqual(['S1+S2+S3+S4', 'S5', 'S6']);
+    });
+
+    it('keeps it in one requirement when a majority of three families joins it, whatever the third says', async () => {
+      expect(await spansOf(fakeRouter({ requirements: seq(cut, list, list) }))).toEqual(['S1+S2+S3+S4', 'S5', 'S6']);
+      expect(await spansOf(fakeRouter({ requirements: seq(list, { groups: [['S1'], ['S2'], ['S3'], ['S4'], ['S5'], ['S6']] }, list) }))).toEqual(['S1+S2+S3+S4', 'S5', 'S6']);
+    });
+
+    it('splits a sentence where two families agree to split it', async () => {
+      expect(await spansOf(fakeRouter({ requirements: cut }, { providers: ['p1', 'p2'] }))).toEqual(['S1', 'S2+S3+S4', 'S5', 'S6']);
+      expect(await spansOf(fakeRouter({ requirements: seq(list, cut, cut) }))).toEqual(['S1', 'S2+S3+S4', 'S5', 'S6']);
+      const two = await anchorsOf({ router: fakeRouter({ requirements: { groups: [['S1'], ['S2']] } }) }, 'a low price, a long service life');
+      expect(two.map((anchor: { text: string }) => anchor.text)).toEqual(['a low price', 'a long service life']);
+    });
+
+    it('separates nothing on the grouping of one provider family, and says so', async () => {
+      const log: string[] = [];
+      expect(await spansOf(fakeRouter({ requirements: cut }, { providers: ['p1'] }), log)).toEqual(['S1+S2+S3+S4+S5+S6']);
+      expect(log).toEqual(['requirements: fewer than two provider families grouped the 6 pieces of the question by meaning; each sentence stays one requirement']);
+    });
+
+    it('still never lets one requirement swallow pieces a majority keeps apart', async () => {
+      const everything = { groups: [['S1', 'S2', 'S3', 'S4', 'S5', 'S6']] };
+      expect(await spansOf(fakeRouter({ requirements: seq(everything, list, cut) }))).toEqual(['S1+S2+S3+S4', 'S5', 'S6']);
+      expect(await spansOf(fakeRouter({ requirements: seq(everything, { groups: [['S1'], ['S2'], ['S3'], ['S4'], ['S5'], ['S6']] }, list) }))).toEqual(['S1+S2+S3+S4', 'S5', 'S6']);
+    });
+
+    it('keeps two sentences apart unless a majority joins pieces across them, and starts a new requirement where a piece was split', async () => {
+      const twoSentences = 'Find trails near the city, for children. Report the parking, the length';
+      const none = await anchorsOf({ router: fakeRouter({}) }, twoSentences);
+      expect(none.map((anchor: { text: string }) => anchor.text)).toEqual(['Find trails near the city, for children. Report the parking', 'the length']);
+      const across = await anchorsOf({ router: fakeRouter({ requirements: { groups: [['S1'], ['S2', 'S3']] } }) }, twoSentences);
+      expect(across.map((anchor: { text: string }) => anchor.text)).toEqual(['Find trails near the city', 'for children. Report the parking, the length']);
+      const tie = await anchorsOf({ router: fakeRouter({ requirements: seq({ groups: [['S1', 'S2'], ['S3']] }, { groups: [['S1', 'S2', 'S3']] }, { groups: [['S1', 'S2'], ['S3']] }) }, { providers: ['p1', 'p2'] }) }, twoSentences);
+      expect(tie.map((anchor: { spans: string[] }) => anchor.spans.join('+'))).toEqual(['S1+S2', 'S3']);
+      const splitter = (request: Ask) => (request.messages[1].content === 'Piece: B with the best ratio' ? { more: true, second: 'with the best ratio' } : { more: false });
+      const cutPiece = await anchorsOf({ router: fakeRouter({ 'requirement-split': splitter }) }, 'similar to A, B with the best ratio, lasting');
+      expect(cutPiece.map((anchor: { text: string }) => anchor.text)).toEqual(['similar to A, B', 'with the best ratio, lasting']);
+    });
+  });
+
   it('stores what the split and the grouping did, so a produced tree shows it', async () => {
     const router = fakeRouter({ 'requirement-split': (request: Ask) => (request.messages[1].content.includes('D with') ? { more: true, second: 'with highest price/value ratio' } : { more: false }), requirements: { groups: [['S1', 'S2', 'S3', 'S4'], ['S5'], ['S6']] }, purpose: FAIL });
     const stored = await requirementsOf({ router }, question);
-    expect(stored.grouping).toEqual({ grouped: true, valid: 2 });
+    expect(stored.grouping).toEqual({ grouped: true, valid: 2, samples: [{ provider: 'p1', groups: [['S1', 'S2', 'S3', 'S4'], ['S5'], ['S6']] }, { provider: 'p2', groups: [['S1', 'S2', 'S3', 'S4'], ['S5'], ['S6']] }] });
     expect(stored.pieces).toEqual([
       { text: 'similar to A', asked: true, split: false, votes: { 0: 2 }, spans: ['S1'] },
       { text: 'B', asked: false, split: false, votes: {}, spans: ['S2'] },
@@ -122,12 +176,12 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
     expect(built.requirements).toEqual({ pieces: stored.pieces, grouping: stored.grouping });
   });
 
-  it('keeps the punctuation split and logs it when fewer than two votes are valid', async () => {
+  it('keeps the sentence whole and logs it when fewer than two votes are valid: a comma alone separates nothing', async () => {
     const log: string[] = [];
     const router = fakeRouter({ requirements: seq({ groups: [['S1', 'S2', 'S3', 'S4'], ['S5']] }, FAIL, { groups: [['S1', 'S9']] }) });
     const anchors = await anchorsOf({ router, log: (line: string) => log.push(line) }, question);
-    expect(anchors.map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual(['C1 similar to A', 'C2 B', 'C3 C', 'C4 D with highest price/value ratio', 'C5 proven good quality']);
-    expect(log).toEqual(['requirements: no majority on grouping the 5 pieces of the question by meaning; the punctuation split is kept']);
+    expect(anchors.map((anchor: { id: string; text: string }) => `${anchor.id} ${anchor.text}`)).toEqual([`C1 ${question}`]);
+    expect(log).toEqual(['requirements: fewer than two provider families grouped the 5 pieces of the question by meaning; each sentence stays one requirement']);
   });
 
   it('refuses a grouping that invents a piece or leaves one out, and asks nothing for a single short piece', async () => {
@@ -135,7 +189,7 @@ describe('requirements are the punctuation pieces grouped by meaning', () => {
     const anchors = await anchorsOf({ router }, 'first piece, second piece');
     expect(router.calls[1].messages[2].content).toContain('a group names an id that is not one of S1, S2');
     expect(router.calls[3].messages[2].content).toContain('every piece id must be in exactly one group');
-    expect(anchors.map((anchor: { text: string }) => anchor.text)).toEqual(['first piece', 'second piece']);
+    expect(anchors.map((anchor: { text: string }) => anchor.text)).toEqual(['first piece, second piece']);
     const single = fakeRouter({});
     expect(await anchorsOf({ router: single }, 'one piece')).toEqual([{ id: 'C1', kind: 'clause', text: 'one piece', spans: ['S1'] }]);
     expect(single.calls).toEqual([]);
