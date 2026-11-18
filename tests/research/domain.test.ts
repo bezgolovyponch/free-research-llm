@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DOMAIN_ASPECTS,
+  classMembers,
+  criterionEvidence,
   domainFindingsPrompt,
   domainQueryPrompt,
   domainUnderstanding,
@@ -110,7 +112,7 @@ describe('domain prompts', () => {
     expect(messages[1].content).toContain('USER HINT');
     expect(messages[1].content).toContain('graded A/cream');
     expect(messages[1].content).toContain('TRADE');
-    expect(messages[1].content).toMatch(/history of the brands/);
+    expect(messages[1].content).not.toMatch(/history of the brands/);
   });
 
   it('asks for findings from the given pages only and cuts page text at 3000 chars', () => {
@@ -169,7 +171,8 @@ describe('trade hubs', () => {
     expect(content).toContain('grade A');
     expect(content).toContain('vintage clothing');
     expect(content).toContain('4 search queries');
-    expect(content).toMatch(/bales|per kg|B2B|export/i);
+    expect(content).not.toMatch(/bales|per kg|B2B|groothandel|Großhandel/i);
+    expect(content).toContain('the words of the trade above that say how such sellers sell');
   });
 });
 
@@ -218,5 +221,68 @@ describe('domain understanding', () => {
     expect(understanding.where).toEqual([]);
     expect(understanding.object).toHaveLength(1);
     expect(understanding.hosts).toEqual(['vintagehub.com']);
+  });
+});
+
+describe('domain study started from the examples of the asker', () => {
+  const criteria = [{ id: 'E1', text: 'sells garments of makers like the named ones', examples: ['Alpha Coats', 'Betula'] }, { id: 'E2', text: 'sells in bulk', examples: [] }];
+  const examples = ['Alpha Coats', 'Betula'];
+  const studied = [
+    { id: 'D1', url: 'https://www.one.example/guide', text: 'Shops stock Alpha Coats, Betula and Cedar Wear on the same rail. A bulk seller states a minimum order per pallet.' },
+    { id: 'D2', url: 'https://two.example/list', text: 'Collectors group Cedar Wear with Betula. Dune Outdoor is sold next to Alpha Coats.' },
+    { id: 'D3', url: 'https://three.example/x', text: 'Elm Street is a road.' },
+  ];
+
+  it('asks for sources that name the examples next to other members of their class, and names no trade of its own', () => {
+    const content = domainQueryPrompt({ question: 'q', purpose: 'p', languages: ['English', 'Czech'], object: 'bulk sellers', hint: 'h', examples, criteria })[1].content;
+    expect(content).toContain('EXAMPLES THE ASKER NAMED:\nAlpha Coats, Betula');
+    expect(content).toContain('[E1] sells garments of makers like the named ones (examples the asker named: Alpha Coats, Betula)');
+    expect(content).toContain("name the asker's examples together with other members of the same class");
+    expect(content).toContain("At least half of the queries name one or two of the asker's examples");
+    expect(content).toContain('English, Czech');
+    expect(content).not.toMatch(/graded|packaged|TRADE|brand/);
+    expect(domainQueryPrompt({ question: 'q', criteria: [criteria[1]] })[1].content).not.toContain('At least half');
+    expect(domainQueryPrompt({ question: 'q', object: 'o' })[1].content).toContain('OBJECT TO STUDY');
+  });
+
+  it('asks the pages for other members of the class and for what a page shows per condition', () => {
+    const content = domainFindingsPrompt({ question: 'q', purpose: 'p', sources: studied, examples, criteria })[1].content;
+    expect(content).toContain('Aspect "members": one finding per other member of the class the asker\'s examples stand for (Alpha Coats, Betula)');
+    expect(content).toContain('Aspect "evidence": what the page of one result states when it meets one of these conditions');
+    expect(content).toContain('[E2] sells in bulk');
+    expect(domainFindingsPrompt({ question: 'q', sources: studied })[1].content).not.toContain('Aspect "members"');
+  });
+
+  const findings = [
+    { aspect: 'members', statement: 'Cedar Wear is stocked with them', quote: 'Shops stock Alpha Coats, Betula and Cedar Wear on the same rail.', sourceId: 'D1', member: 'Cedar Wear' },
+    { aspect: 'members', statement: 'Cedar Wear is grouped with Betula', quote: 'Collectors group Cedar Wear with Betula.', sourceId: 'D2', member: 'cedar wear' },
+    { aspect: 'members', statement: 'Dune Outdoor', quote: 'Dune Outdoor is sold next to Alpha Coats.', sourceId: 'D2', member: 'Dune Outdoor' },
+    { aspect: 'members', statement: 'an example is no new member', quote: 'Collectors group Cedar Wear with Betula.', sourceId: 'D2', member: 'Betula' },
+    { aspect: 'members', statement: 'not next to an example', quote: 'Elm Street is a road.', sourceId: 'D3', member: 'Elm Street' },
+    { aspect: 'members', statement: 'name not in the quote', quote: 'Dune Outdoor is sold next to Alpha Coats.', sourceId: 'D2', member: 'Fern' },
+    { aspect: 'evidence', statement: 'a bulk seller states a minimum order', quote: 'A bulk seller states a minimum order per pallet.', sourceId: 'D1', criterion: '[e2]' },
+    { aspect: 'evidence', statement: 'unknown condition', quote: 'A bulk seller states a minimum order per pallet.', sourceId: 'D1', criterion: 'E9' },
+  ];
+
+  it('keeps a member only when its quoted sentence names it next to an example, and evidence only for a known condition', () => {
+    const kept = verifiedFindings(findings, studied, { examples, criteria });
+    expect(kept.map((finding) => finding.member ?? finding.criterion)).toEqual(['Cedar Wear', 'cedar wear', 'Dune Outdoor', 'E2']);
+    expect(kept[0]).toMatchObject({ host: 'one.example', url: 'https://www.one.example/guide' });
+    expect(verifiedFindings(findings, studied).filter((finding) => finding.aspect === 'members')).toEqual([]);
+  });
+
+  it('learns the class from the sites that name a member, and the page evidence per condition', () => {
+    const merged = mergeFindings([{ data: { findings } }, { data: { findings } }], studied, { examples, criteria });
+    expect(merged).toHaveLength(4);
+    expect(classMembers(merged)).toEqual([
+      { name: 'Cedar Wear', hosts: ['one.example', 'two.example'], quotes: [{ quote: 'Shops stock Alpha Coats, Betula and Cedar Wear on the same rail.', url: 'https://www.one.example/guide' }, { quote: 'Collectors group Cedar Wear with Betula.', url: 'https://two.example/list' }], supported: true },
+      { name: 'Dune Outdoor', hosts: ['two.example'], quotes: [{ quote: 'Dune Outdoor is sold next to Alpha Coats.', url: 'https://two.example/list' }], supported: false },
+    ]);
+    expect(criterionEvidence(merged)).toEqual({ E2: [{ statement: 'a bulk seller states a minimum order', quote: 'A bulk seller states a minimum order per pallet.', host: 'one.example', url: 'https://www.one.example/guide' }] });
+    const understanding = domainUnderstanding(merged);
+    expect(understanding.members.map((member: { name: string }) => member.name)).toEqual(['Cedar Wear', 'Dune Outdoor']);
+    expect(Object.keys(understanding.evidence)).toEqual(['E2']);
+    expect(classMembers(null)).toEqual([]);
+    expect(criterionEvidence(null)).toEqual({});
   });
 });

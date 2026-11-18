@@ -1917,7 +1917,7 @@ describe('hub search', () => {
     expect(router.calls[0].messages[1].content).toContain('Netherlands');
     expect(router.calls[0].messages[1].content).toContain('United Kingdom');
     expect(router.calls[0].messages[1].content).toContain('4 search queries');
-    expect(router.calls[0].messages[1].content).toMatch(/bales|per kg|B2B|export/i);
+    expect(router.calls[0].messages[1].content).not.toMatch(/bales|per kg|B2B|groothandel/i);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('hub round 1: 2 queries, 1 new pages, 1 new hosts'))).toBe(true);
     expect(await engine.searchHubs(project)).toBe(1);
     expect(router.calls).toHaveLength(1);

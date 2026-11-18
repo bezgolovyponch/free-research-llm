@@ -21,7 +21,7 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
-import { conceptFresh, conceptKindLabel, conceptText, frameConcept } from './concept.mjs';
+import { conceptExamples, conceptFresh, conceptKindLabel, conceptText, frameConcept } from './concept.mjs';
 import { CallBudget } from './semantic.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
@@ -801,16 +801,19 @@ export class ResearchEngine {
 
   async studyDomain(project) {
     if (!this.router || this.demo || !this.search?.search) return true;
-    if (project.domain?.ready) return true;
     this.ensureItemCount(project);
+    await this.ensureConcept(project);
+    if (project.domain?.ready && (project.domain.conceptAt ?? null) === (project.concept?.at ?? null)) return true;
     await this.ensureDecisionModel(project);
+    const examples = conceptExamples(project.concept);
+    const criteria = project.concept?.criteria ?? [];
     const purpose = project.decisionModel?.purpose ?? '';
     const kind = project.decisionModel?.kind ?? null;
-    const object = kind ? [kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
+    const object = kind ? [conceptKindLabel(project.concept) || kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : conceptKindLabel(project.concept);
     const hint = project.guidance ?? '';
     const brief = project.brief ?? this.briefOf(project);
     const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
-    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages, object, hint }) }).catch(() => null);
+    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages, object, hint, examples, criteria }) }).catch(() => null);
     const queries = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 4).slice(0, DOMAIN_QUERIES);
     if (!queries.length) return true;
     const found = await this.search.search(queries, { maxSources: DOMAIN_SOURCES }).catch(() => []);
@@ -818,10 +821,10 @@ export class ResearchEngine {
     const replies = [];
     for (let index = 0; index < sources.length; index += DOMAIN_PAGES_PER_CALL) {
       const batch = sources.slice(index, index + DOMAIN_PAGES_PER_CALL);
-      const answer = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainFindingsPrompt({ question: project.question, purpose, sources: batch }) }).catch(() => null);
+      const answer = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainFindingsPrompt({ question: project.question, purpose, sources: batch, examples, criteria }) }).catch(() => null);
       replies.push(answer);
     }
-    const findings = mergeFindings(replies, sources);
+    const findings = mergeFindings(replies, sources, { examples, criteria });
     const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [] });
     const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
     const matchedTitles = Number(project.decisionModel?.kind?.verified?.matched ?? 0);
@@ -840,7 +843,9 @@ export class ResearchEngine {
           ? `portal listings: ${sweptListings}`
           : `listed kind: ${kind?.label ?? 'the item'}`;
     }
-    project.domain = { ...understanding, at: new Date().toISOString() };
+    project.domain = { ...understanding, conceptAt: project.concept?.at ?? null, at: new Date().toISOString() };
+    const learned = understanding.members.filter((member) => member.supported);
+    if (examples.length) this.emit(project, 'decision', `class learned from your examples (${examples.join(', ')}): ${learned.length ? learned.map((member) => `${member.name} (${member.hosts.length} sites)`).join(', ') : 'no other member is named next to them on two sites yet'}`);
     const summary = [
       `object ${kind?.label || understanding.object[0] || 'not named yet'}`,
       `terms ${understanding.terms.slice(0, 3).join(', ') || 'not named yet'}`,
