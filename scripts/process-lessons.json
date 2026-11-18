@@ -681,5 +681,13 @@
     "signal": "Plots b7772e: every one of 322 Turkish plots failed 'real price trend above the EU average' at Turkey -10.7% a year after Turkish inflation (2024), although the user buys in EUR",
     "cause": "trendOf deflated the local house price index by the same country's inflation and compared one year against the EU; no exchange rate and no euro-area inflation were used",
     "prevention": "trendOf converts with Eurostat ert_bil_eur_a (statinfo=AVG, currency=<listing currency>, national currency per euro) and deflates by euro-area HICP; the check compares multi-year growth in EUR over the same years with the EU (site.test 'price trend in the buyer's currency', strategy.test trend checks)"
+  },
+  {
+    "id": "F53",
+    "title": "a research crawled at one call a minute while a better provider was idle",
+    "touches": ["src/llm/ranking.mjs", "src/llm/router.mjs", "tests/llm/ranking.test.ts", "tests/llm/router.test.ts"],
+    "signal": "Suppliers b2f5b7 2026-11-18 05:17-05:42Z: 20 of 90 pages judged; every judge call went to pollinations with a 45 s queue wait while nvidia (91% of answers passing the gates against 76%) was ready; Gemini benched 24 h",
+    "cause": "time per answer left out the queue wait of a paced provider, so a 49 s answer ranked as 4 s; when Gemini's other models rested for their daily quota, its last model (retired, HTTP 404) benched the provider for 24 h instead of until the quota reset",
+    "prevention": "providerStats counts waitMs in spentMs (ranking.test 'counts the time a paced provider kept a call waiting'); benchGoneModel rests until the earliest quota reset of the provider's resting models (router.test 'rests a provider whose last model is gone only until ...')"
   }
 ]

@@ -271,11 +271,17 @@ export class ModelRouter {
   benchGoneModel(provider, model, error) {
     const tiers = ['fast', 'deep'].filter((t) => provider.selected?.[t] === model);
     const vars = (tiers.length ? tiers : ['fast']).map((t) => `FRL_${String(provider.id).toUpperCase()}_${t.toUpperCase()}_MODEL`).join(' / ');
-    const reason = `${model ?? 'the model'} is gone (${error.status ? `HTTP ${error.status}` : 'deprecated'}) and cannot be switched; rests 24 h, set ${vars} to a model this provider still serves`;
-    this.cooldownUntil.set(provider.id, Math.max(this.cooldownUntil.get(provider.id) ?? 0, this.now() + MODEL_GONE_REST_MS));
+    const resets = [...(provider.retired?.values?.() ?? [])].filter((until) => Number.isFinite(until) && until > this.now());
+    const until = resets.length ? Math.min(...resets) : this.now() + MODEL_GONE_REST_MS;
+    const gone = `${model ?? 'the model'} is gone (${error.status ? `HTTP ${error.status}` : 'deprecated'}) and cannot be switched`;
+    const rest = resets.length ? `every other model of this provider rests for its quota, so it rests until the first of them resets (${Math.ceil((until - this.now()) / 60000)} min)` : 'rests 24 h';
+    const reason = `${gone}; ${rest}, set ${vars} to a model this provider still serves`;
+    this.cooldownUntil.set(provider.id, Math.max(this.cooldownUntil.get(provider.id) ?? 0, until));
     this.cooldownReason.set(provider.id, reason);
     this.record({ purpose: 'router', tier: '', provider: provider.id, ...(model ? { model } : {}), ok: false, ms: 0, error: reason });
   }
+
+
 
   benchSlow(provider, error) {
     if (!TIMED_OUT.test(error.message)) {
