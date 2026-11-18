@@ -1721,7 +1721,24 @@ export class ResearchEngine {
     };
   }
 
-  async checkAcceptance(project, pages = null, { memoNext = false } = {}) {
+  async checkAcceptance(project, pages = null, options = {}) {
+    const complete = { result: project.acceptanceResult ?? null, summary: project.acceptanceSummary, deliverables: project.report?.deliverables };
+    try {
+      const deliverables = await this.measureAcceptance(project, pages, options);
+      delete project.acceptanceRecheck;
+      return deliverables;
+    } catch (error) {
+      if (!(error instanceof ResearchCancelled)) throw error;
+      project.acceptanceResult = complete.result;
+      project.acceptanceSummary = complete.summary;
+      if (project.report) project.report.deliverables = complete.deliverables;
+      project.acceptanceRecheck = { cancelled: true, at: new Date().toISOString(), keptResultOf: complete.result?.checkedAt ?? null };
+      this.emit(project, 'acceptance', complete.result ? `re-check cancelled: the last complete result is kept (${acceptanceSummaryOf(project)})` : 're-check cancelled before a complete result existed: no result is stored');
+      throw error;
+    }
+  }
+
+  async measureAcceptance(project, pages = null, { memoNext = false } = {}) {
     let secondOpinions = 0;
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));

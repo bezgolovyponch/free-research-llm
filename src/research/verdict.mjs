@@ -215,6 +215,7 @@ export function verdictReport(project) {
   return {
     ...(listAsked ? headlineOf(computed) : checksHeadline(checks)),
     summary: computed.summary,
+    recheckCancelled: project.acceptanceRecheck?.cancelled ? `a later re-check was cancelled at ${project.acceptanceRecheck.at}; this is the last complete result` : '',
     requirements: requirementRows(checks, computed.perCheck ?? []),
     preconditions: checks.filter((c) => PRECONDITION_IDS.has(c.id)).map((c) => ({ id: c.id, label: c.label, value: c.value, passed: Boolean(c.passed), detail: c.detail ?? '' })),
     items: (computed.items ?? result.items ?? []).map((item) => ({ url: item.url, title: item.title ?? '', tier: item.tier ?? itemTier(item, hardIds, spec), reasons: itemReasons(item, hardIds, spec) })),

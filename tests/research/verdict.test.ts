@@ -338,6 +338,8 @@ describe("the single headline owner (C9, C10; from origin/fix/honest-headline c5
     const memoOnly = { acceptance: { mustMention: ["permit"] }, acceptanceResult: { score: 0.5, checks: [{ id: "mentions", label: "Pages mention: permit", value: 0.5, passed: false, detail: "share of required terms found on the pages" }], items: [], totalAsked: 0 } };
     expect(verdictReport(memoOnly)).toMatchObject({ headline: "0 of 1 expected-result checks pass", upTo: "", requirements: [] });
     expect(verdictReport({ acceptance: { itemCount: 3 } })).toBeNull();
+    expect(verdictReport(memoOnly)!.recheckCancelled).toBe("");
+    expect(verdictReport({ ...memoOnly, acceptanceRecheck: { cancelled: true, at: "2026-11-18T20:00:00.000Z" } })!.recheckCancelled).toBe("a later re-check was cancelled at 2026-11-18T20:00:00.000Z; this is the last complete result");
     expect(verdictLines(null)).toEqual([]);
   });
 });

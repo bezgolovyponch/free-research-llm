@@ -2448,6 +2448,45 @@ describe('hub search', () => {
     expect(verdictInvariants(project)).toEqual([]);
   });
 
+  it('a re-judge cancelled half way never replaces the last complete result (C14)', async () => {
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo-fast', deep: 'demo-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
+      async chat({ messages, tier }) {
+        const fullPrompt = messages.map((m) => m.content).join('\n');
+        if (fullPrompt.includes('strict judge') || fullPrompt.includes('Item page text:')) return { content: JSON.stringify([{ id: 'q1', answer: 'no', spans: ['S1'] }]), model: 'demo-fast', provider: 'demo', usage: {} };
+        return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
+      },
+    };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearchForChecklist, store: new ProjectStore({ dir }), lanes: 2, modeler: new ChecklistModeler({ router, samples: 3 }) });
+    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with highest price/value ratio for a retail second hand shop business in Czech Republic' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 20, valueRange: [0, 50], unit: 'EUR/kg' } });
+    project.candidates = { kept: [{ title: 'Wholesale Supplier A', url: 'https://zagumi.com/anuncio/used-clothing-ID12345', value: 40, unit: 'EUR/kg', price: 40, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits all checks', why: ['wholesale', 'brands'], risks: [] } }], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
+    project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
+    project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
+    await engine.checkAcceptance(project);
+    const complete = project.acceptanceResult!;
+    project.acceptanceSummary = complete.verdict.summary;
+    expect(complete.verdict.summary).toBe('0 of 20 confirmed · 1 rejected');
+    expect(project.acceptanceRecheck).toBeUndefined();
+
+    project.checkCache = {};
+    engine.cancelled.add(project.id);
+    await expect(engine.checkAcceptance(project)).rejects.toBeInstanceOf(ResearchCancelled);
+    expect(project.acceptanceResult).toBe(complete);
+    expect(project.acceptanceResult!.verdict.summary).toBe('0 of 20 confirmed · 1 rejected');
+    expect(project.acceptanceSummary).toBe('0 of 20 confirmed · 1 rejected');
+    expect(project.acceptanceRecheck).toMatchObject({ cancelled: true, keptResultOf: complete.checkedAt });
+    expect(project.log.some((l: { type: string; message: string }) => l.type === 'acceptance' && l.message.includes('re-check cancelled: the last complete result is kept'))).toBe(true);
+
+    engine.cancelled.delete(project.id);
+    await engine.checkAcceptance(project);
+    expect(project.acceptanceResult).not.toBe(complete);
+    expect(project.acceptanceRecheck).toBeUndefined();
+  });
+
   it('on the first acceptance check, with no checklist yet, an unknown hard item is confirmed on a same-host page and the item becomes valid', async () => {
     const itemUrl = 'https://shop.example.org/offer/used-goods-ID555';
     const deepUrl = 'https://shop.example.org/shipping-countries';
