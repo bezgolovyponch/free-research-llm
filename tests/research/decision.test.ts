@@ -644,6 +644,14 @@ describe('checklist hardness from the user\'s words', () => {
     expect(Object.values(await build('criterion')).every(([hard]) => hard === false)).toBe(true);
   });
 
+  it('keeps an asked threshold soft when no measure code can read matches it', async () => {
+    const { DecisionModeler } = await import('../../src/research/decision.mjs');
+    const router = measureOrHardness('criterion');
+    const modeler = new DecisionModeler({ router } as never);
+    const clusters = await modeler.buildChecklistFromTree({ goals: [{ id: 'G1', state: 'kept', goal: 'Count', trace: { id: 'P' }, questions: [{ id: 'Q1', q: 'How many qualified listings are there?', checker: 'code', threshold: { op: '>=', value: 20, unit: 'cars', source: 'asked', hard: true } }] }] }, [], router, null, 'q', '');
+    expect(clusters[0].items[0]).toMatchObject({ hard: false, numeric: undefined });
+  });
+
   it('recognises only question clauses as anchors that can make a goal hard', async () => {
     const { isClauseAnchor } = await import('../../src/research/decision.mjs');
     expect([{ id: 'C1' }, { id: 'C12' }, { id: 'H1' }, { id: 'I2' }, { id: 'P' }, { kind: 'rule', text: 'value' }, null].map(isClauseAnchor)).toEqual([true, true, false, false, false, false, false]);

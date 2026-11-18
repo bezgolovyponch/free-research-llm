@@ -11,7 +11,7 @@ import { voteHardness, thresholdsOf } from './purpose.mjs';
 import { CallBudget, oneOf, vote } from './semantic.mjs';
 
 export { CHECKLIST_VERSION };
-export const DECISION_MODEL_VERSION = 5;
+export const DECISION_MODEL_VERSION = 6;
 export const DOMAIN_CHECKERS = ['consensus', 'statistic', 'official'];
 
 export function isClauseAnchor(trace) {
@@ -546,7 +546,7 @@ export class DecisionModeler {
         const checker = q.checker;
         const scope = DOMAIN_CHECKERS.includes(checker) ? 'domain' : 'item';
         const numeric = q.threshold ? await this.numericOf(q, router, budget) : undefined;
-        const hard = scope === 'item' && (q.threshold?.hard === true || (goalHard && checker === 'page'));
+        const hard = scope === 'item' && ((q.threshold?.hard === true && Boolean(numeric)) || (goalHard && checker === 'page'));
         cluster.items.push({ clause, question: q.q, hard, numeric, checker, scope, goalId: goal.id, questionId: q.id });
       }
     }

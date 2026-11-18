@@ -1016,3 +1016,17 @@ describe('aboutSubject', () => {
   });
 });
 
+
+describe('askedNumber', () => {
+  const question = 'Find cars within 300km from prague, max 65 000 CZK, budget €500, at least 20 cars';
+  it('counts a number as asked only with the unit the user wrote beside it', async () => {
+    const { askedNumber } = await import('../../src/research/purpose.mjs');
+    expect([[300, 'km'], [300, 'points'], [65000, 'CZK'], [65000, 'EUR'], [500, 'EUR'], [500, '€'], [500, 'CZK'], [20, 'cars'], [20, 'listings'], [7, ''], [20, '']].map(([value, unit]) => askedNumber(question, value as number, unit as string))).toEqual([true, false, true, false, true, true, false, true, false, false, true]);
+  });
+
+  it('labels an invented threshold that reuses the user\'s number with another unit as an assumption', async () => {
+    const { thresholdsOf } = await import('../../src/research/purpose.mjs');
+    const tree = { goals: [{ id: 'G1', goal: 'g', questions: [{ id: 'Q1', q: 'Does the reliability score reach 300 points?', checker: 'page', threshold: { op: '>=', value: 300, unit: 'points' } }, { id: 'Q2', q: 'Is it within 300 km?', checker: 'code', threshold: { op: '<=', value: 300, unit: 'km' } }] }] };
+    expect(thresholdsOf(tree, { question }).thresholds.map((t: { node: string; source: string; hard: boolean }) => [t.node, t.source, t.hard])).toEqual([['Q1', 'assumption', false], ['Q2', 'asked', true]]);
+  });
+});

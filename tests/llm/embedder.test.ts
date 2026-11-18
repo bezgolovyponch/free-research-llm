@@ -117,3 +117,29 @@ describe('embedder: ranks only, one model per comparison', () => {
     expect(again.log).toEqual([]);
   });
 });
+
+describe('embedder: key lists', () => {
+  const keyed = (refused: number) => {
+    const sent: string[] = [];
+    const entry = { id: 'one', model: 'one-model', keys: ['ONE_KEY'], request: (env: Record<string, string>, texts: string[]) => ({ url: 'https://embed.test/one', init: { key: env.ONE_KEY, body: JSON.stringify(texts) } }), vectors: (body: { vectors: number[][] }) => body.vectors };
+    const fetchImpl = async (_url: string, init: { key: string; body: string }) => {
+      sent.push(init.key);
+      if (init.key === 'first') return { ok: false, status: refused, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ vectors: (JSON.parse(init.body) as string[]).map((text) => vectorOf(text)) }) };
+    };
+    return { sent, embedder: new Embedder({ env: { ONE_KEY: 'first, second' }, fetchImpl: fetchImpl as never, routes: [entry] as never }) };
+  };
+
+  it('sends one key of a comma-separated list at a time and moves to the next when a key is refused', async () => {
+    const { sent, embedder } = keyed(401);
+    expect(await embedder.embedAll(['red'])).toMatchObject({ model: 'one-model' });
+    expect(sent).toEqual(['first', 'second']);
+  });
+
+  it('does not try another key when the service itself fails', async () => {
+    const { sent, embedder } = keyed(503);
+    expect(await embedder.embedAll(['red'])).toBeNull();
+    expect(sent).toEqual(['first']);
+    expect(embedder.failures).toEqual([{ route: 'one', error: 'one embeddings answered 503' }]);
+  });
+});

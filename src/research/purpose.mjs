@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { clausesOf } from './clauses.mjs';
+import { currencyOf } from './acceptance.mjs';
 import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
 
 export const PURPOSE = JSON.parse(readFileSync(new URL('./purpose.json', import.meta.url), 'utf8'));
@@ -768,6 +769,27 @@ function numberRuns(text) {
   return out;
 }
 
+export function unitsBeside(text, run) {
+  const before = String(text).slice(Math.max(0, run.at - 12), run.at).match(/(\p{L}+|\p{Sc})\s*$/u)?.[1] ?? '';
+  const after = String(text).slice(run.at + run.raw.length, run.at + run.raw.length + 14).match(/^\s*(\p{L}+|\p{Sc}|%)/u)?.[1] ?? '';
+  return [before, after].map((unit) => unit.toLowerCase()).filter(Boolean);
+}
+
+export function sameUnit(a, b) {
+  const money = [currencyOf(a), currencyOf(b)];
+  if (money[0] && money[1]) return money[0] === money[1];
+  const x = String(a ?? '').toLowerCase().replace(/[^\p{L}\p{Sc}%]/gu, '');
+  const y = String(b ?? '').toLowerCase().replace(/[^\p{L}\p{Sc}%]/gu, '');
+  return Boolean(x && y) && (x.startsWith(y) || y.startsWith(x));
+}
+
+export function askedNumber(text, value, unit) {
+  const runs = numberRuns(text).filter((run) => run.values.includes(value));
+  if (!runs.length) return false;
+  if (!String(unit ?? '').trim()) return true;
+  return runs.some((run) => unitsBeside(text, run).some((beside) => sameUnit(beside, unit)));
+}
+
 export function numbersIn(text) {
   return numberRuns(text).flatMap((run) => run.values);
 }
@@ -819,7 +841,8 @@ export function moveNumbers(node, textField, stray) {
 }
 
 export function thresholdsOf(tree, { question = '', guidance = '', answers = [], notes = [] } = {}) {
-  const said = new Set(numbersIn([question, guidance, ...answers].join('\n')));
+  const saidText = [question, guidance, ...answers].join('\n');
+  const said = new Set(numbersIn(saidText));
   const noteById = new Map(notes.map((note) => [note.id, note]));
   const thresholds = [];
   const settle = (node, goal, textField) => {
@@ -831,7 +854,7 @@ export function thresholdsOf(tree, { question = '', guidance = '', answers = [],
     if (!node.threshold) return out;
     const cited = noteById.get(node.note) ?? (goal.notes ?? []).map((id) => noteById.get(id)).find((note) => note && numbersIn(note.quote).includes(node.threshold.value));
     const confirmed = node.threshold.confirmed === true;
-    const source = said.has(node.threshold.value) ? 'asked' : cited && numbersIn(cited.quote).includes(node.threshold.value) ? 'sourced' : 'assumption';
+    const source = askedNumber(saidText, node.threshold.value, node.threshold.unit) ? 'asked' : cited && numbersIn(cited.quote).includes(node.threshold.value) ? 'sourced' : 'assumption';
     const threshold = { ...node.threshold, source, ...(source === 'sourced' ? { url: cited.url, note: cited.id } : {}), hard: source === 'asked' || confirmed };
     thresholds.push({ node: node.id, goal: goal.id, ...threshold });
     return { ...out, threshold };
@@ -845,7 +868,7 @@ export function thresholdsOf(tree, { question = '', guidance = '', answers = [],
 
 export async function voteHardness(ctx, { requirementText, userWords } = {}) {
   const messages = [
-    { role: 'system', content: 'You read one requirement from a research question, in any language. Decide whether it states a hard constraint that must be satisfied (a veto if violated) or a soft criterion that only scores and orders. A hard constraint is an explicit limit: a number with a unit (max price, max distance, minimum area), a range, a radius, or an exclusive word from the user\'s own text (required, must, only, exactly, mandatory, no, not, without, exclude, forbidden). A preference, example, quality, or hint is soft. Answer with JSON only: {"kind":"constraint|criterion"}.' },
+    { role: 'system', content: 'You read one requirement from a research question, in any language. Decide whether it states a hard constraint that must be satisfied (a veto if violated) or a soft criterion that only scores and orders. Numbers, counts of results, limits, ranges and radii are checked separately by code: ignore them. Answer constraint only when, without them, the user\'s own text demands or excludes a property of every single item with an exclusive word (required, must, only, exactly, mandatory, no, not, without, exclude, forbidden). A description, preference, example, quality or hint is a criterion. Answer with JSON only: {"kind":"constraint|criterion"}.' },
     { role: 'user', content: `Requirement: ${requirementText}\n\nUser's own words (question + guidance):\n${userWords}` },
   ];
   const schema = (data) => {
