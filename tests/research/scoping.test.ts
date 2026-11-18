@@ -3,7 +3,7 @@ import { COST_BASIS, COST_GOAL, VALUE_BASIS, VALUE_GOAL } from '../../src/resear
 import { MAX_SOURCES, MIN_HOSTS, MIN_PERSPECTIVES, SUBJECT_CHARS, askedSubject, composeQueries, diversityOf, findSources, fixedPerspectives, pageKey, perspectives, relevanceReason, requirementSubjects, runScoping, scopeNotes, scopingCap, screenSources, screeningSubject, subjectLabels, subjectLevels } from '../../src/research/scoping.mjs';
 import { CallBudget } from '../../src/research/semantic.mjs';
 import { quoteFound } from '../../src/research/quote.mjs';
-import { fakeEmbedder, fakeRouter, seq } from '../helpers/fakes';
+import { fakeEmbedder, fakeRouter, lettersOf, seq } from '../helpers/fakes';
 
 const views = [
   { name: 'Workshop', aspects: [{ lang: 'English', phrase: 'known faults' }, { lang: 'Czech', phrase: 'časté závady' }] },
@@ -122,14 +122,27 @@ describe('sources are kept on a grounded judgement of subject and market', () =>
     ]);
     expect(dropped).toEqual([{ url: 'https://offers.example.com/list', reason: 'off-market: describes another market', role: 'market', roleVotes: { B: 2 } }]);
     const asked = router.userText('source-role');
-    expect(asked).toContain('A when the source explains how to judge or choose such a thing: what decides, methods, criteria, risks, whatever place it describes');
-    expect(asked).toContain('B when the source describes a market: offers, prices, availability or local rules');
+    expect(lettersOf(router.calls.filter((call) => call.task === 'source-role')[0])).toEqual(expect.objectContaining({ 'explains how to judge or choose such a thing: what decides, methods, criteria, risks, whatever place it describes': expect.stringMatching(/^[AB]$/), 'describes a market: offers, prices, availability or local rules': expect.stringMatching(/^[AB]$/) }));
+    const roleCalls = router.calls.filter((call) => call.task === 'source-role');
+    expect(roleCalls[0].choice).toMatchObject({ field: 'role', options: 2 });
+    expect(roleCalls[1].choice!.ids).toEqual([...roleCalls[0].choice!.ids!].reverse());
     expect(asked).toContain('[S2] The rear axle beam rusts at the mount.');
     expect(asked).not.toContain('Asked market');
     expect(router.calls.filter((call) => call.task === 'source-role').slice(0, 2).map((call) => call.avoid)).toEqual([undefined, ['p1']]);
     expect(relevanceReason({ about: 'A', market: 'C', span: 'S1' })).toBe('off-market: describes another market');
     expect(relevanceReason({ about: 'A', market: 'C', span: 'S1' }, 'knowledge')).toBe('');
     expect(relevanceReason({ about: 'C', market: 'A', span: 'S1' }, 'knowledge')).toBe('off-subject: a different subject');
+  });
+
+  it('never drops a source on a role only one provider family gave: the role stays undecided', async () => {
+    const offers = [{ url: 'https://offers.example.com/list', title: 'Offers abroad', text: page('Offers') }];
+    const script = { 'source-relevance': { about: 'B', market: 'C', span: 'S2' }, 'source-role': { role: 'B' } };
+    const alone = fakeRouter(script, { providers: ['p1'] });
+    const one = await screenSources({ router: alone, embedder: fakeEmbedder() }, { sources: offers, purpose: 'buy a reliable car', subject: 'Alpha 1.2', markets: ['Czechia'], regions: ['CZ'] });
+    expect(one.dropped).toEqual([]);
+    expect(one.kept.map((s: { url: string; role: string }) => [s.url, s.role])).toEqual([['https://offers.example.com/list', 'undecided']]);
+    const two = await screenSources({ router: fakeRouter(script), embedder: fakeEmbedder() }, { sources: offers, purpose: 'buy a reliable car', subject: 'Alpha 1.2', markets: ['Czechia'], regions: ['CZ'] });
+    expect(two.dropped.map((s: { role: string }) => s.role)).toEqual(['market']);
   });
 
   it('gives the page country signal to the model as one input line, and never decides by it', async () => {

@@ -325,6 +325,26 @@ describe("stored answers of the 0c750f fixture under the quote rule and the pric
     expect(result.validCount).toBe(1);
   });
 
+  it("a no from one provider family alone rejects nothing: the item stays in the list, to confirm", async () => {
+    const project = copy();
+    migrateChecks(project);
+    const tyresItem = project.acceptanceResult.items.find((i: { url: string }) => i.url === tyres);
+    tyresItem.checks = tyresItem.checks.map((c: { clause: string }) => (c.clause === "kind" ? { ...c, id: kindId, answer: "yes", quote: "Zimní pneu na plechových discích." } : { ...c, answer: "yes", quote: "stated on the page" }));
+    const router = fakeRouter({ "kind-second": { kind: "B", span: "S1" } }, { providers: ["p1"] });
+    const { item, result } = await hardened(project, tyres, router);
+    expect(router.calls).toHaveLength(2);
+    expect(item.checks.find((c: { clause: string }) => c.clause === "kind")).toMatchObject({ answer: "unknown", second: { answer: "unknown", single: true } });
+    expect(item.tier).toBe("to-confirm");
+    expect(result.items.some((i: { url: string }) => i.url === tyres)).toBe(true);
+    const voted = copy();
+    migrateChecks(voted);
+    const votedItem = voted.acceptanceResult.items.find((i: { url: string }) => i.url === tyres);
+    votedItem.checks = tyresItem.checks.map((c: { clause: string }) => (c.clause === "kind" ? { ...c, answer: "yes", second: undefined, reason: undefined } : c));
+    const two = await hardened(voted, tyres, fakeRouter({ "kind-second": { kind: "B", span: "S1" } }));
+    expect(two.item.tier).toBe("rejected");
+    expect(result.tiers.rejected).toBe(two.result.tiers.rejected - 1);
+  });
+
   it("a real car at 10,000 CZK, below the cut, answered A stays a kind yes: the price alone decides nothing", async () => {
     const project = copy();
     const car = project.acceptanceResult.items.find((i: { value: number }) => i.value === 10000);

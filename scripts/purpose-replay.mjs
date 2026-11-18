@@ -10,6 +10,7 @@ import { ChecklistJudge, hardenKind, migrateChecks } from '../src/research/check
 import { HostBook, gatherEvidence, identify, subjectKey } from '../src/research/facts.mjs';
 import { COST_CHECKERS, COST_PHASES, COST_ROLE, METHOD_ID, MIN_EXPLANATIONS, PRICE_CHECKER, VALUE_ROLE, buildPurposeTree, coverageOf, drawRequirements, openEntries, tensionGoalsOf } from '../src/research/purpose.mjs';
 import { KNOWLEDGE, MIN_HOSTS, MIN_PERSPECTIVES, OFF_MARKET, PAGE_CHARS, composeQueries, diversityOf, judgeSource, relevanceReason, runScoping, screenSources } from '../src/research/scoping.mjs';
+import { MIN_KAPPA_ITEMS, cohenKappa, spreadOf } from '../src/research/agreement.mjs';
 import { CallBudget } from '../src/research/semantic.mjs';
 import { sentenceSpans } from '../src/research/spans.mjs';
 import { verdict } from '../src/research/verdict.mjs';
@@ -21,7 +22,8 @@ export const FIXTURE_FILE = path.join(ROOT, 'tests', 'fixtures', 'verdict-0c750f
 export const SIM_OUT = path.join(ROOT, 'data', 'handoff', 'sim', 'sim-out');
 export const JUDGE_SAMPLE = 20;
 export const MAX_LANGUAGES = 4;
-export const USAGE = 'usage: node scripts/purpose-replay.mjs <car|suppliers|plots|library|trail|all> --out <dir outside the repo> [--projects <dir>] [--baseline <sim-out dir>]';
+export const MAX_RUNS = 9;
+export const USAGE = 'usage: node scripts/purpose-replay.mjs <car|suppliers|plots|library|trail|all> --out <dir outside the repo> [--projects <dir>] [--baseline <sim-out dir>] [--runs <1-9>]';
 
 export const BASELINE = {
   car: { sources: '1 of 8', notes: '5 of 10', tensions: 'removed', numbers: '10 %, ...', ach: '9 of 17', facts: 'SDI, 1.4 16V, one MOT record', grades: 'all', prices: '1', kind: 'kind yes' },
@@ -43,7 +45,25 @@ export function parseArgs(argv) {
   const out = value('--out');
   if (!out) return { error: `--out is required\n${USAGE}` };
   if (insideRepo(out)) return { error: `--out must be a folder outside the repository (${ROOT}); nothing was written` };
-  return { modes: mode === 'all' ? MODES : [mode], out: path.resolve(out), projects: value('--projects'), baseline: value('--baseline') };
+  const runs = argv.includes('--runs') ? Number(value('--runs')) : 1;
+  if (!Number.isInteger(runs) || runs < 1 || runs > MAX_RUNS) return { error: `--runs must be a whole number from 1 to ${MAX_RUNS}\n${USAGE}` };
+  return { modes: mode === 'all' ? MODES : [mode], out: path.resolve(out), projects: value('--projects'), baseline: value('--baseline'), runs };
+}
+
+export function runSpread(runs) {
+  const ids = [...new Set(runs.flatMap((rows) => rows.map((row) => row.id)))];
+  return ids.map((id) => {
+    const rows = runs.map((metrics) => metrics.find((row) => row.id === id)).filter(Boolean);
+    const judged = rows.filter((row) => row.pass !== null);
+    const rates = rows.filter((row) => row.rate && row.rate.total > 0);
+    const spread = spreadOf(rates.map((row) => row.rate.part / row.rate.total));
+    return { id, label: rows[0].label, runs: rows.length, passed: judged.filter((row) => row.pass).length, judged: judged.length, counts: rates.map((row) => `${row.rate.part} of ${row.rate.total}`), rate: rates.length ? { mean: spread.mean, min: spread.min, max: spread.max, n: spread.n } : null, values: rows.map((row) => row.value) };
+  });
+}
+
+export function spreadTable(mode, spread) {
+  const percentOf = (value) => `${Math.round(value * 100)}%`;
+  return [`\n== ${mode}: ${spread[0]?.runs ?? 0} run(s) ==`, 'passed | metric | rate per run (count) | mean, lowest to highest', ...spread.map((row) => `${row.judged ? `${row.passed} of ${row.judged}` : 'READ'} | ${row.label} | ${row.counts.join('; ') || '-'} | ${row.rate ? `${percentOf(row.rate.mean)}, ${percentOf(row.rate.min)} to ${percentOf(row.rate.max)} over ${row.rate.n} run(s)` : '-'}`)].join('\n');
 }
 
 export function quoteOfSpans(quote, spans) {
@@ -107,7 +127,14 @@ export async function secondOpinions(ctx, pages, input) {
     rows.push({ url: page.url, role: page.role ?? null, first: { about: page.about, market: page.market, span: page.span, by: page.judgedBy ?? null }, second: again.verdict ? { about: again.verdict.about, market: again.verdict.market, span: again.verdict.span, by: again.provider ?? null } : null, state, reason });
   }
   const count = (state) => rows.filter((row) => row.state === state).length;
-  return { agreed: count(SECOND.agrees), disagreed: count(SECOND.disagrees), unjudged: count(SECOND.unjudged), same: count(SECOND.same), total: pages.length, rows };
+  return { agreed: count(SECOND.agrees), disagreed: count(SECOND.disagrees), unjudged: count(SECOND.unjudged), same: count(SECOND.same), total: pages.length, kappa: secondKappa(rows), rows };
+}
+
+export function secondKappa(rows) {
+  const pairs = (rows ?? []).filter((row) => row.second && (row.state === SECOND.agrees || row.state === SECOND.disagrees)).map((row) => ({ reference: `${row.first.about}${row.first.market}`, answer: `${row.second.about}${row.second.market}` }));
+  const labels = [...new Set(pairs.flatMap((pair) => [pair.reference, pair.answer]))].sort();
+  const { kappa, n } = cohenKappa(pairs, labels);
+  return { kappa, n };
 }
 
 export function offMarketDrops(scoping) {
@@ -219,7 +246,9 @@ function sidesMetric(tree) {
 
 export function metricRows(mode, run, baseline) {
   const rows = [];
-  const add = (id, label, was, value, target, pass) => rows.push({ id, label, baseline: was ?? '-', value, target, pass });
+  const add = (id, label, was, value, target, pass, rate = null) => rows.push({ id, label, baseline: was ?? '-', value, target, pass, ...(rate ? { rate } : {}) });
+  const kappa = run.second.kappa ?? secondKappa(run.second.rows);
+  const kappaNote = `kappa ${kappa.kappa === null ? 'n/a' : kappa.kappa.toFixed(2)} on ${kappa.n} judged by another provider${kappa.n < MIN_KAPPA_ITEMS ? ` (too few: under ${MIN_KAPPA_ITEMS})` : ''}`;
   const tree = run.tree;
   const goals = tree?.goals ?? [];
   const tensions = tensionMetric(tree, run.expect?.tensions);
@@ -229,8 +258,8 @@ export function metricRows(mode, run, baseline) {
   const coverage = coverageMetric(tree, run.anchors);
   add('sources', 'Kept scoping sources: distinct hosts across perspectives', baseline.sources, `${run.scoping.sources.length} kept from ${diversity.hosts} host(s) across ${diversity.perspectives} perspective(s), ${run.scoping.dropped.length} dropped`, `>= ${MIN_HOSTS} hosts across >= ${MIN_PERSPECTIVES} perspectives`, diversity.enough);
   add('roles', 'Knowledge sources dropped as off-market', baseline.roles, `${offMarket.knowledge} knowledge, ${offMarket.unrecorded} without a voted role, of ${offMarket.total} off-market drop(s)`, '0 knowledge, 0 without a voted role', offMarket.knowledge === 0 && offMarket.unrecorded === 0);
-  add('second-opinion', 'Kept sources another provider agrees with, on the same sentences and the same role', 'not measured', `${percent(run.second.agreed, run.second.total)}; ${run.second.disagreed ?? 0} disagree, ${run.second.unjudged ?? 0} not judged, ${run.second.same ?? 0} answered by the same provider`, '>= 80%', run.second.total > 0 && share(run.second.agreed, run.second.total) >= 0.8);
-  add('notes', 'Scoping notes with a quote on the page', baseline.notes, percent(run.notesOnPage, run.scoping.notes.length), '100%', run.notesOnPage === run.scoping.notes.length);
+  add('second-opinion', 'Kept sources another provider agrees with, on the same sentences and the same role', 'not measured', `${percent(run.second.agreed, run.second.total)} (${Math.round(share(run.second.agreed, run.second.total) * 100)}%), ${kappaNote}; ${run.second.disagreed ?? 0} disagree, ${run.second.unjudged ?? 0} not judged, ${run.second.same ?? 0} answered by the same provider`, '>= 80%', run.second.total > 0 && share(run.second.agreed, run.second.total) >= 0.8, { part: run.second.agreed, total: run.second.total });
+  add('notes', 'Scoping notes with a quote on the page', baseline.notes, percent(run.notesOnPage, run.scoping.notes.length), '100%', run.notesOnPage === run.scoping.notes.length, { part: run.notesOnPage, total: run.scoping.notes.length });
   add('tensions', 'Tension goals only for voted pairs of the stated requirements, every explanation cited from a scoping note', baseline.tensions, tensions.value, tensions.target, tensions.pass);
   add('value-cost', 'Value side and total-cost side present exactly when the result consumes resources', baseline.valueCost, sides.value, 'both sides with the three cost phases when it consumes, neither otherwise', sides.pass);
   add('coverage', 'Requirements in a kept goal; none silently left out', baseline.coverage ?? 'not measured', coverage.value, 'every requirement in a kept goal', coverage.pass);
@@ -333,9 +362,19 @@ async function main(argv) {
     const { entry, rows } = inputs;
     if (entry.stored) console.log(`  ${mode}: question, hints (${entry.guidance.length} characters) and regions (${entry.regions.join(', ') || 'none'}) read from the stored research ${entry.project}`);
     const baseline = await readBaseline(args.baseline ?? SIM_OUT, mode);
-    const { metrics } = await runReplay({ mode, entry, out: args.out, router: app.router, search: app.search, embedder, fixture, rows, languages: app.engine.conceptLanguages(entry.regions ?? []), baseline, log: (line) => console.log(`  ${line}`) });
-    console.log(tableText(mode, metrics));
-    failed += metrics.filter((row) => row.pass === false).length;
+    const perRun = [];
+    for (let run = 1; run <= args.runs; run++) {
+      const out = args.runs > 1 ? path.join(args.out, `run-${run}`) : args.out;
+      const { metrics } = await runReplay({ mode, entry, out, router: app.router, search: app.search, embedder, fixture, rows, languages: app.engine.conceptLanguages(entry.regions ?? []), baseline, log: (line) => console.log(`  ${line}`) });
+      console.log(tableText(args.runs > 1 ? `${mode}, run ${run} of ${args.runs}` : mode, metrics));
+      failed += metrics.filter((row) => row.pass === false).length;
+      perRun.push(metrics);
+    }
+    if (args.runs > 1) {
+      const spread = runSpread(perRun);
+      await fs.writeFile(path.join(args.out, `${mode}-spread.json`), JSON.stringify(spread, null, 1));
+      console.log(spreadTable(mode, spread));
+    }
   }
   console.log(failed ? `\npurpose replay: ${failed} target(s) FAILED` : '\npurpose replay: every measured target PASSED (rows marked READ are judged by the lead)');
   return failed ? 1 : 0;

@@ -567,6 +567,7 @@ export class App {
   async seedLedger() {
     const rows = await this.logs.read('model-calls', 500).catch(() => []);
     if (!this.router.ledger.length) this.router.ledger.push(...rows.slice(-500));
+    this.router.restoreLetters(rows);
     const benched = this.router.restoreCooldowns(rows);
     if (benched.length) void this.logs.append('history', { type: 'session', message: `still benched after restart (credit, key or daily quota): ${benched.join(', ')}` });
     return this.routerAdmin.apply();

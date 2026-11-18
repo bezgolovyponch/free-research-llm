@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { clausesOf } from './strategy.mjs';
-import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
+import { sentencesOf } from './clauses.mjs';
+import { SAMPLE_TEMPERATURE, SINGLE_REASON, agreeAcrossSamples, agreed, ask, closedVote, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
 
 export const PURPOSE = JSON.parse(readFileSync(new URL('./purpose.json', import.meta.url), 'utf8'));
 export const TREE_VERSION = 2;
@@ -94,13 +95,13 @@ export async function splitPiece(ctx, piece) {
     return at === null ? { error: `"second" must be words copied exactly from the piece, starting at one of its words after the first: ${text}` } : { value: { at } };
   };
   const result = await vote({ router: ctx.router, task: 'requirement-split', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => String(value.at), budget: ctx.budget, stage: PURPOSE_STAGE });
-  const at = result.value?.at ?? 0;
-  return { parts: at > 0 ? [text.slice(0, at).trim(), text.slice(at).trim()] : [text], votes: result.tally };
+  const at = agreed(result)?.at ?? 0;
+  return { parts: at > 0 ? [text.slice(0, at).trim(), text.slice(at).trim()] : [text], votes: result.tally, ...(result.single ? { single: true } : {}) };
 }
 
 export async function groupSpans(ctx, spans) {
   const singles = spans.map((span) => [span.id]);
-  if (spans.length < 2) return { groups: singles, grouped: false, valid: 0 };
+  if (spans.length < 2) return { groups: singles, grouped: false, valid: 0, samples: [] };
   const known = new Set(spans.map((span) => span.id));
   const order = new Map(spans.map((span, index) => [span.id, index]));
   const messages = [
@@ -117,48 +118,57 @@ export async function groupSpans(ctx, spans) {
   };
   const result = await vote({ router: ctx.router, task: 'requirements', tier: 'fast', messages, schema, n: 3, quorum: 2, budget: ctx.budget, stage: PURPOSE_STAGE });
   const valid = result.replies.length;
-  if (valid < 2) return { groups: singles, grouped: false, valid };
+  const voted = valid >= 2;
+  const samples = result.replies.map((reply) => ({ provider: reply.provider ?? null, groups: reply.value }));
+  const segment = new Map(spans.map((span, index) => [span.id, span.segment ?? `alone-${index}`]));
   const together = new Map();
   for (const reply of result.replies) for (const group of reply.value) for (const a of group) for (const b of group) if (order.get(a) < order.get(b)) together.set(`${a}|${b}`, (together.get(`${a}|${b}`) ?? 0) + 1);
   const count = (a, b) => together.get(order.get(a) < order.get(b) ? `${a}|${b}` : `${b}|${a}`) ?? 0;
+  const apart = (a, b) => voted && (valid - count(a, b)) * 2 > valid;
+  const wanted = (a, b) => (segment.get(a) === segment.get(b) ? !apart(a, b) : voted && count(a, b) * 2 > valid);
   const link = (first, second) => {
-    const counts = first.flatMap((a) => second.map((b) => count(a, b)));
-    return { weakest: Math.min(...counts), sum: counts.reduce((sum, value) => sum + value, 0) };
+    const pairs = first.flatMap((a) => second.map((b) => [a, b]));
+    const counts = pairs.map(([a, b]) => count(a, b));
+    return { open: !pairs.some(([a, b]) => apart(a, b)) && pairs.some(([a, b]) => wanted(a, b)), weakest: Math.min(...counts), sum: counts.reduce((sum, value) => sum + value, 0) };
   };
   let groups = singles;
   for (;;) {
     let best = null;
     for (let i = 0; i < groups.length; i++) {
       for (let j = i + 1; j < groups.length; j++) {
-        const { weakest, sum } = link(groups[i], groups[j]);
-        if (weakest * 2 > valid && (!best || weakest > best.weakest || (weakest === best.weakest && sum > best.sum))) best = { i, j, weakest, sum };
+        const { open, weakest, sum } = link(groups[i], groups[j]);
+        if (open && (!best || weakest > best.weakest || (weakest === best.weakest && sum > best.sum))) best = { i, j, weakest, sum };
       }
     }
     if (!best) break;
     const merged = [...groups[best.i], ...groups[best.j]].sort((a, b) => order.get(a) - order.get(b));
     groups = groups.filter((_, index) => index !== best.i && index !== best.j).concat([merged]).sort((a, b) => order.get(a[0]) - order.get(b[0]));
   }
-  return { groups, grouped: true, valid };
+  return { groups, grouped: voted, valid, samples };
 }
 
 async function groupedPieces(ctx, texts, { prefix, of }) {
   const spans = [];
   const pieces = [];
+  const sentences = sentencesOf(texts);
+  let segment = 0;
   for (const [index, piece] of texts.entries()) {
     const { parts, votes } = await splitPiece(ctx, piece);
     if (parts.length > 1) ctx.log?.(`requirements: the piece "${oneSpace(piece)}" holds two requirements; it is split before "${parts[1]}"`);
+    if (index > 0 && sentences[index] !== sentences[index - 1]) segment += 1;
     const ids = [];
-    for (const text of parts.length > 1 ? parts : [piece]) {
-      spans.push({ id: `${prefix}${spans.length + 1}`, text, piece: index });
+    for (const [at, text] of (parts.length > 1 ? parts : [piece]).entries()) {
+      if (at > 0) segment += 1;
+      spans.push({ id: `${prefix}${spans.length + 1}`, text, piece: index, segment });
       ids.push(`${prefix}${spans.length}`);
     }
     pieces.push({ text: piece, asked: wordCount(piece) >= SPLIT_MIN_WORDS, split: parts.length > 1, votes, spans: ids });
   }
   const byId = new Map(spans.map((span) => [span.id, span]));
-  const { groups, grouped, valid } = await groupSpans(ctx, spans);
-  if (!grouped && spans.length > 1) ctx.log?.(`requirements: no majority on grouping the ${spans.length} pieces of the ${of} by meaning; the punctuation split is kept`);
+  const { groups, grouped, valid, samples } = await groupSpans(ctx, spans);
+  if (!grouped && spans.length > 1) ctx.log?.(`requirements: fewer than two provider families grouped the ${spans.length} pieces of the ${of} by meaning; each sentence stays one requirement`);
   const joined = (group) => group.map((id, at) => `${at === 0 ? '' : byId.get(id).piece === byId.get(group[at - 1]).piece ? ' ' : ', '}${byId.get(id).text}`).join('');
-  return { groups: groups.map((group) => ({ text: joined(group), spans: group })), pieces, grouping: { grouped, valid } };
+  return { groups: groups.map((group) => ({ text: joined(group), spans: group })), pieces, grouping: { grouped, valid, samples } };
 }
 
 export async function requirementsOf(ctx, question, guidance = '') {
@@ -243,7 +253,8 @@ export async function consumesVote(ctx, purpose, anchors) {
   ];
   const schema = (data) => (typeof data?.consumes === 'boolean' ? { value: data.consumes } : { error: '"consumes" must be true or false' });
   const result = await vote({ router: ctx.router, task: 'consumes', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => String(value), budget: ctx.budget, stage: PURPOSE_STAGE });
-  return { value: result.value ?? true, decided: result.value !== null, votes: result.tally };
+  const voted = agreed(result);
+  return { value: voted ?? true, decided: voted !== null, votes: result.tally, ...(result.single ? { single: true } : {}) };
 }
 
 export async function tensionsAsked(ctx, anchors) {
@@ -581,7 +592,7 @@ export async function traceGoal(ctx, goal, candidates) {
   if (relation === 'S') return { ...goal, state: 'kept', trace, votes: result.tally };
   if (relation === 'R') return { ...goal, state: 'kept', trace, restates: true, votes: result.tally };
   if (relation === 'X') return { ...goal, state: 'conflict', trace, reason: `contradicts ${trace.id}: ${trace.text}`, votes: result.tally };
-  return { ...goal, state: 'proposed', trace: null, reason: result.none ? 'traces to no clause, hint, purpose or implication: confirm or drop it' : 'no majority on what it traces to: confirm or drop it', votes: result.tally };
+  return { ...goal, state: 'proposed', trace: null, reason: result.none ? 'traces to no clause, hint, purpose or implication: confirm or drop it' : result.single ? `${SINGLE_REASON}: confirm or drop it` : 'no majority on what it traces to: confirm or drop it', votes: result.tally, ...(result.single ? { single: true, leaning: result.leaning ? { id: result.leaning.id, text: result.leaning.text } : null } : {}) };
 }
 
 async function traceAndRefine(ctx, entry, { candidates, notes, said, cited = null }) {
@@ -591,18 +602,15 @@ async function traceAndRefine(ctx, entry, { candidates, notes, said, cited = nul
   return refined ? { ...traced, ...refined } : { unrefined: traced };
 }
 
-const samePrompt = ({ query, candidate }) => [
-  { role: 'system', content: 'You compare two goals by meaning, in any language. A: they are one objective, stated twice. B: they are two different objectives. Answer with JSON only: {"same":"A|B"}.' },
-  { role: 'user', content: `Goal 1: ${query}\nGoal 2: ${candidate.text}` },
+export const SAME_OPTIONS = [{ id: 'A', text: 'they are one objective, stated twice' }, { id: 'B', text: 'they are two different objectives' }];
+
+const samePrompt = ({ query, candidate, options }) => [
+  { role: 'system', content: 'You compare two goals by meaning, in any language. Pick the one option that fits. Answer with JSON only: {"same":"<letter>"}.' },
+  { role: 'user', content: `Goal 1: ${query}\nGoal 2: ${candidate.text}\n\nThe two goals:\n${optionLines(options, null)}` },
 ];
 
-const sameSchema = (data) => {
-  const same = oneOf(data?.same, ['A', 'B']);
-  return same ? { value: same } : { error: '"same" must be A or B' };
-};
-
 export async function sameGoal(ctx, a, b) {
-  const result = await retrieveThenVerify({ query: a.goal, candidates: [{ id: b.id, text: b.goal }], fixed: true, pairwise: true, router: ctx.router, prompt: samePrompt, schema: sameSchema, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
+  const result = await retrieveThenVerify({ query: a.goal, candidates: [{ id: b.id, text: b.goal }], fixed: true, pairwise: true, options: SAME_OPTIONS, field: 'same', router: ctx.router, prompt: samePrompt, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
   const value = result.pairs[0]?.value ?? null;
   return value === null ? null : value === 'A';
 }
@@ -622,7 +630,7 @@ export async function mergeDuplicates(ctx, tree) {
     if (goal.protected || !goals.includes(goal)) continue;
     const others = goals.filter((other) => other !== goal && !other.protected && !judged.has([goal.id, other.id].sort().join('|')));
     if (!others.length) continue;
-    const result = await retrieveThenVerify({ query: goal.goal, candidates: others.map((other) => ({ id: other.id, text: other.goal })), k: 2, pairwise: true, embedder: ctx.embedder, router: ctx.router, prompt: samePrompt, schema: sameSchema, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
+    const result = await retrieveThenVerify({ query: goal.goal, candidates: others.map((other) => ({ id: other.id, text: other.goal })), k: 2, pairwise: true, options: SAME_OPTIONS, field: 'same', embedder: ctx.embedder, router: ctx.router, prompt: samePrompt, task: 'same-goal', budget: ctx.budget, stage: TREE_STAGE });
     for (const pair of result.pairs) {
       judged.add([goal.id, pair.candidate.id].sort().join('|'));
       const other = goals.find((entry) => entry.id === pair.candidate.id);
@@ -779,16 +787,12 @@ export const NUMBER_KINDS = { A: 'a quantity used as a limit, target or amount',
 
 async function numberKind(ctx, text, run) {
   const marked = `${text.slice(0, run.at)}[[${run.raw}]]${text.slice(run.at + run.raw.length)}`;
-  const messages = [
-    { role: 'system', content: `You read one sentence, in any language, with one number marked by [[ ]]. Say what the marked number is: ${Object.entries(NUMBER_KINDS).map(([letter, label]) => `${letter} ${label}`).join('; ')}. Answer with JSON only: {"kind":"A|B|C"}.` },
-    { role: 'user', content: `Sentence: ${marked}` },
+  const prompt = (options) => [
+    { role: 'system', content: 'You read one sentence, in any language, with one number marked by [[ ]]. Pick the one option that says what the marked number is. Answer with JSON only: {"kind":"<letter>"}.' },
+    { role: 'user', content: `Sentence: ${marked}\n\nThe marked number is:\n${optionLines(options, null)}` },
   ];
-  const schema = (data) => {
-    const kind = oneOf(data?.kind, Object.keys(NUMBER_KINDS));
-    return kind ? { value: kind } : { error: '"kind" must be A, B or C' };
-  };
-  const result = await vote({ router: ctx.router, task: 'number-kind', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: TREE_STAGE });
-  return result.value;
+  const result = await closedVote({ router: ctx.router, task: 'number-kind', tier: 'fast', options: Object.entries(NUMBER_KINDS).map(([id, label]) => ({ id, text: label })), field: 'kind', seed: marked, prompt, n: 3, quorum: 2, budget: ctx.budget, stage: TREE_STAGE });
+  return agreed(result)?.id ?? null;
 }
 
 export async function settleNumbers(ctx, node, textField, allowed) {

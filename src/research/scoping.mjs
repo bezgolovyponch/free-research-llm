@@ -1,7 +1,7 @@
 import { regionVerdict } from './brief.mjs';
 import { COST_BASIS, COST_GOAL, COST_ROLE, VALUE_BASIS, VALUE_GOAL, VALUE_ROLE } from './purpose.mjs';
 import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
-import { SAMPLE_TEMPERATURE, agreeAcrossSamples, ask, idOf, matchPrompt, oneOf, shortText, vote } from './semantic.mjs';
+import { SAMPLE_TEMPERATURE, agreeAcrossSamples, agreed, ask, closedVote, idOf, matchPrompt, oneOf, optionLines, shortText } from './semantic.mjs';
 
 export const STAGE = 'scoping';
 export const MAX_SOURCES = 12;
@@ -316,17 +316,14 @@ export async function judgeSource(ctx, { source, purpose, subject, markets = [],
 }
 
 export async function sourceRole(ctx, { source, shown, purpose, subject }) {
-  const letters = Object.keys(ROLES);
-  const messages = [
-    { role: 'system', content: `You classify one source for a research, in any language. Judge only from the sentences shown. "role": ${letters.map((letter) => `${letter} when the source ${ROLE_TEXT[letter]}`).join('; ')}. Answer with JSON only: {"role":"${letters.join('|')}"}.` },
-    { role: 'user', content: `Purpose: ${purpose}\nAsked subject: ${subject}\nSource title: ${String(source.title ?? '').slice(0, 160)}\n\nSentences:\n${spansBlock(shown, BLOCK_CHARS)}` },
+  const block = spansBlock(shown, BLOCK_CHARS);
+  const prompt = (options) => [
+    { role: 'system', content: 'You classify one source for a research, in any language. Judge only from the sentences shown. Pick the one option that says what the source does. Answer with JSON only: {"role":"<letter>"}.' },
+    { role: 'user', content: `Purpose: ${purpose}\nAsked subject: ${subject}\nSource title: ${String(source.title ?? '').slice(0, 160)}\n\nSentences:\n${block}\n\nThe source:\n${optionLines(options, null)}` },
   ];
-  const schema = (data) => {
-    const role = oneOf(data?.role, letters);
-    return role ? { value: role } : { error: `"role" must be ${letters.join(' or ')}` };
-  };
-  const result = await vote({ router: ctx.router, task: 'source-role', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: STAGE });
-  return { role: result.value ? ROLES[result.value] : UNDECIDED, votes: result.tally };
+  const result = await closedVote({ router: ctx.router, task: 'source-role', tier: 'fast', options: Object.keys(ROLES).map((id) => ({ id, text: ROLE_TEXT[id] })), field: 'role', seed: `${source.url ?? source.title ?? ''}|${subject}`, prompt, n: 3, quorum: 2, budget: ctx.budget, stage: STAGE });
+  const voted = agreed(result)?.id ?? null;
+  return { role: voted ? ROLES[voted] : UNDECIDED, votes: result.tally, ...(result.single ? { single: true } : {}) };
 }
 
 export function relevanceReason(verdict, role = MARKET_ROLE) {

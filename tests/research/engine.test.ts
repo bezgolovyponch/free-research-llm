@@ -9,7 +9,7 @@ import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { HUB_REFRESH_MS, ResearchCancelled, ResearchEngine, TEAM_TTL_MS, hubSearchStale, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
-import { JUDGE_VERSION, LOW_PRICE_REASON, checklistFingerprint } from '../../src/research/checklist.mjs';
+import { JUDGE_VERSION, LOW_PRICE_REASON, SINGLE_KIND_OPINION, checklistFingerprint } from '../../src/research/checklist.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 import { researchedNode } from '../helpers/research-shapes';
@@ -2689,15 +2689,16 @@ describe('a kind no needs a second family on the deeper page', () => {
       const prompt = messages.map((m) => m.content).join('\n');
       if (prompt.includes('This page offers:')) {
         if (prompt.includes('hand-sorted bales')) second.push(id);
-        return { content: JSON.stringify({ kind: prompt.includes('hand-sorted bales') ? aboutAnswer : 'B', span: 'S1' }), model: `${id}-fast`, provider: id, usage: {} };
+        const shown = (aboutAnswer === 'A' ? prompt.match(/^([A-M])\) one /m) : prompt.match(/^([A-M])\) a part or an accessory/m))?.[1] ?? aboutAnswer;
+        return { content: JSON.stringify({ kind: prompt.includes('hand-sorted bales') ? shown : 'B', span: 'S1' }), model: `${id}-fast`, provider: id, usage: {} };
       }
       return { content: JSON.stringify(prompt.includes('Item page text:') ? [] : { answer: 'ok', claims: [], confidence: 'high' }), model: `${id}-fast`, provider: id, usage: {} };
     },
   });
-  const run = async (aboutAnswer: string, stored: unknown[] = []) => {
+  const run = async (aboutAnswer: string, stored: unknown[] = [], ids = ['alpha', 'beta']) => {
     second.length = 0;
     const search = { ...fakeSearch, async readPage(url: string) { return url.endsWith('/about') ? { status: 200, text: about, links: [] } : { status: 200, text: home, links: [{ url: '/about', text: 'About us' }] }; } };
-    const router = new ModelRouter({ providers: [family('alpha', aboutAnswer), family('beta', aboutAnswer)] });
+    const router = new ModelRouter({ providers: ids.map((id) => family(id, aboutAnswer)) });
     const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
     const project = await engine.createProject({ question: 'Find used clothing wholesalers' });
     await engine.updateProject(project.id, { acceptance: { itemCount: 1 } });
@@ -2730,6 +2731,14 @@ describe('a kind no needs a second family on the deeper page', () => {
     expect(project.kindRejected).toEqual([{ url: 'https://seller.example.org/', judgeVersion: JUDGE_VERSION }]);
   });
 
+  it('never rejects when the second opinion comes from the family that said no: the kind is unknown, to confirm', async () => {
+    const { project, kind } = await run('B', [], ['alpha']);
+    expect(second).toEqual(['alpha']);
+    expect(kind).toMatchObject({ answer: 'unknown', reason: SINGLE_KIND_OPINION, second: { single: true } });
+    expect(project.kindRejected).toEqual([]);
+    expect(project.log.some((l: { message: string }) => l.message.startsWith('kind second opinion 1/30: first=no second=unknown'))).toBe(true);
+  });
+
   it('forgets rejections recorded under an older judge version, so those items are judged again', async () => {
     const { project, kind } = await run('A', ['https://seller.example.org/', { url: 'https://seller.example.org/', judgeVersion: JUDGE_VERSION - 1 }]);
     expect(kind.answer).toBe('yes');
@@ -2752,27 +2761,23 @@ describe('the brief marks a kind of business', () => {
 
 describe('kind hardening and the migration of stored answers', () => {
   const offer = 'Used goods offer: mixed second-hand clothing sorted by hand into cream and A grade, packed in pressed bales, sold by the kilogram to shops and market traders. Minimum order one bale; pallets loaded at our warehouse every weekday.';
-  const demo = (chat: (prompt: string) => unknown) => ({
-    id: 'demo',
+  const demo = (chat: (prompt: string) => unknown, id = 'demo') => ({
+    id,
     ready: true,
-    describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo-fast', deep: 'demo-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
+    describe: () => ({ id, label: 'Demo', state: 'ready', detail: '', configured: true, fast: `${id}-fast`, deep: `${id}-deep`, local: true, keyEnv: null, signup: '', modelCount: 1 }),
     async chat({ messages }: { messages: { content: string }[] }) {
-      return { content: JSON.stringify(chat(messages.map((m) => m.content).join('\n'))), model: 'demo-fast', provider: 'demo', usage: {} };
+      return { content: JSON.stringify(chat(messages.map((m) => m.content).join('\n'))), model: `${id}-fast`, provider: id, usage: {} };
     },
   });
-
-  it('passes the low price cut and the median of the candidate table to a second kind judgement, only for an item below the cut', async () => {
-    const secondPrompts: string[] = [];
-    const provider = demo((prompt) => {
-      if (prompt.includes('Median price of its comparable items:')) {
-        secondPrompts.push(prompt);
-        return { kind: 'B', span: 'S1' };
-      }
-      return prompt.includes('This page offers:') ? { kind: 'A', span: 'S1' } : prompt.includes('Item page text:') ? [{ id: 'q1', answer: 'yes', spans: ['S1'] }] : { answer: 'ok', claims: [], confidence: 'high' };
-    });
-    const search = { ...fakeSearch, async readPage() { return { status: 200, text: offer, links: [] }; } };
-    const router = new ModelRouter({ providers: [provider] });
-    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
+  const partLetter = (prompt: string) => prompt.match(/^([A-E])\) a part or an accessory/m)![1];
+  const kindChat = (secondPrompts: string[]) => (prompt: string) => {
+    if (prompt.includes('Median price of its comparable items:')) {
+      secondPrompts.push(prompt);
+      return { kind: partLetter(prompt), span: 'S1' };
+    }
+    return prompt.includes('This page offers:') ? { kind: 'A', span: 'S1' } : prompt.includes('Item page text:') ? [{ id: 'q1', answer: 'yes', spans: ['S1'] }] : { answer: 'ok', claims: [], confidence: 'high' };
+  };
+  const cheapProject = async (engine: ResearchEngine) => {
     const project = await engine.createProject({ question: 'Find used goods sellers that sell by the kilogram' });
     await engine.updateProject(project.id, { acceptance: { itemCount: 21, valueRange: [0, 500], unit: 'EUR/kg' } });
     const row = (i: number, value: number) => ({ title: `Seller ${i}`, url: `https://shop.example.org/offer/used-goods-ID${1000 + i}`, value, unit: 'EUR/kg', price: value, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits', why: [], risks: [] } });
@@ -2781,6 +2786,29 @@ describe('kind hardening and the migration of stored answers', () => {
     project.brief = { located: true, kind: { label: 'used goods seller', terms: ['used goods'] }, regions: [] };
     project.decisionModel = { kind: { label: 'used goods seller', terms: ['used goods'] }, checklist: [{ clause: 'by the kilogram', items: [{ clause: 'by the kilogram', question: 'Does this sell by the kilogram?', hard: true, numeric: null }] }] };
     project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    return project;
+  };
+
+  it('never rejects the cheap item on the no of one provider family: its kind is unknown and it waits to be confirmed', async () => {
+    const secondPrompts: string[] = [];
+    const search = { ...fakeSearch, async readPage() { return { status: 200, text: offer, links: [] }; } };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [demo(kindChat(secondPrompts))] }), search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await cheapProject(engine);
+    await engine.checkAcceptance(project);
+    const cheap = project.acceptanceResult!.items.find((item) => item.url.endsWith('ID1099'))!;
+    expect(cheap.checks.find((c) => c.clause === 'kind')).toMatchObject({ answer: 'unknown', second: { answer: 'unknown', single: true } });
+    expect([cheap.tier, cheap.valid]).toEqual(['to-confirm', false]);
+    expect(project.kindRejected ?? []).toEqual([]);
+    expect(secondPrompts).toHaveLength(1);
+  });
+
+  it('passes the low price cut and the median of the candidate table to a second kind judgement, only for an item below the cut', async () => {
+    const secondPrompts: string[] = [];
+    const provider = demo(kindChat(secondPrompts));
+    const search = { ...fakeSearch, async readPage() { return { status: 200, text: offer, links: [] }; } };
+    const router = new ModelRouter({ providers: [provider, demo(kindChat(secondPrompts), 'other')] });
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await cheapProject(engine);
     await engine.checkAcceptance(project);
     const items = project.acceptanceResult!.items;
     const cheap = items.find((item) => item.url.endsWith('ID1099'))!;

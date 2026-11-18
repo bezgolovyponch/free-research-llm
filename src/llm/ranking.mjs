@@ -245,3 +245,92 @@ export function purposePlan({ providers, stats, usage = {}, enabled, outcomes = 
   byPurpose['research:deep'] = top;
   return { byPurpose, reserved: reserved ?? null, orders };
 }
+
+export function replyFamily(model, providerId = '') {
+  return { stack: String(providerId ?? ''), vendor: familyOf(model, providerId) };
+}
+
+export function sameFamily(a, b) {
+  if (!a || !b) return false;
+  return (a.stack !== '' && a.stack === b.stack) || a.vendor === b.vendor;
+}
+
+export function independentFamilies(families) {
+  const found = [];
+  for (const family of families ?? []) if (family && !found.some((other) => sameFamily(other, family))) found.push(family);
+  return found;
+}
+
+export const CHOICE_LETTERS = 'ABCDEFGHIJKLM';
+export const LETTER_ALPHA = 0.01;
+export const LETTER_MIN_PER_OPTION = 10;
+
+function logGamma(x) {
+  const coefficients = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.001208650973866179, -0.000005395239384953];
+  let series = 1.000000000190015;
+  let y = x;
+  for (const coefficient of coefficients) series += coefficient / ++y;
+  const t = x + 5.5;
+  return -(t - (x + 0.5) * Math.log(t)) + Math.log((2.5066282746310005 * series) / x);
+}
+
+function upperGamma(a, x) {
+  if (x <= 0) return 1;
+  if (x < a + 1) {
+    let term = 1 / a;
+    let sum = term;
+    for (let n = 1; n < 500; n++) {
+      term *= x / (a + n);
+      sum += term;
+      if (Math.abs(term) < Math.abs(sum) * 1e-12) break;
+    }
+    return 1 - sum * Math.exp(-x + a * Math.log(x) - logGamma(a));
+  }
+  const tiny = 1e-300;
+  let b = x + 1 - a;
+  let c = 1 / tiny;
+  let d = 1 / b;
+  let h = d;
+  for (let n = 1; n < 500; n++) {
+    const an = -n * (n - a);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < tiny) d = tiny;
+    c = b + an / c;
+    if (Math.abs(c) < tiny) c = tiny;
+    d = 1 / d;
+    const delta = d * c;
+    h *= delta;
+    if (Math.abs(delta - 1) < 1e-12) break;
+  }
+  return Math.exp(-x + a * Math.log(x) - logGamma(a)) * h;
+}
+
+export function chiSquareP(statistic, dof) {
+  if (!(dof > 0) || !(statistic >= 0)) return 1;
+  return Math.min(1, Math.max(0, upperGamma(dof / 2, statistic / 2)));
+}
+
+export function letterTallies(rows, into = new Map()) {
+  for (const row of rows ?? []) {
+    const options = Number(row?.options);
+    const at = row?.letter ? CHOICE_LETTERS.indexOf(String(row.letter).toUpperCase()) : -1;
+    if (!row?.provider || row.provider === 'router' || !row.task || !(options >= 2) || at < 0 || at >= options) continue;
+    const key = `${row.provider}|${row.model ?? ''}|${row.task}|${options}`;
+    const tally = into.get(key) ?? { provider: row.provider, model: row.model ?? null, task: row.task, options, counts: new Array(options).fill(0) };
+    tally.counts[at] += 1;
+    into.set(key, tally);
+  }
+  return into;
+}
+
+export function letterBias(tallies, { alpha = LETTER_ALPHA, minPerOption = LETTER_MIN_PER_OPTION } = {}) {
+  return [...(tallies?.values?.() ?? [])].map((tally) => {
+    const n = tally.counts.reduce((sum, count) => sum + count, 0);
+    const expected = n / tally.options;
+    const tested = n >= minPerOption * tally.options;
+    const chi2 = expected ? tally.counts.reduce((sum, count) => sum + (count - expected) ** 2 / expected, 0) : 0;
+    const p = tested ? chiSquareP(chi2, tally.options - 1) : null;
+    return { provider: tally.provider, model: tally.model, task: tally.task, options: tally.options, n, counts: [...tally.counts], chi2: Math.round(chi2 * 1000) / 1000, p, tested, biased: tested && p < alpha };
+  });
+}
