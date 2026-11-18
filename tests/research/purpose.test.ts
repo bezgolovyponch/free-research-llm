@@ -965,6 +965,14 @@ describe('voteHardness with stub router', () => {
   const ctxCriterion = { router: fakeRouter({ hardness: { kind: 'criterion' } }), budget: new CallBudget(), log: () => {} };
   const userWords = 'Find cars within 300km from Prague up to 65000CZK';
 
+  it('makes nothing hard on the answer of one provider family, or of two providers serving one vendor', async () => {
+    const alone = { router: fakeRouter({ hardness: { kind: 'constraint' } }, { providers: ['p1'] }) };
+    expect(await voteHardness(alone, { requirementText: 'within 300 km of Prague', userWords })).toBe(false);
+    expect(alone.router.calls).toHaveLength(2);
+    const vendor = { router: fakeRouter({ hardness: { kind: 'constraint' } }, { providers: ['p1', 'p2'], models: { p1: 'llama-3.3-70b', p2: 'llama-4-scout' } }) };
+    expect(await voteHardness(vendor, { requirementText: 'within 300 km of Prague', userWords })).toBe(false);
+  });
+
   it('explicit limit (within 300 km) -> constraint/hard', async () => {
     expect(await voteHardness(ctx, { requirementText: 'within 300 km of Prague', userWords })).toBe(true);
   });

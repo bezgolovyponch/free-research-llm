@@ -8,7 +8,7 @@ import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, MEASURES as ITEM_MEASURES, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 import { MAX_MEMBERS, MIN_MEMBERS, memberTerms, sameMember } from './concept.mjs';
 import { voteHardness, thresholdsOf } from './purpose.mjs';
-import { CallBudget, oneOf, vote } from './semantic.mjs';
+import { CallBudget, agreed, closedVote } from './semantic.mjs';
 
 export { CHECKLIST_VERSION };
 export const DECISION_MODEL_VERSION = 6;
@@ -23,18 +23,13 @@ export const NO_MEASURE = 'Z';
 export async function voteMeasure(ctx, { text, unit = '' }) {
   const keys = Object.keys(ITEM_MEASURES);
   const letters = keys.map((_, index) => String.fromCharCode(65 + index));
-  const lines = [...keys.map((key, index) => `${letters[index]}: ${key}`), `${NO_MEASURE}: none of these is the quantity the question limits`].join('\n');
-  const messages = [
-    { role: 'system', content: `You map one question about a single delivered item to the quantity code can measure on it, in any language. Answer with JSON {"measure": "<letter>"}.\n${lines}` },
+  const prompt = (options) => [
+    { role: 'system', content: `You map one question about a single delivered item to the quantity code can measure on it, in any language. Answer with JSON {"measure": "<letter>"}.\n${[...options.map((option) => `${option.letter}: ${option.text}`), `${NO_MEASURE}: none of these is the quantity the question limits`].join('\n')}` },
     { role: 'user', content: `Question: ${text}\nUnit: ${unit || 'not stated'}` },
   ];
-  const options = [...letters, NO_MEASURE];
-  const schema = (data) => {
-    const letter = oneOf(data?.measure, options);
-    return letter ? { value: letter } : { error: `"measure" must be one of ${options.join(', ')}` };
-  };
-  const result = await vote({ router: ctx.router, task: 'measure', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: 'tree' });
-  return result.value && result.value !== NO_MEASURE ? keys[letters.indexOf(result.value)] : null;
+  const result = await closedVote({ router: ctx.router, task: 'measure', tier: 'fast', options: keys.map((key, index) => ({ id: letters[index], text: key })), field: 'measure', none: NO_MEASURE, seed: `${text}|${unit}`, prompt, n: 3, quorum: 2, budget: ctx.budget, stage: 'tree' });
+  const voted = agreed(result)?.id ?? null;
+  return voted ? keys[letters.indexOf(voted)] : null;
 }
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;

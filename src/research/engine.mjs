@@ -7,7 +7,7 @@ import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
-import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET } from './checklist.mjs';
+import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
 import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
@@ -1909,8 +1909,8 @@ export class ResearchEngine {
                   } else {
                     kindCheck.answer = 'unknown';
                     kindCheck.quote = '';
-                    kindCheck.reason = 'second opinion inconclusive';
-                    kindCheck.second = { answer: second.answer, quote: second.quote, tally: second.tally };
+                    kindCheck.reason = second.single ? SINGLE_KIND_OPINION : 'second opinion inconclusive';
+                    kindCheck.second = { answer: second.answer, quote: second.quote, tally: second.tally, ...(second.single ? { single: true } : {}) };
                   }
                 }
               }

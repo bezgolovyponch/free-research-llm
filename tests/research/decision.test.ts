@@ -508,7 +508,7 @@ describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
           if (req.purpose === 'decision-model') {
             return { provider: 'test', data: decisionProposal };
           }
-          if (req.task === 'measure') { const lines = req.messages[0].content.split('\n'); const wanted = req.messages.at(-1)!.content.includes('Unit: km') ? 'distanceKm' : 'priceEur'; return { provider: 'test', data: { measure: lines.find((l) => l.endsWith(`: ${wanted}`))!.slice(0, 1) } }; }
+          if (req.task === 'measure') { const lines = req.messages[0].content.split('\n'); const wanted = req.messages.at(-1)!.content.includes('Unit: km') ? 'distanceKm' : 'priceEur'; return { provider: ((req as { avoid?: string[] }).avoid ?? []).includes('test') ? 'other' : 'test', data: { measure: lines.find((l) => l.endsWith(`: ${wanted}`))!.slice(0, 1) } }; }
           throw new Error('should not call checklist');
         },
       };
@@ -616,8 +616,8 @@ describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
 describe('checklist hardness from the user\'s words', () => {
   const measureOrHardness = (hard: string) => ({
     complete: async (req: { task?: string; messages: Array<{ content: string }> }) => {
-      if (req.task === 'hardness') return { provider: 'test', data: { kind: hard } };
-      if (req.task === 'measure') return { provider: 'test', data: { measure: 'Z' } };
+      if (req.task === 'hardness') return { provider: ((req as { avoid?: string[] }).avoid ?? []).includes('test') ? 'other' : 'test', data: { kind: hard } };
+      if (req.task === 'measure') return { provider: ((req as { avoid?: string[] }).avoid ?? []).includes('test') ? 'other' : 'test', data: { measure: 'Z' } };
       throw new Error(`unexpected call ${req.task}`);
     },
   });
@@ -659,8 +659,27 @@ describe('checklist hardness from the user\'s words', () => {
 
   it('maps the voted letter back to the measure it lists', async () => {
     const { voteMeasure } = await import('../../src/research/decision.mjs');
-    const router = { complete: async (req: { messages: Array<{ content: string }> }) => ({ provider: 'test', data: { measure: req.messages[0].content.split('\n').find((l) => l.endsWith(': distanceKm'))!.slice(0, 1) } }) };
+    const router = { complete: async (req: { messages: Array<{ content: string }> }) => ({ provider: ((req as { avoid?: string[] }).avoid ?? []).includes('test') ? 'other' : 'test', data: { measure: req.messages[0].content.split('\n').find((l) => l.endsWith(': distanceKm'))!.slice(0, 1) } }) };
     expect(await voteMeasure({ router }, { text: 'Is it within 300 km of Prague?', unit: 'km' })).toBe('distanceKm');
+  });
+
+  it('names no measure and makes nothing hard on the judgement of one provider family', async () => {
+    const { voteMeasure, DecisionModeler } = await import('../../src/research/decision.mjs');
+    const alone = { complete: async (req: { task?: string; messages: Array<{ content: string }> }) => ({ provider: 'test', data: req.task === 'hardness' ? { kind: 'constraint' } : { measure: req.messages[0].content.split('\n').find((l) => l.endsWith(': distanceKm'))!.slice(0, 1) } }) };
+    expect(await voteMeasure({ router: alone }, { text: 'Is it within 300 km of Prague?', unit: 'km' })).toBeNull();
+    const clusters = await new DecisionModeler({ router: alone } as never).buildChecklistFromTree(tree, [], alone, null, 'q', 'hint');
+    expect(clusters.flatMap((c: { items: Array<{ hard: boolean }> }) => c.items.map((i) => i.hard)).every((hard: boolean) => hard === false)).toBe(true);
+  });
+
+  it('shows the measures under rotated letters and records the choice for the letter check', async () => {
+    const { voteMeasure } = await import('../../src/research/decision.mjs');
+    const seen: Array<{ letter: string; choice: { field: string; options: number } }> = [];
+    const router = { complete: async (req: { avoid?: string[]; choice: { field: string; options: number }; messages: Array<{ content: string }> }) => { const letter = req.messages[0].content.split('\n').find((l) => l.endsWith(': distanceKm'))!.slice(0, 1); seen.push({ letter, choice: req.choice }); return { provider: (req.avoid ?? []).includes('test') ? 'other' : 'test', data: { measure: letter } }; } };
+    expect(await voteMeasure({ router }, { text: 'Is it within 300 km of Prague?', unit: 'km' })).toBe('distanceKm');
+    expect(seen).toHaveLength(2);
+    expect(seen[0].letter).not.toBe(seen[1].letter);
+    expect(seen[0].choice.field).toBe('measure');
+    expect(seen[0].choice.options).toBeGreaterThan(2);
   });
 
   it('keeps no numeric check when no measurable quantity matches the question', async () => {

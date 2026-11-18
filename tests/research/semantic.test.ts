@@ -239,6 +239,27 @@ describe('agreeAcrossSamples', () => {
   });
 });
 
+describe('vote with a family that must not count', () => {
+  it('never counts a reply of an excluded family: it is a repeat, and a vote only that family answered is single', async () => {
+    const first = [{ provider: 'p1', model: 'p1-model' }];
+    const only = fakeRouter({ check: { answer: 'no' } }, { providers: ['p1'] });
+    const alone = await vote({ router: only, task: 'check', messages, schema: yesNo, n: 3, quorum: 1, avoid: ['p1'], exclude: first });
+    expect([alone.value, alone.single, agreed(alone), alone.replies.length, alone.repeats.length]).toEqual(['no', true, null, 0, 1]);
+    expect(only.calls.map((call) => call.avoid)).toEqual([['p1']]);
+    const other = fakeRouter({ check: { answer: 'no' } }, { providers: ['p1', 'p2'] });
+    const second = await vote({ router: other, task: 'check', messages, schema: yesNo, n: 3, quorum: 1, avoid: ['p1'], exclude: first });
+    expect([second.value, second.single, agreed(second), second.replies.map((reply) => reply.provider)]).toEqual(['no', undefined, 'no', ['p2']]);
+    const vendor = fakeRouter({ check: { answer: 'no' } }, { providers: ['p2'], models: { p2: 'gpt-oss-20b' } });
+    const same = await vote({ router: vendor, task: 'check', messages, schema: yesNo, quorum: 1, exclude: [{ provider: 'p1', model: 'openai/gpt-oss-120b' }] });
+    expect([same.single, agreed(same)]).toEqual([true, null]);
+    const two = await vote({ router: fakeRouter({ check: { answer: 'no' } }), task: 'check', messages, schema: yesNo, exclude: first, avoid: ['p1'] });
+    expect([two.value, two.single, two.replies.map((reply) => reply.provider)]).toEqual(['no', undefined, ['p2', 'p3']]);
+    const known = Object.assign(fakeRouter({ check: { answer: 'no' } }, { providers: ['p1'] }), { families: () => [{ stack: 'p1', vendor: 'p1' }], familyOf: (provider: string) => ({ stack: provider, vendor: provider }) });
+    const lone = await vote({ router: known, task: 'check', messages, schema: yesNo, quorum: 1, exclude: [{ provider: 'p1' }] });
+    expect([lone.single, known.calls.length]).toEqual([true, 1]);
+  });
+});
+
 describe('vote with a provider to avoid', () => {
   it('passes the caller\'s avoid list to the first call and keeps it for the later ones', async () => {
     const avoided: Array<string[] | undefined> = [];
