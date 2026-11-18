@@ -1,4 +1,5 @@
 import { plain } from './itemgate.mjs';
+import { SAMPLE_TEMPERATURE, ask } from './semantic.mjs';
 
 export const CONCEPT_QUERIES = 6;
 export const CONCEPT_PAGES = 10;
@@ -184,4 +185,178 @@ export function conceptPages(sources = [], limit = CONCEPT_PAGES) {
     url: source.url ?? '',
     text: `${source.title ?? ''} ${source.snippet ?? ''} ${source.text ?? ''}`.slice(0, 4000),
   }));
+}
+
+export const CONCEPT_VERSION = 1;
+export const FRAME_SAMPLES = 3;
+export const FRAME_TASK = 'concept-frame';
+export const FRAME_STAGE = 'purpose';
+export const POPULATION = 'population';
+export const CRITERION = 'criterion';
+export const LIMIT = 'limit';
+export const RANK = 'rank';
+export const CONTEXT = 'context';
+export const METHOD = 'method';
+export const DEMOTING_ROLES = [RANK, CONTEXT, METHOD];
+export const PIECE_MIN_WORDS = 2;
+export const KIND_LABEL_CHARS = 80;
+export const CRITERION_TEXT_CHARS = 200;
+const FRAME_FIELDS = { concept: CRITERION, limits: LIMIT, ranks: RANK, context: CONTEXT, method: METHOD };
+const ROLE_ORDER = [CRITERION, LIMIT, RANK, CONTEXT, METHOD];
+const ASKED = [['question', 'Request'], ['expected', 'Expected result']];
+
+const squeeze = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
+const folded = (text) => squeeze(text).toLowerCase();
+
+export function spanIn(text, quote) {
+  const wanted = folded(quote);
+  if (!wanted) return null;
+  const at = folded(text).indexOf(wanted);
+  return at < 0 ? null : { at, end: at + wanted.length };
+}
+
+function located(quote, said) {
+  for (const [source] of ASKED) {
+    const span = spanIn(said[source], quote);
+    if (span) return { source, ...span };
+  }
+  return null;
+}
+
+export function framePrompt({ question, expected = '' }) {
+  const said = { question, expected };
+  return [
+    { role: 'system', content: 'You frame one request for a list of results the way a review protocol does (population, concept, context), in any language. Every "quote" is copied letter for letter from the request or its expected result. "population": the one thing each result is, the unit that is delivered: {"quote":"...","label":"at most 8 words"}. "concept": what every single result must be, have or offer to count, one entry per separate condition: {"quote":"...","text":"the condition in at most 16 words","examples":["..."]}; when the request names examples of something, the condition is the class those examples stand for, "examples" lists them as written in the quote, and a result with another member of that class meets it. "limits": conditions stated with a number: {"quote":"..."}. "ranks": words that ask for the most or the least of something across the results, which order the results: {"quote":"...","text":"..."}. "context": why the result is wanted and where it is used: {"quote":"...","text":"..."}. "method": words about how the results are to be researched or compared, which no single result can meet: {"quote":"...","text":"..."}. Leave no part of the request out. Answer with JSON only: {"population":{"quote":"...","label":"..."},"concept":[],"limits":[],"ranks":[],"context":[],"method":[]}.' },
+    { role: 'user', content: ASKED.map(([source, label]) => (squeeze(said[source]) ? `${label}: ${squeeze(said[source])}` : '')).filter(Boolean).join('\n') },
+  ];
+}
+
+export function frameSample(data, said) {
+  const elements = [];
+  const take = (role, entry) => {
+    const quote = squeeze(entry?.quote);
+    const span = located(quote, said);
+    if (!span) return;
+    const examples = [...new Set((Array.isArray(entry?.examples) ? entry.examples : []).map(squeeze).filter((example) => example && spanIn(quote, example)))];
+    elements.push({ role, quote, text: squeeze(entry?.text ?? entry?.label).slice(0, CRITERION_TEXT_CHARS), examples, ...span });
+  };
+  if (data?.population) take(POPULATION, data.population);
+  for (const [field, role] of Object.entries(FRAME_FIELDS)) for (const entry of Array.isArray(data?.[field]) ? data[field] : []) take(role, entry);
+  return elements.length ? { value: elements } : { error: 'no "quote" was copied letter for letter from the request or its expected result' };
+}
+
+function overlaps(a, b) {
+  if (a.source !== b.source) return false;
+  const shared = Math.min(a.end, b.end) - Math.max(a.at, b.at);
+  return shared > 0 && shared * 2 >= Math.min(a.end - a.at, b.end - b.at);
+}
+
+function clustersOf(samples, wanted) {
+  const clusters = [];
+  samples.forEach((elements, sample) => {
+    for (const element of elements.filter(wanted)) {
+      const touching = clusters.filter((cluster) => cluster.some((member) => overlaps(member, element)));
+      const merged = [...touching.flat(), { ...element, sample }];
+      for (const cluster of touching) clusters.splice(clusters.indexOf(cluster), 1);
+      clusters.push(merged);
+    }
+  });
+  return clusters;
+}
+
+const votersOf = (cluster) => new Set(cluster.map((member) => member.sample)).size;
+
+function votedRole(cluster) {
+  const voters = (role) => votersOf(cluster.filter((member) => member.role === role));
+  const best = Math.max(...ROLE_ORDER.map(voters));
+  const role = ROLE_ORDER.find((candidate) => voters(candidate) === best);
+  return DEMOTING_ROLES.includes(role) && best < 2 ? CRITERION : role;
+}
+
+function settled(cluster, role) {
+  const members = cluster.filter((member) => member.role === role);
+  const pool = members.length ? members : cluster;
+  const widest = [...pool].sort((a, b) => (b.end - b.at) - (a.end - a.at) || a.at - b.at)[0];
+  const examples = [...new Map(pool.flatMap((member) => member.examples).map((example) => [folded(example), example])).values()];
+  return { text: pool.map((member) => member.text).find(Boolean) || widest.quote, quote: widest.quote, source: widest.source, at: widest.at, end: widest.end, examples, samples: votersOf(cluster) };
+}
+
+function piecesOf(said) {
+  const pieces = [];
+  for (const [source] of ASKED) {
+    for (const piece of String(said[source] ?? '').split(/,|;/).map(squeeze).filter((part) => part.split(' ').length >= PIECE_MIN_WORDS)) {
+      const span = spanIn(said[source], piece);
+      if (span) pieces.push({ source, quote: piece, ...span });
+    }
+  }
+  return pieces;
+}
+
+const sourceRank = (element) => ASKED.findIndex(([source]) => source === element.source);
+const inOrder = (a, b) => sourceRank(a) - sourceRank(b) || a.at - b.at;
+const holds = (element, piece) => element.source === piece.source && element.at <= piece.at && element.end >= piece.end;
+
+export function agreeFrames(samples, { question, expected = '' }) {
+  const said = { question, expected };
+  const population = clustersOf(samples, (element) => element.role === POPULATION).sort((a, b) => votersOf(b) - votersOf(a))[0];
+  const byRole = Object.fromEntries(ROLE_ORDER.map((role) => [role, []]));
+  const framed = [];
+  for (const cluster of clustersOf(samples, (element) => element.role !== POPULATION)) {
+    const role = votedRole(cluster);
+    const element = settled(cluster, role);
+    byRole[role].push(element);
+    framed.push(element);
+  }
+  const head = population ? settled(population, POPULATION) : null;
+  const covered = [...framed, ...(head ? [head] : [])];
+  for (const piece of piecesOf(said)) {
+    if (covered.some((element) => overlaps(element, piece) || holds(element, piece))) continue;
+    byRole[CRITERION].push({ text: piece.quote.slice(0, CRITERION_TEXT_CHARS), quote: piece.quote, source: piece.source, at: piece.at, end: piece.end, examples: [], samples: 0, unframed: true });
+  }
+  const numbered = (role, prefix) => byRole[role].sort(inOrder).map((element, index) => ({ id: `${prefix}${index + 1}`, ...element }));
+  return {
+    version: CONCEPT_VERSION,
+    question: String(question ?? ''),
+    expected: String(expected ?? ''),
+    samples: samples.length,
+    population: head ? { label: head.text, quote: head.quote, source: head.source, samples: head.samples } : null,
+    criteria: numbered(CRITERION, 'E'),
+    limits: numbered(LIMIT, 'L'),
+    ranks: numbered(RANK, 'R'),
+    context: numbered(CONTEXT, 'X'),
+    method: numbered(METHOD, 'M'),
+  };
+}
+
+export async function frameConcept(ctx, { question, expected = '' }) {
+  const said = { question, expected };
+  const samples = [];
+  for (let index = 0; index < FRAME_SAMPLES; index++) {
+    const reply = await ask({ router: ctx.router, task: FRAME_TASK, tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: framePrompt(said), schema: (data) => frameSample(data, said), budget: ctx.budget, stage: FRAME_STAGE });
+    if (reply) samples.push(reply.value);
+  }
+  return samples.length ? agreeFrames(samples, said) : null;
+}
+
+export function conceptFresh(concept, { question, expected = '' }) {
+  return Boolean(concept && concept.version === CONCEPT_VERSION && concept.question === String(question ?? '') && concept.expected === String(expected ?? ''));
+}
+
+export function conceptKindLabel(concept) {
+  return squeeze(concept?.population?.quote).slice(0, KIND_LABEL_CHARS);
+}
+
+export function conceptExamples(concept) {
+  return [...new Set((concept?.criteria ?? []).flatMap((criterion) => criterion.examples ?? []))];
+}
+
+export function conceptText(concept) {
+  if (!concept) return '';
+  const lines = [];
+  if (concept.population) lines.push(`Each result is: ${concept.population.quote}`);
+  for (const criterion of concept.criteria ?? []) lines.push(`[${criterion.id}] must: ${criterion.text}${criterion.examples?.length ? ` (the asker's examples of the class: ${criterion.examples.join(', ')}; a similar member counts)` : ''}`);
+  for (const limit of concept.limits ?? []) lines.push(`[${limit.id}] limit: ${limit.quote}`);
+  for (const rank of concept.ranks ?? []) lines.push(`[${rank.id}] ranks the eligible: ${rank.text}`);
+  for (const entry of concept.context ?? []) lines.push(`Context: ${entry.text}`);
+  return lines.join('\n');
 }

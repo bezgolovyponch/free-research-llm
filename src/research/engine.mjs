@@ -21,6 +21,8 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
+import { conceptFresh, conceptKindLabel, conceptText, frameConcept } from './concept.mjs';
+import { CallBudget } from './semantic.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, lowPriceCut, lowPriceStats, shortlistText, tableVerdict } from './candidates.mjs';
@@ -541,7 +543,7 @@ export class ResearchEngine {
     const located = Boolean(template.itemKind) ? true : model?.kind?.validated ? false : (!kind || listedKind(kind));
     if (model?.kind) model.kind.entity = located === false;
     const seaAsked = asksSea(foundation, brief.coastal) || Boolean(model?.criteria?.some((c) => c.measure === 'coastKm'));
-    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief({ ...brief, located }), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief({ ...brief, located }), conceptText(project.concept), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -627,11 +629,33 @@ export class ResearchEngine {
     return table;
   }
 
+  async ensureConcept(project) {
+    if (!this.router || this.demo || !project.acceptance?.itemCount) return project.concept ?? null;
+    const said = { question: project.question, expected: project.acceptance?.expected ?? '' };
+    if (conceptFresh(project.concept, said)) return project.concept;
+    const framed = await frameConcept({ router: this.router, budget: new CallBudget() }, said).catch(() => null);
+    if (!framed) {
+      this.emit(project, 'warn', 'concept not framed: no model returned a framing quoted from your words; eligibility criteria cannot be fixed until one does');
+      return project.concept ?? null;
+    }
+    project.concept = { ...framed, at: new Date().toISOString() };
+    this.emit(project, 'decision', `concept framed from your words (${framed.samples} sample(s)): ${conceptText(project.concept).split('\n').join(' · ')}`);
+    return project.concept;
+  }
+
+  askedKind(project) {
+    const asked = conceptKindLabel(project.concept);
+    if (asked && project.decisionModel?.kind) project.decisionModel.kind.asked = asked;
+    return project.decisionModel ?? null;
+  }
+
   async ensureDecisionModel(project) {
     await this.ensureArea(project);
-    if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
+    await this.ensureConcept(project);
+    if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return this.askedKind(project);
     try {
       const model = await this.modeler.build(project);
+      this.askedKind(project);
       if (model) this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}`);
       return model;
     } catch (error) {
@@ -643,7 +667,8 @@ export class ResearchEngine {
   async rebuildDecisionModel(project) {
     if (!this.modeler || this.demo) return project.decisionModel ?? null;
     try {
-      return await this.modeler.build(project, { force: true });
+      await this.modeler.build(project, { force: true });
+      return this.askedKind(project);
     } catch (error) {
       this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
       return project.decisionModel ?? null;

@@ -374,7 +374,8 @@ describe('ResearchEngine', () => {
 
   it('calibrates the item kind on the swept titles when few titles use its words, once with three independent proposals kept by majority, and passes the sub-type to the brief', async () => {
     const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
-    const router = { complete: async (req: { purpose: string; tier: string; messages: Array<{ role: string; content: string }> }) => {
+    const router = { complete: async (req: { purpose: string; tier: string; task?: string; messages: Array<{ role: string; content: string }> }) => {
+      if (req.task === 'concept-frame') return null;
       calls.push(req);
       return { provider: 'p', data: { not: ['kola', 'svetlo', 'pneumatiky', 'naraznik'], subtype: { label: 'hatchback', models: ['fabia', 'corsa', 'polo'] } } };
     } };
@@ -652,7 +653,7 @@ describe('ResearchEngine', () => {
         { id: 'D2.2', parentId: 'D2', title: 'Running costs', question: 'What running costs change which used car is worth shortlisting?', method: 'lookup', searchQueries: ['used car running costs'] },
       ],
     };
-    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { order.push('decompose'); return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat(request: unknown) { if (!JSON.stringify(request).includes('You frame one request')) order.push('decompose'); return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
     const router = new ModelRouter({ providers: [provider] });
     const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
     const project = await engine.createProject({ question: 'Which used car listings under 50000 EUR are worth shortlisting right now?', templateId: 'generic', expected: '10 links to real listings of used cars priced up to 50000 EUR' });

@@ -734,7 +734,10 @@ describe('kind options for a research that looks for businesses', () => {
     const cluster = kindCluster({ label: 'wholesale clothing supplier', terms: ['wholesale'], entity: true });
     expect(cluster.items[0].question).toBe('Is this page one wholesale clothing supplier, a single business on its own site or profile (not a directory of several, an article, or a wanted ad)?');
     expect(cluster.options.map((o: { letter: string }) => o.letter)).toEqual(['A', 'B', 'C', 'D', 'E', 'U']);
-    expect(cluster.options[0].text).toContain('whatever range of goods it shows');
+    expect(cluster.options[0].text).toBe('one wholesale clothing supplier: a single business, on its own website or its own profile page');
+    const asked = kindCluster({ label: 'wholesale clothing supplier', asked: 'wholesale branded second hand clothing providers', terms: ['wholesale'], entity: true });
+    expect(asked.options[0].text).toBe('one wholesale branded second hand clothing providers: a single business, on its own website or its own profile page');
+    expect(asked.options[3].text).toBe('a wanted ad, or a business that is not wholesale branded second hand clothing providers');
     expect(cluster.options[1].text).toBe('a directory, list or search page of several businesses');
   });
 
