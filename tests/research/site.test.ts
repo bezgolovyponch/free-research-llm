@@ -194,7 +194,7 @@ describe('SiteAssessor', () => {
     expect(out.screenedCount).toBe(9);
     expect(out.kept.map((r: { url: string }) => r.url)).toEqual(['https://famalo.example/14451']);
     expect(out.kept[0]).toMatchObject({ locatedBy: 'place "Vir, Croatia"', site: { coastKm: 0.6, climate: { workable: 9 } }, fit: { zoning: 'agricultural', hpi: 11.7 } });
-    expect(out.sites.trends.HR).toEqual({ change: 13.9, inflation: 2, real: 11.7, year: '2025', realCagr: 9.7, since: '2024' });
+    expect(out.sites.trends.HR).toMatchObject({ change: 13.9, inflation: 2, real: 11.7, year: '2025', realCagr: 9.7, since: '2024' });
     expect(out.sites.euHpi).toBe(11.7);
     expect(out.sites).toMatchObject({ assessed: 3, located: 3, far: 2, unlocated: 0 });
     expect(out.examples.at(-1).reasons[0]).toMatch(/farther than 25 km from the sea/);
@@ -377,10 +377,10 @@ describe('SiteAssessor', () => {
   });
 
   it('turns a nominal house-price change into a real one with the same year of inflation', async () => {
-    const { realCagr, realChange, trendOf, yearly } = await import('../../src/research/site.mjs');
+    const { realCagr, realChange, trendOf, yearly, TREND_VERSION } = await import('../../src/research/site.mjs');
     expect(realChange(41.5, 34.9)).toBe(4.9);
     expect(realChange(5.5, 2.5)).toBe(2.9);
-    expect(trendOf({ 2024: 10, 2025: 41.5 }, { 2024: 58.5, 2025: 34.9 })).toEqual({ change: 41.5, inflation: 34.9, real: 4.9, year: '2025', realCagr: -14.7, since: '2024' });
+    expect(trendOf({ 2024: 10, 2025: 41.5 }, { 2024: 58.5, 2025: 34.9 })).toEqual({ change: 41.5, inflation: 34.9, real: 4.9, year: '2025', realCagr: -14.7, since: '2024', version: TREND_VERSION });
     expect(realCagr({ 2021: 10, 2022: 10 }, { 2021: 0, 2022: 0 }, ['2021', '2022'])).toBe(10);
     expect(realCagr({ 2025: 5 }, { 2025: 2 }, ['2025'])).toBeNull();
     expect(trendOf({ 2025: 5 }, { 2024: 2 })).toBeNull();
@@ -805,3 +805,34 @@ describe('price trend audit fixes (PR #45)', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('price trend in the buyer\'s currency', () => {
+  const trRates = { 2023: 25.7597, 2024: 35.5734, 2025: 44.8161 };
+  const eaHicp = { 2024: 2.4, 2025: 2.1 };
+
+  it('converts local house prices with the Eurostat ert_bil_eur_a statinfo=AVG rate (national currency per euro) and deflates by euro-area inflation', async () => {
+    const { trendOf } = await import('../../src/research/site.mjs');
+    const trend = trendOf({ 2023: 60, 2024: 10, 2025: 41.5 }, { 2023: 53.9, 2024: 58.5, 2025: 34.9 }, { rates: trRates, baseHicp: { 2023: 5.4, ...eaHicp } });
+    expect(trend).toMatchObject({ real: 4.9, realInBase: 10, realInBaseCagr: -7.5, realInBaseSince: '2024', baseInflation: 2.1, exchangeChange: -20.6 });
+  });
+
+  it('gives a euro country no exchange effect and deflates it by euro-area inflation', async () => {
+    const { trendOf } = await import('../../src/research/site.mjs');
+    const trend = trendOf({ 2023: 3, 2024: 4, 2025: 5 }, { 2023: 4, 2024: 2.4, 2025: 2.2 }, { rates: null, baseHicp: { 2023: 5.4, ...eaHicp } });
+    expect(trend).toMatchObject({ realInBase: 2.8, realInBaseCagr: 2.2 });
+    expect(trend.exchangeChange).toBeUndefined();
+  });
+
+  it('keeps the local real trend and says why when the latest year has no exchange rate', async () => {
+    const { trendOf } = await import('../../src/research/site.mjs');
+    const trend = trendOf({ 2024: 10, 2025: 41.5 }, { 2024: 58.5, 2025: 34.9 }, { rates: { 2023: 25.7597, 2024: 35.5734 }, baseHicp: eaHicp });
+    expect(trend.realInBase).toBeUndefined();
+    expect(trend.baseNote).toBe('no exchange rate or euro-area inflation for 2025; the local real trend is used');
+  });
+
+  it('reads each country\'s currency from its own listings', async () => {
+    const { currencyByCountry } = await import('../../src/research/site.mjs');
+    expect(currencyByCountry([{ countryCode: 'TR', currency: 'TRY' }, { countryCode: 'TR', currency: 'TRY' }, { countryCode: 'TR', currency: 'EUR' }, { countryCode: 'PT', currency: 'EUR' }, { countryCode: 'ES', currency: '' }])).toEqual({ TR: 'TRY', PT: 'EUR' });
+  });
+});
+

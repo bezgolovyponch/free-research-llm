@@ -673,5 +673,13 @@
     "signal": "Suppliers b2f5b7 live on 80822d2: 15 of 20 confirmed; gradedwholesale.com, dropy.com.pl and five europages company profiles rejected by the kind judge, every one with option C 'several items or a list'",
     "cause": "the kind options were written for listing pages (one unit, a part, several items); a business page always shows many goods",
     "prevention": "kindCluster gives a business kind (kind.entity, set by briefOf when located is false) options about one business, a directory, an article and a wanted ad (checklist.test 'kind options for a research that looks for businesses'); witness in docs/audits/entity-kind-proof.md"
+  },
+  {
+    "id": "F51",
+    "title": "the price trend was measured in local money, not in the buyer's currency",
+    "touches": ["src/research/site.mjs", "src/research/strategy.mjs", "tests/research/site.test.ts", "tests/research/strategy.test.ts"],
+    "signal": "Plots b7772e: every one of 322 Turkish plots failed 'real price trend above the EU average' at Turkey -10.7% a year after Turkish inflation (2024), although the user buys in EUR",
+    "cause": "trendOf deflated the local house price index by the same country's inflation and compared one year against the EU; no exchange rate and no euro-area inflation were used",
+    "prevention": "trendOf converts with Eurostat ert_bil_eur_a (statinfo=AVG, currency=<listing currency>, national currency per euro) and deflates by euro-area HICP; the check compares multi-year growth in EUR over the same years with the EU (site.test 'price trend in the buyer's currency', strategy.test trend checks)"
   }
 ]

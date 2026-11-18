@@ -51,10 +51,14 @@ export const OVERPASS_URLS = ['https://overpass-api.de/api/interpreter', 'https:
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const HPI_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hpi_a';
 const HICP_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_aind';
+const ERT_URL = 'https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/ert_bil_eur_a';
 export const MIN_PLACE_RANK = 12;
 export const COUNTRY_PLACE_RANK = 4;
 const EUROSTAT_CODE = { GR: 'EL' };
 export const EU_AGGREGATE = 'EU27_2020';
+export const BASE_CURRENCY = 'EUR';
+export const BASE_INFLATION_GEO = 'EA';
+export const TREND_VERSION = 2;
 const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"][name]';
 export const TITLE_PLACE_KM = 25;
 const COUNT_FILTERS = {
@@ -183,11 +187,50 @@ export function realCagr(hpi, hicp, years) {
   return round((factor ** (1 / years.length) - 1) * 100, 1);
 }
 
-export function trendOf(hpi, hicp) {
+export function baseFactor(year, previous, { hpi, rates, baseHicp }) {
+  if (hpi[year] === undefined || baseHicp[year] === undefined) return null;
+  const exchange = rates ? (rates[previous] && rates[year] ? rates[previous] / rates[year] : null) : 1;
+  return exchange === null ? null : ((1 + hpi[year] / 100) * exchange) / (1 + baseHicp[year] / 100);
+}
+
+export function trendOf(hpi, hicp, { rates = null, baseHicp = null } = {}) {
   const years = Object.keys(hpi).filter((y) => hicp[y] !== undefined).sort();
+  if (!years.length) return null;
   const year = years.at(-1);
-  if (!year) return null;
-  return { change: hpi[year], inflation: hicp[year], real: realChange(hpi[year], hicp[year]), year, realCagr: realCagr(hpi, hicp, years), since: years[0] };
+  const result = { change: hpi[year], inflation: hicp[year], real: realChange(hpi[year], hicp[year]), year, realCagr: realCagr(hpi, hicp, years), since: years[0], version: TREND_VERSION };
+  if (!baseHicp) return result;
+  const factors = years.slice(1).map((y, i) => [y, baseFactor(y, years[i], { hpi, rates, baseHicp })]).filter(([, f]) => f !== null);
+  const last = factors.at(-1);
+  if (!last || last[0] !== year) return { ...result, baseNote: `no ${rates ? 'exchange rate or ' : ''}euro-area inflation for ${year}; the local real trend is used` };
+  const product = factors.reduce((f, [, factor]) => f * factor, 1);
+  return {
+    ...result,
+    realInBase: round((last[1] - 1) * 100, 1),
+    realInBaseCagr: round((product ** (1 / factors.length) - 1) * 100, 1),
+    realInBaseSince: factors[0][0],
+    baseInflation: baseHicp[year],
+    ...(rates ? { exchangeChange: round((rates[years.at(-2)] / rates[year] - 1) * 100, 1) } : {}),
+  };
+}
+
+export async function fetchRates(currency, fetchJson) {
+  if (!currency || currency === BASE_CURRENCY) return null;
+  return yearly(await fetchJson(`${ERT_URL}?statinfo=AVG&currency=${currency}&sinceTimePeriod=2019`, { timeoutMs: TREND_TIMEOUT_MS }));
+}
+
+export function currencyByCountry(rows) {
+  const counts = new Map();
+  for (const row of rows) {
+    if (!row.countryCode || !/^[A-Z]{3}$/.test(String(row.currency ?? ''))) continue;
+    const key = `${row.countryCode}|${row.currency}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const best = new Map();
+  for (const [key, n] of counts) {
+    const [code, currency] = key.split('|');
+    if (!best.has(code) || best.get(code).n < n) best.set(code, { currency, n });
+  }
+  return Object.fromEntries([...best].map(([code, { currency }]) => [code, currency]));
 }
 
 export function fitOf(row, { hpi = null } = {}) {
@@ -558,7 +601,8 @@ export class SiteAssessor {
     }
     const codes = [...new Set(rows.map((r) => r.countryCode).filter(Boolean)), EU_AGGREGATE];
     const trends = {};
-    for (const code of codes) trends[code] = await this.priceTrend(code);
+    const currencies = currencyByCountry(rows);
+    for (const code of codes) trends[code] = await this.priceTrend(code, currencies[code] ?? BASE_CURRENCY);
     return { trends, euHpi: trends[EU_AGGREGATE]?.real ?? null };
   }
 
@@ -605,17 +649,24 @@ export class SiteAssessor {
     return { missing, due: missing.filter((code) => !this.hpiFresh(this.store.hpi[code])) };
   }
 
-  async priceTrend(code) {
+  async baseInflation() {
+    if (!this.baseHicp) this.baseHicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${BASE_INFLATION_GEO}&sinceTimePeriod=2020`, { timeoutMs: TREND_TIMEOUT_MS }));
+    return this.baseHicp;
+  }
+
+  async priceTrend(code, currency = BASE_CURRENCY) {
     if (!code) return null;
     const known = this.store.hpi[code];
-    if (this.hpiFresh(known)) return known.value ?? null;
+    if (this.hpiFresh(known) && (known.value === null || known.value?.version === TREND_VERSION)) return known.value ?? null;
     if (!this.limits.newSites) return known?.value ?? null;
     let value;
     try {
       const geo = EUROSTAT_CODE[code] ?? code;
       const hpi = yearly(await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`, { timeoutMs: TREND_TIMEOUT_MS }));
       const hicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${geo}&sinceTimePeriod=2020`, { timeoutMs: TREND_TIMEOUT_MS }));
-      value = trendOf(hpi, hicp);
+      const baseHicp = await this.baseInflation();
+      const rates = currency && currency !== BASE_CURRENCY ? await fetchRates(currency, this.fetchJson).catch(() => undefined) : null;
+      value = rates === undefined ? { ...trendOf(hpi, hicp), baseNote: `no ${currency} exchange rate from Eurostat; the local real trend is used` } : trendOf(hpi, hicp, { rates, baseHicp });
     } catch (error) {
       if (!transientError(error) && !/HTTP (?:429|5\d\d)/.test(String(error?.message ?? ''))) {
         this.store.hpi[code] = { at: this.now(), checked: this.now(), value: known?.value ?? null };
@@ -685,7 +736,7 @@ export class SiteAssessor {
           site = await this.addLakes(point.lat, point.lon, site);
         }
         const conflict = await this.titleConflict(row, point, brief);
-        const trend = await this.priceTrend(row.countryCode);
+        const trend = await this.priceTrend(row.countryCode, row.currency || BASE_CURRENCY);
         const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(sea ? site : withoutSea(site)), fit: fitOf(row, { hpi: trend?.real ?? null }), ...(conflict ? { placeConflict: conflict } : {}) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;

@@ -3,7 +3,7 @@ import { SEA_WORDS } from './brief.mjs';
 import { PERCEIVED_MAX_C } from './cci.mjs';
 import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
-import { areaM2, zoningOf, explorePoints, haversineKm } from './site.mjs';
+import { areaM2, zoningOf, explorePoints, haversineKm, EU_AGGREGATE } from './site.mjs';
 import { cadastreNotes } from './parcels.mjs';
 import { withConfirmRisk } from './blockers.mjs';
 import { quoteFound } from './quote.mjs';
@@ -240,7 +240,12 @@ function keepCheck(id, asked) {
 export function planFor(row, strategy, { convert = null, euHpi = null, trends = null, asked = null } = {}) {
   const rules = strategy.rules;
   const trend = trends?.[row.countryCode] ?? null;
-  const hpi = trend?.real ?? row.fit?.hpi ?? null;
+  const euTrend = trends?.[EU_AGGREGATE] ?? trends?.EU27_2020 ?? null;
+  const localReal = trend?.real ?? row.fit?.hpi ?? null;
+  const multiYear = trend?.realInBaseCagr !== undefined && euTrend?.realInBaseCagr !== undefined;
+  const baseReal = multiYear ? trend.realInBaseCagr : trend?.realInBase ?? localReal;
+  const euBaseReal = multiYear ? euTrend.realInBaseCagr : euTrend?.realInBase ?? euTrend?.real ?? euHpi ?? null;
+  const hpi = baseReal;
   const country = strategy.countries[row.countryCode] ?? null;
   const site = row.site;
   const climate = site?.climate ?? null;
@@ -251,12 +256,13 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const zoning = zoningOf(row);
   const ebike = rules.ebikeKm.value;
   const density = row.countryCode && row.countryCode !== DENSITY_COUNTRY ? ` (assumption: ${DENSITY_COUNTRY_NAME} density, no national rule found for ${row.country || row.countryCode})` : '';
+  const trendDetail = hpi === null ? `no official price series for ${row.country || 'this country'} in the model` : multiYear ? `${row.country} ${signed(hpi)}% a year in EUR after euro-area inflation ${trend.realInBaseSince}–${trend.year} (last year ${signed(trend.realInBase)}% in EUR, ${signed(localReal)}% in local terms) vs EU ${signed(euBaseReal)}% (Eurostat, housing)` : `${row.country} ${signed(hpi)}% a year after inflation vs EU ${euBaseReal === null ? 'not known' : `${signed(euBaseReal)}%`} (Eurostat, housing)`;
   const allChecks = [
     seaCheck(site, ebike),
     check('season', `${rules.minWorkableMonths.value}+ camping months (Camping Climate Index above 3: acceptable or better, Ma 2021 Table 4)`, climate?.cci ? climate.workable >= rules.minWorkableMonths.value : null, climate?.cci ? `${climate.workable} camping months (index above 3), ${climate.good ?? '?'} good (≥ 5), ${climate.comfortable} optimal (≥ 7), ${climate.cci.optimalDays} optimal days a year` : 'climate not measured with the Camping Climate Index yet'),
     check('noAc', 'no air conditioning needed', climate?.cci ? climate.hottest <= rules.maxHottest.value : null, climate?.cci ? `hottest month average high ${climate.hottest} °C (limit ${rules.maxHottest.value} °C); ${climate.cci.hotDays} day(s) a year above 34 °C` : 'climate not measured with the Camping Climate Index yet'),
     check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${rules.pitchM2.value} m² each on ${rules.campingShare.value * 100}% of the land${density}` : 'area not shown'),
-    check('trend', 'real price trend above the EU average', hpi === null || euHpi === null ? null : hpi > euHpi, hpi === null ? `no official price series for ${row.country || 'this country'} in the model` : `${row.country} ${signed(hpi)}% a year after inflation vs EU ${euHpi === null ? '?' : `${signed(euHpi)}%`} (Eurostat, housing)`),
+    check('trend', 'real price trend above the EU average', hpi === null || euBaseReal === null ? null : hpi > euBaseReal, trendDetail),
     check('location', 'the listing location is consistent', row.placeConflict ? null : true, row.placeConflict ?? 'map point and title agree'),
     check('legal', 'a legal path for a buyer', country ? !country.blocker && !INDUSTRIAL.test(words) : null, country?.blocker ?? (INDUSTRIAL.test(words) ? 'industrial site: camping parks must be 1,000 m from insalubrious industry (Portaria 1320/2008)' : country?.path ?? 'no path researched for this country')),
   ];
@@ -270,7 +276,8 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   if (keepCheck('noAc', asked) && climate?.cci && climate.hottest <= rules.maxHottest.value) why.push(`hottest month average high ${climate.hottest} °C: tents work without air conditioning${climate.cci.hotDays ? ` (about ${climate.cci.hotDays} day(s) a year above 34 °C)` : ''}`);
   if (units !== null && units >= rules.minUnits.value) why.push(`${Math.round(m2).toLocaleString('en-US')} m² holds ${units} units, ${rules.minUnits.value} are enough to open${density}`);
   if (cost) why.push(`entry ≈ ${eur(cost.total)} (price ${eur(cost.price)} + ${cost.taxLabel} ${eur(cost.tax)}${cost.tents !== null ? ` + ${cost.units} bell tents ${eur(cost.tents)}` : ''}; excludes ${cost.excludes})`);
-  if (keepCheck('trend', asked) && hpi !== null && euHpi !== null && hpi > euHpi) why.push(`${row.country} house prices ${signed(hpi)}% a year after inflation${trend ? ` (nominal ${signed(trend.change)}%, inflation ${trend.inflation}%, ${trend.year})` : ''} vs EU ${signed(euHpi)}% (Eurostat, country level, not land)`);
+  if (keepCheck('trend', asked) && hpi !== null && euBaseReal !== null && hpi > euBaseReal) why.push(`house prices: ${trendDetail}; country level, not land`);
+
   if (site && !site.mapPending) why.push(`${explorePoints(site)} things to explore and ${(site.lodging ?? 0) + (site.campsites ?? 0)} places to stay within 15 km (demand)`);
   if (site?.mapPending) why.push('things to explore and places to stay nearby: queued, the public map service is busy');
   if (country?.path && !country.blocker) why.push(`path: ${country.path}`);
@@ -354,11 +361,17 @@ export function opportunityOf(row, plan, { trends = null, euTrend = null } = {})
   const passed = met.filter((c) => c.ok === true).length;
   score += passed;
   reasons.push(`${passed} of ${met.length} site checks met (${met.map((c) => `${c.label}: ${c.ok === true ? 'yes' : c.ok === false ? 'no' : '?'}`).join(', ')})`);
-  if (trend?.realCagr !== null && trend?.realCagr !== undefined) {
-    const projected = Math.round(((1 + trend.realCagr / 100) ** PROJECTION_YEARS - 1) * 100);
-    const above = euTrend?.realCagr !== null && euTrend?.realCagr !== undefined && trend.realCagr > euTrend.realCagr;
+  const baseCagr = trend?.realInBaseCagr ?? trend?.realCagr;
+  const baseSince = trend?.realInBaseSince ?? trend?.since;
+  const euBaseCagr = euTrend?.realInBaseCagr ?? euTrend?.realCagr;
+  const hasBaseCagr = trend?.realInBaseCagr !== undefined;
+  if (baseCagr !== null && baseCagr !== undefined) {
+    const projected = Math.round(((1 + baseCagr / 100) ** PROJECTION_YEARS - 1) * 100);
+    const above = euBaseCagr !== null && euBaseCagr !== undefined && baseCagr > euBaseCagr;
     if (above) score += 2;
-    reasons.push(`${row.country} house prices ${trend.realCagr >= 0 ? '+' : ''}${trend.realCagr}% a year after inflation ${trend.since}–${trend.year}${euTrend?.realCagr !== undefined && euTrend?.realCagr !== null ? ` (EU ${euTrend.realCagr >= 0 ? '+' : ''}${euTrend.realCagr}%)` : ''}; if that continues, about ${projected >= 0 ? '+' : ''}${projected}% in ${PROJECTION_YEARS} years (a trend continuation for housing, not a land forecast)`);
+    const localNote = hasBaseCagr ? ` (local ${trend.realCagr >= 0 ? '+' : ''}${trend.realCagr}% after ${trend.inflation}% inflation)` : '';
+    const baseLabel = hasBaseCagr ? 'in EUR after euro-area inflation' : 'after inflation';
+    reasons.push(`${row.country} house prices ${baseCagr >= 0 ? '+' : ''}${baseCagr}% a year ${baseLabel} ${baseSince}–${trend.year}${localNote}${euBaseCagr !== undefined && euBaseCagr !== null ? ` (EU ${euBaseCagr >= 0 ? '+' : ''}${euBaseCagr}%)` : ''}; if that continues, about ${projected >= 0 ? '+' : ''}${projected}% in ${PROJECTION_YEARS} years (a trend continuation for housing, not a land forecast)`);
   }
   if (site) {
     const scenic = explorePoints(site);
