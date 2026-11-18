@@ -89,7 +89,7 @@ export async function vote({ n = 3, quorum = 2, key = (value) => JSON.stringify(
   const purpose = request.tier === 'deep' ? DRAFT_PURPOSE : JUDGE_PURPOSE;
   const replies = [];
   const tally = {};
-  const used = [];
+  const used = [...(request.avoid ?? [])];
   let winner = null;
   for (let index = 0; index < n && winner === null; index++) {
     const result = await attempt({ ...request, messages: typeof messages === 'function' ? messages(index) : messages, avoid: avoidSame && used.length ? [...used] : undefined });

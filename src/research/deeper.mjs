@@ -1,5 +1,6 @@
 import { plain } from './itemgate.mjs';
 import { hardIdsOf, itemTier } from './verdict.mjs';
+import { ENTITY_PATH } from './entitypath.mjs';
 
 function extractKeyWords(question) {
   return plain(question).split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
@@ -25,7 +26,6 @@ function lastSegment(url) {
   }
 }
 
-const ENTITY_PATH = /^((?:\/[a-z]{2})?\/(?:company|companies|firma|firmen|empresa|entreprise|societe|azienda|bedrijf|supplier|suppliers|seller|vendor|store)\/[^/]+)/i;
 
 function entityPrefix(url) {
   try {
@@ -40,7 +40,7 @@ function insideEntity(url, prefix) {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
 
-async function findRelevantLinks(links, itemUrl, keyWords, max = 3) {
+export async function findRelevantLinks(links, itemUrl, keyWords, max = 3) {
   const prefix = entityPrefix(itemUrl);
   const matching = [];
   const companyPages = [];

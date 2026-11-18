@@ -7,8 +7,8 @@ import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
-import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind } from './checklist.mjs';
-import { DeeperReader, deeperOrder } from './deeper.mjs';
+import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET } from './checklist.mjs';
+import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -1688,13 +1688,18 @@ export class ResearchEngine {
   }
 
   async checkAcceptance(project, pages = null, { memoNext = false } = {}) {
+    let secondOpinions = 0;
     await this.ensurePurposeTree(project);
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
     const readPage = this.cachedPageReader(pages);
     project.kindRejected = project.kindRejected ?? [];
-    const kindRejectedSet = new Set(project.kindRejected);
+    project.kindRejected = project.kindRejected.filter((entry) => {
+      const version = typeof entry === 'object' ? entry.judgeVersion : 0;
+      return version === JUDGE_VERSION;
+    });
+    const kindRejectedSet = new Set(project.kindRejected.map((e) => (typeof e === 'object' ? e.url : e)));
     const deliverables = (brief.located === false
       ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage, kindTerms: project.decisionModel?.kind?.terms ?? [], findWebsite: this.search?.search ? (name) => this.search.search([`"${name}"`], { maxSources: 5 }) : null })
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
@@ -1764,9 +1769,48 @@ export class ResearchEngine {
           item.checks = checks;
 
           const kindCheck = checks.find(c => c.clause === 'kind' && c.id.startsWith('kind|'));
-          if (kindCheck && kindCheck.answer === 'no') {
-            if (!kindRejectedSet.has(item.url)) {
-              project.kindRejected.push(item.url);
+          if (kindCheck && kindCheck.answer === 'no' && kindCheck.quote) {
+            let secondOpinionUsed = false;
+            if (secondOpinions < KIND_SECOND_OPINION_BUDGET && this.checklistJudge.router && readPage) {
+              const deeperPageUrl = await this.findDeeperPageForKind(item, readPage, project.decisionModel?.kind ?? null);
+              if (deeperPageUrl) {
+                const deeperPage = await readPage(deeperPageUrl).catch(() => null);
+                const deeperPageText = deeperPage?.text ?? '';
+                if (deeperPageText) {
+                  const kind = project.decisionModel?.kind ?? null;
+                  const second = await this.checklistJudge.judgeKindAgain(deeperPageText, kind, {
+                    value: item.value,
+                    unit: item.unit ?? '',
+                    median: prices?.median ?? null,
+                    avoid: kindCheck.provider
+                  });
+                  secondOpinions++;
+                  secondOpinionUsed = true;
+                  this.emit(project, 'acceptance', `kind second opinion ${secondOpinions}/${KIND_SECOND_OPINION_BUDGET}: first=no second=${second.answer} url=${deeperPageUrl}`);
+                  if (second.answer === 'no' && second.quote) {
+                    if (!kindRejectedSet.has(item.url)) {
+                      project.kindRejected.push({ url: item.url, judgeVersion: JUDGE_VERSION });
+                      kindRejectedSet.add(item.url);
+                      if (project.kindRejected.length > 500) {
+                        project.kindRejected.shift();
+                      }
+                    }
+                  } else if (second.answer === 'yes' && second.quote) {
+                    kindCheck.answer = 'yes';
+                    kindCheck.quote = second.quote;
+                    kindCheck.option = 'A';
+                    kindCheck.second = { answer: 'yes', quote: second.quote, tally: second.tally };
+                  } else {
+                    kindCheck.answer = 'unknown';
+                    kindCheck.quote = '';
+                    kindCheck.reason = 'second opinion inconclusive';
+                    kindCheck.second = { answer: second.answer, quote: second.quote, tally: second.tally };
+                  }
+                }
+              }
+            }
+            if (!secondOpinionUsed && !kindRejectedSet.has(item.url)) {
+              project.kindRejected.push({ url: item.url, judgeVersion: JUDGE_VERSION });
               kindRejectedSet.add(item.url);
               if (project.kindRejected.length > 500) {
                 project.kindRejected.shift();
@@ -1815,6 +1859,13 @@ export class ResearchEngine {
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
   }
+
+  async findDeeperPageForKind(item, readPage, kind) {
+    const page = await readPage(item.url).catch(() => null);
+    const [first] = await findRelevantLinks(page?.links ?? [], item.url, [kind?.label, ...(kind?.terms ?? [])].filter(Boolean), 1);
+    return first ?? null;
+  }
+
 
   recomputeAcceptanceValidity(result, spec, checklist, kind = null) {
     const verdictResult = verdict(result.items, spec, checklist, kind);
