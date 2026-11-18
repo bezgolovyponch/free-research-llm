@@ -9,7 +9,7 @@ import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter, OfflineError } from '../../src/llm/router.mjs';
 import { TASK_MARKERS, decomposePrompt, synthesizePrompt, withGuidance } from '../../src/research/prompts.mjs';
 import { HUB_REFRESH_MS, ResearchCancelled, ResearchEngine, TEAM_TTL_MS, hubSearchStale, groupQueryPrompt, needsSiteFit, queryLanguages } from '../../src/research/engine.mjs';
-import { JUDGE_VERSION, LOW_PRICE_REASON, checklistFingerprint } from '../../src/research/checklist.mjs';
+import { JUDGE_VERSION, LOW_PRICE_REASON, SINGLE_KIND_OPINION, checklistFingerprint } from '../../src/research/checklist.mjs';
 import { aggregate, normalizeSample } from '../../src/research/decision.mjs';
 import { ProjectStore } from '../../src/store.mjs';
 import { researchedNode } from '../helpers/research-shapes';
@@ -2689,15 +2689,16 @@ describe('a kind no needs a second family on the deeper page', () => {
       const prompt = messages.map((m) => m.content).join('\n');
       if (prompt.includes('This page offers:')) {
         if (prompt.includes('hand-sorted bales')) second.push(id);
-        return { content: JSON.stringify({ kind: prompt.includes('hand-sorted bales') ? aboutAnswer : 'B', span: 'S1' }), model: `${id}-fast`, provider: id, usage: {} };
+        const shown = (aboutAnswer === 'A' ? prompt.match(/^([A-M])\) one /m) : prompt.match(/^([A-M])\) a part or an accessory/m))?.[1] ?? aboutAnswer;
+        return { content: JSON.stringify({ kind: prompt.includes('hand-sorted bales') ? shown : 'B', span: 'S1' }), model: `${id}-fast`, provider: id, usage: {} };
       }
       return { content: JSON.stringify(prompt.includes('Item page text:') ? [] : { answer: 'ok', claims: [], confidence: 'high' }), model: `${id}-fast`, provider: id, usage: {} };
     },
   });
-  const run = async (aboutAnswer: string, stored: unknown[] = []) => {
+  const run = async (aboutAnswer: string, stored: unknown[] = [], ids = ['alpha', 'beta']) => {
     second.length = 0;
     const search = { ...fakeSearch, async readPage(url: string) { return url.endsWith('/about') ? { status: 200, text: about, links: [] } : { status: 200, text: home, links: [{ url: '/about', text: 'About us' }] }; } };
-    const router = new ModelRouter({ providers: [family('alpha', aboutAnswer), family('beta', aboutAnswer)] });
+    const router = new ModelRouter({ providers: ids.map((id) => family(id, aboutAnswer)) });
     const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
     const project = await engine.createProject({ question: 'Find used clothing wholesalers' });
     await engine.updateProject(project.id, { acceptance: { itemCount: 1 } });
@@ -2728,6 +2729,14 @@ describe('a kind no needs a second family on the deeper page', () => {
     const { project, kind } = await run('B');
     expect(kind.answer).toBe('no');
     expect(project.kindRejected).toEqual([{ url: 'https://seller.example.org/', judgeVersion: JUDGE_VERSION }]);
+  });
+
+  it('never rejects when the second opinion comes from the family that said no: the kind is unknown, to confirm', async () => {
+    const { project, kind } = await run('B', [], ['alpha']);
+    expect(second).toEqual(['alpha']);
+    expect(kind).toMatchObject({ answer: 'unknown', reason: SINGLE_KIND_OPINION, second: { single: true } });
+    expect(project.kindRejected).toEqual([]);
+    expect(project.log.some((l: { message: string }) => l.message.startsWith('kind second opinion 1/30: first=no second=unknown'))).toBe(true);
   });
 
   it('forgets rejections recorded under an older judge version, so those items are judged again', async () => {
