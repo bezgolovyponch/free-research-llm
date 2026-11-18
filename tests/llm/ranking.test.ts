@@ -95,6 +95,16 @@ describe('router ranking', () => {
     }
   });
 
+  it('counts the time a paced provider kept a call waiting, so a 45 s queue is not read as a 4 s answer', () => {
+    const rows = [
+      ...Array.from({ length: 4 }, () => ({ ts: new Date(now).toISOString(), purpose: 'checklist', tier: 'fast', provider: 'pollinations', ok: true, ms: 4000, waitMs: 45000 })),
+      ...Array.from({ length: 4 }, () => ({ ts: new Date(now).toISOString(), purpose: 'checklist', tier: 'fast', provider: 'nvidia', ok: true, ms: 13000 })),
+    ];
+    const s = providerStats(rows, { now });
+    expect([s.pollinations.msPerAnswer, s.nvidia.msPerAnswer]).toEqual([49000, 13000]);
+    expect(s.pollinations.medianMs.fast).toBe(4000);
+  });
+
   it('counts the time lost on failed calls too, so speed means time per useful answer', () => {
     const s = providerStats([...calls('pollinations', 'fast', 10, 40000), ...calls('pollinations', 'fast', 10, 40000, false, 'pollinations HTTP 500: boom')], { now });
     expect(s.pollinations).toMatchObject({ calls: 20, ok: 10, failed: 10, spentMs: 800000, msPerAnswer: 80000 });

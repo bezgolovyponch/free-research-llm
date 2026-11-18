@@ -66,7 +66,7 @@ export function providerStats(ledger, { now = Date.now(), windowMs = WINDOW_MS }
     if (row.ts && now - Date.parse(row.ts) > windowMs) continue;
     const s = (stats[row.provider] ??= { calls: 0, ok: 0, failed: 0, rateLimited: 0, spentMs: 0, ms: { fast: [], deep: [], all: [] } });
     s.calls++;
-    if (Number(row.ms) > 0) s.spentMs += Number(row.ms);
+    if (Number(row.ms) > 0 || Number(row.waitMs) > 0) s.spentMs += Math.max(0, Number(row.ms) || 0) + Math.max(0, Number(row.waitMs) || 0);
     if (row.ok) {
       s.ok++;
       if (Number(row.ms) > 0) {

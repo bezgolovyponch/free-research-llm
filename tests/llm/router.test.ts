@@ -694,6 +694,18 @@ describe('ModelRouter deprecated models', () => {
     expect(router.available().map((p) => p.id)).toEqual(['b']);
   });
 
+  it('rests a provider whose last model is gone only until its other models\' quota resets, not 24 h', async () => {
+    let now = Date.parse('2026-11-18T05:40:00Z');
+    const reset = Date.parse('2026-11-18T08:00:00Z');
+    const model = 'gemini-2.5-flash';
+    const gemini = { ...provider('gemini', [new ProviderError('gemini HTTP 404: models/gemini-2.5-flash is not found', { status: 404 })]), selected: { fast: 'gemini-3.1-flash-lite', deep: model }, retired: new Map([['gemini-3.5-flash', reset], ['gemini-flash-latest', reset], ['old-one', Infinity]]) };
+    const b = provider('b', []);
+    const router = new ModelRouter({ providers: [gemini, b], now: () => now });
+    router.benchGoneModel(gemini as never, model, new ProviderError('gone', { status: 404 }));
+    expect(router.cooldownUntil.get('gemini')).toBe(reset);
+    expect(router.cooldownReason.get('gemini')).toBe('gemini-2.5-flash is gone (HTTP 404) and cannot be switched; every other model of this provider rests for its quota, so it rests until the first of them resets (140 min), set FRL_GEMINI_DEEP_MODEL to a model this provider still serves');
+  });
+
   it('benches a provider whose deprecated model is pinned by an env override, and retires and switches the model when the provider can', async () => {
     const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
     const dead = '@cf/meta/infire-llama-3.1-8b-instruct';
