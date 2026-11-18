@@ -25,7 +25,7 @@ import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
 import { conceptExamples, conceptOf, conceptText } from './concept.mjs';
-import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
+import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, describedItem, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, lowPriceCut, lowPriceStats, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
@@ -848,7 +848,11 @@ export class ResearchEngine {
     if (String(project.decisionModel.purpose ?? '').trim()) return true;
     await this.rebuildDecisionModel(project);
     if (String(project.decisionModel?.purpose ?? '').trim()) return true;
-    if (String(project.guidance ?? '').trim()) return true;
+    const requirements = project.decisionModel?.requirements ?? [];
+    if (requirements.length) {
+      this.emit(project, 'decision', `the purpose is not stated; your request already names ${requirements.length} requirement(s) a result must meet, so a stated purpose would not change the plan and the research goes on`);
+      return true;
+    }
     this.setPhase(project, 'needs-purpose');
     this.emit(project, 'phase', 'research paused: the purpose is not clear — state why you ask and what result is worth having (Hints field)');
     return false;
@@ -926,9 +930,10 @@ export class ResearchEngine {
     const merged = mergeConceptCards(replies);
     const card = applyConceptCard(merged.data, pages);
     if (!card.terms.length) {
-      if (String(project.guidance ?? '').trim()) {
-        project.decisionModel.kind = { ...kind, validated: { pages: pages.length, terms: [], basis: 'hints', at: new Date().toISOString() } };
-        this.emit(project, 'decision', `the ${pages.length} page(s) about "${kind.label}" name it in different words; your Hints describe the item, so the research goes on and each page is judged for the kind`);
+      const described = describedItem({ kind, domain: project.domain });
+      if (described) {
+        project.decisionModel.kind = { ...kind, validated: { pages: pages.length, terms: [], basis: described.basis, at: new Date().toISOString() } };
+        this.emit(project, 'decision', `the ${pages.length} page(s) about "${kind.label}" name it in different words; the item is already described (${described.basis === 'request' ? 'your request' : 'the sources read for your request and Hints'}: ${described.words}), so another description would not change the plan: the research goes on and each page is judged for the kind`);
         return true;
       }
       this.setPhase(project, 'needs-concept');

@@ -78,6 +78,15 @@ export function conceptCardPrompt({ kind = {}, question = '', pages = [] }) {
   ];
 }
 
+const DESCRIBED_TERMS_SHOWN = 4;
+
+export function describedItem({ kind, domain }) {
+  const described = String(kind?.described ?? '').trim();
+  if (described) return { basis: 'request', words: described };
+  const terms = (domain?.ready ? domain.terms ?? [] : []).map((term) => String(term ?? '').trim()).filter(Boolean);
+  return terms.length ? { basis: 'domain', words: terms.slice(0, DESCRIBED_TERMS_SHOWN).join(', ') } : null;
+}
+
 export function mergeConceptCards(replies) {
   const datas = (replies ?? []).map((reply) => (reply?.data && typeof reply.data === 'object' ? reply.data : null)).filter(Boolean);
   const need = Math.max(1, Math.ceil(datas.length / 2));
