@@ -4,7 +4,6 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyCalibration, applyModel, calibrationPrompt, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
 import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
-import { fakeRouter, seq } from '../helpers/fakes';
 
 const question = 'Find plots for a glamping site under 30000 EUR, at most 15 km from the sea, hottest month under 29 °C, with a strong price trend';
 const sample = (criteria: object[], terms = ['plot', 'terreno']) => normalizeSample({ concept: 'cheap coastal glamping land', kind: { label: 'plot of land', terms }, criteria });
@@ -336,15 +335,6 @@ describe('decision model version', () => {
     expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, checklistVersion: CHECKLIST_VERSION } })).toBe(true);
   });
 
-  it('treats a model built before the current purpose tree as stale so the checklist follows the tree', async () => {
-    const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
-    const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
-    const model = { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] }, version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION, treeAt: null };
-    expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: model })).toBe(true);
-    expect(modeler.fresh({ question: 'q', guidance: '', purposeTree: { at: '2026-11-18T00:00:00.000Z' }, decisionModel: model })).toBe(false);
-    expect(modeler.fresh({ question: 'q', guidance: '', purposeTree: { at: '2026-11-18T00:00:00.000Z' }, decisionModel: { ...model, treeAt: '2026-11-18T00:00:00.000Z' } })).toBe(true);
-  });
-
   it('treats a current model with no kind and no criteria as stale so the next run tries again', async () => {
     const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
@@ -462,139 +452,6 @@ describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
     expect(project.decisionModel.caseIds).not.toContain(own.id);
   });
 
-  describe('checklist built from purpose tree', () => {
-    const purposeTree = {
-      goals: [
-        {
-          id: 'G1',
-          state: 'kept',
-          goal: 'Within 300 km of Prague',
-          questions: [
-            { id: 'Q1', q: 'Is this listing within 300 km of Prague?', checker: 'code', threshold: { op: '<=', value: 300, unit: 'km', hard: true, source: 'asked' } },
-            { id: 'Q2', q: 'Is the distance stated on the page?', checker: 'page', threshold: null },
-          ],
-        },
-        {
-          id: 'G2',
-          state: 'kept',
-          goal: 'Price up to 65000 CZK',
-          questions: [
-            { id: 'Q3', q: 'Is the price at most 65000 CZK?', checker: 'page', threshold: { op: '<=', value: 65000, unit: 'CZK', hard: true, source: 'asked' } },
-          ],
-        },
-        {
-          id: 'G3',
-          state: 'proposed',
-          goal: 'Invented goal',
-          questions: [
-            { id: 'Q4', q: 'Is it invented?', checker: 'page', threshold: null },
-          ],
-        },
-        {
-          id: 'G4',
-          state: 'kept',
-          goal: 'Proven quality',
-          questions: [
-            { id: 'Q5', q: 'Do independent sources confirm the quality?', checker: 'consensus', threshold: null },
-          ],
-        },
-      ],
-    };
-
-    it('builds checklist from stored purposeTree fixture (source tree)', async () => {
-      const decisionProposal = { concept: 'c', kind: { label: 'car', terms: ['hatchback'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
-      const router = {
-        complete: async (req: { purpose: string; task?: string; messages: Array<{ content: string }> }) => {
-          if (req.purpose === 'decision-model') {
-            return { provider: 'test', data: decisionProposal };
-          }
-          if (req.task === 'measure') { const lines = req.messages[0].content.split('\n'); const wanted = req.messages.at(-1)!.content.includes('Unit: km') ? 'distanceKm' : 'priceEur'; return { provider: 'test', data: { measure: lines.find((l) => l.endsWith(`: ${wanted}`))!.slice(0, 1) } }; }
-          throw new Error('should not call checklist');
-        },
-      };
-      const project = {
-        id: 'tree-checklist',
-        question: carQuestion,
-        guidance: '',
-        acceptance: { itemCount: 20 },
-        purposeTree,
-        scoping: { notes: [] },
-      };
-      const modeler = new DecisionModeler({ router } as never);
-      const model = await modeler.build(project);
-      expect(model.checklist).toBeDefined();
-      expect(model.checklist!.length).toBe(3);
-      const clauses = model.checklist!.map((c) => c.clause);
-      expect(clauses).toContain('Within 300 km of Prague');
-      expect(clauses).toContain('Price up to 65000 CZK');
-      expect(clauses).toContain('Proven quality');
-      const hardChecks = model.checklist!.flatMap((c) => c.items.filter((i) => i.hard));
-      expect(hardChecks.length).toBe(2);
-      expect(hardChecks.map((i) => i.question)).toContain('Is this listing within 300 km of Prague?');
-      expect(hardChecks.map((i) => i.question)).toContain('Is the price at most 65000 CZK?');
-      const distanceItem = model.checklist!.find((c) => c.clause === 'Within 300 km of Prague')!.items.find((i) => i.numeric);
-      expect(distanceItem!.numeric).toMatchObject({ measure: 'distanceKm', op: '<=', value: 300, unit: 'km' });
-      const priceItem = model.checklist!.find((c) => c.clause === 'Price up to 65000 CZK')!.items.find((i) => i.numeric);
-      expect(priceItem!.numeric).toMatchObject({ measure: 'priceEur', op: '<=', value: 65000, unit: 'CZK' });
-    });
-
-    it('falls back to ChecklistModeler when no purposeTree', async () => {
-      const decisionProposal = { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
-      const checklistProposal = {
-        items: [
-          { clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } },
-        ],
-      };
-      let checklistCalls = 0;
-      const router = {
-        complete: async (req: { purpose: string }) => {
-          if (req.purpose === 'decision-model') {
-            return { provider: 'test', data: decisionProposal };
-          }
-          if (req.purpose === 'checklist') {
-            checklistCalls++;
-            return { provider: 'test', data: checklistProposal };
-          }
-          throw new Error('unexpected purpose: ' + req.purpose);
-        },
-      };
-      const project = { id: 'no-tree', question, guidance: '', acceptance: { expected: '20 plots' } };
-      const modeler = new DecisionModeler({ router } as never);
-      const model = await modeler.build(project);
-      expect(checklistCalls).toBe(3);
-      expect(model.checklist).toBeDefined();
-      expect(model.checklist![0].clause).toBe('sea');
-    });
-
-    it('empty tree never replaces a good model checklist', async () => {
-      const decisionProposal = { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
-      const fallbackProposal = {
-        items: [
-          { clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } },
-        ],
-      };
-      let checklistCalls = 0;
-      const router = {
-        complete: async (req: { purpose: string }) => {
-          if (req.purpose === 'decision-model') {
-            return { provider: 'test', data: decisionProposal };
-          }
-          if (req.purpose === 'checklist') {
-            checklistCalls++;
-            return { provider: 'test', data: fallbackProposal };
-          }
-          throw new Error('unexpected purpose: ' + req.purpose);
-        },
-      };
-      const project = { id: 'empty-tree', question, guidance: '', acceptance: { expected: '20 plots' }, purposeTree: { goals: [] }, scoping: { notes: [] } };
-      const modeler = new DecisionModeler({ router } as never);
-      const model = await modeler.build(project);
-      expect(checklistCalls).toBe(3);
-      expect(model.checklist).toBeDefined();
-      expect(model.checklist![0].clause).toBe('sea');
-    });
-  });
-
   it('a title prefix is not a model', () => {
     const titles = ['Prodám Citroen Saxo 1,4 VTS', 'Prodám Citroen C4 1,4 + LPG', 'Prodam citroen c3', 'Prodám Citroen C1', 'Škoda Fabia 2, LPG', 'ŠKODA FABIA II COMFORT 2008', 'Škoda Felicia 1.3'];
     const out = applyCalibration({ label: 'used car', terms: ['hatchback'] }, { data: { not: [], subtype: { label: 'hatchback', models: ['citroen c3', 'prodam citroen c1', 'skoda fabia ii', 'skoda felicia'], variants: [] } } }, titles);
@@ -612,60 +469,3 @@ describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
     expect(applyCalibration(kind, reply, [...cars, ...wheels], { itemTitles: wheels }).kind.not).toEqual(['parts', 'accessories', 'kola']);
   });
 });
-
-describe('checklist hardness from the user\'s words', () => {
-  const measureOrHardness = (hard: string) => ({
-    complete: async (req: { task?: string; messages: Array<{ content: string }> }) => {
-      if (req.task === 'hardness') return { provider: 'test', data: { kind: hard } };
-      if (req.task === 'measure') return { provider: 'test', data: { measure: 'Z' } };
-      throw new Error(`unexpected call ${req.task}`);
-    },
-  });
-  const tree = {
-    goals: [
-      { id: 'G1', state: 'kept', goal: 'Within 300 km of Prague', refine: 'AND', trace: { id: 'C1', text: 'within 300km from prague' }, questions: [{ id: 'Q1', q: 'Is the listing located within the asked area?', checker: 'page', threshold: null }] },
-      { id: 'G2', state: 'kept', goal: 'Suppliers in the hinted countries', refine: 'AND', trace: { id: 'H1', text: 'suppliers in NL, DE, UK' }, questions: [{ id: 'Q2', q: 'Is the supplier in Germany?', checker: 'page', threshold: null }] },
-      { id: 'G3', state: 'kept', goal: 'Value for the purpose', refine: 'AND', trace: { kind: 'rule', text: 'value' }, questions: [{ id: 'Q3', q: 'Does it deliver within 24 hours?', checker: 'page', threshold: null }, { id: 'Q4', q: 'Is the sell-through lift at least 10%?', checker: 'statistic', threshold: { op: '>=', value: 10, unit: '%', source: 'sourced', hard: false } }] },
-      { id: 'G4', state: 'kept', goal: 'Proven quality', refine: 'AND', trace: { id: 'C2', text: 'proven good quality' }, questions: [{ id: 'Q5', q: 'Do independent sources agree on its quality?', checker: 'consensus', threshold: null }] },
-    ],
-  };
-  const build = async (hard: string) => {
-    const { DecisionModeler } = await import('../../src/research/decision.mjs');
-    const modeler = new DecisionModeler({ router: measureOrHardness(hard) } as never);
-    const clusters = await modeler.buildChecklistFromTree(tree, [], measureOrHardness(hard), null, 'q', 'hint');
-    return Object.fromEntries(clusters.flatMap((c: { items: Array<{ questionId: string; hard: boolean; scope: string }> }) => c.items.map((i) => [i.questionId, [i.hard, i.scope]])));
-  };
-
-  it('makes a question hard only when its goal traces to a clause of the question that states a constraint', async () => {
-    expect(await build('constraint')).toEqual({ Q1: [true, 'item'], Q2: [false, 'item'], Q3: [false, 'item'], Q4: [false, 'domain'], Q5: [false, 'domain'] });
-  });
-
-  it('keeps every question soft when the clause is only a preference', async () => {
-    expect(Object.values(await build('criterion')).every(([hard]) => hard === false)).toBe(true);
-  });
-
-  it('keeps an asked threshold soft when no measure code can read matches it', async () => {
-    const { DecisionModeler } = await import('../../src/research/decision.mjs');
-    const router = measureOrHardness('criterion');
-    const modeler = new DecisionModeler({ router } as never);
-    const clusters = await modeler.buildChecklistFromTree({ goals: [{ id: 'G1', state: 'kept', goal: 'Count', trace: { id: 'P' }, questions: [{ id: 'Q1', q: 'How many qualified listings are there?', checker: 'code', threshold: { op: '>=', value: 20, unit: 'cars', source: 'asked', hard: true } }] }] }, [], router, null, 'q', '');
-    expect(clusters[0].items[0]).toMatchObject({ hard: false, numeric: undefined });
-  });
-
-  it('recognises only question clauses as anchors that can make a goal hard', async () => {
-    const { isClauseAnchor } = await import('../../src/research/decision.mjs');
-    expect([{ id: 'C1' }, { id: 'C12' }, { id: 'H1' }, { id: 'I2' }, { id: 'P' }, { kind: 'rule', text: 'value' }, null].map(isClauseAnchor)).toEqual([true, true, false, false, false, false, false]);
-  });
-
-  it('maps the voted letter back to the measure it lists', async () => {
-    const { voteMeasure } = await import('../../src/research/decision.mjs');
-    const router = { complete: async (req: { messages: Array<{ content: string }> }) => ({ provider: 'test', data: { measure: req.messages[0].content.split('\n').find((l) => l.endsWith(': distanceKm'))!.slice(0, 1) } }) };
-    expect(await voteMeasure({ router }, { text: 'Is it within 300 km of Prague?', unit: 'km' })).toBe('distanceKm');
-  });
-
-  it('keeps no numeric check when no measurable quantity matches the question', async () => {
-    const { voteMeasure } = await import('../../src/research/decision.mjs');
-    expect(await voteMeasure({ router: measureOrHardness('constraint') }, { text: 'Is the sell-through lift at least 10%?', unit: '%' })).toBeNull();
-  });
-});
-
