@@ -283,6 +283,241 @@ describe("verdict", () => {
   });
 });
 
+describe("V1: kind gate vetoes in goal path", () => {
+  const kind = { label: "car listing", terms: ["car"], not: ["wanted", "parts", "accessories", "retail"] };
+  const kindId = "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted, parts, accessories, retail)?";
+
+  const goalChecklist = [
+    { clause: "accurate listing", goalId: "G1", items: [{ question: "Is this listing accurate?", hard: true, numeric: null }] },
+    { clause: "price limit", goalId: "G2", goalHard: true, items: [{ question: "Is price <= 65000?", hard: true, numeric: { measure: "priceEur", op: "<=", value: 65000, unit: "CZK" } }] },
+  ];
+
+  const baseItem = (overrides = {}) => ({
+    live: true,
+    listing: true,
+    inRange: true,
+    purpose: [],
+    checks: [],
+    value: 20000,
+    unit: "CZK",
+    ...overrides,
+  });
+
+  it("V1: kind check with answer 'no' rejects in goal path", () => {
+    const items = [baseItem({
+      checks: [
+        { id: "accurate listing|Is this listing accurate?", answer: "yes", hard: true, clause: "accurate listing" },
+        { id: kindId, answer: "no", hard: true, clause: "kind", quote: "" },
+      ],
+    })];
+
+    const result = verdict(items, { itemCount: 1 }, goalChecklist, kind);
+    expect(result.tiers.rejected).toBe(1);
+    expect(result.tiers.confirmed).toBe(0);
+  });
+
+  it("V1: kind check with answer 'unknown' goes to to-confirm in goal path", () => {
+    const items = [baseItem({
+      checks: [
+        { id: "accurate listing|Is this listing accurate?", answer: "yes", hard: true, clause: "accurate listing" },
+        { id: kindId, answer: "unknown", hard: true, clause: "kind", quote: "" },
+      ],
+    })];
+
+    const result = verdict(items, { itemCount: 1 }, goalChecklist, kind);
+    expect(result.tiers.toConfirm).toBe(1);
+    expect(result.tiers.confirmed).toBe(0);
+  });
+
+  it("V1: kind check with answer 'yes' and quote allows confirmed in goal path", () => {
+    const items = [baseItem({
+      checks: [
+        { id: "accurate listing|Is this listing accurate?", answer: "yes", hard: true, clause: "accurate listing" },
+        { id: kindId, answer: "yes", hard: true, clause: "kind", quote: "Škoda Fabia 1.2" },
+      ],
+    })];
+
+    const result = verdict(items, { itemCount: 1 }, goalChecklist, kind);
+    expect(result.tiers.confirmed).toBe(1);
+    expect(result.tiers.rejected).toBe(0);
+  });
+});
+
+describe("V2: hard items not in hard goal still veto in goal path", () => {
+  const goalChecklist = [
+    { clause: "soft goal", goalId: "G1", items: [{ question: "Is it good?", hard: false, numeric: null }] },
+    { clause: "hard numeric", goalId: "G2", items: [{ question: "Is price <= 65000?", hard: true, numeric: { measure: "priceEur", op: "<=", value: 65000, unit: "CZK" } }] },
+  ];
+
+  const baseItem = (overrides = {}) => ({
+    live: true,
+    listing: true,
+    inRange: true,
+    purpose: [],
+    checks: [],
+    value: 20000,
+    unit: "CZK",
+    ...overrides,
+  });
+
+  it("V2: hard numeric check with 'no' rejects even if goal not marked goalHard", () => {
+    const items = [baseItem({
+      checks: [
+        { id: "soft goal|Is it good?", answer: "yes", hard: false, clause: "soft goal" },
+        { id: "hard numeric|Is price <= 65000?", answer: "no", hard: true, clause: "hard numeric" },
+      ],
+    })];
+
+    const result = verdict(items, { itemCount: 1 }, goalChecklist, null);
+    expect(result.tiers.rejected).toBe(1);
+  });
+
+  it("V2: hard numeric check with 'unknown' goes to to-confirm even if goal not marked goalHard", () => {
+    const items = [baseItem({
+      checks: [
+        { id: "soft goal|Is it good?", answer: "yes", hard: false, clause: "soft goal" },
+        { id: "hard numeric|Is price <= 65000?", answer: "unknown", hard: true, clause: "hard numeric" },
+      ],
+    })];
+
+    const result = verdict(items, { itemCount: 1 }, goalChecklist, null);
+    expect(result.tiers.toConfirm).toBe(1);
+  });
+
+  it("V2: hard non-numeric check with 'no' rejects even if goal not marked goalHard", () => {
+    const checklistWithHard = [
+      { clause: "soft goal", goalId: "G1", items: [{ question: "Is it good?", hard: false, numeric: null }] },
+      { clause: "hard qualitative", goalId: "G2", items: [{ question: "Is it verified?", hard: true, numeric: null }] },
+    ];
+
+    const items = [baseItem({
+      checks: [
+        { id: "soft goal|Is it good?", answer: "yes", hard: false, clause: "soft goal" },
+        { id: "hard qualitative|Is it verified?", answer: "no", hard: true, clause: "hard qualitative" },
+      ],
+    })];
+
+    const result = verdict(items, { itemCount: 1 }, checklistWithHard, null);
+    expect(result.tiers.rejected).toBe(1);
+  });
+});
+
+describe("V3: openGoals uses correct key lookup", () => {
+  const goalChecklist = [
+    { clause: "goal one", goalId: "G1", goalHard: true, items: [{ question: "Check one?", hard: true, numeric: null }] },
+    { clause: "goal two", goalId: "G2", goalHard: true, items: [{ question: "Check two?", hard: true, numeric: null }] },
+  ];
+
+  const baseItem = (overrides = {}) => ({
+    live: true,
+    listing: true,
+    inRange: true,
+    purpose: [],
+    checks: [],
+    ...overrides,
+  });
+
+  it("V3: openGoals correctly finds goals with unknown combined checks", () => {
+    const items = [
+      baseItem({
+        url: "1",
+        checks: [
+          { id: "goal one|Check one?", answer: "yes", hard: true, clause: "goal one" },
+          { id: "goal two|Check two?", answer: "unknown", hard: true, clause: "goal two" },
+        ],
+      }),
+      baseItem({
+        url: "2",
+        checks: [
+          { id: "goal one|Check one?", answer: "yes", hard: true, clause: "goal one" },
+          { id: "goal two|Check two?", answer: "unknown", hard: true, clause: "goal two" },
+        ],
+      }),
+    ];
+
+    const result = verdict(items, { itemCount: 2 }, goalChecklist, null);
+    expect(result.tiers.toConfirm).toBe(2);
+    expect(result.summary).toContain("goal two");
+  });
+});
+
+describe("V5: goal path and old path return same perCheck shape", () => {
+  const kind = { label: "car listing", terms: ["car"], not: ["wanted"] };
+  const kindId = "kind|Is this page one car listing offered as asked (not a part, accessory, wanted ad or list and not wanted)?";
+
+  const checklistOld = [
+    { clause: "price", items: [{ question: "Is price <= 65000?", hard: true, numeric: { measure: "priceEur", op: "<=", value: 65000, unit: "CZK" } }] },
+    { clause: "kind", items: [{ question: "Is it a car?", hard: true, numeric: null }] },
+  ];
+
+  const checklistGoal = [
+    { clause: "price", goalId: "G1", goalHard: true, items: [{ question: "Is price <= 65000?", hard: true, numeric: { measure: "priceEur", op: "<=", value: 65000, unit: "CZK" } }] },
+    { clause: "kind", goalId: "G2", goalHard: true, items: [{ question: "Is it a car?", hard: true, numeric: null }] },
+  ];
+
+  const baseItem = (overrides = {}) => ({
+    live: true,
+    listing: true,
+    inRange: true,
+    purpose: [],
+    checks: [],
+    value: 20000,
+    unit: "CZK",
+    ...overrides,
+  });
+
+  it("V5: both paths return perCheck with id, clause, yes, no, unknown", () => {
+    const items = [
+      baseItem({ url: "1", checks: [
+        { id: "price|Is price <= 65000?", answer: "yes", hard: true, clause: "price" },
+        { id: kindId, answer: "yes", hard: true, clause: "kind", quote: "car" },
+      ]}),
+      baseItem({ url: "2", checks: [
+        { id: "price|Is price <= 65000?", answer: "no", hard: true, clause: "price" },
+        { id: kindId, answer: "no", hard: true, clause: "kind", quote: "parts" },
+      ]}),
+    ];
+
+    const resultOld = verdict(items, { itemCount: 2 }, checklistOld, kind);
+    const resultGoal = verdict(items, { itemCount: 2 }, checklistGoal, kind);
+
+    for (const pc of resultOld.perCheck) {
+      expect(pc).toHaveProperty("id");
+      expect(pc).toHaveProperty("clause");
+      expect(pc).toHaveProperty("yes");
+      expect(pc).toHaveProperty("no");
+      expect(pc).toHaveProperty("unknown");
+    }
+    for (const pc of resultGoal.perCheck) {
+      expect(pc).toHaveProperty("id");
+      expect(pc).toHaveProperty("clause");
+      expect(pc).toHaveProperty("yes");
+      expect(pc).toHaveProperty("no");
+      expect(pc).toHaveProperty("unknown");
+    }
+  });
+
+  it("V5: both paths produce same tier counts for same data", () => {
+    const items = [
+      baseItem({ url: "1", checks: [
+        { id: "price|Is price <= 65000?", answer: "yes", hard: true, clause: "price" },
+        { id: kindId, answer: "yes", hard: true, clause: "kind", quote: "car" },
+      ]}),
+      baseItem({ url: "2", checks: [
+        { id: "price|Is price <= 65000?", answer: "no", hard: true, clause: "price" },
+        { id: kindId, answer: "no", hard: true, clause: "kind", quote: "parts" },
+      ]}),
+    ];
+
+    const resultOld = verdict(items, { itemCount: 2 }, checklistOld, kind);
+    const resultGoal = verdict(items, { itemCount: 2 }, checklistGoal, kind);
+
+    expect(resultOld.tiers.confirmed).toBe(resultGoal.tiers.confirmed);
+    expect(resultOld.tiers.rejected).toBe(resultGoal.tiers.rejected);
+    expect(resultOld.tiers["to-confirm"]).toBe(resultGoal.tiers["to-confirm"]);
+  });
+});
+
 describe("stored answers of the 0c750f fixture under the quote rule and the price rule", () => {
   const kind = { label: "car listing", terms: ["car"], not: ["wanted", "parts", "accessories", "retail"] };
   const tyres = "https://auto.bazos.cz/inzerat/226132468/zimni-pneu-na-plechacich-kia-ceed.php";
@@ -387,5 +622,30 @@ describe("runOutcome", () => {
 
   it("keeps the phase while the research has not finished", () => {
     expect(runOutcome({ phase: "researching", acceptanceResult: { totalAsked: 20, validCount: 1 } }).state).toBe("researching");
+  });
+});
+
+describe("named brands in the question under a purpose tree", () => {
+  const kind = { label: "supplier", terms: ["supplier"] };
+  const kindId = "kind|Is this page one supplier offered as asked?";
+  const kindChecklist = { clause: "kind", items: [{ question: "Is this page one supplier offered as asked?", hard: true, numeric: null }] };
+  const item = () => ({
+    live: true,
+    evidence: "https://supplier.test/about",
+    purpose: [{ id: "purpose-names-1", passed: false }],
+    checks: [
+      { id: kindId, answer: "yes", quote: "We are a supplier", hard: true, clause: "kind" },
+      { id: "brands|Does it offer brands comparable to the named ones?", answer: "unknown", hard: false, clause: "brands" },
+    ],
+  });
+
+  it("does not reject an item for not naming the example brands when the purpose tree owns the requirement", () => {
+    const tree = [kindChecklist, { clause: "brands", goalId: "G1", items: [{ question: "Does it offer brands comparable to the named ones?", hard: false, numeric: null }] }];
+    expect(verdict([item()], { itemCount: 1 }, tree, kind).tiers.confirmed).toBe(1);
+  });
+
+  it("still rejects it on the clause checklist that has no purpose tree", () => {
+    expect(qualifies(item(), { itemCount: 1 })).toBe(false);
+    expect(qualifies(item(), { itemCount: 1 }, { namesVeto: false })).toBe(true);
   });
 });

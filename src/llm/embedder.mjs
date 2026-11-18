@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { splitKeys } from './provider.mjs';
 
 export const EMBED_BATCH = 50;
 export const EMBED_TEXT_CHARS = 2000;
 export const EMBED_CACHE_SIZE = 20000;
 export const EMBED_TEXTS_PER_RUN = 2000;
 
+export const KEY_REFUSALS = [401, 403, 429];
 export const EMBED_ROUTES = [
   {
     id: 'cloudflare',
@@ -100,13 +102,25 @@ export class Embedder {
     await fs.writeFile(this.fileOf(model), JSON.stringify({ model, vectors }));
   }
 
+  async answerFrom(route, batch) {
+    const variants = Math.max(1, ...route.keys.map((key) => splitKeys(this.env[key]).length));
+    let status = 0;
+    for (let index = 0; index < variants; index++) {
+      const env = { ...this.env, ...Object.fromEntries(route.keys.map((key) => { const values = splitKeys(this.env[key]); return [key, values[index % values.length] ?? '']; })) };
+      const { url, init } = route.request(env, batch);
+      const response = await this.fetchImpl(url, init);
+      if (response.ok) return response;
+      status = response.status;
+      if (!KEY_REFUSALS.includes(status)) break;
+    }
+    throw new Error(`${route.id} embeddings answered ${status}`);
+  }
+
   async fetchVectors(route, texts) {
     const out = [];
     for (let at = 0; at < texts.length; at += EMBED_BATCH) {
       const batch = texts.slice(at, at + EMBED_BATCH);
-      const { url, init } = route.request(this.env, batch);
-      const response = await this.fetchImpl(url, init);
-      if (!response.ok) throw new Error(`${route.id} embeddings answered ${response.status}`);
+      const response = await this.answerFrom(route, batch);
       const vectors = route.vectors(await response.json());
       if (!Array.isArray(vectors) || vectors.length !== batch.length || vectors.some((v) => !Array.isArray(v) || !v.length)) throw new Error(`${route.id} embeddings returned no vectors`);
       out.push(...vectors);

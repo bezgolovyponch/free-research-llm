@@ -27,6 +27,10 @@ import { buildCandidates, candidateDeliverables, lowPriceCut, lowPriceStats, sho
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
 import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
+import { runScoping } from './scoping.mjs';
+import { buildPurposeTree, TREE_VERSION } from './purpose.mjs';
+import { CallBudget } from './semantic.mjs';
+import { Embedder } from '../llm/embedder.mjs';
 import { listingKey } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
@@ -280,6 +284,12 @@ export function needsSiteFit(strategy, decisionModel) {
 export const FACT_PAGES = 400;
 export const FACT_READS_AT_ONCE = 6;
 
+export function purposeSubject(project) {
+  const kind = project.decisionModel?.kind ?? null;
+  const terms = [...new Set([kind?.label, ...(kind?.terms ?? []), ...(project.domain?.terms ?? [])].map((term) => String(term ?? '').trim()).filter(Boolean))];
+  return terms.length ? terms.slice(0, 6).join(', ') : '';
+}
+
 export class ResearchEngine {
   constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null, now = () => Date.now() }) {
     this.now = now;
@@ -455,11 +465,27 @@ export class ResearchEngine {
     const template = templateById(project.templateId);
     this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
+
+    await this.ensurePurposeTree(project);
+    const purposeTree = project.purposeTree;
+
+    const purposeGoals = purposeTree?.goals?.filter((g) => g.state === 'kept').map((g) => g.goal).join('; ') || '';
+
     const ask = async (feedback) => {
       const reply = await this.router.complete({
         purpose: 'decompose',
         tier: 'deep',
-        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback, listsItems: Boolean(project.acceptance?.itemCount) }), project.guidance),
+        messages: withGuidance(decomposePrompt({
+          question: project.question,
+          template,
+          constraints: project.constraints,
+          dataSummary: project.data?.text,
+          expected: project.acceptance?.expected,
+          brief: this.briefOf(project).text,
+          feedback,
+          listsItems: Boolean(project.acceptance?.itemCount),
+          purposeGoals,
+        }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
       const fixes = repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
@@ -671,6 +697,69 @@ export class ResearchEngine {
     project.hubSearchedAt = new Date(this.now()).toISOString();
     this.emit(project, 'candidates', `hub search: ${sources.length} page(s) from ${hubs.join(', ')}`);
     return sources.length;
+  }
+
+  purposeTreeFresh(project) {
+    const tree = project.purposeTree;
+    return Boolean(tree && tree.version === TREE_VERSION && tree.question === project.question && tree.guidance === String(project.guidance ?? ''));
+  }
+
+  async runScopingStage(project, { purpose, kind, brief, languages }) {
+    const titles = (project.sweep?.pages ?? []).flatMap((page) => (page.listings ?? []).map((l) => String(l.title ?? ''))).filter(Boolean);
+    const requirements = project.nodes?.flatMap((node) => node.question ?? []).filter(Boolean) ?? [];
+    const ctx = {
+      router: this.router,
+      search: this.search,
+      embedder: this.embedder ?? new Embedder({ env: process.env }),
+      budget: new CallBudget(),
+      log: (msg) => this.emit(project, 'decision', msg),
+    };
+    const { scoping } = await runScoping(ctx, {
+      question: project.question,
+      purpose: purpose || project.question,
+      kind: kind?.label ?? '',
+      regions: brief.regions ?? [],
+      markets: brief.regions?.map((code) => countryByCode(code)?.name ?? code) ?? [],
+      languages,
+      rows: project.candidates?.kept ?? [],
+      titles,
+      requirements,
+    });
+    project.scoping = scoping;
+    return scoping;
+  }
+
+  async ensurePurposeTree(project) {
+    if (!this.router || this.demo || !project.acceptance?.itemCount) return project.purposeTree ?? null;
+    if (this.purposeTreeFresh(project)) return project.purposeTree;
+    if (!project.scoping?.notes?.length && this.search?.search) {
+      const brief = project.brief ?? this.briefOf(project);
+      const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
+      await this.runScopingStage(project, { purpose: project.decisionModel?.purpose ?? '', kind: project.decisionModel?.kind ?? null, brief, languages });
+    }
+    this.emit(project, 'phase', 'building the purpose tree from the question, hints and scoping notes');
+    const ctx = {
+      router: this.router,
+      search: this.search,
+      embedder: this.embedder ?? new Embedder({ env: process.env }),
+      budget: new CallBudget(),
+      subject: purposeSubject(project),
+      log: (msg) => this.emit(project, 'decision', msg),
+    };
+    const { phase: treePhase, tree } = await buildPurposeTree(ctx, {
+      question: project.question,
+      guidance: project.guidance ?? '',
+      notes: project.scoping?.notes ?? [],
+    });
+    if (!tree?.goals?.length) {
+      this.emit(project, 'warn', `purpose tree not built: ${treePhase}; the stored checklist stays`);
+      return project.purposeTree ?? null;
+    }
+    project.purposeTree = { ...tree, question: project.question, guidance: String(project.guidance ?? ''), version: TREE_VERSION, at: new Date().toISOString() };
+    this.emit(project, 'tree', `purpose tree built: ${tree.goals.length} goals (phase: ${treePhase})`);
+    await this.rebuildDecisionModel(project);
+    await this.store.save(project, { reason: 'purpose tree built' });
+    return project.purposeTree;
   }
 
   async studyDomain(project) {
@@ -1599,6 +1688,7 @@ export class ResearchEngine {
   }
 
   async checkAcceptance(project, pages = null, { memoNext = false } = {}) {
+    await this.ensurePurposeTree(project);
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);

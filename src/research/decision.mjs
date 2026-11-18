@@ -2,13 +2,40 @@ import fs from 'node:fs/promises';
 import { bm25 } from './evidence.mjs';
 import { plain } from './itemgate.mjs';
 import { explorePoints } from './site.mjs';
-import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
+import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2 } from './strategy.mjs';
+import { clausesOf } from './clauses.mjs';
 import { quoteFound } from './quote.mjs';
-import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
+import { ChecklistModeler, CHECKLIST_VERSION, MEASURES as ITEM_MEASURES, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 import { MAX_MEMBERS, MIN_MEMBERS, memberTerms, sameMember } from './concept.mjs';
+import { voteHardness, thresholdsOf } from './purpose.mjs';
+import { CallBudget, oneOf, vote } from './semantic.mjs';
 
 export { CHECKLIST_VERSION };
-export const DECISION_MODEL_VERSION = 4;
+export const DECISION_MODEL_VERSION = 6;
+export const DOMAIN_CHECKERS = ['consensus', 'statistic', 'official'];
+
+export function isClauseAnchor(trace) {
+  return /^C\d+$/.test(String(trace?.id ?? ''));
+}
+
+export const NO_MEASURE = 'Z';
+
+export async function voteMeasure(ctx, { text, unit = '' }) {
+  const keys = Object.keys(ITEM_MEASURES);
+  const letters = keys.map((_, index) => String.fromCharCode(65 + index));
+  const lines = [...keys.map((key, index) => `${letters[index]}: ${key}`), `${NO_MEASURE}: none of these is the quantity the question limits`].join('\n');
+  const messages = [
+    { role: 'system', content: `You map one question about a single delivered item to the quantity code can measure on it, in any language. Answer with JSON {"measure": "<letter>"}.\n${lines}` },
+    { role: 'user', content: `Question: ${text}\nUnit: ${unit || 'not stated'}` },
+  ];
+  const options = [...letters, NO_MEASURE];
+  const schema = (data) => {
+    const letter = oneOf(data?.measure, options);
+    return letter ? { value: letter } : { error: `"measure" must be one of ${options.join(', ')}` };
+  };
+  const result = await vote({ router: ctx.router, task: 'measure', tier: 'fast', messages, schema, n: 3, quorum: 2, key: (value) => value, budget: ctx.budget, stage: 'tree' });
+  return result.value && result.value !== NO_MEASURE ? keys[letters.indexOf(result.value)] : null;
+}
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
 export const CASES_RETRIEVED = 2;
@@ -450,7 +477,7 @@ export class DecisionModeler {
 
   fresh(project) {
     const m = project.decisionModel;
-    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
+    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && (m.treeAt ?? null) === (project.purposeTree?.at ?? null) && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
   }
 
   async build(project, { force = false } = {}) {
@@ -484,9 +511,53 @@ export class DecisionModeler {
         }
       }
     }
-    const checklist = await this.checklistModeler.build(question, guidance);
-    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, rebuildWeaker };
+    const budget = new CallBudget();
+    let checklist = null;
+    if (project.purposeTree?.goals?.length) {
+      const { tree: treeWithThresholds } = thresholdsOf(project.purposeTree, { question, guidance, notes: project.scoping?.notes ?? [] });
+      checklist = await this.buildChecklistFromTree(treeWithThresholds, project.scoping?.notes ?? [], this.router, budget, question, guidance);
+    } else {
+      checklist = await this.checklistModeler.build(question, guidance);
+    }
+    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, treeAt: project.purposeTree?.at ?? null, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
     return project.decisionModel;
   }
+
+  async buildChecklistFromTree(purposeTree, scopingNotes, router, budget, question, guidance) {
+    const userWords = `${question}\n${guidance}`;
+    const anchorHard = new Map();
+    const hardAnchor = async (trace) => {
+      if (!isClauseAnchor(trace)) return false;
+      if (!anchorHard.has(trace.id)) anchorHard.set(trace.id, await voteHardness({ router, budget, log: () => {} }, { requirementText: trace.text, userWords }));
+      return anchorHard.get(trace.id);
+    };
+    const clusters = [];
+    for (const goal of purposeTree.goals ?? []) {
+      if (goal.state !== 'kept' || !goal.questions?.length) continue;
+      const clause = goal.goal.slice(0, 200);
+      const goalHard = await hardAnchor(goal.trace);
+      let cluster = clusters.find((c) => c.clause === clause);
+      if (!cluster) {
+        cluster = { clause, items: [], refine: goal.refine ?? 'AND', goalId: goal.id, goalHard, anchor: goal.trace?.id ?? null };
+        clusters.push(cluster);
+      }
+      for (const q of goal.questions) {
+        const checker = q.checker;
+        const scope = DOMAIN_CHECKERS.includes(checker) ? 'domain' : 'item';
+        const numeric = q.threshold ? await this.numericOf(q, router, budget) : undefined;
+        const hard = scope === 'item' && ((q.threshold?.hard === true && Boolean(numeric)) || (goalHard && checker === 'page'));
+        cluster.items.push({ clause, question: q.q, hard, numeric, checker, scope, goalId: goal.id, questionId: q.id });
+      }
+    }
+    return clusters;
+  }
+
+
+  async numericOf(question, router, budget) {
+    const { op, value, unit } = question.threshold;
+    const measure = await voteMeasure({ router, budget }, { text: question.q, unit });
+    return measure ? { measure, op, value, unit } : undefined;
+  }
+
 }

@@ -327,10 +327,13 @@ export class ChecklistJudge {
     const checks = [];
     const numericItems = [];
     const qualitativeItems = [];
+    const domainItems = [];
 
     for (const cluster of checklist) {
       for (const ci of cluster.items) {
-        if (ci.numeric?.measure && ci.numeric.op && ci.numeric.value !== null && MEASURES[ci.numeric.measure]) {
+        if (ci.scope === 'domain') {
+          domainItems.push({ cluster, item: ci });
+        } else if (ci.numeric?.measure && ci.numeric.op && ci.numeric.value !== null && MEASURES[ci.numeric.measure]) {
           numericItems.push({ cluster, item: ci });
         } else {
           qualitativeItems.push({ cluster, item: ci });
@@ -348,6 +351,10 @@ export class ChecklistJudge {
         quote = `${ci.numeric.measure}: ${val} ${ci.numeric.unit}`;
       }
       checks.push({ id: cluster.clause + '|' + ci.question, answer, quote, hard: ci.hard, clause: cluster.clause });
+    }
+
+    for (const { cluster, item: ci } of domainItems) {
+      checks.push({ id: cluster.clause + '|' + ci.question, answer: 'unknown', quote: '', hard: false, clause: cluster.clause, scope: 'domain' });
     }
 
     const questions = qualitativeItems.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, hard: ci.hard, clause: cluster.clause }));
