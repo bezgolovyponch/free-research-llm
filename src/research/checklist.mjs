@@ -1,6 +1,6 @@
 import { plain } from './itemgate.mjs';
 import { isUmbrella } from './concept.mjs';
-import { MAX_SPAN_CHARS, pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
+import { MAX_SPAN_CHARS, pickRanked, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
 import { agreed, closedVote } from './semantic.mjs';
 import { MEASURES as DecisionMeasures, compare, adaptForChecklist } from './measures.mjs';
 
@@ -318,7 +318,9 @@ async function shownSpans(spans, query, embedder, always = []) {
   const room = (list) => Math.max(0, lineCount(list) - always.length);
   const opening = room(spans);
   if (opening >= spans.length) return spans;
-  const picked = await pickSpans(spans, query, embedder, opening);
+  const ranked = embedder ? await embedder.rank(query, spans.map((span) => span.text), opening) : null;
+  if (!ranked) return null;
+  const picked = pickRanked(spans, ranked);
   return picked.slice(0, room(picked));
 }
 
@@ -359,6 +361,7 @@ export class ChecklistJudge {
     const question = cluster.items[0];
     const check = { id: `${cluster.clause}|${question.question}`, answer: 'unknown', quote: '', hard: question.hard, clause: cluster.clause };
     const shown = await shownSpans(spans, question.question, this.embedder);
+    if (!shown) return { ...check, provider: null, notJudged: true, reason: NOT_RANKED_REASON };
     if (!shown.length) return { ...check, provider: null };
     const reply = await this.completeFull(kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
     const letter = String(reply?.data?.kind ?? '').trim().toUpperCase();
@@ -372,7 +375,7 @@ export class ChecklistJudge {
     const cluster = kindCluster(kind);
     const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
     const shown = spans.length ? await shownSpans(spans, cluster.items[0].question, this.embedder) : [];
-    if (!shown.length) return { answer: 'unknown', quote: '', tally: {} };
+    if (!shown?.length) return { answer: 'unknown', quote: '', tally: {} };
     const price = { value, unit, median };
     const first = exclude ?? (avoid ? [{ provider: avoid }] : []);
     const block = spansBlock(shown, JUDGE_BLOCK_CHARS);
@@ -432,6 +435,10 @@ export class ChecklistJudge {
         continue;
       }
       const picked = pageSpans.length ? await shownSpans(pageSpans, asked.map((q) => q.asked).join(' '), this.embedder, facts) : [];
+      if (!picked) {
+        for (const q of asked) checks.push({ id: q.id, answer: 'unknown', quote: '', hard: q.hard, clause: q.clause, notJudged: true, reason: NOT_RANKED_REASON, ...(q.criterion ? { criterion: q.criterion } : {}) });
+        continue;
+      }
       const shown = [...facts, ...picked];
       const answers = await this.answersFromPage(asked, shown);
       const missing = asked.filter((q) => !answers.has(q.short));
@@ -456,6 +463,12 @@ export class ChecklistJudge {
 
     return checks;
   }
+}
+
+export const NOT_RANKED_REASON = 'not judged: the page is longer than one reading and no sentence ranking answered';
+
+export function notJudged(checks) {
+  return (checks ?? []).some((check) => check.notJudged);
 }
 
 export const PRICE_MEASURE = 'priceEur';

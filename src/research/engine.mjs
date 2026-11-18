@@ -9,6 +9,7 @@ import { appendAppMessage, runSummary } from './notify.mjs';
 import { currencyOf } from './acceptance.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
+import { notJudged } from './checklist.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
 import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
@@ -1783,7 +1784,7 @@ export class ResearchEngine {
             }
             checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null, { row: rows.get(item.url) ?? null, price, members, evidence: project.domain?.evidence ?? {}, labels, criteria: project.decisionModel?.criteria ?? [], measures: { trends: project.candidates?.sites?.trends ?? null, euHpi: project.candidates?.sites?.euHpi ?? null } });
             item.checklist = checklistSummary([item])[0];
-            checkCache[cacheKey] = { checks, summary: item.checklist };
+            if (!notJudged(checks)) checkCache[cacheKey] = { checks, summary: item.checklist };
             const keys = Object.keys(checkCache);
             if (keys.length > 500) {
               delete checkCache[keys[0]];
