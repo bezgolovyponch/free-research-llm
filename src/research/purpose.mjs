@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { clausesOf } from './clauses.mjs';
+import { clausesOf, sentencesOf } from './clauses.mjs';
 import { currencyOf } from './acceptance.mjs';
 import { SAMPLE_TEMPERATURE, SINGLE_REASON, agreeAcrossSamples, agreed, ask, closedVote, idOf, matchPrompt, oneOf, optionLines, retrieveThenVerify, shortText, vote } from './semantic.mjs';
 
@@ -106,7 +106,7 @@ export async function splitPiece(ctx, piece) {
 
 export async function groupSpans(ctx, spans) {
   const singles = spans.map((span) => [span.id]);
-  if (spans.length < 2) return { groups: singles, grouped: false, valid: 0 };
+  if (spans.length < 2) return { groups: singles, grouped: false, valid: 0, samples: [] };
   const known = new Set(spans.map((span) => span.id));
   const order = new Map(spans.map((span, index) => [span.id, index]));
   const messages = [
@@ -123,48 +123,57 @@ export async function groupSpans(ctx, spans) {
   };
   const result = await vote({ router: ctx.router, task: 'requirements', tier: 'fast', messages, schema, n: 3, quorum: 2, budget: ctx.budget, stage: PURPOSE_STAGE });
   const valid = result.replies.length;
-  if (valid < 2) return { groups: singles, grouped: false, valid };
+  const voted = valid >= 2;
+  const samples = result.replies.map((reply) => ({ provider: reply.provider ?? null, groups: reply.value }));
+  const segment = new Map(spans.map((span, index) => [span.id, span.segment ?? `alone-${index}`]));
   const together = new Map();
   for (const reply of result.replies) for (const group of reply.value) for (const a of group) for (const b of group) if (order.get(a) < order.get(b)) together.set(`${a}|${b}`, (together.get(`${a}|${b}`) ?? 0) + 1);
   const count = (a, b) => together.get(order.get(a) < order.get(b) ? `${a}|${b}` : `${b}|${a}`) ?? 0;
+  const apart = (a, b) => voted && (valid - count(a, b)) * 2 > valid;
+  const wanted = (a, b) => (segment.get(a) === segment.get(b) ? !apart(a, b) : voted && count(a, b) * 2 > valid);
   const link = (first, second) => {
-    const counts = first.flatMap((a) => second.map((b) => count(a, b)));
-    return { weakest: Math.min(...counts), sum: counts.reduce((sum, value) => sum + value, 0) };
+    const pairs = first.flatMap((a) => second.map((b) => [a, b]));
+    const counts = pairs.map(([a, b]) => count(a, b));
+    return { open: !pairs.some(([a, b]) => apart(a, b)) && pairs.some(([a, b]) => wanted(a, b)), weakest: Math.min(...counts), sum: counts.reduce((sum, value) => sum + value, 0) };
   };
   let groups = singles;
   for (;;) {
     let best = null;
     for (let i = 0; i < groups.length; i++) {
       for (let j = i + 1; j < groups.length; j++) {
-        const { weakest, sum } = link(groups[i], groups[j]);
-        if (weakest * 2 > valid && (!best || weakest > best.weakest || (weakest === best.weakest && sum > best.sum))) best = { i, j, weakest, sum };
+        const { open, weakest, sum } = link(groups[i], groups[j]);
+        if (open && (!best || weakest > best.weakest || (weakest === best.weakest && sum > best.sum))) best = { i, j, weakest, sum };
       }
     }
     if (!best) break;
     const merged = [...groups[best.i], ...groups[best.j]].sort((a, b) => order.get(a) - order.get(b));
     groups = groups.filter((_, index) => index !== best.i && index !== best.j).concat([merged]).sort((a, b) => order.get(a[0]) - order.get(b[0]));
   }
-  return { groups, grouped: true, valid };
+  return { groups, grouped: voted, valid, samples };
 }
 
 async function groupedPieces(ctx, texts, { prefix, of }) {
   const spans = [];
   const pieces = [];
+  const sentences = sentencesOf(texts);
+  let segment = 0;
   for (const [index, piece] of texts.entries()) {
     const { parts, votes } = await splitPiece(ctx, piece);
     if (parts.length > 1) ctx.log?.(`requirements: the piece "${oneSpace(piece)}" holds two requirements; it is split before "${parts[1]}"`);
+    if (index > 0 && sentences[index] !== sentences[index - 1]) segment += 1;
     const ids = [];
-    for (const text of parts.length > 1 ? parts : [piece]) {
-      spans.push({ id: `${prefix}${spans.length + 1}`, text, piece: index });
+    for (const [at, text] of (parts.length > 1 ? parts : [piece]).entries()) {
+      if (at > 0) segment += 1;
+      spans.push({ id: `${prefix}${spans.length + 1}`, text, piece: index, segment });
       ids.push(`${prefix}${spans.length}`);
     }
     pieces.push({ text: piece, asked: wordCount(piece) >= SPLIT_MIN_WORDS, split: parts.length > 1, votes, spans: ids });
   }
   const byId = new Map(spans.map((span) => [span.id, span]));
-  const { groups, grouped, valid } = await groupSpans(ctx, spans);
-  if (!grouped && spans.length > 1) ctx.log?.(`requirements: no majority on grouping the ${spans.length} pieces of the ${of} by meaning; the punctuation split is kept`);
+  const { groups, grouped, valid, samples } = await groupSpans(ctx, spans);
+  if (!grouped && spans.length > 1) ctx.log?.(`requirements: fewer than two provider families grouped the ${spans.length} pieces of the ${of} by meaning; each sentence stays one requirement`);
   const joined = (group) => group.map((id, at) => `${at === 0 ? '' : byId.get(id).piece === byId.get(group[at - 1]).piece ? ' ' : ', '}${byId.get(id).text}`).join('');
-  return { groups: groups.map((group) => ({ text: joined(group), spans: group })), pieces, grouping: { grouped, valid } };
+  return { groups: groups.map((group) => ({ text: joined(group), spans: group })), pieces, grouping: { grouped, valid, samples } };
 }
 
 export async function requirementsOf(ctx, question, guidance = '') {

@@ -122,7 +122,7 @@ describe('purpose replay: with --projects the inputs come from the stored resear
     const router = fakeRouter(script());
     const { run } = await runReplay({ mode: 'suppliers', entry, rows, out, router, search: { ...search, searched: [] }, embedder: fakeEmbedder(), fixture, languages: ['English'] });
     expect(run.anchors.filter((anchor: { kind: string }) => anchor.kind === 'hint').map((anchor: { text: string }) => anchor.text)).toEqual(['Supplier countries: NL, DE, UK, IT, PL, LT']);
-    expect(run.tree.requirements.hints.grouping).toEqual({ grouped: true, valid: 2 });
+    expect(run.tree.requirements.hints.grouping).toMatchObject({ grouped: true, valid: 2 });
     expect(router.userText('purpose')).toContain('[H1] Supplier countries: NL, DE, UK, IT, PL, LT');
     expect(router.count('purpose')).toBe(3);
     expect(run.scoping.screened).toEqual({ purpose: 'a buyer wants a sound car for little money, because a small budget', subject: 'wholesale second hand clothing provider, as asked: Find wholesale branded second hand clothing providers for a retail second hand shop in Czech Republic and Slovakia' });
