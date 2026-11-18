@@ -665,5 +665,13 @@
     "signal": "Suppliers b2f5b7 live on ba474ac: 7 of 20 confirmed from 21 delivered; the hub search had run once per hinted country (15 pages each) on 2026-11-17 and was reused for 7 days; 8 of 28 pages were spam or off-topic",
     "cause": "searchHubs searched once and cached the result for a week, whatever the result count; nothing searched again when the run ended short",
     "prevention": "searchHubs runs rounds until the pool not rejected by the kind judge reaches 3x the asked count, snowballs queries from suppliers the judge accepted, pages directories, ranks pages by BM25 without dropping other languages, and ignores the cache when short (engine.test hub rounds)"
+  },
+  {
+    "id": "F52",
+    "title": "real suppliers rejected as 'several items or a list'",
+    "touches": ["src/research/checklist.mjs", "src/research/engine.mjs", "tests/research/checklist.test.ts", "tests/research/engine.test.ts"],
+    "signal": "Suppliers b2f5b7 live on 80822d2: 15 of 20 confirmed; gradedwholesale.com, dropy.com.pl and five europages company profiles rejected by the kind judge, every one with option C 'several items or a list'",
+    "cause": "the kind options were written for listing pages (one unit, a part, several items); a business page always shows many goods",
+    "prevention": "kindCluster gives a business kind (kind.entity, set by briefOf when located is false) options about one business, a directory, an article and a wanted ad (checklist.test 'kind options for a research that looks for businesses'); witness in docs/audits/entity-kind-proof.md"
   }
 ]

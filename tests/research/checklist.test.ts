@@ -648,7 +648,7 @@ describe('item-level checklist with a kind check and code-measured values', () =
   });
 
   it('the fingerprint carries the judge version, so answers of an older judge are not reused', () => {
-    expect(JUDGE_VERSION).toBe(3);
+    expect(JUDGE_VERSION).toBe(4);
     expect(CHECKLIST_VERSION).toBe(4);
     expect(checklistFingerprint(checklist).endsWith(`judge:${JUDGE_VERSION}`)).toBe(true);
   });
@@ -704,5 +704,21 @@ describe('filterCountItems', () => {
 
   it('keeps every item when no count was asked', () => {
     expect(kept([])).toHaveLength(clusters.length);
+  });
+});
+
+describe('kind options for a research that looks for businesses', () => {
+  it('asks whether the page is one business on its own site or profile, and names a directory, an article and a wanted ad as the other answers', () => {
+    const cluster = kindCluster({ label: 'wholesale clothing supplier', terms: ['wholesale'], entity: true });
+    expect(cluster.items[0].question).toBe('Is this page one wholesale clothing supplier, a single business on its own site or profile (not a directory of several, an article, or a wanted ad)?');
+    expect(cluster.options.map((o: { letter: string }) => o.letter)).toEqual(['A', 'B', 'C', 'D', 'E', 'U']);
+    expect(cluster.options[0].text).toContain('whatever range of goods it shows');
+    expect(cluster.options[1].text).toBe('a directory, list or search page of several businesses');
+  });
+
+  it('keeps the listing options for an item sold on listing pages', () => {
+    const cluster = kindCluster({ label: 'hatchback', terms: ['hatchback'] });
+    expect(cluster.options[2].text).toBe('several items or a list');
+    expect(cluster.items[0].question).toBe('Is this page one hatchback offered as asked (not a part, accessory, wanted ad or list)?');
   });
 });
