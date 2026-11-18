@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, CRITERION, CONTEXT, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, agreeFrames, conceptExamples, conceptFresh, conceptKindLabel, conceptText, frameConcept, framePrompt, frameSample, spanIn } from '../../src/research/concept.mjs';
+import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, agreeFrames, askedWithUnit, conceptChecklist, conceptExamples, conceptFresh, conceptKindLabel, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
 import { fakeRouter, seq } from '../helpers/fakes';
 
 describe('concept card', () => {
@@ -155,5 +155,46 @@ describe('concept framing', () => {
     expect(conceptText(null)).toBe('');
     expect(conceptKindLabel(null)).toBe('');
     expect(framePrompt({ question: 'q' })[1].content).toBe('Request: q');
+  });
+});
+
+describe('eligibility criteria fed into the decision model checklist', () => {
+  const concept = {
+    question: 'Find sellers of coats like Alpha Coats, Betula, proven quality, within 300 km',
+    expected: '20 links',
+    criteria: [
+      { id: 'E1', text: 'sells coats of makers like the named ones', quote: 'coats like Alpha Coats, Betula', examples: ['Alpha Coats', 'Betula'] },
+      { id: 'E2', text: 'quality is proven', quote: 'proven quality', examples: [] },
+    ],
+  };
+  const modelWritten = [
+    { clause: 'graded a', items: [{ clause: 'graded a', question: 'Is it graded A?', hard: true, numeric: null }] },
+    { clause: 'distance', items: [{ clause: 'distance', question: 'Is it within 300 km?', hard: true, numeric: { measure: 'distanceKm', op: '<=', value: 300, unit: 'km' } }] },
+    { clause: 'sea', items: [{ clause: 'sea', question: 'Is the sea within 20 km?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] },
+    { clause: 'value', items: [{ clause: 'value', question: 'Is it the cheapest?', hard: false, numeric: null }] },
+  ];
+
+  it('makes every requirement of the asker a hard check, with the examples as anchors of its class', () => {
+    const checklist = conceptChecklist(concept, modelWritten);
+    expect(checklist.slice(0, 2).map((c: { role: string; criterion: string; quote: string; items: Array<{ hard: boolean }> }) => [c.role, c.criterion, c.quote, c.items[0].hard])).toEqual([[ELIGIBILITY, 'E1', 'coats like Alpha Coats, Betula', true], [ELIGIBILITY, 'E2', 'proven quality', true]]);
+    expect(checklist[0].items[0].question).toBe('Does this page show that the result meets this requirement of the request: "sells coats of makers like the named ones"? The asker named Alpha Coats, Betula as examples; another member of the same class counts as well.');
+    expect(criterionQuestion(concept.criteria[1])).toBe('Does this page show that the result meets this requirement of the request: "quality is proven"?');
+  });
+
+  it('keeps the questions a model wrote as appraisal that never vetoes, except a limit whose number the asker wrote', () => {
+    const appraisal = conceptChecklist(concept, modelWritten).slice(2);
+    expect(appraisal.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([[APPRAISAL, 'graded a', false], [APPRAISAL, 'distance', true], [APPRAISAL, 'sea', false], [APPRAISAL, 'value', false]]);
+  });
+
+  it('counts a number as the limit of the asker only with the unit written beside it', () => {
+    const text = 'within 300km from prague, price up to 65 000 CZK, 20000EUR max, 10 month a year, 20 links';
+    expect([[300, 'km'], [65000, 'CZK'], [20000, 'EUR'], [10, 'months'], [20, 'km'], [300, 'points'], [300, ''], [7, 'km']].map(([value, unit]) => askedWithUnit(text, value, unit))).toEqual([true, true, true, true, false, false, false, false]);
+  });
+
+  it('leaves the checklist as it is when no concept was framed, and holds without a model checklist', () => {
+    expect(conceptChecklist(null, modelWritten)).toBe(modelWritten);
+    expect(conceptChecklist({ criteria: [] }, modelWritten)).toBe(modelWritten);
+    expect(conceptChecklist(null)).toBeNull();
+    expect(conceptChecklist(concept, null)).toHaveLength(2);
   });
 });

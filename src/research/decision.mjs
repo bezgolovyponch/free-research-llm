@@ -5,7 +5,7 @@ import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
 import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
-import { MAX_MEMBERS, MIN_MEMBERS, memberTerms, sameMember } from './concept.mjs';
+import { MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, memberTerms, sameMember } from './concept.mjs';
 
 export { CHECKLIST_VERSION };
 export const DECISION_MODEL_VERSION = 7;
@@ -450,7 +450,7 @@ export class DecisionModeler {
 
   fresh(project) {
     const m = project.decisionModel;
-    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
+    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && (m.conceptAt ?? null) === (project.concept?.at ?? null) && m.agreement?.samples >= 2 && !isDegenerate(m));
   }
 
   async build(project, { force = false } = {}) {
@@ -484,8 +484,8 @@ export class DecisionModeler {
         }
       }
     }
-    const checklist = await this.checklistModeler.build(question, guidance);
-    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, rebuildWeaker };
+    const checklist = conceptChecklist(project.concept, await this.checklistModeler.build(question, guidance));
+    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, conceptAt: project.concept?.at ?? null, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
     return project.decisionModel;
   }

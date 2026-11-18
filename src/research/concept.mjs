@@ -350,6 +350,35 @@ export function conceptExamples(concept) {
   return [...new Set((concept?.criteria ?? []).flatMap((criterion) => criterion.examples ?? []))];
 }
 
+export const ELIGIBILITY = 'eligibility';
+export const APPRAISAL = 'appraisal';
+
+export function criterionQuestion(criterion) {
+  const examples = criterion.examples?.length ? ` The asker named ${criterion.examples.join(', ')} as examples; another member of the same class counts as well.` : '';
+  return `Does this page show that the result meets this requirement of the request: "${criterion.text}"?${examples}`;
+}
+
+export function askedWithUnit(text, value, unit) {
+  const wanted = folded(unit).replace(/[^\p{L}\p{Sc}%]/gu, '');
+  if (!wanted || !Number.isFinite(Number(value))) return false;
+  for (const match of String(text ?? '').matchAll(/\d+(?:[ .,]\d{3})*(?:[.,]\d+)?/g)) {
+    const digits = match[0].replace(/[ .,](?=\d{3}(?:\D|$))/g, '').replace(',', '.');
+    if (Number(digits) !== Number(value)) continue;
+    const beside = folded(String(text).slice(match.index + match[0].length, match.index + match[0].length + 14)).match(/^\s*(\p{L}+|\p{Sc}|%)/u)?.[1] ?? '';
+    if (beside && (beside.startsWith(wanted) || wanted.startsWith(beside))) return true;
+  }
+  return false;
+}
+
+export function conceptChecklist(concept, checklist = null) {
+  if (!concept?.criteria?.length) return checklist ?? null;
+  const asked = `${concept.question}\n${concept.expected}`;
+  const limit = (item) => Boolean(item.hard && item.numeric?.measure && askedWithUnit(asked, item.numeric.value, item.numeric.unit));
+  const eligibility = concept.criteria.map((criterion) => ({ clause: criterion.text, role: ELIGIBILITY, criterion: criterion.id, quote: criterion.quote, items: [{ clause: criterion.text, question: criterionQuestion(criterion), hard: true, criterion: criterion.id }] }));
+  const appraisal = (checklist ?? []).map((cluster) => ({ ...cluster, role: APPRAISAL, items: cluster.items.map((item) => ({ ...item, hard: limit(item) })) }));
+  return [...eligibility, ...appraisal];
+}
+
 export function conceptText(concept) {
   if (!concept) return '';
   const lines = [];

@@ -32,7 +32,7 @@ export function itemTier(item, hardIds, spec) {
     return "rejected";
   }
 
-  const hasHardUnknown = hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "");
+  const hasHardUnknown = new Set(hardChecks.map((c) => c.id)).size < hardIds.length || hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "");
   if (hasHardUnknown) {
     return "to-confirm";
   }
@@ -69,7 +69,9 @@ export function itemEvidence(item, hardIds, spec) {
   const belief = yesCount / hardIds.length;
   const plausibility = 1 - noCount / hardIds.length;
   
-  return { belief, plausibility, open: unknownIds };
+  const missing = hardIds.filter((id) => !hardChecks.some((c) => c.id === id));
+
+  return { belief, plausibility, open: [...unknownIds, ...missing] };
 }
 
 export function verdict(items, spec, checklist, kind = null) {
