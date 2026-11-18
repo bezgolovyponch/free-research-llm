@@ -1003,6 +1003,11 @@ export class ResearchEngine {
     const merged = mergeConceptCards(replies);
     const card = applyConceptCard(merged.data, pages);
     if (!card.terms.length) {
+      if (String(project.guidance ?? '').trim()) {
+        project.decisionModel.kind = { ...kind, validated: { pages: pages.length, terms: [], basis: 'hints', at: new Date().toISOString() } };
+        this.emit(project, 'decision', `the ${pages.length} page(s) about "${kind.label}" name it in different words; your Hints describe the item, so the research goes on and each page is judged for the kind`);
+        return true;
+      }
       this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: the ${pages.length} page(s) about "${kind.label}" do not call it the same thing — say what the item is in the Hints field`);
       return false;

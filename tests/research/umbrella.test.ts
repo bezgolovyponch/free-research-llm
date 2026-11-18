@@ -277,6 +277,27 @@ describe('the engine with a category', () => {
     expect(p.log.some((l) => l.type === 'decision' && l.message.includes('confirmed as a category on 4 page(s): 2 kind(s) named by sellers (roofer, plumber); kept without a page yet: electrician'))).toBe(true);
   });
 
+  it('goes on with the Hints when the pages name a single kind in different words, and pauses without Hints', async () => {
+    const pages = [
+      { title: 'Groothandel', url: 'https://a.example/', text: 'Tweedehands kleding per kilo in balen.' },
+      { title: 'Hurtownia', url: 'https://b.example/', text: 'Odziez uzywana na wage, bele.' },
+    ];
+    const single = { label: 'used clothing wholesaler', terms: ['used clothing wholesaler'] };
+    const run = async (guidance: string) => {
+      const { engine } = engineWith([], pages);
+      const p = { ...project(), guidance, decisionModel: { kind: structuredClone(single), criteria: [] } } as ReturnType<typeof project> & { phase?: string; guidance: string };
+      return { ok: await engine.validateConcept(p as never), p };
+    };
+    const hinted = await run('graded vintage clothing sold per kg in bales');
+    expect(hinted.ok).toBe(true);
+    expect(hinted.p.phase).toBeUndefined();
+    expect((hinted.p.decisionModel.kind as unknown as { validated: { basis: string } }).validated.basis).toBe('hints');
+    expect(hinted.p.log.some((l) => l.type === 'decision' && l.message.includes('name it in different words; your Hints describe the item'))).toBe(true);
+    const bare = await run('');
+    expect(bare.ok).toBe(false);
+    expect(bare.p.phase).toBe('needs-concept');
+  });
+
   it('pauses when the pages confirm only one kind of the category', async () => {
     const pages = [
       { title: 'Roof repair Porto', url: 'https://a.example/', text: 'Roof repair.' },
