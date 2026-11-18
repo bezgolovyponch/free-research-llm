@@ -1,14 +1,16 @@
 {
   "name": "free-research-llm",
-  "version": "1.0.0",
-  "description": "Free research LLM: one prompt in, a decomposed, source-checked analytical answer out. Runs on free model quotas, on macOS, Windows, Linux or a free cloud VM.",
   "type": "module",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@12.4.2",
+  "description": "Free research LLM: one prompt in, a decomposed, source-checked analytical answer out. Runs on free model quotas, on macOS, Windows, Linux or a free cloud VM.",
   "license": "MIT",
-  "engines": {
-    "node": "^22.12.0 || >=24.0.0"
-  },
   "bin": {
     "frl": "src/frl.mjs"
+  },
+  "engines": {
+    "node": "^22.12.0 || >=24.0.0"
   },
   "scripts": {
     "start": "node src/server.mjs",
@@ -19,24 +21,47 @@
     "quality": "node scripts/quality.mjs",
     "hooks": "git config core.hooksPath .githooks",
     "postinstall": "node scripts/postinstall.mjs",
-    "e2e": "playwright test"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.65.1",
-    "fast-check": "^4.10.2",
-    "vitest": "^5.1.0",
-    "yaml": "^2.9.1"
+    "e2e": "playwright test",
+    "dev": "tsx --watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "contracts:lint": "redocly lint",
+    "contracts:types": "node scripts/contracts/types.mjs",
+    "contracts:check": "pnpm contracts:lint && node scripts/contracts/types.mjs --check",
+    "composition:render": "node --import tsx scripts/composition/sync-docs.ts",
+    "composition:check": "node --import tsx scripts/composition/check.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "typecheck": "tsc --noEmit",
+    "test:watch": "vitest",
+    "ci": "pnpm run quality"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "cheerio": "^1.2.0",
     "csv-stringify": "^6.9.0",
+    "express": "^4.21.2",
+    "express-openapi-validator": "^5.6.2",
     "fflate": "^0.8.3",
     "ws": "^8.23.0"
   },
   "optionalDependencies": {
     "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^9.5.1",
+    "@playwright/test": "^1.65.1",
+    "@redocly/cli": "^2.52.0",
+    "@types/express": "^4.17.25",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.10.0",
+    "fast-check": "^4.10.2",
+    "light-my-request": "^6.8.0",
+    "openapi-typescript": "^7.13.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.0",
+    "yaml": "^2.9.1"
   },
   "allowScripts": {
     "node-pty@1.1.0": true,
