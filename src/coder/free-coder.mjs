@@ -16,6 +16,7 @@ const CONVENTIONS = `Rules of this repository (the quality gate enforces most of
 - Never write an API key, token or password into any file.
 - A model proposes, code decides: chats never create, delete or run anything without a button or a gate.
 - Tests may be added or changed, never removed or weakened.
+- Evaluation integrity: never edit, delete or weaken an existing test, fixture, baseline or quality check. If a test or the spec conflicts with your change, STOP and report the conflict with file:line; do not resolve it yourself.
 - Keep the surrounding style; make the smallest change that reaches the desired output.`;
 
 export function planPrompt(ticket, files, located = []) {

@@ -27,10 +27,12 @@ export function gateSummary(output) {
   return String(output ?? '').split('\n').filter((l) => /^(PASS|FAIL) /.test(l)).join('\n');
 }
 
-function npmGate(cwd) {
+function npmGate(cwd, root) {
   return new Promise((resolve) => {
     const win = process.platform === 'win32';
-    const child = spawn(win ? 'npm.cmd' : 'npm', ['run', '--silent', 'quality'], { cwd, shell: win, env: { ...isolatedEnv(), FRL_KEYCHAIN: '0' } });
+    const env = { ...isolatedEnv(), FRL_KEYCHAIN: '0' };
+    if (root) env.FRL_INTEGRITY_BASE = root;
+    const child = spawn(win ? 'npm.cmd' : 'npm', ['run', '--silent', 'quality'], { cwd, shell: win, env });
     let output = '';
     const timer = setTimeout(() => child.kill(), GATE_TIMEOUT_MS);
     child.stdout.on('data', (d) => (output += d));
@@ -140,7 +142,7 @@ export class CodeSandbox {
     spawnSync('git', ['add', '-A'], { cwd: this.dir, env: isolatedEnv() });
     const tests = await this.countAllTests();
     if (tests < this.testCount) return { passed: false, output: `FAIL  testCount    the change removes tests (${this.testCount} before, ${tests} after); tests may be added, never removed`, summary: `FAIL  testCount    ${this.testCount} → ${tests}` };
-    const result = await this.gateRunner(this.dir);
+    const result = await this.gateRunner(this.dir, this.root);
     const detail = result.passed ? '' : await this.explain(this.dir, failedGates(result.output));
     return { ...result, output: detail ? `${result.output}\n${detail}` : result.output, summary: gateSummary(result.output) };
   }

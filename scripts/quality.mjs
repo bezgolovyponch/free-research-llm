@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { SECRET_PATTERNS } from '../src/secrets.mjs';
 import { acquireQualityLock, releaseQualityLock, LOCK_WAIT_MS } from './quality-lock.mjs';
 import { binEntry, startedDirectly } from './tool-entry.mjs';
@@ -87,7 +88,161 @@ function mergeBase() {
   return process.env.CI ? run('git', ['rev-parse', 'HEAD~1']).stdout.trim() : '';
 }
 
+function checkTestIntegrity(diff, commitMessages) {
+  function isProtected(path) {
+    if (path === 'scripts/quality.mjs' || path === 'scripts/zero-loss.mjs') return true;
+    if (path.startsWith('scripts/reference')) return true;
+    if (path.startsWith('tests/')) {
+      if (path.endsWith('.test.ts')) return true;
+      if (path.startsWith('tests/fixtures/reference/')) return true;
+      if (path.startsWith('tests/fixtures/methods/')) return true;
+    }
+    return false;
+  }
+
+  function testChangeAllows(path, messages) {
+    for (const msg of messages) {
+      const match = msg.match(/^test-change:\s*(.+?)\s*[—-]\s*(.+)$/);
+      if (match) {
+        const allowedPath = match[1].trim();
+        if (allowedPath === path) return true;
+        if (allowedPath.endsWith('/') && path.startsWith(allowedPath)) return true;
+      }
+    }
+    return false;
+  }
+
+  const lines = diff.split('\n');
+  let currentFile = null;
+  const violations = [];
+  const allowedViolations = [];
+  let pendingRemovals = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fileMatch = line.match(/^diff --git a\/(.+?) b\/(.+?)$/);
+    if (fileMatch) {
+      currentFile = fileMatch[2];
+      pendingRemovals = [];
+      continue;
+    }
+    if (!currentFile || !isProtected(currentFile)) continue;
+
+    if (line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('@@')) continue;
+
+    if (line.startsWith('-')) {
+      const content = line.slice(1);
+      pendingRemovals.push(content);
+    } else if (line.startsWith('+')) {
+      const addedContent = line.slice(1);
+      if (pendingRemovals.length > 0) {
+        const removedContent = pendingRemovals.shift();
+        if (!testChangeAllows(currentFile, commitMessages)) {
+          violations.push(`Changed line in ${currentFile}: ${addedContent}`);
+        } else {
+          allowedViolations.push(`Changed line in ${currentFile} (allowed by test-change): ${addedContent}`);
+        }
+      } else {
+      }
+    } else {
+      for (const removed of pendingRemovals) {
+        if (!testChangeAllows(currentFile, commitMessages)) {
+          violations.push(`Removed line in ${currentFile}: ${removed}`);
+        } else {
+          allowedViolations.push(`Removed line in ${currentFile} (allowed by test-change): ${removed}`);
+        }
+      }
+      pendingRemovals = [];
+    }
+  }
+
+  for (const removed of pendingRemovals) {
+    if (!testChangeAllows(currentFile, commitMessages)) {
+      violations.push(`Removed line in ${currentFile}: ${removed}`);
+    } else {
+      allowedViolations.push(`Removed line in ${currentFile} (allowed by test-change): ${removed}`);
+    }
+  }
+
+  if (violations.length > 0) {
+    return { passed: false, detail: violations.join('\n') };
+  }
+  if (allowedViolations.length > 0) {
+    return { passed: true, detail: allowedViolations.join('\n') };
+  }
+  return { passed: true, detail: 'no removed or changed lines in protected paths' };
+}
+
+function protectedPaths() {
+  return [
+    'tests/**/*.test.ts',
+    'tests/fixtures/reference/**',
+    'tests/fixtures/methods/**',
+    'scripts/quality.mjs',
+    'scripts/zero-loss.mjs',
+    'scripts/reference*.mjs',
+  ];
+}
+
+function diffAgainstBaseDir(baseDir, currentDir = ROOT) {
+  const protectedPathsList = protectedPaths();
+  let diff = '';
+  for (const pattern of protectedPathsList) {
+    const glob = pattern.replace(/\*\*/g, '*');
+    const files = run('find', [currentDir, '-path', `*/${glob}`, '-type', 'f']).stdout.trim().split('\n').filter(Boolean);
+    for (const file of files) {
+      const relPath = path.relative(currentDir, file);
+      const baseFile = path.join(baseDir, relPath);
+      if (!fs.existsSync(baseFile)) continue;
+      const currentContent = fs.readFileSync(file, 'utf8');
+      const baseContent = fs.readFileSync(baseFile, 'utf8');
+      if (currentContent === baseContent) continue;
+      const currentLines = currentContent.split('\n');
+      const baseLines = baseContent.split('\n');
+      const maxLen = Math.max(currentLines.length, baseLines.length);
+      let fileDiff = '';
+      for (let i = 0; i < maxLen; i++) {
+        const baseLine = baseLines[i] ?? '';
+        const currentLine = currentLines[i] ?? '';
+        if (baseLine !== currentLine) {
+          if (baseLine && !currentLine) {
+            fileDiff += `-${baseLine}\n`;
+          } else if (!baseLine && currentLine) {
+            fileDiff += `+${currentLine}\n`;
+          } else {
+            fileDiff += `-${baseLine}\n+${currentLine}\n`;
+          }
+        }
+      }
+      if (fileDiff) {
+        diff += `diff --git a/${relPath} b/${relPath}\n--- a/${relPath}\n+++ b/${relPath}\n${fileDiff}`;
+      }
+    }
+  }
+  return diff;
+}
+
 const gates = {
+  testIntegrity(files) {
+    const headCommit = run('git', ['log', '-1', '--pretty=%B']).stdout.trim();
+    const commitMessages = headCommit.split('\n').filter(Boolean);
+    const integrityBase = process.env.FRL_INTEGRITY_BASE;
+    let diff = '';
+    if (integrityBase) {
+      diff = diffAgainstBaseDir(integrityBase);
+    } else {
+      const base = mergeBase();
+      if (base) {
+        diff = run('git', ['diff', base, '--', ...protectedPaths()]).stdout;
+      } else if (process.env.CI) {
+        diff = run('git', ['diff', 'HEAD~1', '--', ...protectedPaths()]).stdout;
+      } else {
+        return { passed: true, detail: 'skipped: no git history for testIntegrity gate' };
+      }
+    }
+    return checkTestIntegrity(diff, commitMessages);
+  },
+
   methods(files) {
     const methodsPath = path.join(ROOT, 'src', 'research', 'methods.json');
     if (!fs.existsSync(methodsPath)) {
@@ -108,10 +263,18 @@ const gates = {
       if (!normFixture.includes(normQuote)) {
         failures.push(`${method.id}: quote not found in fixture (whitespace-normalised)`);
       }
+      if (method.sha256) {
+        const hash = crypto.createHash('sha256').update(fixture).digest('hex');
+        if (hash !== method.sha256) {
+          failures.push(`${method.id}: fixture sha256 mismatch (expected ${method.sha256}, got ${hash})`);
+        }
+      } else {
+        failures.push(`${method.id}: missing sha256 in methods.json`);
+      }
     }
     return {
       passed: failures.length === 0,
-      detail: failures.length ? failures.join('; ') : `${verified.length} verified method quote(s) found in fixtures`
+      detail: failures.length ? failures.join('; ') : `${verified.length} verified method quote(s) and sha256(s) verified`
     };
   },
 
@@ -328,6 +491,8 @@ export function dependencies(files) {
 export function egress(files) {
   return gates.egress(files);
 }
+
+export { checkTestIntegrity, diffAgainstBaseDir };
 
 async function runQualityGate() {
   const files = repoFiles();
