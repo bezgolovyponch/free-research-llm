@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq, fakeEmbedder } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
@@ -778,6 +778,8 @@ describe('item-level checklist with a kind check and code-measured values', () =
     const id = 'within 50 km of the town|Is this within 50 km of the town?';
     expect(seen.flat()).toContain('Is this within 50 km of the town?');
     expect(checks.find((c) => c.id === id)).toMatchObject({ answer: 'yes', quote: 'Our yard is in the town, ten minutes from the harbour.', hard: true, clause: 'within 50 km of the town' });
+    const unquoted = { complete: async () => ({ provider: 'test', data: { answers: [{ id: 'q1', answer: 'unknown', spans: [] }, { id: 'q2', answer: 'yes', spans: ['S9'] }] } }) };
+    expect((await new ChecklistJudge({ router: unquoted }).judge({ url: 'http://example.com' }, page, checklist)).find((c) => c.id === id)).toMatchObject({ answer: 'unknown', quote: '' });
   });
 
   it('a measured distance keeps the code comparison and that question is never sent to the page', async () => {
@@ -795,11 +797,27 @@ describe('item-level checklist with a kind check and code-measured values', () =
     const numeric = { measure: 'distanceKm', op: '<=', value: 50, unit: 'km' };
     expect(measuredValue({ distanceKm: 30 }, numeric)).toBe(30);
     expect(measuredValue({ distanceKm: '12' }, numeric)).toBe(12);
+    expect(measuredReading({ distanceKm: 30 }, numeric)).toEqual({ value: 30, measure: 'distanceKm' });
+    expect(measuredReading({ distanceKm: '12' }, numeric)).toEqual({ value: 12, measure: 'distanceKm' });
     expect(measuredValue({ distanceKm: null }, numeric)).toBeUndefined();
     expect(measuredValue({ distanceKm: 'far' }, numeric)).toBeUndefined();
     expect(measuredValue({}, numeric)).toBeUndefined();
     expect(measuredValue({ distanceKm: 30 }, { ...numeric, value: null })).toBeUndefined();
     expect(measuredValue({ distanceKm: 30 }, null)).toBeUndefined();
+  });
+
+  it('reads the candidate row before the page, then the decision criterion the item states, and asks the page only when neither measures it', () => {
+    const sea = { measure: 'distanceKm', op: '<=', value: 20, unit: 'km' };
+    const criteria = [{ measure: 'coastKm', op: '<=', value: 20 }];
+    expect(measuredReading({ url: 'u' }, sea, { row: { distanceKm: 12 }, criteria })).toEqual({ value: 12, measure: 'distanceKm' });
+    expect(measuredReading({ url: 'u' }, sea, { row: { site: { coastKm: 3.3 } }, criteria })).toEqual({ value: 3.3, measure: 'coastKm' });
+    expect(measuredReading({ url: 'u' }, sea, { row: { site: {} }, criteria })).toBeUndefined();
+    expect(measuredReading({ url: 'u' }, sea, { criteria })).toBeUndefined();
+    expect(measuredReading({ url: 'u' }, sea, { row: { site: { coastKm: 3.3 } }, criteria: [{ measure: 'coastKm', op: '<=', value: 25 }] })).toBeUndefined();
+    const price = { measure: 'priceEur', op: '<=', value: 20000, unit: 'EUR' };
+    expect(measuredReading({ value: 2166, unit: 'EUR' }, price, { price: (priced: { value: number }) => priced.value })).toEqual({ value: 2166, measure: 'priceEur' });
+    expect(measuredReading({ value: 2166, unit: 'EUR' }, price, { price: () => undefined })).toBeUndefined();
+    expect(measuredReading({ value: 2166, unit: 'EUR' }, price, { price: () => true })).toBeUndefined();
   });
 });
 

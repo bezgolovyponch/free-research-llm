@@ -187,7 +187,7 @@ function getMeasures() {
   return adaptForChecklist(DecisionMeasures);
 }
 
-const finite = (raw) => (raw !== null && raw !== undefined && raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined);
+const finite = (raw) => (raw !== null && raw !== undefined && raw !== '' && typeof raw !== 'boolean' && Number.isFinite(Number(raw)) ? Number(raw) : undefined);
 
 function finiteReading(measure, item, ctx) {
   return measure ? finite(measure.read(item ?? {}, ctx)) : undefined;
