@@ -752,6 +752,25 @@
     "prevention": "Ship new decision layers behind a comparison against the stable result on all reference researches (criteria count, hard checks count, confirmed items that fit) — never replace. A new layer must be additive: it provides extra goals/checks that the stable layer can optionally use, but the stable checklist from decisionModel.criteria + decisionModel.checklist remains the source of truth for validity. The comparison gate runs on every reference research in CI and fails if the new layer changes any confirmed item that fits or drops any hard check that the stable layer enforced."
   },
   {
+    "id": "F55",
+    "title": "A headline that averages unrelated checks hides the verdict; must-haves are non-compensatory (ELECTRE TRI veto, Roy 1991; conjunctive rule), preconditions are reported apart",
+    "touches": [
+      "src/research/verdict.mjs",
+      "src/research/acceptance.mjs",
+      "src/research/result.mjs",
+      "src/research/prompts.mjs",
+      "src/research/handoff.mjs",
+      "src/report.mjs",
+      "public/index.html",
+      "tests/research/verdict.test.ts",
+      "tests/report.test.ts",
+      "scripts/headline-replay.mjs"
+    ],
+    "signal": "The acceptance score (arithmetic mean of all checks) was shown as the headline, so 8 checks averaging 0.5 looked like '50% met' even when 0 of 20 items passed every must-have; preconditions (count, links live, value range, mustMention) were mixed into the same list as hard checklist vetoes; piece grades were shown as an 'evidence probability' of the answer",
+    "cause": "scoreOf() averaged checklist vetoes, kind checks and preconditions together; the UI, the report, the handoff and the memo each read the mean and its flat list of checks on their own, so no single place said how many items meet every must-have; the log-odds of piece grades was named and shown as a probability",
+    "prevention": "One owner (origin/fix/honest-headline c50e86c, 60c162b; carried into the result-validity stack): verdictReport in src/research/verdict.mjs builds the headline 'N of M meet every must-have' with the reachable count 'up to K of M could meet every must-have (N confirmed + T to confirm)', the requirement rows with yes/no/unknown counts and the quote or reason per item; preconditions (count, live links, value range, mentions) are listed apart and never enter the headline; acceptanceResult.checks and score stay for verdictInvariants; the server, the report, the handoff, the prompts and the result screen read verdictReport, and the memo prompt gets its lines computed before the memo. Piece grades are research support (GRADE_RESEARCH_SUPPORT, nodeResearchSupport in result.mjs), labelled so in the UI and the prompts and never as the chance that the answer is right. scripts/headline-replay.mjs prints, for stored projects, the stored summary, the old mean, the new headline, the tiers and the criteria and must-have counts (tests/scripts/headline-replay.test.ts)."
+  },
+  {
     "id": "F56",
     "title": "a 2-of-3 vote could be one provider answering twice, and no change to the engine could be told from noise",
     "touches": [
