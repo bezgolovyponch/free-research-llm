@@ -1,4 +1,5 @@
 import { ROOT_ID } from './tree.mjs';
+import { preconditions, effect } from './nodevalidity.mjs';
 
 export const SETTLED = new Set(['verified', 'supported', 'covered']);
 const OPEN = new Set(['pending', 'researching']);
@@ -6,6 +7,8 @@ const GRADE_GAP = { verified: 0, supported: 0.25, weak: 0.6, unsupported: 0.85, 
 const FIX_CHECKS = new Set(['answer', 'citations', 'calculation']);
 const RESEARCH_CHECKS = new Set(['concrete', 'numbers-sourced', 'critique']);
 const NEEDS_USER = /\b(owner input|your|you|user'?s?|budget|preference|which (?:one|model|option)|depends on (?:the|your)|not specified|unspecified|define|definition|ambiguous|clarify|assum(?:e|ption)s? (?:about|on) (?:the )?(?:buyer|seller|owner|company|business))\b/i;
+
+const WORLD_FACT = /\b(price|cost|rate|percentage|margin|revenue|profit|volume|capacity|speed|size|weight|distance|time|date|version|model|spec|feature|regulation|law|standard|certification|warranty|availability|stock|supply|demand|market|competitor|trend|growth|decline|forecast|estimate|benchmark|average|median|range|minimum|maximum)\b/i;
 
 function failures(node) {
   return (node.verification?.checks ?? []).filter((c) => !c.passed);
@@ -15,7 +18,19 @@ function assumptionsOf(node) {
   return (node.finding?.claims ?? []).filter((c) => c.assumption).map((c) => c.text);
 }
 
-export function nodeAction(node) {
+function isWorldFactAssumption(text) {
+  return WORLD_FACT.test(text);
+}
+
+function getBrokenReason(node, project) {
+  const eff = effect(node);
+  if (eff.broken) {
+    return eff.reason;
+  }
+  return null;
+}
+
+export function nodeAction(node, project) {
   if (SETTLED.has(node.status)) return null;
   const failed = failures(node);
   const ids = new Set(failed.map((c) => c.id));
@@ -34,15 +49,33 @@ export function nodeAction(node) {
     const broken = failed.filter((c) => FIX_CHECKS.has(c.id));
     why = node.error ? `run failed: ${node.error}` : broken.map((c) => `${c.label}: ${c.detail}`).join('; ') || 'a critical check failed';
     next = ids.has('calculation') ? `Press Re-research on this row (or open ${node.id} → ↻ Re-research): the formula did not recompute, so it is re-asked with the inputs and the formula step by step` : ids.has('citations') ? `Press Re-research on this row (or open ${node.id} → ↻ Re-research): the answer cited sources that were never retrieved` : `Press Re-research on this row. If it fails again, open ${node.id} → Split further`;
-  } else if (NEEDS_USER.test(userText) || (assumptions.length && !ids.has('numbers-sourced'))) {
+  } else if (assumptions.length) {
+    const worldFactAssumptions = assumptions.filter(isWorldFactAssumption);
+    if (worldFactAssumptions.length) {
+      action = 'research';
+      why = `rests on assumptions about the world: ${worldFactAssumptions.slice(0, 3).join(' | ')}`;
+      next = `These are facts the web can show. Press Re-research on this row to find evidence.`;
+    } else {
+      action = 'clarify';
+      why = `rests on assumptions: ${assumptions.slice(0, 3).join(' | ')}`;
+      next = `Press Clarify in chat: type the missing input as the request (e.g. your target margin) and the result you expect as the desired output, or attach your data with 📎`;
+    }
+  } else if (NEEDS_USER.test(userText)) {
     action = 'clarify';
-    why = assumptions.length ? `rests on assumptions: ${assumptions.slice(0, 3).join(' | ')}` : `needs an input only you can give: ${gaps[0] ?? node.question}`;
+    why = `needs an input only you can give: ${gaps[0] ?? node.question}`;
     next = `Press Clarify in chat: type the missing input as the request (e.g. your target margin) and the result you expect as the desired output, or attach your data with 📎`;
   } else {
-    action = 'research';
-    const soft = failed.filter((c) => RESEARCH_CHECKS.has(c.id));
-    why = soft.map((c) => `${c.label}: ${c.detail}`).join('; ') || gaps.join('; ') || `graded ${node.status}`;
-    next = gaps.length ? `Search for: ${gaps.slice(0, 3).join('; ')}. Press Re-research on this row; it uses these searches` : (node.sources ?? []).length < 2 ? `Open ${node.id} → Instructions & pages to read, paste the exact pages to read in the URL box (one per line), press Save, then ↻ Re-research` : `Press Re-research on this row. If it stays weak, open ${node.id} → Split further`;
+    const brokenReason = getBrokenReason(node, project);
+    if (brokenReason) {
+      action = 'research';
+      why = 'produced no value: ' + brokenReason;
+      next = 'Fix the failed precondition or effect: ' + brokenReason + '. Press Re-research on this row.';
+    } else {
+      action = 'research';
+      const soft = failed.filter((c) => RESEARCH_CHECKS.has(c.id));
+      why = soft.map((c) => `${c.label}: ${c.detail}`).join('; ') || gaps.join('; ') || `graded ${node.status}`;
+      next = gaps.length ? `Search for: ${gaps.slice(0, 3).join('; ')}. Press Re-research on this row; it uses these searches` : (node.sources ?? []).length < 2 ? `Open ${node.id} → Instructions & pages to read, paste the exact pages to read in the URL box (one per line), press Save, then ↻ Re-research` : `Press Re-research on this row. If it stays weak, open ${node.id} → Split further`;
+    }
   }
   const priority = Math.round(((node.impact ?? 3) * (node.uncertainty ?? 3) * (GRADE_GAP[node.status] ?? 1)) / 25 * 100) / 100;
   return { nodeId: node.id, title: node.title, status: node.status, action, why: why.slice(0, 400), next: next.slice(0, 300), priority, gaps: gaps.slice(0, 5), assumptions: assumptions.slice(0, 5) };
@@ -56,7 +89,7 @@ function citedInMemo(report) {
 export function actionPlan(project) {
   const cited = citedInMemo(project.report);
   return project.nodes
-    .map(nodeAction)
+    .map((node) => nodeAction(node, project))
     .filter(Boolean)
     .map((a) => ({ ...a, decisive: cited.has(a.nodeId), priority: cited.has(a.nodeId) ? Math.min(1, Math.round(a.priority * 1.5 * 100) / 100) : a.priority }))
     .sort((a, b) => b.priority - a.priority || a.nodeId.localeCompare(b.nodeId, undefined, { numeric: true }));
