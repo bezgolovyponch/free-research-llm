@@ -146,3 +146,67 @@ describe('NodeChat priority', () => {
     expect(node.status).toBe('pending');
   });
 });
+
+describe('NodeChat traceOk and retrieve-data', () => {
+  it('rejects edit when traceOk fails (question drift) and keeps question and findings', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), embedder: { embedAll: async () => ({ vectors: [[1,0,0], [0.3,0.7,0], [0.8,0.2,0]] }) } });
+    const project = await engine.createProject({ question: 'What are the resale prices for used vehicles?' });
+    await engine.run(project.id);
+    const node = (await engine.load(project.id)).nodes.find((n) => n.title.includes('resale') || n.question.includes('resale'));
+    expect(node).toBeDefined();
+    const originalQuestion = node!.question;
+    const originalFinding = node!.finding;
+    router.complete = (async () => ({ data: { reply: 'ok', actions: [{ type: 'edit', nodeId: node!.id, fields: { question: 'What is the weather forecast?' } }] }, provider: 'x', model: 'y' })) as typeof router.complete;
+    const chat = new NodeChat({ engine, suggester: { suggest: async () => ({}) } });
+    const result = await chat.send(project.id, node!.id, 'change the question to weather forecast', { desired: 'new question' });
+    expect(result.actions.some((a) => a.type === 'edit' && a.ok === false)).toBe(true);
+    const failedEdit = result.actions.find((a) => a.type === 'edit' && a.ok === false);
+    expect(failedEdit!.error).toContain('question drift');
+    const saved = await engine.load(project.id);
+    const savedNode = saved.nodes.find((n) => n.id === node!.id);
+    expect(savedNode!.question).toBe(originalQuestion);
+    expect(savedNode!.finding).toEqual(originalFinding);
+  });
+
+  it('converts "retrieve data yourself" request to rerun instead of rewriting question', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }) });
+    const project = await engine.createProject({ question: 'What are the resale prices for used vehicles?' });
+    await engine.run(project.id);
+    const node = (await engine.load(project.id)).nodes.find((n) => n.title.includes('resale') || n.question.includes('resale'));
+    expect(node).toBeDefined();
+    const originalQuestion = node!.question;
+    router.complete = (async () => ({ data: { reply: 'ok', actions: [{ type: 'edit', nodeId: node!.id, fields: { question: 'What are supplier prices?' } }] }, provider: 'x', model: 'y' })) as typeof router.complete;
+    const chat = new NodeChat({ engine, suggester: { suggest: async () => ({}) } });
+    const result = await chat.send(project.id, node!.id, 'clarify it yourself by retrieving the appropriate data', { desired: 'resale price data' });
+    expect(result.actions.some((a) => a.type === 'rerun' && a.ok === true)).toBe(true);
+    expect(result.actions.some((a) => a.type === 'edit')).toBe(false);
+    const saved = await engine.load(project.id);
+    const savedNode = saved.nodes.find((n) => n.id === node!.id);
+    expect(savedNode!.question).toBe(originalQuestion);
+    expect(savedNode!.status).toBe('pending');
+  });
+
+  it('keeps history when question change is applied', async () => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), embedder: { embedAll: async () => ({ vectors: [[1,0,0], [0.9,0.1,0], [0.8,0.2,0]] }) } });
+    const project = await engine.createProject({ question: 'What are the resale prices for used vehicles?' });
+    await engine.run(project.id);
+    const node = (await engine.load(project.id)).nodes.find((n) => n.title.includes('resale') || n.question.includes('resale'));
+    expect(node).toBeDefined();
+    const originalQuestion = node!.question;
+    const originalFinding = node!.finding;
+    router.complete = (async () => ({ data: { reply: 'ok', actions: [{ type: 'edit', nodeId: node!.id, fields: { question: 'Find average resale price' } }] }, provider: 'x', model: 'y' })) as typeof router.complete;
+    const chat = new NodeChat({ engine, suggester: { suggest: async () => ({}) } });
+    const result = await chat.send(project.id, node!.id, 'make the question slightly sharper: find average resale price', { desired: 'sharper question' });
+    expect(result.actions.some((a) => a.type === 'edit' && a.ok === true)).toBe(true);
+    const saved = await engine.load(project.id);
+    const savedNode = saved.nodes.find((n) => n.id === node!.id);
+    expect(savedNode!.question).not.toBe(originalQuestion);
+    expect(savedNode!.history).toBeDefined();
+    expect(savedNode!.history.length).toBeGreaterThan(0);
+    expect(savedNode!.history[0].question).toBe(originalQuestion);
+    expect(savedNode!.history[0].finding).toEqual(originalFinding);
+  });
+});

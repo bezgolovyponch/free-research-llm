@@ -17,6 +17,23 @@ const RESULTS_ACTIONS = new Set(['expand', 'suggest', 'rerun']);
 export const RESULTS_KEY = 'R';
 const FILE_TEXT_IN_THREAD = 4000;
 
+const RETRIEVE_PATTERNS = [
+  /retrieve.*data/i,
+  /clarify.*data/i,
+  /clarify.*yourself/i,
+  /find.*data/i,
+  /get.*data/i,
+  /look up.*data/i,
+  /fetch.*data/i,
+  /pull.*data/i,
+  /obtain.*data/i,
+  /collect.*data/i,
+];
+
+function isRetrieveDataRequest(text) {
+  return RETRIEVE_PATTERNS.some((p) => p.test(text));
+}
+
 export function resultsProposalLabel(a) {
   if (a.type === 'rerun') return `Re-research ${a.nodeId}${a.hint ? `: ${String(a.hint).slice(0, 80)}` : ''}`;
   if (a.type === 'expand') return `Split ${a.nodeId} into sub-issues${a.hint ? `: ${String(a.hint).slice(0, 80)}` : ''}`;
@@ -123,7 +140,15 @@ export class NodeChat {
       }
     }
     const proposing = key === RESULTS_KEY;
-    const actions = proposing ? [] : answer.actions;
+    let actions = proposing ? [] : answer.actions;
+    if (!proposing && focus && isRetrieveDataRequest(text)) {
+      actions = actions.map((a) => {
+        if (a.type === 'edit' && a.fields && a.fields.question && a.fields.question !== focus.question) {
+          return { type: 'rerun', nodeId: a.nodeId, hint: a.fields.question };
+        }
+        return a;
+      });
+    }
     const proposals = proposing ? answer.actions.map((a, i) => ({ pid: `p${i + 1}`, state: 'proposed', ...a, label: resultsProposalLabel(a) })) : [];
     const reply = answer.reply;
     const busy = actions.length && (this.improver?.isActive(id) || this.engine.running.has(id));
