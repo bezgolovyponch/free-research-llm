@@ -7,7 +7,8 @@
     "context": "Multi-criteria SORTING: a decision maker defines ordered categories by reference profiles; each alternative is assigned by comparison with them. Profiles and thresholds are elicited from the decision maker.",
     "transfer": "Direct fit: results are sorted into ordered categories — fits (base) > option (trade-off) > rejected. A category may have several limiting profiles: the BASE profile (every asked requirement incl. the anchor, e.g. the asked brands) and an OPTION profile (anchor partly missing, every other purpose requirement at a high level). Condition: profiles come from the asker's words, hints and the purpose, are shown to the owner and editable — never invented by the engine alone.",
     "status": "verified",
-    "url": "https://www.lamsade.dauphine.fr/~bouyssou/BMP_ETRI.pdf"
+    "url": "https://www.lamsade.dauphine.fr/~bouyssou/BMP_ETRI.pdf",
+    "sha256": "cf069105de7abc55f0ca5949f1c4c90d61be02a0b8097e058f6c1782dd8597d4"
   },
   {
     "id": "M2",
@@ -17,7 +18,8 @@
     "context": "Requirements engineering for SYSTEM design: alternative refinements are alternative designs to satisfy a system goal; chosen by analysts.",
     "transfer": "Transfer by analogy only: a purpose goal of the asker (\"guests come for the natural setting\") may be met by alternative means (sea near OR scenic surroundings). Condition: the parent goal is found by WHY from the asker's words/purpose; alternatives are proposed, voted and owner-confirmed; the asker's own requirement always stays one alternative. Does not license dropping an asker's must-have.",
     "status": "verified",
-    "url": "https://webperso.info.ucl.ac.be/~avl/files/RE01.pdf"
+    "url": "https://webperso.info.ucl.ac.be/~avl/files/RE01.pdf",
+    "sha256": "e3505d208eb54a1e91b2e5b5360e3b45a5684212d2fd4436ef5dfbacb6e85ed2"
   },
   {
     "id": "M3",
@@ -27,7 +29,8 @@
     "context": "Goals extracted from stakeholder interview transcripts, judged by human annotators.",
     "transfer": "A model-proposed refinement (alternative, category profile) is wrong about 1 time in 4 in that setting: every such proposal needs independent-family votes (#212) and owner confirmation before it can change which items count.",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2509.01048"
+    "url": "https://arxiv.org/abs/2509.01048",
+    "sha256": "2f5d3fa31edaba7fc4137f2d69206a35161e980991d0811b79e1a2ba6df8f052"
   },
   {
     "id": "M4",
@@ -55,7 +58,8 @@
     "context": "Planning benchmarks",
     "transfer": "Every model output is a proposal; it counts after a code check",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2402.01817"
+    "url": "https://arxiv.org/abs/2402.01817",
+    "sha256": "2637a705228db8bd0cb085c490e19e0f534752a29e6298d91e689b366d1949f1"
   },
   {
     "id": "M7",
@@ -65,7 +69,8 @@
     "context": "Software requirements",
     "transfer": "Domain knowledge is a slot of the request model, not background",
     "status": "verified",
-    "url": "https://arxiv.org/pdf/1209.1551"
+    "url": "https://arxiv.org/pdf/1209.1551",
+    "sha256": "18df367f30fdabff27f10c22a23cd7a6756deacabf49419f2a32743f48b883c8"
   },
   {
     "id": "M8",
@@ -75,7 +80,8 @@
     "context": "Measurement programmes",
     "transfer": "Each requirement carries viewpoint and context (roles) and a measure",
     "status": "verified",
-    "url": "https://www.cs.umd.edu/users/basili/publications/proceedings/P124.pdf"
+    "url": "https://www.cs.umd.edu/users/basili/publications/proceedings/P124.pdf",
+    "sha256": "8496c5acdf9b7879b146a79f380b25fc3950c05aac4c2ad3b0d69637aa3b7185"
   },
   {
     "id": "M9",
@@ -85,7 +91,8 @@
     "context": "4 software projects",
     "transfer": "The request model is checked by a second family and by trace gates",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2604.22207"
+    "url": "https://arxiv.org/abs/2604.22207",
+    "sha256": "d9da8ca93d8982363058b7ce8ce76a3eaf225b97a2ea8cbe6db0935aee7eb71c"
   },
   {
     "id": "M10",
@@ -95,7 +102,8 @@
     "context": "Agent scenarios; deep research rubrics",
     "transfer": "Implicit requirements stated and labelled derived",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2602.20424"
+    "url": "https://arxiv.org/abs/2602.20424",
+    "sha256": "e828919719526f05715f59a34a7ff25475e0ff1fa95f5b1ea3321811efeb3155"
   },
   {
     "id": "M11",
@@ -105,7 +113,8 @@
     "context": "Instruction following; agentic rubrics",
     "transfer": "Hard checks in small batches",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2410.03608"
+    "url": "https://arxiv.org/abs/2410.03608",
+    "sha256": "d8a28cf08e7636ece59ca98cbc00c635337c8bb2dbb43c3ec3967b627de971ba"
   },
   {
     "id": "M12",
@@ -115,7 +124,8 @@
     "context": "Reasoning benchmarks",
     "transfer": "Second opinions stop at agreement",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2511.02603"
+    "url": "https://arxiv.org/abs/2511.02603",
+    "sha256": "265843869cf54de7e4dcf71c31f7485ddee76431b968ff57d42784ebc7b70dac"
   },
   {
     "id": "M13",
@@ -125,7 +135,8 @@
     "context": "Tool-using agents",
     "transfer": "Decompose once, every stage reads it; reuse per kind",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2506.14852"
+    "url": "https://arxiv.org/abs/2506.14852",
+    "sha256": "5b520fd7569fae973bd74a74e5678cde9201a86679c974cf5fcec177da11c8e3"
   },
   {
     "id": "M14",
@@ -135,7 +146,8 @@
     "context": "Deep research agents",
     "transfer": "Code checks before page judging",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2608.08389"
+    "url": "https://arxiv.org/abs/2608.08389",
+    "sha256": "206cc3ea6714febc60a157fa734eac4269d80863d5e4afe5ce188f76162ca06b"
   },
   {
     "id": "M15",
@@ -145,7 +157,8 @@
     "context": "Prompt optimisation; agent contexts",
     "transfer": "Loop proposals reflect on failing traces; lessons as itemised playbook",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2507.19457"
+    "url": "https://arxiv.org/abs/2507.19457",
+    "sha256": "f36329bcf1af2a675b3cbba3f82db20bd3fbe4a012a9bf54bf474091264a5b8d"
   },
   {
     "id": "M16",
@@ -155,6 +168,7 @@
     "context": "LLM evals",
     "transfer": "Reference gate compares paired with intervals",
     "status": "verified",
-    "url": "https://arxiv.org/abs/2411.00640"
+    "url": "https://arxiv.org/abs/2411.00640",
+    "sha256": "3c59142f449cd6ff38a61a7ae195f34ea654cd647181f624506bc9d7c3940901"
   }
 ]
