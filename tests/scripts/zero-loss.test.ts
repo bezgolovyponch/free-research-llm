@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { binomialCoefficient, mcNemarExact, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, outcomesOf, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers } from '../../scripts/zero-loss.mjs';
+import { binomialCoefficient, mcNemarExact, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, outcomesOf, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers, outcomesDiffer } from '../../scripts/zero-loss.mjs';
 import { createAnswerTape, tapeKey } from '../../scripts/answer-tape.mjs';
 import { ChecklistJudge } from '../../src/research/checklist.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
@@ -268,5 +268,107 @@ describe('zero-loss: extractJudgedItems and computeTiers', () => {
     expect(items).toHaveLength(1);
     expect(items[0].checks).toHaveLength(1);
     expect(items[0].checks[0].answer).toBe('yes');
+  });
+});
+
+describe('zero-loss: exercised command', () => {
+  it('detects zero changed outcomes', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+        { project: 'p1', url: 'https://a.example.org/2', clause: 'c1', question: 'q2', hard: false, measure: 'm1', outcome: 'no' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+        { project: 'p1', url: 'https://a.example.org/2', clause: 'c1', question: 'q2', hard: false, measure: 'm1', outcome: 'no' },
+      ],
+    };
+    const { changed, total } = outcomesDiffer(baseline, current);
+    expect(changed).toBe(0);
+    expect(total).toBe(2);
+  });
+
+  it('detects changed outcome field', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'no' },
+      ],
+    };
+    const { changed, total } = outcomesDiffer(baseline, current);
+    expect(changed).toBe(1);
+    expect(total).toBe(1);
+  });
+
+  it('detects changed measure field', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm2', outcome: 'yes' },
+      ],
+    };
+    const { changed, total } = outcomesDiffer(baseline, current);
+    expect(changed).toBe(1);
+    expect(total).toBe(1);
+  });
+
+  it('ignores project/url/clause/question keys for diff', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+      ],
+    };
+    const { changed, total } = outcomesDiffer(baseline, current);
+    expect(changed).toBe(0);
+    expect(total).toBe(1);
+  });
+
+  it('handles new outcomes in current not in baseline', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+        { project: 'p1', url: 'https://a.example.org/2', clause: 'c1', question: 'q2', hard: false, measure: 'm1', outcome: 'no' },
+      ],
+    };
+    const { changed, total } = outcomesDiffer(baseline, current);
+    expect(changed).toBe(0);
+    expect(total).toBe(2);
+  });
+
+  it('handles missing outcomes in current', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+        { project: 'p1', url: 'https://a.example.org/2', clause: 'c1', question: 'q2', hard: false, measure: 'm1', outcome: 'no' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://a.example.org/1', clause: 'c1', question: 'q1', hard: true, measure: 'm1', outcome: 'yes' },
+      ],
+    };
+    const { changed, total } = outcomesDiffer(baseline, current);
+    expect(changed).toBe(0);
+    expect(total).toBe(1);
   });
 });

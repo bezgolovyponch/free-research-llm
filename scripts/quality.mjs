@@ -102,7 +102,7 @@ function checkTestIntegrity(diff, commitMessages) {
 
   function testChangeAllows(path, messages) {
     for (const msg of messages) {
-      const match = msg.match(/^test-change:\s*(.+?)\s*[—-]\s*(.+)$/);
+      const match = msg.match(/^test-change:\s*(\S+)\s+[—-]\s+(.+)$/);
       if (match) {
         const allowedPath = match[1].trim();
         if (allowedPath === path) return true;
