@@ -217,8 +217,11 @@ const gates = {
     if (!fs.existsSync(snapshotDir) || !fs.existsSync(baselineFile)) {
       return { passed: true, detail: 'skipped: baseline or snapshot not found' };
     }
-    const failed = await checkSnapshot(snapshotDir, baselineFile);
-    return { passed: !failed, detail: failed ? 'zero-loss check failed' : 'zero-loss check passed' };
+    const tapeDir = process.env.FRL_TAPE_DIR || path.join(snapshotDir, 'tape');
+    const hasTape = fs.existsSync(tapeDir);
+    const failed = await checkSnapshot(snapshotDir, baselineFile, hasTape);
+    const detail = failed ? 'zero-loss check failed' : 'zero-loss check passed';
+    return { passed: !failed, detail: hasTape ? detail + ' (with judge)' : detail };
   },
 };
 

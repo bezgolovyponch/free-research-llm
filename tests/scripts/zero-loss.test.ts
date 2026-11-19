@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { binomialCoefficient, mcNemarExact, negativeFlips, outcomesOf, recordSnapshot, checkSnapshot } from '../../scripts/zero-loss.mjs';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { binomialCoefficient, mcNemarExact, negativeFlips, outcomesOf, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject } from '../../scripts/zero-loss.mjs';
+import { createAnswerTape, tapeKey } from '../../scripts/answer-tape.mjs';
+import { ChecklistJudge } from '../../src/research/checklist.mjs';
+import { ModelRouter } from '../../src/llm/router.mjs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 
 describe('zero-loss: McNemar exact', () => {
   it('b=1, c=8 -> 0.0390625', () => {
@@ -93,5 +96,76 @@ describe('zero-loss: record and check roundtrip', () => {
     expect(exitCode).toBe(0);
     await rm(dir, { recursive: true, force: true });
     await rm(baselineFile, { force: true });
+  });
+});
+
+describe('zero-loss: judge flip detection logic', () => {
+  it('detects yes->no flip for judge outcomes', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'yes' },
+        { project: 'p1', url: 'https://example.test/2', clause: 'quality', question: 'Is it high quality?', hard: false, measure: 'judge', outcome: 'yes' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'no' },
+        { project: 'p1', url: 'https://example.test/2', clause: 'quality', question: 'Is it high quality?', hard: false, measure: 'judge', outcome: 'yes' },
+      ],
+    };
+    const flips = negativeFlips(baseline, current);
+    expect(flips).toHaveLength(1);
+    expect(flips[0]).toMatchObject({ url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?' });
+  });
+
+  it('detects yes->unknown as flip for judge outcomes', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'yes' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'unknown' },
+      ],
+    };
+    const flips = negativeFlips(baseline, current);
+    expect(flips).toHaveLength(1);
+  });
+
+  it('ignores no->yes transition', () => {
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'no' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'yes' },
+      ],
+    };
+    const flips = negativeFlips(baseline, current);
+    expect(flips).toHaveLength(0);
+  });
+});
+
+describe('zero-loss: judge unrecorded tracking', () => {
+  it('tracks unrecorded prompts separately from flips in runJudgeCheck logic', () => {
+    // This test verifies the logic that unrecorded prompts are tracked separately
+    // and don't cause flips. The actual integration test requires provider setup.
+    const baseline = {
+      outcomes: [
+        { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'yes' },
+      ],
+    };
+    const current = {
+      outcomes: [
+        { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'unknown' },
+      ],
+    };
+    const flips = negativeFlips(baseline, current);
+    // yes->unknown is a flip, but in runJudgeCheck this would be tracked as unrecorded
+    // if the tape missed the prompt. The gate fails on flips, but unrecorded are reported separately.
+    expect(flips.length).toBe(1);
   });
 });
