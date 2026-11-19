@@ -13,7 +13,7 @@ import { TICKET_ID, claudePrompt } from './changes.mjs';
 import { spawnSync } from 'node:child_process';
 import { PROVIDER_PRESETS, SEARCH_KEYS } from './llm/presets.mjs';
 import { guideFor } from './llm/guides.mjs';
-import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helperArgs, parseHelpers, recommendModel, serverArgs, speedOf } from './local/llamacpp.mjs';
+import { HELPER_PORT, LlamaCppInstaller, MODELS, SERVER_PORT, helpCacheFile, helperArgs, parseHelpers, recommendModel, serverArgs, serverHelp, speedOf } from './local/llamacpp.mjs';
 import { CREDSTORE, KeychainSecrets, runCommand, secretNames } from './secrets.mjs';
 import { shareLinks } from './share.mjs';
 import { pcSetupCommand } from './local/pcsetup.mjs';
@@ -450,7 +450,8 @@ const commands = {
       const i = rest.indexOf(`--${name}`);
       return i >= 0 && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[i + 1] : fallback;
     };
-    const installer = new LlamaCppInstaller({ dir: path.join(ROOT, 'data', 'llama'), run: (c, a) => run(c, a, { shell: false }), log: (m) => console.log(m) });
+    const llamaDir = path.join(ROOT, 'data', 'llama');
+    const installer = new LlamaCppInstaller({ dir: llamaDir, run: (c, a) => run(c, a, { shell: false }), log: (m) => console.log(m) });
     const current = await installer.current();
     const need = () => console.log('llama.cpp is not installed yet: node src/frl.mjs local install');
     if (action === 'install') {
@@ -475,7 +476,8 @@ const commands = {
       const helpers = parseHelpers(flag('helpers'));
       const port = Number(flag('port', SERVER_PORT));
       const vramMb = Number(flag('vram', 0));
-      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split'), parallel: Number(flag('parallel', 1)), kv: flag('kv', ''), vramMb });
+      const help = await serverHelp({ server: current.server, cacheFile: helpCacheFile(llamaDir) });
+      const args = serverArgs({ model: flag('model'), helpers, port, ctx: Number(flag('ctx', 16384)), split: flag('split'), parallel: Number(flag('parallel', 1)), kv: flag('kv', ''), vramMb, help });
       await secrets.write('LLAMACPP_BASE_URL', `http://127.0.0.1:${port}/v1`).catch(() => {});
       await rememberServe(ROOT, { server: current.server, args, port });
       if (args.includes('--background') || process.argv.includes('--background')) {

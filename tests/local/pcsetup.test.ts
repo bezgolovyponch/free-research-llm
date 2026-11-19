@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FIREWALL_RULE, PC_BIG_MODEL_MIN_MB, pcSetupCommand, pcSetupScript } from '../../src/local/pcsetup.mjs';
+import { FIREWALL_RULE, PC_BIG_MODEL_MIN_MB, noMmapPick, pcSetupCommand, pcSetupScript } from '../../src/local/pcsetup.mjs';
+import { listedFlagPattern } from '../../src/local/llamacpp.mjs';
 
 describe('pcSetupScript', () => {
   it('downloads the matching llama.cpp build, picks a model by graphics memory and serves it on the network', () => {
@@ -30,6 +31,19 @@ describe('pcSetupScript', () => {
     expect(firewall).toContain('open PowerShell as administrator once and run');
     expect(lines.find((l) => l.startsWith('$public = '))).toContain("NetworkCategory -eq 'Public'");
     expect(lines.find((l) => l.startsWith('for ($i = 0; $i -lt 120'))).toContain("Invoke-RestMethod -Uri 'http://127.0.0.1:8090/v1/models'");
+  });
+
+  it('asks the build on the other PC not to memory-map the model it puts entirely on the GPU, only with a flag its own --help lists', () => {
+    const lines = pcSetupScript().split('\r\n');
+    const probe = lines.indexOf('$help = (& $server.FullName --help 2>&1 | Out-String)');
+    expect(probe).toBeGreaterThan(lines.indexOf("$devices = (& $server.FullName --list-devices 2>&1 | Out-String)"));
+    expect(lines[probe + 1]).toBe(noMmapPick());
+    expect(noMmapPick()).toBe(`if ($help -match '(?m)${listedFlagPattern('--load-mode')}') { $noMmap = @('--load-mode', 'none') } elseif ($help -match '(?m)${listedFlagPattern('--no-mmap')}') { $noMmap = @('--no-mmap') } else { $noMmap = @() }`);
+    expect(listedFlagPattern('--load-mode')).toBe('^\\s*(?:-[^\\s,]+,\\s*)*--load-mode(?=[\\s,]|$)');
+    expect(noMmapPick()).not.toContain('"');
+    const args = lines.find((l) => l.startsWith('$serverArgs = '))!;
+    expect(lines.indexOf(args)).toBeGreaterThan(probe + 1);
+    expect(args).toBe(`$serverArgs = @('-hf', $model, '-ngl', '99', '-c', "$ctx", '-np', "$slots", '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0') + $noMmap + @('--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '0.0.0.0', '--port', '8090', '-a', 'pc-model')`);
   });
 
   it('builds the one-line PowerShell command with the research link token', () => {
