@@ -222,3 +222,11 @@ describe('testIntegrity at commit time', () => {
     expect(checkTestIntegrity(diff, ['test-change: tests/research/x.test.ts — expected value corrected']).passed).toBe(true);
   });
 });
+
+describe('test-change declarations', () => {
+  it('accepts a path that contains a hyphen', async () => {
+    const { checkTestIntegrity } = await import('../../scripts/quality.mjs');
+    const diff = 'diff --git a/scripts/zero-loss.mjs b/scripts/zero-loss.mjs\n--- a/scripts/zero-loss.mjs\n+++ b/scripts/zero-loss.mjs\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n';
+    expect(checkTestIntegrity(diff, ['test-change: scripts/zero-loss.mjs — reviewed']).passed).toBe(true);
+  });
+});
