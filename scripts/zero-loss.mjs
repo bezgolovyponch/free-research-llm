@@ -19,7 +19,7 @@ function parseArgs(argv) {
   const values = (flag) => argv.flatMap((arg, index) => (arg === flag && argv[index + 1] !== undefined ? [argv[index + 1]] : []));
   const value = (flag) => values(flag)[0] ?? null;
   const hasFlag = (flag) => argv.includes(flag);
-  if (!['record', 'check'].includes(command)) return { error: 'usage:\n  node scripts/zero-loss.mjs record <snapshotDir> --out <file> [--judge]\n  node scripts/zero-loss.mjs check <snapshotDir> --baseline <file> [--judge]' };
+  if (!['record', 'check', 'exercised'].includes(command)) return { error: 'usage:\n  node scripts/zero-loss.mjs record <snapshotDir> --out <file> [--judge]\n  node scripts/zero-loss.mjs check <snapshotDir> --baseline <file> [--judge]\n  node scripts/zero-loss.mjs exercised <snapshotDir> --baseline <file>' };
   const snapshotDir = path.resolve(value('<snapshotDir>') ?? argv[1]);
   if (!snapshotDir) return { error: 'snapshotDir is required' };
   const judge = hasFlag('--judge');
@@ -27,6 +27,11 @@ function parseArgs(argv) {
     const out = value('--out');
     if (!out) return { error: '--out is required' };
     return { command, snapshotDir, out: path.resolve(out), judge };
+  }
+  if (command === 'exercised') {
+    const baseline = value('--baseline');
+    if (!baseline) return { error: '--baseline is required' };
+    return { command, snapshotDir, baseline: path.resolve(baseline), judge };
   }
   const baseline = value('--baseline');
   if (!baseline) return { error: '--baseline is required' };
@@ -681,6 +686,54 @@ async function recordSnapshot(snapshotDir, outFile, judge = false) {
   }
 }
 
+function outcomesDiffer(baseline, current) {
+  const baseByKey = new Map();
+  for (const o of baseline.outcomes) {
+    baseByKey.set(keyOf(o), o);
+  }
+  let changed = 0;
+  for (const curr of current.outcomes) {
+    const base = baseByKey.get(keyOf(curr));
+    if (!base) continue;
+    const baseKeys = Object.keys(base);
+    const currKeys = Object.keys(curr);
+    const allKeys = new Set([...baseKeys, ...currKeys]);
+    let anyDiff = false;
+    for (const key of allKeys) {
+      if (key === 'project' || key === 'url' || key === 'clause' || key === 'question') continue;
+      if (JSON.stringify(base[key]) !== JSON.stringify(curr[key])) {
+        anyDiff = true;
+        break;
+      }
+    }
+    if (anyDiff) changed++;
+  }
+  return { changed, total: current.outcomes.length };
+}
+
+async function exercisedSnapshot(snapshotDir, baselineFile) {
+  const baseline = JSON.parse(await fs.readFile(baselineFile, 'utf8'));
+  const projectsDir = path.join(snapshotDir, 'projects');
+  const projects = await loadProjects(projectsDir);
+
+  const allOutcomes = [];
+  for (const project of projects) {
+    const { outcomes } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
+    allOutcomes.push(...outcomes.map((o) => ({ ...o, project: project.id })));
+  }
+
+  const current = { outcomes: allOutcomes };
+  const { changed, total } = outcomesDiffer(baseline, current);
+
+  console.log('exercised: ' + changed + ' of ' + total + ' outcomes changed inputs');
+  if (changed === 0) {
+    console.log('PASS (not measured: no outcome changed)');
+  } else {
+    console.log('PASS');
+  }
+  return 0;
+}
+
 async function main(argv) {
   const args = parseArgs(argv);
   if (args.error) {
@@ -690,9 +743,12 @@ async function main(argv) {
   if (args.command === 'record') {
     return await recordSnapshot(args.snapshotDir, args.out, args.judge);
   }
+  if (args.command === 'exercised') {
+    return await exercisedSnapshot(args.snapshotDir, args.baseline);
+  }
   return await checkSnapshot(args.snapshotDir, args.baseline, args.judge);
 }
 
 if (process.argv[1] && import.meta.url === 'file://' + process.argv[1]) process.exit(await main(process.argv.slice(2)));
 
-export { outcomesOf, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, getTapeDir, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers };
+export { outcomesOf, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, getTapeDir, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers, outcomesDiffer, exercisedSnapshot };
