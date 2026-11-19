@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SECRET_PATTERNS } from '../src/secrets.mjs';
 import { acquireQualityLock, releaseQualityLock, LOCK_WAIT_MS } from './quality-lock.mjs';
-import { binEntry } from './tool-entry.mjs';
+import { binEntry, startedDirectly } from './tool-entry.mjs';
 import { computeWasteStats } from './waste.mjs';
 
 import { parse as parseYaml } from 'yaml';
@@ -191,6 +191,6 @@ function runQualityGate() {
   process.exitCode = verdict.passed ? 0 : 1;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (startedDirectly(import.meta.url)) {
   runQualityGate();
 }

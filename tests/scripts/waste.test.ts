@@ -2,7 +2,23 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { aggregate, readCalls, parseDateArg } from '../../scripts/waste.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+describe('waste: started directly or imported', () => {
+  it('prints its report only when started directly, never when the quality gate imports it', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'waste-entry-'));
+    const imported = spawnSync(process.execPath, ['--input-type=module', '-e', "await import('./scripts/waste.mjs')"], { cwd: ROOT, encoding: 'utf8' });
+    expect(imported.status).toBe(0);
+    expect(imported.stdout).toBe('');
+    const direct = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'waste.mjs'), '--json', '--data', dir], { cwd: ROOT, encoding: 'utf8' });
+    expect(direct.status).toBe(0);
+    expect(JSON.parse(direct.stdout).calls).toBe(0);
+  });
+});
 
 describe('waste: date parsing', () => {
   it('parses start of day for --since', () => {

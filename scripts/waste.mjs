@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { startedDirectly } from './tool-entry.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -170,4 +171,4 @@ function main() {
   }
 }
 
-main();
+if (startedDirectly(import.meta.url)) main();
