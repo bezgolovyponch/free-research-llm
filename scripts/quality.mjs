@@ -233,6 +233,8 @@ export function integrityResult({ messageFile } = {}) {
     diff = diffAgainstBaseDir(integrityBase);
   } else if (base) {
     diff = run('git', ['diff', base, '--', ...protectedPaths()]).stdout;
+  } else if (messageFile && run('git', ['rev-parse', '--verify', 'HEAD']).stdout.trim()) {
+    diff = run('git', ['diff', '--cached', 'HEAD', '--', ...protectedPaths()]).stdout;
   } else if (process.env.CI) {
     diff = run('git', ['diff', 'HEAD~1', '--', ...protectedPaths()]).stdout;
   } else {
