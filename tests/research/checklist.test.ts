@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
-import { FAIL, fakeRouter, seq } from '../helpers/fakes';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, matchPrompt } from '../../src/research/checklist.mjs';
+import { FAIL, fakeRouter, seq, fakeEmbedder, pickLetter } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
+import { hardIdsOf, itemTier, awaitsSecondFamily } from '../../src/research/verdict.mjs';
+import { DecisionModeler } from '../../src/research/decision.mjs';
+import { retrieveThenVerify } from '../../src/research/semantic.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -866,5 +869,229 @@ describe('numeric checklist items answer from the measured plot row', () => {
   it('reads the camping months from the plot site climate', async () => {
     const checks = await new ChecklistJudge({ router }).judge(row, '', climate, null, [], {});
     expect(checks[0].answer).toBe('yes');
+  });
+});
+
+describe('checklist clause matching to criteria and plan checks', () => {
+  const kind = { label: 'plot of land', terms: ['plot', 'terreno'], not: ['house', 'villa'] };
+
+  const criterionText = 'strong price increase trend country real house-price trend minus the EU average realTrendVsEu';
+  const planCheckLegalText = 'a legal path for a buyer legal';
+  const planCheckUnitsText = 'room for 3+ units units';
+
+  function clauseMatchRouter(picks: Record<string, string>) {
+    return fakeRouter({
+      '': (request) => {
+        const content = request.messages[1].content ?? '';
+        if (content.includes('This page offers:')) {
+          return { kind: 'A', span: 'S1' };
+        }
+        return { answers: [{ id: 'q1', answer: 'yes', spans: ['S1'] }] };
+      },
+      'checklist-clause-match': (request) => {
+        const query = /^Text: (.+)$/m.exec(request.messages[1].content)?.[1] ?? '';
+        const pickedText = picks[query];
+        if (!pickedText) return { pick: 'N' };
+        return { pick: pickLetter(request as never, (option) => option === pickedText) };
+      },
+    });
+  }
+
+  function pickLegalRouter() {
+    return fakeRouter({
+      '': (request) => {
+        const content = request.messages[1].content ?? '';
+        if (content.includes('This page offers:')) {
+          return { kind: 'A', span: 'S1' };
+        }
+        return { answers: [{ id: 'q1', answer: 'yes', spans: ['S1'] }] };
+      },
+      'checklist-clause-match': (request) => {
+        const prompt = request.messages[1].content ?? '';
+        const optionLines = [...prompt.matchAll(/^([A-Z])\) (.+)$/gm)];
+        const options = optionLines.map(([, letter, text]) => ({ letter, text }));
+        const legalOption = options.find((o) => o.text.includes('legal'));
+        const pick = legalOption ? legalOption.letter : 'A';
+        return { pick };
+      },
+    });
+  }
+
+  function makeTrendChecklist(suffix = '') {
+    return [{ clause: `price increase trend is strong${suffix}`, items: [{ clause: `price increase trend is strong${suffix}`, question: 'Does this plot have a strong price increase trend?', hard: true, numeric: null }] }];
+  }
+
+  function makeGlampingChecklist(suffix = '') {
+    return [{ clause: `suitable for glamping after preparation${suffix}`, items: [{ clause: `suitable for glamping after preparation${suffix}`, question: 'Is this plot suitable for glamping after the necessary preparation work?', hard: true, numeric: null }] }];
+  }
+
+  function makeUnmatchedChecklist(suffix = '') {
+    return [{ clause: `unknown requirement${suffix}`, items: [{ clause: `unknown requirement${suffix}`, question: 'Does this have an unknown property?', hard: true, numeric: null }] }];
+  }
+
+  function makeCacheChecklist(suffix = '') {
+    return [{ clause: `cached trend check${suffix}`, items: [{ clause: `cached trend check${suffix}`, question: 'Does this have a cached trend?', hard: true, numeric: null }] }];
+  }
+
+  it('matches "price increase trend is strong" to criterion realTrendVsEu (op >, value 0) and answers yes from row with trend +2.8 and ctx euHpi, quote includes realTrendVsEu', async () => {
+    const checklist = makeTrendChecklist('-a');
+    const router = clauseMatchRouter({
+      'price increase trend is strong-a': criterionText,
+    });
+    const embedder = fakeEmbedder();
+    const judge = new ChecklistJudge({ router, embedder });
+
+    const row = {
+      url: 'http://example.com/plot',
+      title: 'Plot with trend',
+      countryCode: 'PT',
+      plan: { checks: [] },
+    };
+    const context = {
+      criteria: [{ id: 'realTrendVsEu', measure: 'realTrendVsEu', op: '>', value: 0, clause: 'strong price increase trend' }],
+      measures: { trends: { PT: { real: 2.8 } }, euHpi: 0.8 },
+      row,
+      fingerprint: checklistFingerprint(checklist),
+    };
+
+    const checks = await judge.judge(row, 'Some page text about the plot', checklist, kind, context);
+
+    const trendCheck = checks.find((c) => c.id === 'price increase trend is strong-a|Does this plot have a strong price increase trend?');
+    expect(trendCheck).toBeDefined();
+    expect(trendCheck!.answer).toBe('yes');
+    expect(trendCheck!.quote).toContain('realTrendVsEu: 2');
+    expect(trendCheck!.derived).toBe(true);
+    expect(router.count('checklist-clause-match')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('matches "suitable for glamping after preparation" to plan checks legal+units; answers yes when both ok', async () => {
+    const checklist = makeGlampingChecklist('-b');
+    const router = pickLegalRouter();
+    const embedder = fakeEmbedder();
+    const judge = new ChecklistJudge({ router, embedder });
+
+    const row = {
+      url: 'http://example.com/plot',
+      title: 'Plot with legal and units',
+      plan: {
+        checks: [
+          { id: 'legal', label: 'a legal path for a buyer', ok: true, detail: 'Rural camping park allowed' },
+          { id: 'units', label: 'room for 3+ units', ok: true, detail: '720 m² → 10 units' },
+        ],
+      },
+    };
+    const context = {
+      criteria: [],
+      row,
+      fingerprint: checklistFingerprint(checklist),
+    };
+
+    const checks = await judge.judge(row, 'Some page text', checklist, kind, context);
+
+    const glampingCheck = checks.find((c) => c.id === 'suitable for glamping after preparation-b|Is this plot suitable for glamping after the necessary preparation work?');
+    expect(glampingCheck).toBeDefined();
+    expect(glampingCheck!.answer).toBe('yes');
+    expect(glampingCheck!.quote).toContain('legal: yes');
+    expect(glampingCheck!.derived).toBe(true);
+  });
+
+  it('matches "suitable for glamping after preparation" to plan checks legal+units; answers no when one is false', async () => {
+    const checklist = makeGlampingChecklist('-c');
+    const router = pickLegalRouter();
+    const embedder = fakeEmbedder();
+    const judge = new ChecklistJudge({ router, embedder });
+
+    const row = {
+      url: 'http://example.com/plot',
+      title: 'Plot with legal false',
+      plan: {
+        checks: [
+          { id: 'legal', label: 'a legal path for a buyer', ok: false, detail: 'Not allowed' },
+          { id: 'units', label: 'room for 3+ units', ok: true, detail: '720 m² → 10 units' },
+        ],
+      },
+    };
+    const context = {
+      criteria: [],
+      row,
+      fingerprint: checklistFingerprint(checklist),
+    };
+
+    const checks = await judge.judge(row, 'Some page text', checklist, kind, context);
+
+    const glampingCheck = checks.find((c) => c.id === 'suitable for glamping after preparation-c|Is this plot suitable for glamping after the necessary preparation work?');
+    expect(glampingCheck).toBeDefined();
+    expect(glampingCheck!.answer).toBe('no');
+    expect(glampingCheck!.quote).toContain('legal: no');
+    expect(glampingCheck!.derived).toBe(true);
+  });
+
+  it('an unmatched clause stays page-judged (router called for the page question)', async () => {
+    const checklist = makeUnmatchedChecklist('-d');
+    const router = fakeRouter({
+      '': (request) => {
+        const content = request.messages[1].content ?? '';
+        if (content.includes('This page offers:')) {
+          return { kind: 'A', span: 'S1' };
+        }
+        return { answers: [{ id: 'q1', answer: 'yes', spans: ['S1'] }] };
+      },
+      'checklist-clause-match': (request) => {
+        const query = /^Text: (.+)$/m.exec(request.messages[1].content)?.[1] ?? '';
+        return { pick: 'N' };
+      },
+    });
+    const embedder = fakeEmbedder();
+    const judge = new ChecklistJudge({ router, embedder });
+
+    const row = { url: 'http://example.com/plot', title: 'Plot', plan: { checks: [] } };
+    const context = {
+      criteria: [{ id: 'dummy', measure: 'priceEur', op: '<=', value: 100, clause: 'dummy' }],
+      row,
+      fingerprint: checklistFingerprint(checklist),
+    };
+
+    const checks = await judge.judge(row, 'Page says it has the unknown property', checklist, kind, context);
+
+    const unmatchedCheck = checks.find((c) => c.id === 'unknown requirement-d|Does this have an unknown property?');
+    expect(unmatchedCheck).toBeDefined();
+    expect(unmatchedCheck!.answer).toBe('yes');
+    expect(unmatchedCheck!.quote).toContain('unknown property');
+    expect(unmatchedCheck!.derived).toBeUndefined();
+    expect(router.count('checklist-clause-match')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('the match is computed once per checklist fingerprint (cached)', async () => {
+    const checklist = makeCacheChecklist('-e');
+    let matchCalls = 0;
+    const router = fakeRouter({
+      '': (request) => {
+        const content = request.messages[1].content ?? '';
+        if (content.includes('This page offers:')) {
+          return { kind: 'A', span: 'S1' };
+        }
+        return { answers: [{ id: 'q1', answer: 'yes', spans: ['S1'] }] };
+      },
+      'checklist-clause-match': (request) => {
+        matchCalls++;
+        return { pick: 'A' };
+      },
+    });
+    const embedder = fakeEmbedder();
+    const judge = new ChecklistJudge({ router, embedder });
+
+    const row = { url: 'http://example.com/plot', title: 'Plot', countryCode: 'PT', plan: { checks: [] } };
+    const context = {
+      criteria: [{ id: 'realTrendVsEu', measure: 'realTrendVsEu', op: '>', value: 0, clause: 'cached trend check' }],
+      measures: { trends: { PT: { real: 2.8 } }, euHpi: 0.8 },
+      row,
+      fingerprint: checklistFingerprint(checklist),
+    };
+
+    await judge.judge(row, 'Page text 1', checklist, kind, context);
+    await judge.judge(row, 'Page text 2', checklist, kind, context);
+    await judge.judge(row, 'Page text 3', checklist, kind, context);
+
+    expect(matchCalls).toBe(2);
   });
 });
