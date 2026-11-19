@@ -6,8 +6,10 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
-import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
+import { currencyOf } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, keepJudged, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
+import { verdict, itemTier, verdictInvariants, hardIdsOf, awaitsSecondFamily, acceptanceSummaryOf, scoreOf, verdictReport, verdictLines } from './verdict.mjs';
+import { notJudged } from './checklist.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
 import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
@@ -22,17 +24,18 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
-import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
+import { askerQuestions, conceptExamples, conceptOf, conceptText } from './concept.mjs';
+import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, describedItem, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, lowPriceCut, lowPriceStats, shortlistText, tableVerdict } from './candidates.mjs';
 import { groupOf, listingFacts, pageFactsFrom } from './valuation.mjs';
 import { MIN_AGREEING_SITES, VALUE_FACT_TEXTS, applyValueFacts, consensusOf, mergeValueFacts, valueFactsPrompt } from './valuecase.mjs';
-import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
+import { domainFindingsPrompt, domainQueryPrompt, domainText, domainUnderstanding, hubQueryPrompt, hubsFrom, mergeFindings, HUB_QUERIES } from './domain.mjs';
 import { listingKey, nextPageUrl } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, asksSea, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
-import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
+import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, kindNote, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { applySchema, schemaPrompt, schemaSample, verifySchema } from '../search/schema.mjs';
@@ -323,8 +326,8 @@ export class ResearchEngine {
     this.listeners = new Map();
     this.running = new Set();
     this.cancelled = new Set();
-    this.checklistJudge = new ChecklistJudge({ router });
     this.embedder = embedder;
+    this.checklistJudge = new ChecklistJudge({ router, embedder });
   }
 
   subscribe(projectId, listener) {
@@ -497,6 +500,7 @@ export class ResearchEngine {
     const acceptance = proposed.spec;
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
+    this.askAsker(project);
     if (acceptance?.itemCount) {
       await this.ensureDecisionModel(project);
       const brief = this.briefOf(project);
@@ -543,7 +547,7 @@ export class ResearchEngine {
     const located = Boolean(template.itemKind) ? true : model?.kind?.validated ? false : (!kind || listedKind(kind));
     if (model?.kind) model.kind.entity = located === false;
     const seaAsked = asksSea(foundation, brief.coastal) || Boolean(model?.criteria?.some((c) => c.measure === 'coastKm'));
-    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief({ ...brief, located }), strategy ? foundationText(foundation) : modelText(model)].filter(Boolean).join('\n') };
+    project.brief = { ...brief, located, asksSea: seaAsked, subtype: model?.subtype ?? null, groupFacts: project.groupFacts ?? {}, foundation, text: [describeBrief({ ...brief, located }), strategy ? [foundationText(foundation), conceptText(conceptOf(model))].filter(Boolean).join('\n') : modelText(model), domainText(project.domain)].filter(Boolean).join('\n') };
     return project.brief;
   }
 
@@ -633,8 +637,17 @@ export class ResearchEngine {
     await this.ensureArea(project);
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
     try {
+      const before = project.decisionModel ?? null;
+      const reframing = Boolean(before) && Boolean(this.modeler.current?.(project));
       const model = await this.modeler.build(project);
-      if (model) this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}`);
+      if (!model || (model === before && !reframing)) {
+        this.emit(project, 'decision', `decision model not built: no provider family returned a proposal that names the item to list${before ? '; the earlier model is kept' : ''}`);
+        return model ?? null;
+      }
+      this.askAsker(project);
+      if (model.requirements?.length) this.emit(project, 'decision', `requirements judged by meaning, from your words: ${conceptText(conceptOf(model)).split('\n').join(' · ')}`);
+      else if (this.router) this.emit(project, 'warn', 'no model framed the request in your own words: only the measured criteria and the model-written checklist apply');
+      this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}; ${kindNote(model)}`);
       return model;
     } catch (error) {
       this.emit(project, 'decision', `decision model not built: ${String(error.message).slice(0, 160)}`);
@@ -642,10 +655,15 @@ export class ResearchEngine {
     }
   }
 
-  async rebuildDecisionModel(project) {
+  askAsker(project) {
+    const asks = askerQuestions(project.decisionModel);
+    if (asks.length) project.assumptionsToConfirm = [...new Set([...(project.assumptionsToConfirm ?? []), ...asks])];
+  }
+
+  async rebuildDecisionModel(project, options = {}) {
     if (!this.modeler || this.demo) return project.decisionModel ?? null;
     try {
-      return await this.modeler.build(project, { force: true });
+      return await this.modeler.build(project, { force: true, ...options });
     } catch (error) {
       this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
       return project.decisionModel ?? null;
@@ -778,16 +796,18 @@ export class ResearchEngine {
 
   async studyDomain(project) {
     if (!this.router || this.demo || !this.search?.search) return true;
-    if (project.domain?.ready) return true;
     this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
+    const examples = conceptExamples(conceptOf(project.decisionModel));
+    const criteria = project.decisionModel?.requirements ?? [];
+    if (project.domain?.ready && examples.join('|') === (project.domain.examples ?? []).join('|')) return true;
     const purpose = project.decisionModel?.purpose ?? '';
     const kind = project.decisionModel?.kind ?? null;
-    const object = kind ? [kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
+    const object = kind ? [kind.asked || kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
     const hint = project.guidance ?? '';
     const brief = project.brief ?? this.briefOf(project);
     const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
-    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages, object, hint }) }).catch(() => null);
+    const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages, object, hint, examples, criteria }) }).catch(() => null);
     const queries = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 4).slice(0, DOMAIN_QUERIES);
     if (!queries.length) return true;
     const found = await this.search.search(queries, { maxSources: DOMAIN_SOURCES }).catch(() => []);
@@ -795,10 +815,10 @@ export class ResearchEngine {
     const replies = [];
     for (let index = 0; index < sources.length; index += DOMAIN_PAGES_PER_CALL) {
       const batch = sources.slice(index, index + DOMAIN_PAGES_PER_CALL);
-      const answer = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainFindingsPrompt({ question: project.question, purpose, sources: batch }) }).catch(() => null);
+      const answer = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainFindingsPrompt({ question: project.question, purpose, sources: batch, examples, criteria }) }).catch(() => null);
       replies.push(answer);
     }
-    const findings = mergeFindings(replies, sources);
+    const findings = mergeFindings(replies, sources, { examples, criteria });
     const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [] });
     const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
     const matchedTitles = Number(project.decisionModel?.kind?.verified?.matched ?? 0);
@@ -817,7 +837,9 @@ export class ResearchEngine {
           ? `portal listings: ${sweptListings}`
           : `listed kind: ${kind?.label ?? 'the item'}`;
     }
-    project.domain = { ...understanding, at: new Date().toISOString() };
+    project.domain = { ...understanding, examples, at: new Date().toISOString() };
+    const learned = understanding.members.filter((member) => member.supported);
+    if (examples.length) this.emit(project, 'decision', `class learned from your examples (${examples.join(', ')}): ${learned.length ? learned.map((member) => `${member.name} (${member.hosts.length} sites)`).join(', ') : 'no other member is named next to them on two sites yet'}`);
     const summary = [
       `object ${kind?.label || understanding.object[0] || 'not named yet'}`,
       `terms ${understanding.terms.slice(0, 3).join(', ') || 'not named yet'}`,
@@ -833,13 +855,36 @@ export class ResearchEngine {
     return true;
   }
 
+  async ensureKind(project) {
+    if (!this.modeler || this.demo || !project.acceptance?.itemCount || templateById(project.templateId).itemKind) return true;
+    if (project.decisionModel?.kind?.label) return true;
+    const earlier = project.decisionModel ?? null;
+    await this.rebuildDecisionModel(project, { askedBefore: [...(earlier?.providers ?? []), ...(earlier?.proposals?.refused ?? [])], grounded: true });
+    const model = project.decisionModel ?? null;
+    if (model?.kind?.label) {
+      this.emit(project, 'decision', `decision model rebuilt with other provider families and your own words: ${kindNote(model)}`);
+      return true;
+    }
+    this.setPhase(project, 'needs-kind');
+    this.emit(project, 'phase', `research paused: ${kindNote(model)}, after a rebuild with other provider families and your own words; without the item to list the plan cannot deliver anything, because no result can be screened — say what the item is in the Hints field, then press ▶ Run`);
+    return false;
+  }
+
   async ensurePurpose(project) {
     await this.ensureDecisionModel(project);
     if (!project.decisionModel || this.demo) return true;
     if (String(project.decisionModel.purpose ?? '').trim()) return true;
     await this.rebuildDecisionModel(project);
     if (String(project.decisionModel?.purpose ?? '').trim()) return true;
-    if (String(project.guidance ?? '').trim()) return true;
+    const requirements = project.decisionModel?.requirements ?? [];
+    if (requirements.length) {
+      this.emit(project, 'decision', `the purpose is not stated; your request already names ${requirements.length} requirement(s) a result must meet, so a stated purpose would not change the plan and the research goes on`);
+      return true;
+    }
+    if (!project.decisionModel?.framing && String(project.guidance ?? '').trim()) {
+      this.emit(project, 'decision', 'the request could not be framed this time, which does not mean it names no requirement: the purpose is not asked while your Hints stand, and the framing is tried again at the next step');
+      return true;
+    }
     this.setPhase(project, 'needs-purpose');
     this.emit(project, 'phase', 'research paused: the purpose is not clear — state why you ask and what result is worth having (Hints field)');
     return false;
@@ -917,9 +962,10 @@ export class ResearchEngine {
     const merged = mergeConceptCards(replies);
     const card = applyConceptCard(merged.data, pages);
     if (!card.terms.length) {
-      if (String(project.guidance ?? '').trim()) {
-        project.decisionModel.kind = { ...kind, validated: { pages: pages.length, terms: [], basis: 'hints', at: new Date().toISOString() } };
-        this.emit(project, 'decision', `the ${pages.length} page(s) about "${kind.label}" name it in different words; your Hints describe the item, so the research goes on and each page is judged for the kind`);
+      const described = describedItem({ kind, domain: project.domain });
+      if (described) {
+        project.decisionModel.kind = { ...kind, validated: { pages: pages.length, terms: [], basis: described.basis, at: new Date().toISOString() } };
+        this.emit(project, 'decision', `the ${pages.length} page(s) about "${kind.label}" name it in different words; the item is already described (${described.basis === 'request' ? 'your request' : 'the sources read for your request and Hints'}: ${described.words}), so another description would not change the plan: the research goes on and each page is judged for the kind`);
         return true;
       }
       this.setPhase(project, 'needs-concept');
@@ -1469,11 +1515,12 @@ export class ResearchEngine {
     this.setPhase(project, 'synthesizing');
     this.emit(project, 'phase', 'writing the decision memo');
     await this.store.save(project, { reason: 'memo started' });
+    const deliverables = await this.checkAcceptance(project, pages, { memoNext: true });
     const template = templateById(project.templateId);
     const reply = await this.router.complete({
       purpose: 'synthesize',
       tier: 'deep',
-      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates) }), project.guidance),
+      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates), verdict: verdictLines(verdictReport(project)) }), project.guidance),
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
@@ -1496,8 +1543,8 @@ export class ResearchEngine {
       basis: basisOf(project.nodes),
       model: `${reply.provider}/${reply.model}`,
       generatedAt: new Date().toISOString(),
+      deliverables,
     };
-    await this.checkAcceptance(project, pages);
     this.planActions(project);
     if (project.report.claimCheck) {
       const passed = project.report.claimCheck.contradicted.length === 0;
@@ -1706,7 +1753,24 @@ export class ResearchEngine {
     };
   }
 
-  async checkAcceptance(project, pages = null, { memoNext = false } = {}) {
+  async checkAcceptance(project, pages = null, options = {}) {
+    const complete = { result: project.acceptanceResult ?? null, summary: project.acceptanceSummary, deliverables: project.report?.deliverables };
+    try {
+      const deliverables = await this.measureAcceptance(project, pages, options);
+      delete project.acceptanceRecheck;
+      return deliverables;
+    } catch (error) {
+      if (!(error instanceof ResearchCancelled)) throw error;
+      project.acceptanceResult = complete.result;
+      project.acceptanceSummary = complete.summary;
+      if (project.report) project.report.deliverables = complete.deliverables;
+      project.acceptanceRecheck = { cancelled: true, at: new Date().toISOString(), keptResultOf: complete.result?.checkedAt ?? null };
+      this.emit(project, 'acceptance', complete.result ? `re-check cancelled: the last complete result is kept (${acceptanceSummaryOf(project)})` : 're-check cancelled before a complete result existed: no result is stored');
+      throw error;
+    }
+  }
+
+  async measureAcceptance(project, pages = null, { memoNext = false } = {}) {
     let secondOpinions = 0;
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
@@ -1718,11 +1782,12 @@ export class ResearchEngine {
       return version === JUDGE_VERSION;
     });
     const kindRejectedSet = new Set(project.kindRejected.map((e) => (typeof e === 'object' ? e.url : e)));
-    const deliverables = (brief.located === false
+    const built = (brief.located === false
       ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage, kindTerms: project.decisionModel?.kind?.terms ?? [], findWebsite: this.search?.search ? (name) => this.search.search([`"${name}"`], { maxSources: 5 }) : null })
-      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
+      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]));
+    const deliverables = keepJudged(built, project.acceptanceResult?.items ?? [], { carry: brief.located === false })
       .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
-    project.report.deliverables = deliverables;
+    if (project.report) project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage, convert });
     project.checkCache = project.checkCache ?? {};
@@ -1731,11 +1796,24 @@ export class ResearchEngine {
 
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
 
+    let judgeContext = null;
     if (project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
       const newChecklist = filterCountItems(project.decisionModel.checklist, askedCounts(project.acceptance));
       if (newChecklist) {
         project.checklist = newChecklist;
-        const fingerprint = checklistFingerprint(newChecklist);
+        const members = (project.domain?.members ?? []).filter((member) => member.supported).map((member) => member.name);
+        const labels = project.decisionModel?.labels ?? [];
+        const fingerprint = `${checklistFingerprint(newChecklist)}::${members.length}:${labels.length}`;
+        const rows = new Map((project.candidates?.kept ?? []).map((row) => [row.url, row]));
+        const price = (priced, unit) => {
+          if (priced.value === null || priced.value === undefined) return undefined;
+          const from = currencyOf(priced.unit ?? '');
+          const to = currencyOf(unit ?? '') || currencyOf(project.acceptance?.unit ?? '');
+          if (from === to) return Number(priced.value);
+          if (!from || !to || !convert) return undefined;
+          return convert(Number(priced.value), from, to) ?? undefined;
+        };
+        judgeContext = { fingerprint, of: (item) => ({ row: rows.get(item.url) ?? null, price, members, evidence: project.domain?.evidence ?? {}, labels, criteria: project.decisionModel?.criteria ?? [], measures: { trends: project.candidates?.sites?.trends ?? null, euHpi: project.candidates?.sites?.euHpi ?? null } }) };
         const targetCount = project.acceptance?.itemCount ?? project.acceptanceResult.items.length;
         let judgedCount = 0;
         let confirmedCount = 0;
@@ -1762,14 +1840,9 @@ export class ResearchEngine {
               item.checks = [];
               continue;
             }
-            const ctx = {
-              trends: project.candidates?.sites?.trends ?? null,
-              euHpi: project.candidates?.sites?.euHpi ?? null,
-            };
-            const decisionCriteria = project.decisionModel?.criteria ?? [];
-            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null, decisionCriteria, ctx);
+            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null, judgeContext.of(item));
             item.checklist = checklistSummary([item])[0];
-            checkCache[cacheKey] = { checks, summary: item.checklist };
+            if (!notJudged(checks)) checkCache[cacheKey] = { checks, summary: item.checklist };
             const keys = Object.keys(checkCache);
             if (keys.length > 500) {
               delete checkCache[keys[0]];
@@ -1832,12 +1905,17 @@ export class ResearchEngine {
                 }
               }
             }
-            if (!secondOpinionUsed && !kindRejectedSet.has(item.url)) {
-              project.kindRejected.push({ url: item.url, judgeVersion: JUDGE_VERSION });
-              kindRejectedSet.add(item.url);
-              if (project.kindRejected.length > 500) {
-                project.kindRejected.shift();
+            if (!secondOpinionUsed && kindCheck.second?.answer === 'no') {
+              if (!kindRejectedSet.has(item.url)) {
+                project.kindRejected.push({ url: item.url, judgeVersion: JUDGE_VERSION });
+                kindRejectedSet.add(item.url);
+                if (project.kindRejected.length > 500) project.kindRejected.shift();
               }
+            } else if (!secondOpinionUsed) {
+              kindCheck.leaning = { answer: 'no', quote: kindCheck.quote };
+              kindCheck.answer = 'unknown';
+              kindCheck.quote = '';
+              kindCheck.reason = SINGLE_KIND_OPINION;
             }
           }
 
@@ -1862,6 +1940,8 @@ export class ResearchEngine {
       }
     }
 
+    if (judgeContext) await this.settlePending(project, readPage, judgeContext);
+
     const kind = project.decisionModel?.kind ?? null;
     if (project.acceptanceResult) {
       this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, project.checklist, kind);
@@ -1880,7 +1960,21 @@ export class ResearchEngine {
     }
 
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
-    if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${Math.round(project.acceptanceResult.score * 100)}% — ${project.acceptanceResult.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}`);
+    if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${verdictLines(verdictReport(project)).join(' · ')}`);
+    return deliverables;
+  }
+
+  async settlePending(project, readPage, judgeContext) {
+    const hardIds = hardIdsOf(project.checklist, project.decisionModel?.kind ?? null);
+    for (const item of project.acceptanceResult?.items ?? []) {
+      if (!awaitsSecondFamily(item, hardIds)) continue;
+      this.throwIfCancelled(project);
+      const page = await readPage(item.pageUrl ?? item.url).catch(() => null);
+      if (!page?.text) continue;
+      item.checks = await this.checklistJudge.confirmPending(item.checks, page.text, project.checklist, judgeContext.of(item));
+      const entry = project.checkCache?.[`${item.pageUrl ?? item.url}::${judgeContext.fingerprint}`];
+      if (entry) entry.checks = entry.checks.map((cached) => (cached.pending ? item.checks.find((check) => check.id === cached.id) ?? cached : cached));
+    }
   }
 
   async findDeeperPageForKind(item, readPage, kind) {
@@ -1968,6 +2062,10 @@ export class ResearchEngine {
       this.reground(project);
       if (!await this.ensurePurpose(project)) {
         await this.store.save(project, { reason: 'run paused: the purpose is not stated' });
+        return project;
+      }
+      if (!await this.ensureKind(project)) {
+        await this.store.save(project, { reason: 'run paused: the item to list is not agreed' });
         return project;
       }
       if (!await this.validateConcept(project)) {
@@ -2356,7 +2454,6 @@ export class ResearchEngine {
     try {
       const project = await this.load(id);
       await this.synthesize(project, pages);
-      await this.checkAcceptance(project, pages, { memoNext: true });
       this.checkSpecs(project);
       this.planActions(project);
       const asked = project.acceptanceResult?.totalAsked ?? 0;

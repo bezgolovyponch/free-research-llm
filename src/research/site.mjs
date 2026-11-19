@@ -58,7 +58,7 @@ const EUROSTAT_CODE = { GR: 'EL' };
 export const EU_AGGREGATE = 'EU27_2020';
 export const BASE_CURRENCY = 'EUR';
 export const BASE_INFLATION_GEO = 'EA';
-export const TREND_VERSION = 2;
+export const TREND_VERSION = 3;
 const LAKE_FILTER = '[natural=water][water~"^(lake|reservoir)$"][name]';
 export const TITLE_PLACE_KM = 25;
 const COUNT_FILTERS = {
@@ -205,6 +205,7 @@ export function trendOf(hpi, hicp, { rates = null, baseHicp = null } = {}) {
   const product = factors.reduce((f, [, factor]) => f * factor, 1);
   return {
     ...result,
+    baseFactors: Object.fromEntries(factors),
     realInBase: round((last[1] - 1) * 100, 1),
     realInBaseCagr: round((product ** (1 / factors.length) - 1) * 100, 1),
     realInBaseSince: factors[0][0],
@@ -213,9 +214,24 @@ export function trendOf(hpi, hicp, { rates = null, baseHicp = null } = {}) {
   };
 }
 
+export function commonTrend(trend, other) {
+  const years = Object.keys(trend?.baseFactors ?? {}).filter((year) => other?.baseFactors?.[year] !== undefined).sort();
+  if (!years.length) return null;
+  const cagr = (factors) => round((years.reduce((product, year) => product * factors[year], 1) ** (1 / years.length) - 1) * 100, 1);
+  return { own: cagr(trend.baseFactors), other: cagr(other.baseFactors), since: years[0], year: years.at(-1), years: years.length };
+}
+
+export function trendKey(code, currency = BASE_CURRENCY) {
+  return currency && currency !== BASE_CURRENCY ? `${code}|${currency}` : code;
+}
+
 export async function fetchRates(currency, fetchJson) {
   if (!currency || currency === BASE_CURRENCY) return null;
   return yearly(await fetchJson(`${ERT_URL}?statinfo=AVG&currency=${currency}&sinceTimePeriod=2019`, { timeoutMs: TREND_TIMEOUT_MS }));
+}
+
+function retryable(error) {
+  return transientError(error) || /HTTP (?:429|5\d\d)/.test(String(error?.message ?? ''));
 }
 
 export function currencyByCountry(rows) {
@@ -602,6 +618,7 @@ export class SiteAssessor {
     const codes = [...new Set(rows.map((r) => r.countryCode).filter(Boolean)), EU_AGGREGATE];
     const trends = {};
     const currencies = currencyByCountry(rows);
+    this.currencies = { ...(this.currencies ?? {}), ...currencies };
     for (const code of codes) trends[code] = await this.priceTrend(code, currencies[code] ?? BASE_CURRENCY);
     return { trends, euHpi: trends[EU_AGGREGATE]?.real ?? null };
   }
@@ -643,10 +660,10 @@ export class SiteAssessor {
 
   trendGaps(codes = []) {
     const missing = [...new Set([...codes.filter(Boolean), EU_AGGREGATE])].filter((code) => {
-      const entry = this.store.hpi[code];
+      const entry = this.store.hpi[trendKey(code, this.currencies?.[code])];
       return !entry || entry.value === null || entry.value === undefined;
     });
-    return { missing, due: missing.filter((code) => !this.hpiFresh(this.store.hpi[code])) };
+    return { missing, due: missing.filter((code) => !this.hpiFresh(this.store.hpi[trendKey(code, this.currencies?.[code])])) };
   }
 
   async baseInflation() {
@@ -656,7 +673,8 @@ export class SiteAssessor {
 
   async priceTrend(code, currency = BASE_CURRENCY) {
     if (!code) return null;
-    const known = this.store.hpi[code];
+    const key = trendKey(code, currency);
+    const known = this.store.hpi[key];
     if (this.hpiFresh(known) && (known.value === null || known.value?.version === TREND_VERSION)) return known.value ?? null;
     if (!this.limits.newSites) return known?.value ?? null;
     let value;
@@ -665,20 +683,23 @@ export class SiteAssessor {
       const hpi = yearly(await this.fetchJson(`${HPI_URL}?unit=RCH_A_AVG&purchase=TOTAL&geo=${geo}&sinceTimePeriod=2020`, { timeoutMs: TREND_TIMEOUT_MS }));
       const hicp = yearly(await this.fetchJson(`${HICP_URL}?unit=RCH_A_AVG&coicop=CP00&geo=${geo}&sinceTimePeriod=2020`, { timeoutMs: TREND_TIMEOUT_MS }));
       const baseHicp = await this.baseInflation();
-      const rates = currency && currency !== BASE_CURRENCY ? await fetchRates(currency, this.fetchJson).catch(() => undefined) : null;
+      const rates = currency && currency !== BASE_CURRENCY ? await fetchRates(currency, this.fetchJson).catch((error) => {
+        if (retryable(error)) throw error;
+        return undefined;
+      }) : null;
       value = rates === undefined ? { ...trendOf(hpi, hicp), baseNote: `no ${currency} exchange rate from Eurostat; the local real trend is used` } : trendOf(hpi, hicp, { rates, baseHicp });
     } catch (error) {
-      if (!transientError(error) && !/HTTP (?:429|5\d\d)/.test(String(error?.message ?? ''))) {
-        this.store.hpi[code] = { at: this.now(), checked: this.now(), value: known?.value ?? null };
+      if (!retryable(error)) {
+        this.store.hpi[key] = { at: this.now(), checked: this.now(), value: known?.value ?? null };
         this.persist();
         return known?.value ?? null;
       }
       const failures = (known?.failures ?? 0) + 1;
-      this.store.hpi[code] = { at: known?.at ?? 0, checked: this.now(), value: known?.value ?? null, failures, retryAt: this.now() + backoffMs(failures - 1) };
+      this.store.hpi[key] = { at: known?.at ?? 0, checked: this.now(), value: known?.value ?? null, failures, retryAt: this.now() + backoffMs(failures - 1) };
       this.persist();
       return known?.value ?? null;
     }
-    this.store.hpi[code] = { at: this.now(), checked: this.now(), value: value ?? null };
+    this.store.hpi[key] = { at: this.now(), checked: this.now(), value: value ?? null };
     this.persist();
     return value ?? null;
   }
@@ -736,7 +757,7 @@ export class SiteAssessor {
           site = await this.addLakes(point.lat, point.lon, site);
         }
         const conflict = await this.titleConflict(row, point, brief);
-        const trend = await this.priceTrend(row.countryCode, row.currency || BASE_CURRENCY);
+        const trend = await this.priceTrend(row.countryCode, ctx.currencies?.[row.countryCode] ?? BASE_CURRENCY);
         const assessed = { ...row, lat: point.lat, lon: point.lon, locatedBy: point.by, site: shortSite(sea ? site : withoutSea(site)), fit: fitOf(row, { hpi: trend?.real ?? null }), ...(conflict ? { placeConflict: conflict } : {}) };
         if (brief?.coastal && (site.coastKm === null || site.coastKm > EBIKE_KM)) {
           stats.far++;
@@ -757,7 +778,9 @@ export class SiteAssessor {
     await this.load();
     this.reads = 0;
     const stats = { assessed: 0, located: 0, far: 0, unlocated: 0, pending: 0, failed: 0 };
-    const ctx = { readPage, onProgress, stats, started: this.now(), fresh: 0 };
+    const currencies = currencyByCountry([...(candidates.kept ?? []), ...(candidates.outside ?? [])]);
+    this.currencies = { ...(this.currencies ?? {}), ...currencies };
+    const ctx = { readPage, onProgress, stats, started: this.now(), fresh: 0, currencies };
     const inside = await this.measureRows(candidates.kept ?? [], brief, ctx);
     const kept = inside.near;
     const { far, gone } = inside;

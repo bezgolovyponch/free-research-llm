@@ -5,11 +5,13 @@ import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
 import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
-import { MAX_MEMBERS, MIN_MEMBERS, memberTerms, sameMember } from './concept.mjs';
+import { ELIGIBILITY, MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
 import { MEASURES, compare } from './measures.mjs';
+import { agreeAcrossSamples, agreed, closedVote, familyProposals, matchPrompt, optionLines, retrieveThenVerify } from './semantic.mjs';
+import { tokens } from '../search/search.mjs';
 
 export { CHECKLIST_VERSION };
-export const DECISION_MODEL_VERSION = 7;
+export const DECISION_MODEL_VERSION = 9;
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
 export const CASES_RETRIEVED = 2;
@@ -62,6 +64,19 @@ export function normalizeSample(raw) {
   };
 }
 
+export const NO_ITEM_NAMED = 'it names no item to list: "kind.label" is empty';
+
+export function proposalOf(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const sample = normalizeSample(data);
+  return sample.kind.label.trim() ? sample : null;
+}
+
+const proposalSchema = (data) => {
+  const sample = proposalOf(data);
+  return sample ? { value: sample } : { error: NO_ITEM_NAMED };
+};
+
 const median = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -98,12 +113,47 @@ function fromCases(measure, op, cases, id = '') {
   return null;
 }
 
-export function aggregate(samples, { question = '', guidance = '', cases = [], id = '' } = {}) {
-  const n = samples.length;
+export const KIND_MATCH_TASK = 'kind-match';
+export const GROUNDED_KIND_TASK = 'kind-grounded';
+
+export function groundedKindPrompt({ query, options, none }) {
+  return [
+    { role: 'system', content: `You read what an asker wrote, in any language, and the items research assistants proposed to list for it. Pick the option that names the item the asker's own words ask to list, or ${none} when none does. Answer with JSON only: {"pick":"<one letter>"}.` },
+    { role: 'user', content: `The asker wrote:\n${query}\n\nItems proposed:\n${optionLines(options, none)}` },
+  ];
+}
+
+export function askerWords({ question = '', guidance = '' } = {}) {
+  return [`Request: ${String(question).trim()}`, ...(String(guidance).trim() ? [`Hints: ${String(guidance).trim()}`] : [])].join('\n');
+}
+
+export async function settleKind(samples, { router, embedder = null, grounding = '' } = {}) {
+  if (!samples.length) return { voters: [], grounded: false };
+  const kinds = samples.map((sample, index) => ({ index, label: sample.kind.label }));
+  const clusters = await agreeAcrossSamples({ samples: kinds.map((kind) => [kind]), textOf: (kind) => kind.label, minSamples: 1, embedder, router, prompt: matchPrompt('kind of item'), task: KIND_MATCH_TASK });
+  const votersOf = (cluster) => cluster.items.map((kind) => kind.index);
+  const [largest] = clusters.filter((cluster) => cluster.samples >= Math.floor(samples.length / 2) + 1).sort((a, b) => b.samples - a.samples);
+  if (largest) return { voters: votersOf(largest), grounded: false };
+  if (!String(grounding).trim() || !clusters.length) return { voters: [], grounded: false };
+  const result = await retrieveThenVerify({ query: grounding, candidates: clusters.map((cluster, id) => ({ id, text: cluster.item.label })), fixed: true, router, prompt: groundedKindPrompt, task: GROUNDED_KIND_TASK });
+  return result.picked ? { voters: votersOf(clusters[result.picked.id]), grounded: true } : { voters: [], grounded: false };
+}
+
+export async function agreedKindVoters(samples, options = {}) {
+  return (await settleKind(samples, { ...options, grounding: '' })).voters;
+}
+
+export function aggregate(samples, { question = '', guidance = '', cases = [], id = '', kindVoters = null } = {}) {
+  const agreeing = (kindVoters ?? []).map((index) => samples[index]).filter(Boolean);
+  const about = agreeing.length ? agreeing : samples;
+  const grounds = agreeing.length >= Math.floor(samples.length / 2) + 1 ? agreeing : samples;
+  const named = kindVoters ? agreeing : samples;
+  const n = grounds.length;
   const majority = Math.floor(n / 2) + 1;
+  const kindMajority = Math.floor(named.length / 2) + 1;
   const said = `${question}\n${guidance}`;
   const groups = new Map();
-  for (const sample of samples) {
+  for (const sample of grounds) {
     const seen = new Set();
     for (const c of sample.criteria) {
       const key = `${c.measure}|${c.op}`;
@@ -131,20 +181,21 @@ export function aggregate(samples, { question = '', guidance = '', cases = [], i
     else noLimit.push({ measure, op, clause, votes: votes.length });
   }
   const termVotes = new Map();
-  for (const sample of samples) for (const t of new Set(sample.kind.terms)) termVotes.set(t, (termVotes.get(t) ?? 0) + 1);
-  const terms = [...termVotes].filter(([, v]) => v >= majority).map(([t]) => t);
+  for (const sample of named) for (const t of new Set(sample.kind.terms)) termVotes.set(t, (termVotes.get(t) ?? 0) + 1);
+  const terms = [...termVotes].filter(([, v]) => v >= kindMajority).map(([t]) => t);
   const notVotes = new Map();
-  for (const sample of samples) for (const t of new Set(sample.kind.not ?? [])) notVotes.set(t, (notVotes.get(t) ?? 0) + 1);
-  const not = [...notVotes].filter(([, v]) => v >= majority).map(([t]) => t);
-  const labels = samples.map((s) => s.kind.label).filter(Boolean);
+  for (const sample of named) for (const t of new Set(sample.kind.not ?? [])) notVotes.set(t, (notVotes.get(t) ?? 0) + 1);
+  const not = [...notVotes].filter(([, v]) => v >= kindMajority).map(([t]) => t);
+  const labels = named.map((s) => s.kind.label).filter(Boolean);
   const label = labels.sort((a, b) => labels.filter((x) => x === b).length - labels.filter((x) => x === a).length)[0] ?? '';
-  const members = votedMembers(samples, majority);
-  const kindTerms = [...new Set([...terms, ...members.flatMap((m) => m.terms)])];
+  const members = votedMembers(named, kindMajority);
+  const voted = [...new Set([...terms, ...members.flatMap((m) => m.terms)])];
+  const kindTerms = voted.length || !kindVoters ? voted : [...new Set(labels.map((text) => plain(text).trim()).filter(Boolean))];
   const clauses = clausesOf(question).map((text) => ({ text, criteria: criteria.filter((c) => (c.quote && quoteFound(text, c.quote)) || (c.clause && quoteFound(text, c.clause)) || (c.clause && quoteFound(c.clause, text))).map((c) => c.id) }));
   const wanted = contentWords(said);
   let chosen = null;
   let purposeGrounded = 0;
-  for (const sample of samples) {
+  for (const sample of about) {
     const overlap = [...contentWords(`${sample.purpose ?? ''} ${sample.value ?? ''}`)].filter((w) => wanted.has(w)).length;
     if (!chosen || overlap > purposeGrounded) {
       chosen = sample;
@@ -153,7 +204,7 @@ export function aggregate(samples, { question = '', guidance = '', cases = [], i
   }
   const purpose = chosen?.purpose && chosen.value && purposeGrounded >= 2 && /so that/i.test(chosen.purpose) ? chosen.purpose : null;
   return {
-    concept: samples.map((s) => s.concept).find(Boolean) ?? '',
+    concept: about.map((s) => s.concept).find(Boolean) ?? '',
     purpose,
     value: chosen?.value || null,
     needs: chosen?.needs ?? [],
@@ -163,8 +214,22 @@ export function aggregate(samples, { question = '', guidance = '', cases = [], i
     noLimit,
     clauses,
     missing: clauses.filter((c) => !c.criteria.length).map((c) => c.text),
-    agreement: { samples: n, majority, proposed: groups.size, kept: criteria.length + noLimit.length },
+    agreement: { samples: samples.length, majority, proposed: groups.size, kept: criteria.length + noLimit.length, ...(kindVoters ? { kindVoters: agreeing.length } : {}) },
   };
+}
+
+export function kindNote(model) {
+  if (!model) return 'no provider family returned a decision model that names the item to list';
+  const kinds = model.proposals?.kinds ?? [];
+  const named = kinds.length ? ` (${kinds.map((entry) => `${entry.provider}: ${entry.label}`).join('; ')})` : '';
+  const families = model.agreement?.samples ?? kinds.length;
+  const voters = model.agreement?.kindVoters;
+  const label = model.kind?.label;
+  if (!label) return `no item kind agreed: the provider families named different items${named}`;
+  if (model.agreement?.kindGrounded) return `item kind "${label}" chosen by your own words (request and Hints) among the items the provider families named${named}`;
+  if (voters === 0 && model.kind.framed) return `item kind "${label}" taken from your own words: the provider families named different items${named}`;
+  if (voters === 0) return `item kind "${label}" kept from the earlier model: the provider families now named different items${named}`;
+  return `item kind "${label}" agreed by ${voters ?? families} of ${families} provider families${named}${model.single ? ', one family only, to confirm' : ''}`;
 }
 
 export function verifyKind(kind, titles) {
@@ -228,13 +293,43 @@ export function applyCalibration(kind, reply, titles, { itemTitles = [] } = {}) 
   };
 }
 
+export const UNAPPROVED_EXAMPLES = 'Models built earlier for other questions, which nobody approved, so they may be wrong';
+
+function exampleShot(c) {
+  return `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [], ...(c.kind.members?.length ? { members: c.kind.members.map((m) => ({ label: m.label, terms: m.terms })) } : {}) } : null, criteria: (c.criteria ?? []).map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`;
+}
+
+export function exampleBlocks(examples = []) {
+  const approved = examples.filter((c) => c.approved === true);
+  const unapproved = examples.filter((c) => c.approved !== true);
+  return [approved.length ? `Approved examples:\n${approved.map(exampleShot).join('\n\n')}` : '', unapproved.length ? `${UNAPPROVED_EXAMPLES}:\n${unapproved.map(exampleShot).join('\n\n')}` : ''].filter(Boolean).join('\n\n');
+}
+
 export function decisionPrompt({ question, guidance = '', expected = '', examples = [] }) {
   const measures = Object.entries(MEASURES).map(([id, m]) => `- ${id}: ${m.label} (${m.unit})`).join('\n');
-  const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [], ...(c.kind.members?.length ? { members: c.kind.members.map((m) => ({ label: m.label, terms: m.terms })) } : {}) } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
+  const shots = exampleBlocks(examples);
   return [
     { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label, the words (in English and in the languages of the named countries) that listing titles use for it, and "not", the words (in English and in the languages of the named countries, and of the countries around a named place) that listing titles use for things sold alongside the item that are not the item itself (parts, accessories, wanted ads, services). When the item asked is a category that covers several distinct kinds of seller or item (one asks for "home improvement contractors" and means roofers, plumbers, electricians and the like), "kind" also lists in "members" every kind the question reasonably covers, each {"label": "...", "terms": ["..."]} with the words its own sellers use, and "terms" holds the words for the category as a whole; "members" is [] when the item is one kind.\n"purpose" is one sentence "<who> wants <outcome> so that <value>" in the user's own terms, naming the decision the result serves. "value" is one sentence naming the result worth having and how it is judged (for example "a shortlist of <N> <items> within <distance> of <place>, each at or below <limit> and below the median price of comparable items"). "needs" is up to 8 items {"need": "...", "kind": "listings" | "knowledge" | "computed", "sources": ["a domain or a source type", up to 4]} where listings are read by code from portals, knowledge is researched by tree pieces, and computed is derived by code from the listings table. Answer with JSON only: {"concept": "...", "purpose": "...", "value": "...", "needs": [...], "kind": {"label": "...", "terms": ["..."], "not": ["..."], "members": [{"label": "...", "terms": ["..."]}]}, "criteria": [...], "unmodelled": ["..."]}` },
-    { role: 'user', content: `${shots ? `Approved examples:\n${shots}\n\n` : ''}Question: ${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
+    { role: 'user', content: `${shots ? `${shots}\n\n` : ''}Question: ${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
   ];
+}
+
+export const EXAMPLE_TASK = 'example-kind';
+export const EXAMPLE_OPTIONS = [{ id: 'same', text: 'the same kind of item as the new question' }, { id: 'other', text: 'a different kind of item' }];
+
+export function examplePrompt({ question, example, options }) {
+  return [
+    { role: 'system', content: 'You compare two research questions by meaning, in any language. Say what the earlier question asks to find, compared with the new question. Answer with JSON only: {"same":"<one letter>"}.' },
+    { role: 'user', content: `New question: ${question}\n\nEarlier question: ${example.question}\n\nThe earlier question asks to find:\n${optionLines(options)}` },
+  ];
+}
+
+export async function sameKindExamples(router, question, examples) {
+  const judged = await Promise.all((examples ?? []).map(async (example) => {
+    const result = await closedVote({ router, task: EXAMPLE_TASK, tier: 'fast', options: EXAMPLE_OPTIONS, field: 'same', seed: `${question}|${example.question}`, prompt: (shown) => examplePrompt({ question, example, options: shown }) });
+    return agreed(result)?.id === 'same' ? example : null;
+  }));
+  return judged.filter(Boolean);
 }
 
 export function evaluateCriterion(row, criterion, ctx = {}) {
@@ -288,6 +383,8 @@ export function modelText(model) {
   if (model.concept) lines.push(`Concept: ${model.concept}`);
   if (model.criteria?.length) lines.push(`Decision model (code measures each listing): ${model.criteria.map((c) => `${MEASURES[c.measure].label} ${c.op} ${c.value} ${MEASURES[c.measure].unit} (${c.source})`).join('; ')}`);
   if (model.noLimit?.length) lines.push(`Asked but no limit stated, so not checked: ${model.noLimit.map((c) => MEASURES[c.measure].label).join('; ')}`);
+  const framed = conceptText(conceptOf(model));
+  if (framed) lines.push(framed);
   if (model.missing?.length) lines.push(`Not modelled yet (no code check): ${model.missing.join('; ')}`);
   if (model.checklist?.length) {
     lines.push(`Checklist (each item judged on its own page):`);
@@ -319,8 +416,17 @@ export const REFERENCE_CASE = {
   uses: 0,
 };
 
+export const CASE_SIMILARITY_FLOOR = 0.2;
+
+export function caseSimilarity(question, earlier) {
+  const asked = new Set(tokens(question));
+  if (!asked.size) return 0;
+  const said = new Set(tokens(earlier));
+  return [...asked].filter((word) => said.has(word)).length / asked.size;
+}
+
 export function rankCases(question, cases, k = CASES_RETRIEVED, exclude = '') {
-  const pool = cases.filter((c) => c.question && !(exclude && c.id === exclude));
+  const pool = cases.filter((c) => c.question && !(exclude && c.id === exclude) && caseSimilarity(question, c.question) >= CASE_SIMILARITY_FLOOR);
   if (!pool.length) return [];
   const sims = bm25(pool.map((c) => c.question), question);
   const top = Math.max(...sims);
@@ -412,29 +518,46 @@ function carried(before, model) {
   return { ...model, ...defined(before, MODEL_STATE), kind: { ...model.kind, terms, ...(not.length ? { not } : {}), ...members, ...defined(was, KIND_STATE) } };
 }
 
+function withFraming(model, framed, checklist) {
+  const requirements = framed?.criteria ?? [];
+  const covered = (text) => requirements.some((requirement) => quoteFound(text, requirement.quote) || quoteFound(requirement.quote, text));
+  const framing = framed ? { population: framed.population, limits: framed.limits, ranks: framed.ranks, context: framed.context, method: framed.method, open: framed.open ?? [], samples: framed.samples } : null;
+  const asked = conceptKindLabel(framed);
+  const named = model.kind ?? (asked ? { label: asked, terms: [plain(asked).trim()], verified: null, framed: true } : null);
+  const kind = asked && named ? { ...named, asked, described: conceptDescribed(framed), examples: conceptExamples(framed) } : model.kind;
+  return { ...model, kind, missing: (model.missing ?? []).filter((text) => !covered(text)), checklist: conceptChecklist(framed, checklist, { criteria: model.criteria ?? [] }), requirements, framing };
+}
+
 export class DecisionModeler {
-  constructor({ router, cases = null, samples = SAMPLES } = {}) {
+  constructor({ router, cases = null, samples = SAMPLES, embedder = null } = {}) {
     this.router = router;
+    this.embedder = embedder;
     this.cases = cases;
     this.samples = samples;
-    this.checklistModeler = new ChecklistModeler({ router, samples });
+    this.checklistModeler = new ChecklistModeler({ router, samples, embedder });
   }
 
   fresh(project) {
-    const m = project.decisionModel;
-    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
+    return this.current(project) && Boolean(project.decisionModel.framing);
   }
 
-  async build(project, { force = false } = {}) {
-    if (this.fresh(project) && !force) return project.decisionModel;
+  current(project) {
+    const m = project.decisionModel;
+    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && (m.expected ?? '') === String(project.acceptance?.expected ?? '') && m.agreement?.samples >= 1 && !isDegenerate(m));
+  }
+
+  async build(project, { force = false, askedBefore = [], grounded = false } = {}) {
+    if (!force && this.current(project)) return project.decisionModel.framing ? project.decisionModel : this.reframe(project);
     const question = project.question;
     const guidance = String(project.guidance ?? '');
-    const examples = this.cases ? await this.cases.retrieve(question, CASES_RETRIEVED, project.id) : [];
+    const examples = this.cases ? await sameKindExamples(this.router, question, await this.cases.retrieve(question, CASES_RETRIEVED, project.id)) : [];
     const messages = decisionPrompt({ question, guidance, expected: project.acceptance?.expected ?? '', examples });
-    const replies = await Promise.all(Array.from({ length: this.samples }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
-    const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));
-    if (samples.length < 2) return project.decisionModel ?? null;
-    const model = aggregate(samples, { question, guidance, cases: examples, id: project.id });
+    const drawn = await familyProposals({ router: this.router, n: this.samples, tier: 'deep', purpose: 'decision-model', temperature: SAMPLE_TEMPERATURE, messages, schema: proposalSchema, askedBefore });
+    const samples = drawn.proposals.map((proposal) => proposal.value);
+    if (!samples.length) return project.decisionModel ?? null;
+    const settled = await settleKind(samples, { router: this.router, embedder: this.embedder, grounding: grounded ? askerWords({ question, guidance }) : '' });
+    const model = aggregate(samples, { question, guidance, cases: examples, id: project.id, kindVoters: settled.voters });
+    if (settled.grounded) model.agreement.kindGrounded = true;
     const stored = project.decisionModel;
     let finalModel = model;
     let rebuildWeaker = false;
@@ -456,9 +579,20 @@ export class DecisionModeler {
         }
       }
     }
-    const checklist = await this.checklistModeler.build(question, guidance);
-    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, rebuildWeaker };
+    const expected = String(project.acceptance?.expected ?? '');
+    const framed = await frameConcept({ router: this.router }, { question, expected }).catch(() => null);
+    const { checklist, requirements, framing, ...withConcept } = withFraming(finalModel, framed, await this.checklistModeler.build(question, guidance));
+    const proposals = { families: samples.length, repeats: drawn.repeats.map((entry) => entry.provider), refused: drawn.refused.map((entry) => entry.provider), kinds: drawn.proposals.map((proposal) => ({ provider: proposal.provider, label: proposal.value.kind.label })) };
+    project.decisionModel = { ...carried(stored, withConcept), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: drawn.proposals.map((proposal) => proposal.provider), proposals, ...(samples.length === 1 ? { single: true } : {}), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, expected, requirements, framing, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
+    return project.decisionModel;
+  }
+
+  async reframe(project) {
+    const model = project.decisionModel;
+    const framed = await frameConcept({ router: this.router }, { question: project.question, expected: String(project.acceptance?.expected ?? '') }).catch(() => null);
+    if (!framed) return model;
+    project.decisionModel = withFraming(model, framed, (model.checklist ?? []).filter((cluster) => cluster.role !== ELIGIBILITY));
     return project.decisionModel;
   }
 }

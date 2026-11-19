@@ -11,6 +11,7 @@ export const DRAFT_TEMPERATURE = 0.2;
 
 const LETTERS = CHOICE_LETTERS;
 export const SINGLE_REASON = 'one independent judgement only: fewer than two provider families answered';
+const correction = (error) => ({ role: 'user', content: `Your last answer was not accepted: ${error ?? 'it does not follow the JSON format'}. Answer again with JSON only, in the exact format asked.` });
 
 export function agreed(result) {
   return result && !result.single ? result.value ?? null : null;
@@ -89,7 +90,7 @@ async function attempt({ router, task, tier = 'fast', messages, schema, avoid, t
     const call = { provider: reply.provider ?? null, model: reply.model ?? null, valid: checked?.error === undefined && checked?.value !== undefined && checked?.value !== null };
     calls.push(call);
     if (call.valid) return { value: checked.value, provider: call.provider, model: call.model, calls };
-    asked = [...messages, { role: 'user', content: `Your last answer was not accepted: ${checked?.error ?? 'it does not follow the JSON format'}. Answer again with JSON only, in the exact format asked.` }];
+    asked = [...messages, correction(checked?.error)];
   }
   return { value: null, calls };
 }
@@ -229,22 +230,103 @@ export function matchPrompt(what) {
   ];
 }
 
-export async function agreeAcrossSamples({ samples, textOf, sameKey = null, minSamples = 2, embedder = null, router, prompt, task, budget = null, stage = null }) {
+export async function agreeAcrossSamples({ samples, textOf, sameKey = null, minSamples = 2, embedder = null, router, prompt, task, budget = null, stage = null, keepUndecided = false }) {
   const clusters = [];
   for (const [sample, items] of samples.entries()) {
     for (const item of items) {
       const open = clusters.filter((cluster) => !cluster.samples.has(sample) && (!sameKey || sameKey(cluster.items[0]) === sameKey(item)));
       const exact = open.find((cluster) => cluster.items.some((other) => textOf(other).trim().toLowerCase() === textOf(item).trim().toLowerCase()));
       let home = exact ?? null;
+      let undecided = false;
       if (!home && open.length) {
         const match = await retrieveThenVerify({ query: textOf(item), candidates: open.map((cluster, id) => ({ id, text: textOf(cluster.items[0]) })), embedder, router, prompt, task, budget, stage });
         home = match.picked ? open[match.picked.id] : null;
+        undecided = !home && !match.none;
       }
       if (home) {
         home.items.push(item);
         home.samples.add(sample);
-      } else clusters.push({ items: [item], samples: new Set([sample]) });
+      } else clusters.push({ items: [item], samples: new Set([sample]), undecided });
     }
   }
-  return clusters.filter((cluster) => cluster.samples.size >= minSamples).map((cluster) => ({ item: cluster.items[0], items: cluster.items, samples: cluster.samples.size }));
+  const short = (cluster) => cluster.samples.size < minSamples;
+  return clusters.filter((cluster) => !short(cluster) || (keepUndecided && cluster.undecided)).map((cluster) => ({ item: cluster.items[0], items: cluster.items, samples: cluster.samples.size, ...(short(cluster) ? { undecided: true } : {}) }));
+}
+
+export const PROPOSAL_WAVES = 3;
+export const PROPOSAL_QUORUM = 2;
+
+function openFamilies(router, { tier, purpose, counted, held, askedBefore }) {
+  const open = router.families?.({ tier, purpose })?.filter((family) => !counted.some((other) => sameFamily(other, family))) ?? null;
+  if (!open) return null;
+  const free = open.filter((family) => !family.paid);
+  const reachable = free.length || held >= PROPOSAL_QUORUM ? free : open;
+  const fresh = reachable.filter((family) => !askedBefore.has(family.stack));
+  return [...fresh, ...reachable.filter((family) => !fresh.includes(family))];
+}
+
+export async function familyProposals({ router, n = 3, tier = 'deep', purpose, task = null, temperature, messages, schema, askedBefore = [], budget = null, stage = null, record = false }) {
+  const familyOf = (reply) => router.familyOf?.(reply.provider, { tier, model: reply.model }) ?? replyFamily(reply.model, reply.provider ?? '');
+  const earlier = new Set(askedBefore);
+  const counted = [];
+  const used = new Set();
+  const proposals = [];
+  const repeats = [];
+  const refused = [];
+  let spent = false;
+  const complete = async (content, avoid) => {
+    if (budget && !budget.take(stage)) {
+      spent = true;
+      return null;
+    }
+    try {
+      return await router.complete({ purpose, tier, temperature, messages: content, ...(task ? { task } : {}), ...(avoid.length ? { avoid } : {}), ...(counted.length ? { outside: [...counted] } : {}) });
+    } catch {
+      return null;
+    }
+  };
+  const draw = async (avoid) => {
+    const drawn = [];
+    let content = messages;
+    for (let round = 0; round < 2; round++) {
+      const reply = await complete(content, avoid);
+      if (!reply) break;
+      const checked = schema(reply.data);
+      const valid = checked?.error === undefined && checked?.value !== undefined && checked?.value !== null;
+      if (record && reply.provider) router.recordOutcome?.({ provider: reply.provider, model: reply.model, purpose, passed: valid });
+      drawn.push(valid ? { reply, value: checked.value } : { reply });
+      if (valid) break;
+      content = [...messages, correction(checked?.error)];
+    }
+    return drawn;
+  };
+  for (let wave = 0; wave < n * PROPOSAL_WAVES && proposals.length < n; wave++) {
+    const targets = openFamilies(router, { tier, purpose, counted, held: proposals.length, askedBefore: earlier });
+    if (targets && !targets.length) break;
+    const want = targets ? Math.min(n - proposals.length, targets.length) : 1;
+    const ahead = (targets ?? []).map((family) => family.stack).filter(Boolean);
+    const perCall = await Promise.all(Array.from({ length: want }, (_, index) => {
+      const away = !targets || !earlier.has(targets[index]?.stack) ? [...earlier] : [];
+      return draw([...new Set([...used, ...away, ...ahead.slice(0, index)])]);
+    }));
+    const replies = perCall.flat();
+    const novel = replies.some(({ reply }) => !used.has(reply.provider));
+    for (const { reply, value } of replies) {
+      if (reply.provider) used.add(reply.provider);
+      const entry = { provider: reply.provider ?? null, model: reply.model ?? null };
+      if (value === undefined) {
+        refused.push(entry);
+        continue;
+      }
+      const family = familyOf(reply);
+      if (counted.some((other) => sameFamily(other, family))) {
+        repeats.push({ ...entry, value });
+        continue;
+      }
+      counted.push(family);
+      proposals.push({ ...entry, value, ...(family.paid ? { paid: true } : {}) });
+    }
+    if (!novel || spent) break;
+  }
+  return { proposals, repeats, refused };
 }

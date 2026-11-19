@@ -6,7 +6,7 @@ import { ScriptedProvider } from '../../src/llm/scripted-provider.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
 import { ResearchEngine } from '../../src/research/engine.mjs';
 import { ProjectStore } from '../../src/store.mjs';
-import { CONCEPT_MARKER, MAX_MEMBERS, MIN_MEMBERS, UMBRELLA_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, memberTerms, mergeConceptCards, sameMember } from '../../src/research/concept.mjs';
+import { CONCEPT_MARKER, describedItem, MAX_MEMBERS, MIN_MEMBERS, UMBRELLA_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, memberTerms, mergeConceptCards, sameMember } from '../../src/research/concept.mjs';
 import { aggregate, decisionPrompt, normalizeSample, votedMembers } from '../../src/research/decision.mjs';
 import { domainUnderstanding, supportedMembers } from '../../src/research/domain.mjs';
 import { entityDeliverables, kindOnPage, purposeChecks } from '../../src/research/acceptance.mjs';
@@ -201,7 +201,7 @@ describe('checking delivered pages against a category', () => {
   it('delivers a seller of one kind, anchored on the words of that kind rather than the category label', async () => {
     const nodes = [{ id: 'A', sources: [{ url: 'https://porto-pipes.example/', title: 'Pipe repair and plumbing in Porto', text: 'Pipe repair, plumbing and boilers in Porto.' }] }];
     const terms = contractors.members.flatMap(memberTerms);
-    expect(await entityDeliverables(nodes as never, { terms, kindLabel: contractors.label })).toEqual([]);
+    expect((await entityDeliverables(nodes as never, { terms, kindLabel: contractors.label })).filter((d: { named: boolean }) => d.named)).toEqual([]);
     expect((await entityDeliverables(nodes as never, { terms, kindLabel: contractors.label, members: contractors.members })).map((d: { url: string }) => d.url)).toEqual(['https://porto-pipes.example/']);
   });
 
@@ -277,25 +277,84 @@ describe('the engine with a category', () => {
     expect(p.log.some((l) => l.type === 'decision' && l.message.includes('confirmed as a category on 4 page(s): 2 kind(s) named by sellers (roofer, plumber); kept without a page yet: electrician'))).toBe(true);
   });
 
-  it('goes on with the Hints when the pages name a single kind in different words, and pauses without Hints', async () => {
+  describe('pages that name a single kind in different words (C11): the pause fires only when the answer would change the plan', () => {
     const pages = [
       { title: 'Groothandel', url: 'https://a.example/', text: 'Tweedehands kleding per kilo in balen.' },
       { title: 'Hurtownia', url: 'https://b.example/', text: 'Odziez uzywana na wage, bele.' },
     ];
-    const single = { label: 'used clothing wholesaler', terms: ['used clothing wholesaler'] };
-    const run = async (guidance: string) => {
+    const single = { label: 'wholesale clothing supplier', terms: ['wholesale clothing supplier'] };
+    const suppliersQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio , proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
+    const suppliersHints = 'branded vintage clothing wholesale: graded A/cream, sold per kg in bales or curated bundles, suppliers in NL, DE, UK, IT, PL, LT';
+    const suppliersDomain = { ready: true, terms: ['branded vintage clothing wholesale', 'graded A', 'cream', 'suppliers in NL'], not: [] };
+    const run = async (extra: object, kind: object = single) => {
       const { engine } = engineWith([], pages);
-      const p = { ...project(), guidance, decisionModel: { kind: structuredClone(single), criteria: [] } } as ReturnType<typeof project> & { phase?: string; guidance: string };
+      const p = { ...project(), ...extra, decisionModel: { kind: structuredClone(kind), criteria: [] } } as ReturnType<typeof project> & { phase?: string };
       return { ok: await engine.validateConcept(p as never), p };
     };
-    const hinted = await run('graded vintage clothing sold per kg in bales');
-    expect(hinted.ok).toBe(true);
-    expect(hinted.p.phase).toBeUndefined();
-    expect((hinted.p.decisionModel.kind as unknown as { validated: { basis: string } }).validated.basis).toBe('hints');
-    expect(hinted.p.log.some((l) => l.type === 'decision' && l.message.includes('name it in different words; your Hints describe the item'))).toBe(true);
-    const bare = await run('');
-    expect(bare.ok).toBe(false);
-    expect(bare.p.phase).toBe('needs-concept');
+    const basisOf = (p: ReturnType<typeof project>) => (p.decisionModel.kind as unknown as { validated?: { basis: string } }).validated?.basis;
+
+    it('the suppliers research b2f5b7 with its current Hints does not pause: the sources read for them already describe the item', async () => {
+      const { ok, p } = await run({ question: suppliersQuestion, guidance: suppliersHints, domain: suppliersDomain });
+      expect(ok).toBe(true);
+      expect(p.phase).toBeUndefined();
+      expect(basisOf(p)).toBe('domain');
+      expect(p.log.some((l) => l.type === 'decision' && l.message.includes('the item is already described (the sources read for your request and Hints: branded vintage clothing wholesale, graded A, cream, suppliers in NL), so another description would not change the plan'))).toBe(true);
+    });
+
+    it('a request that describes the item goes on without any Hints', async () => {
+      const { ok, p } = await run({ guidance: '' }, { ...single, described: 'wholesale branded second hand clothing providers' });
+      expect(ok).toBe(true);
+      expect(basisOf(p)).toBe('request');
+    });
+
+    it('Hints that do not describe the item no longer skip the pause', async () => {
+      const { ok, p } = await run({ guidance: 'prefer the cheapest ones' });
+      expect(ok).toBe(false);
+      expect(p.phase).toBe('needs-concept');
+      expect(basisOf(p)).toBeUndefined();
+    });
+
+    it('no Hints and no description pauses, and a domain study that is not ready does not count', async () => {
+      expect((await run({ guidance: '' })).p.phase).toBe('needs-concept');
+      expect((await run({ guidance: suppliersHints, domain: { ...suppliersDomain, ready: false } })).p.phase).toBe('needs-concept');
+      expect(describedItem({ kind: single, domain: { ready: true, terms: [] } })).toBeNull();
+    });
+  });
+
+  describe('a decision model without a stated purpose (C11)', () => {
+    const run = async (extra: object, model: object) => {
+      const { engine } = engineWith([], []);
+      (engine as unknown as { modeler: null }).modeler = null;
+      const p = { ...project(), ...extra, decisionModel: { kind: structuredClone(contractors), criteria: [], ...model } } as ReturnType<typeof project> & { phase?: string };
+      return { ok: await engine.ensurePurpose(p as never), p };
+    };
+
+    it('goes on when the request names requirements, Hints or not', async () => {
+      const { ok, p } = await run({ guidance: '' }, { purpose: '', requirements: [{ id: 'E1', text: 'licensed', quote: 'licensed' }] });
+      expect(ok).toBe(true);
+      expect(p.phase).toBeUndefined();
+      expect(p.log.some((l) => l.type === 'decision' && l.message.includes('your request already names 1 requirement(s) a result must meet, so a stated purpose would not change the plan'))).toBe(true);
+    });
+
+    it('pauses when the request was framed and names neither a purpose nor a requirement, even with Hints', async () => {
+      const { ok, p } = await run({ guidance: 'prefer the cheapest ones' }, { purpose: '', requirements: [], framing: { samples: 3 } });
+      expect(ok).toBe(false);
+      expect(p.phase).toBe('needs-purpose');
+    });
+
+    it('a failed framing is not "no requirement": with Hints the research goes on and is framed again at the next step, without Hints it pauses', async () => {
+      const hinted = await run({ guidance: 'prefer the cheapest ones' }, { purpose: '', requirements: [], framing: null });
+      expect(hinted.ok).toBe(true);
+      expect(hinted.p.phase).toBeUndefined();
+      expect(hinted.p.log.some((l) => l.type === 'decision' && l.message.includes('could not be framed this time, which does not mean it names no requirement'))).toBe(true);
+      const bare = await run({ guidance: '' }, { purpose: '', requirements: [], framing: null });
+      expect(bare.ok).toBe(false);
+      expect(bare.p.phase).toBe('needs-purpose');
+    });
+
+    it('a stated purpose never pauses', async () => {
+      expect((await run({ guidance: '' }, { purpose: 'A homeowner wants a contractor for a roof repair', requirements: [] })).ok).toBe(true);
+    });
   });
 
   it('pauses when the pages confirm only one kind of the category', async () => {

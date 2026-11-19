@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregate, basisOf, changedSince, effectiveGrade, nodeIdsIn, nodeProbabilities, questionKind, resultModel, sanitizeVerdict } from '../../src/research/result.mjs';
+import { aggregate, basisOf, changedSince, effectiveGrade, nodeIdsIn, nodeResearchSupport, questionKind, resultModel, sanitizeVerdict } from '../../src/research/result.mjs';
 
 const node = (id: string, parentId: string, status: string, answer = 'A concrete answer: 12 firms.', impact = 3) => ({ id, parentId, status, impact, finding: { answer } });
 
@@ -31,7 +31,7 @@ describe('computed result from the current pieces', () => {
     const p = plan();
     expect(effectiveGrade(p.nodes[2])).toBe('weak');
     expect(effectiveGrade(p.nodes[1])).toBe('verified');
-    const probs = nodeProbabilities(p.nodes);
+    const probs = nodeResearchSupport(p.nodes);
     expect(probs.get('D1.1')).toBe(0.9);
     expect(probs.get('D1.2')).toBe(0.4);
     expect(probs.get('D1')).toBeGreaterThan(0.6);
@@ -97,11 +97,11 @@ describe('evidence probability of pieces that failed or never ran (audit 2026-11
     const stored = overall(tree('weak', 'unsupported'));
     expect(overall(tree('weak', 'failed'))).toBeLessThanOrEqual(stored);
     expect(overall(tree('failed', 'failed'))).toBeLessThanOrEqual(stored);
-    expect(nodeProbabilities(tree('weak', 'failed')).get('D6.2')).toBe(0.15);
+    expect(nodeResearchSupport(tree('weak', 'failed')).get('D6.2')).toBe(0.15);
   });
 
   it('a piece that never ran is left out instead of counting as an even chance', () => {
-    const probs = nodeProbabilities(tree('weak', 'pending'));
+    const probs = nodeResearchSupport(tree('weak', 'pending'));
     expect(probs.get('D6.2')).toBeNull();
     expect(probs.get('D6')).toBeLessThanOrEqual(0.4);
     const unstarted = tree('pending', 'pending').map((n) => ({ ...n, status: 'pending' }));

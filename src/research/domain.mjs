@@ -62,16 +62,18 @@ ${termList.join(', ') || 'none'}
 HUBS (country and the language to search in):
 ${hubLines || 'none'}
 
-Write exactly ${HUB_QUERIES} search queries for every hub, in that hub's language, using the words of the trade for the object as a trader there would write them: translate the terms naturally into the language of the hub (Dutch "vintage groothandel", German "Vintage Großhandel").
-The queries must aim at the sellers' own websites: their shops, warehouses, exporters and trade companies, not marketplaces, aggregators, directories or classifieds.
-One query must name the wholesale signal words of the hub language: bales, per kg, B2B, export.
+Write exactly ${HUB_QUERIES} search queries for every hub, in that hub's language, using the words of the trade for the object as a trader there would write them: translate the terms naturally into the language of the hub.
+The queries must aim at the sellers' own websites, not marketplaces, aggregators, directories or classifieds.
+One query must use the words of the trade above that say how such sellers sell, in the hub's language.
 Every query is a plain web search query, names the object concretely, and reads like a practitioner or a trade site would search. No site: filters, no operators.
 Answer with JSON only: {"queries": [{"country": "...", "language": "...", "query": "..."}]}`,
     },
   ];
 }
 
-export const DOMAIN_ASPECTS = ['object', 'process', 'actors', 'terms', 'quality', 'where', 'not', 'use'];
+export const MEMBERS = 'members';
+export const EVIDENCE = 'evidence';
+export const DOMAIN_ASPECTS = ['object', 'process', 'actors', 'terms', 'quality', 'where', 'not', 'use', MEMBERS, EVIDENCE];
 
 const SYSTEM = 'You are a domain mapper for research. You reply with a single JSON object only, no prose, no code fences.';
 
@@ -80,11 +82,55 @@ const PAGE_TEXT_CHARS = 3000;
 const SUPPORT_HOSTS = 2;
 const OVERLAP = 0.5;
 
-export function domainQueryPrompt({ question, purpose, languages = [], object = '', hint = '' } = {}) {
+function conditionLines(criteria) {
+  return (Array.isArray(criteria) ? criteria : []).map((criterion) => `[${criterion.id}] ${squash(criterion.text)}${criterion.examples?.length ? ` (examples the asker named: ${criterion.examples.join(', ')})` : ''}`).join('\n');
+}
+
+export function domainQueryPrompt({ question, purpose, languages = [], object = '', hint = '', examples = [], criteria = [] } = {}) {
   const langs = (Array.isArray(languages) ? languages : [languages]).map((l) => String(l ?? '').trim()).filter(Boolean);
   const languageLine = langs.length ? langs.join(', ') : 'English';
   const objectLine = String(object ?? '').replace(/\s+/g, ' ').trim();
   const hintLine = String(hint ?? '').replace(/\s+/g, ' ').trim();
+  const named = (Array.isArray(examples) ? examples : []).map(squash).filter(Boolean);
+  if (named.length || criteria.length) {
+    return [
+      { role: 'system', content: SYSTEM },
+      {
+        role: 'user',
+        content: `TASK=DOMAIN_QUERIES
+Before any research is planned, learn this domain from sources, starting from what the asker wrote.
+
+QUESTION:
+${String(question ?? '').trim()}
+
+PURPOSE:
+${String(purpose ?? '').trim() || 'not stated'}
+
+WHAT EACH RESULT IS:
+${objectLine || 'not stated'}
+
+WHAT EACH RESULT MUST BE OR OFFER:
+${conditionLines(criteria) || 'not stated'}
+
+EXAMPLES THE ASKER NAMED:
+${named.join(', ') || 'none'}
+
+USER HINT (starting vocabulary):
+${hintLine || 'none'}
+
+Write 6 to 8 web search queries, spread across these languages: ${languageLine}.
+The queries must find sources that:
+1. name the asker's examples together with other members of the same class, so the class can be learned
+2. show who offers such results and how they offer them
+3. use the words the field uses for them, in each language
+4. show where such results are listed or found
+5. show what the page of one such result states when it meets each condition above
+6. show look-alikes that do not meet the conditions
+${named.length ? 'At least half of the queries name one or two of the asker\'s examples next to what each result is.\n' : ''}Every query is a plain web search query, names what is searched concretely, and reads like a practitioner would search. No site: filters, no operators.
+Answer with JSON only: {"queries": ["...", "...", "..."]}`,
+      },
+    ];
+  }
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -115,7 +161,6 @@ The queries must explain the TRADE and the practice around the object:
 7. look-alikes that are not the object, sold alongside it
 8. typical use cases for this purpose
 
-Never ask about the history of the brands or the products named in the question; study the trade around the object, not the story of a brand.
 Start from the words of the USER HINT and the OBJECT TO STUDY: use them in the queries, and keep the trade words of the object in every query.
 Every query is a plain web search query, names the object concretely, and reads like a practitioner or a trade site would search. No site: filters, no operators.
 Answer with JSON only: {"queries": ["...", "...", "..."]}`,
@@ -123,7 +168,11 @@ Answer with JSON only: {"queries": ["...", "...", "..."]}`,
   ];
 }
 
-export function domainFindingsPrompt({ question, purpose, sources = [] } = {}) {
+export function domainFindingsPrompt({ question, purpose, sources = [], examples = [], criteria = [] } = {}) {
+  const named = (Array.isArray(examples) ? examples : []).map(squash).filter(Boolean);
+  const conditions = conditionLines(criteria);
+  const classRule = named.length ? `\nAspect "${MEMBERS}": one finding per other member of the class the asker's examples stand for (${named.join(', ')}). Its quote is a sentence that names that member next to at least one of the asker's examples, and it carries "member": the member's name copied from the quote.` : '';
+  const evidenceRule = conditions ? `\nAspect "${EVIDENCE}": what the page of one result states when it meets one of these conditions. It carries "criterion": the id of the condition.\n${conditions}` : '';
   const pages = (Array.isArray(sources) ? sources : []).map((source) => ({
     id: String(source?.id ?? ''),
     url: String(source?.url ?? ''),
@@ -151,7 +200,7 @@ ASPECTS: ${DOMAIN_ASPECTS.join(', ')}
 Every finding is one fact taken from one page:
 {"aspect": one of ${DOMAIN_ASPECTS.join('|')}, "statement": "<= 20 words", "quote": "exact sentence copied from the page", "sourceId": "the page id"}
 
-Rules: the quote is copied character for character from that page, never paraphrased; the statement says what the quote means in at most 20 words; use only the pages below, never outside knowledge; skip a page with nothing to say; cover every aspect the pages support.
+Rules: the quote is copied character for character from that page, never paraphrased; the statement says what the quote means in at most 20 words; use only the pages below, never outside knowledge; skip a page with nothing to say; cover every aspect the pages support.${classRule}${evidenceRule}
 Answer with JSON only: {"findings": [{"aspect": "...", "statement": "...", "quote": "...", "sourceId": "..."}]}
 
 ${blocks || 'NO PAGES'}`,
@@ -184,8 +233,10 @@ function sourceMap(sources) {
   return map;
 }
 
-export function verifiedFindings(findings, sources) {
+export function verifiedFindings(findings, sources, { examples = [], criteria = [] } = {}) {
   const map = sourceMap(sources);
+  const named = examples.map(normalized).filter(Boolean);
+  const known = new Set(criteria.map((criterion) => String(criterion.id)));
   const kept = [];
   for (const finding of Array.isArray(findings) ? findings : []) {
     const aspect = String(finding?.aspect ?? '').trim();
@@ -195,23 +246,36 @@ export function verifiedFindings(findings, sources) {
     const source = map.get(String(finding?.sourceId ?? ''));
     if (!source) continue;
     if (!normalized(source.text).includes(quote)) continue;
+    const more = {};
+    if (aspect === MEMBERS) {
+      const member = normalized(finding?.member);
+      if (!member || !quote.includes(member) || named.includes(member) || !named.some((example) => quote.includes(example))) continue;
+      more.member = squash(finding.member);
+    }
+    if (aspect === EVIDENCE) {
+      const criterion = String(finding?.criterion ?? '').trim().replace(/^\[|\]$/g, '').toUpperCase();
+      if (!known.has(criterion)) continue;
+      more.criterion = criterion;
+    }
     kept.push({
       aspect,
       statement: squash(finding?.statement),
       quote: squash(finding?.quote),
       sourceId: String(finding.sourceId),
       host: source.host,
+      url: String(source.url ?? ''),
+      ...more,
     });
   }
   return kept;
 }
 
-export function mergeFindings(replies, sources) {
+export function mergeFindings(replies, sources, concept = {}) {
   const merged = [];
   const seen = new Set();
   for (const reply of Array.isArray(replies) ? replies : []) {
-    for (const finding of verifiedFindings(reply?.data?.findings, sources)) {
-      const key = `${finding.aspect}::${normalized(finding.quote)}`;
+    for (const finding of verifiedFindings(reply?.data?.findings, sources, concept)) {
+      const key = `${finding.aspect}::${normalized(finding.member ?? finding.criterion ?? '')}::${normalized(finding.quote)}`;
       if (seen.has(key)) continue;
       seen.add(key);
       merged.push(finding);
@@ -332,6 +396,42 @@ export function supportedMembers(members = [], sources = []) {
   return named;
 }
 
+export const EVIDENCE_PER_CRITERION = 4;
+
+export function classMembers(findings) {
+  const byName = new Map();
+  for (const finding of (Array.isArray(findings) ? findings : []).filter((entry) => entry?.aspect === MEMBERS && entry.member)) {
+    const key = normalized(finding.member);
+    const member = byName.get(key) ?? { name: finding.member, hosts: [], quotes: [] };
+    if (finding.host && !member.hosts.includes(finding.host)) {
+      member.hosts.push(finding.host);
+      member.quotes.push({ quote: finding.quote, url: finding.url });
+    }
+    byName.set(key, member);
+  }
+  return [...byName.values()].map((member) => ({ ...member, supported: member.hosts.length >= SUPPORT_HOSTS })).sort((a, b) => b.hosts.length - a.hosts.length);
+}
+
+export function criterionEvidence(findings) {
+  const byCriterion = {};
+  for (const finding of (Array.isArray(findings) ? findings : []).filter((entry) => entry?.aspect === EVIDENCE && entry.criterion)) {
+    const list = byCriterion[finding.criterion] ?? (byCriterion[finding.criterion] = []);
+    if (list.length < EVIDENCE_PER_CRITERION && !list.some((entry) => entry.host === finding.host)) list.push({ statement: finding.statement, quote: finding.quote, host: finding.host, url: finding.url });
+  }
+  return byCriterion;
+}
+
+export const DOMAIN_TEXT_MEMBERS = 12;
+
+export function domainText(domain) {
+  const members = (domain?.members ?? []).filter((member) => member.supported).slice(0, DOMAIN_TEXT_MEMBERS).map((member) => member.name);
+  const evidence = Object.entries(domain?.evidence ?? {}).flatMap(([criterion, entries]) => entries.slice(0, 2).map((entry) => `[${criterion}] "${entry.quote}"`));
+  return [
+    members.length ? `Learned from sources, members of the class your examples stand for: ${members.join(', ')}` : '',
+    evidence.length ? `Learned from sources, what the page of an eligible result states: ${evidence.join(' ')}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 export function domainUnderstanding(findings, { hint = '', sources = [], members = [] } = {}) {
   const list = Array.isArray(findings) ? findings.filter(Boolean) : [];
   const byAspect = (aspect) => list.filter((finding) => String(finding?.aspect ?? '') === aspect);
@@ -345,6 +445,8 @@ export function domainUnderstanding(findings, { hint = '', sources = [], members
     actors: statements('actors'),
     use: statements('use'),
     object: statements('object'),
+    members: classMembers(list),
+    evidence: criterionEvidence(list),
     hosts: hostsOf(list),
   };
   if (!understanding.terms.length && (members?.length ?? 0) >= MIN_MEMBERS) {

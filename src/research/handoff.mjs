@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { verdictReport } from './verdict.mjs';
 
 const GOOD = new Set(['verified', 'supported']);
 const MAX_ITEMS = 12;
@@ -29,7 +30,7 @@ export function handoffRecord(project, { reason, resume = {} } = {}) {
     phase: project.phase,
     verdict: project.report?.verdict ?? null,
     progress: { total: nodes.length, passing: nodes.filter((n) => GOOD.has(n.status)).length, pending: nodes.filter((n) => n.status === 'pending').length },
-    expectedResult: project.acceptanceResult ? { score: project.acceptanceResult.score, checks: project.acceptanceResult.checks.map((c) => `${c.label}: ${pct(c.value)}`) } : null,
+    expectedResult: project.acceptanceResult ? { score: project.acceptanceResult.score, headline: verdictReport(project).headline, checks: project.acceptanceResult.checks.map((c) => `${c.label}: ${pct(c.value)}`) } : null,
     loop: project.improve ? { baseline: project.improve.baseline ?? null, best: project.improve.best ?? null, trials: trials.length, kept: trials.filter((t) => t.outcome === 'kept').length } : null,
     insights: [
       ...nodes.filter((n) => GOOD.has(n.status) && n.finding?.answer).slice(0, MAX_ITEMS).map((n) => `${n.id} [${n.status}] ${n.finding.answer}`),
@@ -52,7 +53,7 @@ export function handoffMarkdown(r) {
   return `# Handoff: ${r.question}
 
 Saved ${r.at} · reason: **${r.reason}** · phase: ${r.phase}
-Expected result: ${r.expected || 'not set'}${r.expectedResult ? ` · met ${pct(r.expectedResult.score)}` : ''}
+Expected result: ${r.expected || 'not set'}${r.expectedResult?.headline ? ` · ${r.expectedResult.headline}` : ''}
 Verdict: ${r.verdict ?? 'none yet'}
 Progress: ${r.progress.passing}/${r.progress.total} pieces pass the checks, ${r.progress.pending} not researched
 ${r.loop ? `Loop: score ${r.loop.baseline} → ${r.loop.best}, ${r.loop.kept} of ${r.loop.trials} changes kept\n` : ''}

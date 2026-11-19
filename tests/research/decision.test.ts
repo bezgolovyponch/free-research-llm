@@ -2,8 +2,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyCalibration, applyModel, calibrationPrompt, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
+import { CASE_SIMILARITY_FLOOR, CaseBank, DecisionModeler, GROUNDED_KIND_TASK, KIND_MATCH_TASK, NO_ITEM_NAMED, REFERENCE_CASE, UNAPPROVED_EXAMPLES, UTILITY_PRIOR, agreedKindVoters, aggregate, askerWords, kindNote, applyCalibration, applyModel, calibrationPrompt, caseSimilarity, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
 import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
+import { pickLetter } from '../helpers/fakes';
 
 const question = 'Find plots for a glamping site under 30000 EUR, at most 15 km from the sea, hottest month under 29 °C, with a strong price trend';
 const sample = (criteria: object[], terms = ['plot', 'terreno']) => normalizeSample({ concept: 'cheap coastal glamping land', kind: { label: 'plot of land', terms }, criteria });
@@ -168,67 +169,171 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
   const reply = (criteria: object[]) => ({ provider: 'p', data: { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria } });
   const checklistReply = { items: [{ clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] };
 
-  it('asks several times with sampling, keeps the agreed criteria and records the case', async () => {
-    const calls: { temperature: number; purpose: string }[] = [];
-    const answers = [reply([sea, heat]), reply([sea]), null];
-    const checklistAnswers = [checklistReply, checklistReply, checklistReply];
-    let decisionCalls = 0;
-    let checklistCalls = 0;
-    const router = { complete: async (req: { temperature: number; purpose: string }) => {
-      calls.push(req);
-      if (req.purpose === 'checklist') {
-        const next = checklistAnswers.shift();
-        checklistCalls++;
-        if (!next) throw new Error('quota');
-        return { provider: 'p', data: next };
-      }
-      const next = answers.shift();
-      decisionCalls++;
-      if (!next) throw new Error('quota');
-      return next;
-    } };
+  type Ask = { temperature: number; purpose: string; task?: string; avoid?: string[]; messages: { role: string; content: string }[] };
+  const sameKind = (req: Ask) => ({ same: pickLetter(req as never, (text) => text === 'the same kind of item as the new question') });
+  const familyRouter = (byProvider: Record<string, unknown>, { checklist = checklistReply as unknown, tasks = {} as Record<string, (req: Ask) => unknown> } = {}) => {
+    const providers = Object.keys(byProvider);
+    const calls: (Ask & { provider: string })[] = [];
+    return {
+      calls,
+      families: () => providers.map((id) => ({ stack: id, vendor: id })),
+      familyOf: (id: string) => ({ stack: id, vendor: id }),
+      async complete(req: Ask) {
+        const avoided = new Set(req.avoid ?? []);
+        const provider = providers.find((id) => !avoided.has(id)) ?? providers[0];
+        calls.push({ ...req, provider });
+        const handler = req.task ? tasks[req.task] : undefined;
+        const data = handler ? handler(req) : req.task ? null : req.purpose === 'checklist' ? checklist : byProvider[provider];
+        if (data === null || data === undefined) throw new Error('quota');
+        return { provider, model: `${provider}-model`, data };
+      },
+    };
+  };
+
+  it('asks one proposal of each provider family with sampling, keeps the agreed criteria and records the case', async () => {
+    const router = familyRouter({ p1: reply([sea, heat]).data, p2: reply([sea]).data, p3: null }, { tasks: { 'example-kind': sameKind } });
     const recorded: string[] = [];
     const cases = { retrieve: async () => [REFERENCE_CASE], record: async (id: string) => { recorded.push(id); } };
     const project: Record<string, unknown> = { id: 'p9', question, guidance: '', acceptance: { expected: '20 plots' } };
-    const model = await new DecisionModeler({ router, cases }).build(project);
-    expect(decisionCalls).toBe(3);
-    expect(checklistCalls).toBe(3);
-    expect(calls.every((c) => (c.purpose === 'decision-model' || c.purpose === 'checklist') && c.temperature > 0)).toBe(true);
+    const model = await new DecisionModeler({ router, cases } as never).build(project);
+    expect(router.calls.filter((c) => c.purpose === 'decision-model').map((c) => c.provider)).toEqual(['p1', 'p2', 'p3', 'p3']);
+    expect(router.calls.filter((c) => c.purpose === 'checklist').map((c) => c.provider)).toEqual(['p1', 'p2', 'p3']);
+    expect(router.calls.filter((c) => c.purpose === 'decision-model' || c.purpose === 'checklist').every((c) => c.temperature > 0)).toBe(true);
     expect(model.criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+    expect(model.agreement).toMatchObject({ samples: 2, majority: 2 });
+    expect(model).toMatchObject({ providers: ['p1', 'p2'], proposals: { families: 2, repeats: [], refused: [] } });
+    expect(model.single).toBeUndefined();
     expect(model.checklist).toBeDefined();
     expect(model.caseIds).toEqual([REFERENCE_CASE.id]);
     expect(recorded).toEqual(['p9']);
-    expect(await new DecisionModeler({ router: { complete: async () => { throw new Error('no call expected'); } } }).build(project)).toBe(model);
+    expect(await new DecisionModeler({ router: { complete: async () => { throw new Error('no call expected'); } } } as never).build(project)).toBe(model);
   });
 
-  it('keeps no model when fewer than two proposals came back', async () => {
+  it('counts one proposal per provider family: a second reply of a counted family is a repeat, not a second vote', async () => {
+    const replies = [reply([sea, heat]), reply([sea, heat]), reply([sea])];
+    const router = { complete: async (req: Ask) => { if (req.task) throw new Error('none'); return req.purpose === 'checklist' ? { provider: 'p', data: checklistReply } : replies.shift(); } };
+    const model = await new DecisionModeler({ router } as never).build({ id: 'one-family', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(model.agreement).toMatchObject({ samples: 1, majority: 1 });
+    expect(model).toMatchObject({ single: true, providers: ['p'], proposals: { families: 1, repeats: ['p'], refused: [] } });
+    expect(replies).toHaveLength(1);
+  });
+
+  it('never counts a reply that names no item: it is asked once more with the reason, and stays no proposal', async () => {
+    const router = familyRouter({ p1: reply([sea]).data, p2: { answer: 'ok' }, p3: reply([sea, heat]).data });
+    const model = await new DecisionModeler({ router } as never).build({ id: 'junk', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(model.agreement).toMatchObject({ samples: 2, majority: 2 });
+    expect(model.proposals).toMatchObject({ families: 2, repeats: ['p1'], refused: ['p2', 'p2'] });
+    expect(model.criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+    const retried = router.calls.filter((c) => c.purpose === 'decision-model' && c.messages.length === 3);
+    expect(retried.map((c) => c.messages[2].content)).toEqual([`Your last answer was not accepted: ${NO_ITEM_NAMED}. Answer again with JSON only, in the exact format asked.`]);
+  });
+
+  it('keeps no model when no proposal came back, and keeps the earlier model untouched when no reply names an item', async () => {
     const router = { complete: async () => { throw new Error('down'); } };
-    expect(await new DecisionModeler({ router }).build({ id: 'x', question })).toBeNull();
+    expect(await new DecisionModeler({ router } as never).build({ id: 'x', question })).toBeNull();
+    const stored = { kind: { label: 'used car', terms: ['hatchback'] }, criteria: [], noLimit: [], agreement: { samples: 2, majority: 2, proposed: 0, kept: 0 } };
+    const unnamed = familyRouter({ p1: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] }, p2: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } });
+    expect(await new DecisionModeler({ router: unnamed } as never).build({ id: 'y', question, guidance: '', acceptance: { expected: '20 cars' }, decisionModel: stored }, { force: true })).toBe(stored);
   });
 
-  it('a rebuild with an empty aggregate keeps the stored kind and criteria', async () => {
+  it('a rebuild whose proposals name different items keeps the stored kind and criteria', async () => {
     const stored = {
       kind: { label: 'used car', terms: ['hatchback'], not: ['parts'], verified: { titles: 10, matched: 5, share: 0.5 } },
       criteria: [{ measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000', source: 'question' }],
       noLimit: [],
       agreement: { samples: 3, majority: 2, proposed: 5, kept: 1 },
     };
-    const answers = [
-      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
-      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
-      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
-    ];
-    const router = {
-      complete: async (req: { purpose: string }) => {
-        if (req.purpose === 'checklist') return { provider: 'p', data: { items: [{ clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] } };
-        return answers.shift()!;
-      }
-    };
+    const router = familyRouter({ p1: { concept: 'c', kind: { label: 'used car', terms: [] }, criteria: [] }, p2: { concept: 'c', kind: { label: 'car wheel', terms: [] }, criteria: [] } });
     const project = { id: 'p-rebuild', question, guidance: '', acceptance: { expected: '20 cars' }, decisionModel: stored };
-    const model = await new DecisionModeler({ router }).build(project, { force: true });
+    const model = await new DecisionModeler({ router } as never).build(project, { force: true });
     expect(model.kind).toEqual(stored.kind);
     expect(model.criteria).toEqual(stored.criteria);
     expect(model.rebuildWeaker).toBe(true);
+    expect(model.agreement.kindVoters).toBe(0);
+  });
+
+  const stag = 'Find 40 activity providers for a stag party';
+  const pickProvider = (req: Ask) => ({ pick: pickLetter(req as never, (text) => text === 'activity provider') });
+
+  it('agrees the item kind by meaning and takes the kind, the criteria and the concept only from the proposals that agree', async () => {
+    const offTopic = { concept: REFERENCE_CASE.concept, kind: { label: 'plot of land', terms: ['land', 'plot'] }, criteria: [sea] };
+    const router = familyRouter(
+      { p1: offTopic, p2: { concept: 'stag activities', kind: { label: 'activity provider', terms: ['activity providers'] }, criteria: [sea] }, p3: { concept: 'group activities', kind: { label: 'activity company', terms: ['activity companies'] }, criteria: [] } },
+      { tasks: { [KIND_MATCH_TASK]: pickProvider } },
+    );
+    const model = await new DecisionModeler({ router } as never).build({ id: 'stag', question: stag, guidance: '', acceptance: { expected: '40 providers' } }, { force: true });
+    expect(model.kind).toMatchObject({ label: 'activity provider', terms: ['activity provider', 'activity company'] });
+    expect(model.concept).toBe('stag activities');
+    expect([model.criteria, model.noLimit]).toEqual([[], []]);
+    expect(model.agreement).toMatchObject({ samples: 3, majority: 2, kindVoters: 2 });
+    expect(model.proposals.kinds).toEqual([{ provider: 'p1', label: 'plot of land' }, { provider: 'p2', label: 'activity provider' }, { provider: 'p3', label: 'activity company' }]);
+    expect(router.calls.filter((c) => c.task === KIND_MATCH_TASK).length).toBeGreaterThan(0);
+  });
+
+  it('keeps no item kind when the families name different items, and asks nothing when they use one label', async () => {
+    const split = familyRouter({ p1: { concept: 'c', kind: { label: 'activity provider', terms: ['tour operator'] }, criteria: [] }, p2: { concept: 'c', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] } });
+    expect((await new DecisionModeler({ router: split } as never).build({ id: 'split', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true })).kind).toBeNull();
+    const same = familyRouter({ p1: { concept: 'c', kind: { label: 'Plot of land', terms: ['plot'] }, criteria: [] }, p2: { concept: 'c', kind: { label: 'plot of land', terms: ['terreno'] }, criteria: [] } });
+    const model = await new DecisionModeler({ router: same } as never).build({ id: 'same', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(model.kind).toMatchObject({ label: 'Plot of land', terms: ['plot of land'] });
+    expect(same.calls.filter((c) => c.task === KIND_MATCH_TASK)).toHaveLength(0);
+    expect(await agreedKindVoters([normalizeSample({ kind: { label: 'plot', terms: ['plot'] } })], { router: same } as never)).toEqual([0]);
+  });
+
+  it('takes the kind from the asker\'s own words when the families agree on none and the request is framed', async () => {
+    const framed = { population: { quote: 'activity providers', label: 'activity provider' }, concept: [] };
+    const router = familyRouter(
+      { p1: { concept: 'c', kind: { label: 'activity provider', terms: ['tour operator'] }, criteria: [] }, p2: { concept: 'c', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] } },
+      { tasks: { 'concept-frame': () => framed } },
+    );
+    const model = await new DecisionModeler({ router } as never).build({ id: 'framed', question: stag, guidance: '', acceptance: { expected: '40 providers' } }, { force: true });
+    expect(model.kind).toMatchObject({ label: 'activity providers', terms: ['activity providers'], asked: 'activity providers', framed: true });
+    expect(model.agreement.kindVoters).toBe(0);
+  });
+
+  it('aggregates every proposal when no kind is agreed, so the purpose still comes from the families, and as before without a kind vote', () => {
+    const one = normalizeSample({ concept: 'first', purpose: 'A stag group wants activity providers so that they book directly', value: 'a list of activity providers for a stag party', kind: { label: 'activity provider', terms: ['tour'] }, criteria: [] });
+    const two = normalizeSample({ concept: 'second', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] });
+    const none = aggregate([one, two], { question: stag, kindVoters: [] });
+    expect([none.kind, none.concept, none.purpose, none.agreement.kindVoters]).toEqual([null, 'first', one.purpose, 0]);
+    expect(aggregate([two, one], { question: stag }).concept).toBe('second');
+    expect(aggregate([two, one], { question: stag, kindVoters: [1] })).toMatchObject({ concept: 'first', kind: { label: 'activity provider', terms: ['tour'] } });
+  });
+
+  it('tells the owner which family named which item, whatever became of the kind', () => {
+    const kinds = [{ provider: 'groq', label: 'activity provider' }, { provider: 'pollinations', label: 'plot of land' }];
+    const named = '(groq: activity provider; pollinations: plot of land)';
+    expect(kindNote(null)).toBe('no provider family returned a decision model that names the item to list');
+    expect(kindNote({ kind: null, agreement: { samples: 2, kindVoters: 0 }, proposals: { kinds } })).toBe(`no item kind agreed: the provider families named different items ${named}`);
+    expect(kindNote({ kind: { label: 'activity provider' }, agreement: { samples: 3, kindVoters: 2 }, proposals: { kinds } })).toBe(`item kind "activity provider" agreed by 2 of 3 provider families ${named}`);
+    expect(kindNote({ kind: { label: 'used car' }, agreement: { samples: 2, kindVoters: 0 }, proposals: { kinds } })).toBe(`item kind "used car" kept from the earlier model: the provider families now named different items ${named}`);
+    expect(kindNote({ kind: { label: 'activity providers', framed: true }, agreement: { samples: 2, kindVoters: 0 }, proposals: { kinds } })).toBe(`item kind "activity providers" taken from your own words: the provider families named different items ${named}`);
+    expect(kindNote({ kind: { label: 'activity provider' }, agreement: { samples: 1, kindVoters: 1 }, single: true, proposals: { kinds: kinds.slice(0, 1) } })).toBe('item kind "activity provider" agreed by 1 of 1 provider families (groq: activity provider), one family only, to confirm');
+  });
+
+  it('lets a kind one family named, chosen by the asker\'s words, decide no criterion alone: the criteria still need a majority of every family', () => {
+    const one = normalizeSample({ concept: 'first', kind: { label: 'activity provider', terms: ['tour'] }, criteria: [sea] });
+    const two = normalizeSample({ concept: 'second', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] });
+    const chosen = aggregate([two, one], { question, kindVoters: [1] });
+    expect(chosen).toMatchObject({ concept: 'first', kind: { label: 'activity provider' }, criteria: [], agreement: { samples: 2, majority: 2, kindVoters: 1 } });
+    expect(aggregate([one, one, two], { question, kindVoters: [0, 1] }).criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+  });
+
+  it('rebuilds with other families first and, when they still name different items, lets independent families pick the item the asker\'s own words ask for', async () => {
+    const pickFromWords = (req: Ask) => ({ pick: req.messages[1].content.includes('Hints: the item is an activity provider') ? pickLetter(req as never, (text) => text === 'activity provider') : 'N' });
+    const router = familyRouter(
+      { p1: { concept: 'glamping', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] }, p2: { concept: 'stag activities', kind: { label: 'activity provider', terms: ['tour'] }, criteria: [] }, p3: { concept: 'boats', kind: { label: 'boat', terms: ['boat'] }, criteria: [] } },
+      { tasks: { [GROUNDED_KIND_TASK]: pickFromWords } },
+    );
+    const project = { id: 'grounded', question: stag, guidance: 'the item is an activity provider', acceptance: { expected: '40 providers' } };
+    const model = await new DecisionModeler({ router } as never).build(project, { force: true, askedBefore: ['p1'], grounded: true });
+    expect(router.calls.find((c) => c.purpose === 'decision-model')?.avoid).toEqual(['p1']);
+    expect(model.kind).toMatchObject({ label: 'activity provider', terms: ['tour'] });
+    expect(model.agreement).toMatchObject({ kindVoters: 1, kindGrounded: true });
+    expect(kindNote(model)).toBe('item kind "activity provider" chosen by your own words (request and Hints) among the items the provider families named (p2: activity provider; p3: boat; p1: plot of land)');
+    expect(router.calls.find((c) => c.task === GROUNDED_KIND_TASK)?.messages[1].content).toContain(askerWords({ question: stag, guidance: project.guidance }));
+    const ungrounded = familyRouter({ p1: { concept: 'c', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] }, p2: { concept: 'c', kind: { label: 'activity provider', terms: ['tour'] }, criteria: [] } }, { tasks: { [GROUNDED_KIND_TASK]: pickFromWords } });
+    expect((await new DecisionModeler({ router: ungrounded } as never).build({ id: 'ungrounded', question: stag, guidance: '', acceptance: { expected: '40 providers' } }, { force: true, grounded: true })).kind).toBeNull();
   });
 
   it('a rebuild with fewer kept criteria keeps the stored criteria', async () => {
@@ -275,6 +380,70 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
     const project = { id: 'p-degenerate', question, guidance: '', acceptance: { expected: '20 cars' } };
     await new DecisionModeler({ router, cases }).build(project, { force: true });
     expect(recorded).toEqual([]);
+  });
+});
+
+describe('examples shown to the decision model: a similar question about the same kind of item, labelled as it is', () => {
+  const stag = 'Find 40 activity providers in Durres (Albania) that a stag party of 8 to 15 men could book directly';
+  type Ask = { purpose: string; task?: string; avoid?: string[]; messages: { role: string; content: string }[] };
+  const exampleRouter = (same: (earlier: string) => boolean, providers = ['p1', 'p2', 'p3']) => {
+    const calls: Ask[] = [];
+    return {
+      calls,
+      async complete(req: Ask) {
+        calls.push(req);
+        const avoided = new Set(req.avoid ?? []);
+        const provider = providers.find((id) => !avoided.has(id)) ?? providers[0];
+        const answer = (data: unknown) => ({ provider, model: `${provider}-model`, data });
+        if (req.task === 'concept-frame') return null;
+        if (req.task === 'example-kind') {
+          const earlier = /Earlier question: (.+)/.exec(req.messages[1].content)?.[1] ?? '';
+          const wanted = same(earlier) ? 'the same kind of item as the new question' : 'a different kind of item';
+          return answer({ same: pickLetter(req as never, (text) => text === wanted) });
+        }
+        if (req.purpose === 'checklist') return answer({ items: [{ clause: 'sea', question: 'Is the sea within 15 km?', hard: true, numeric: null }] });
+        return answer({ concept: 'c', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [sea] });
+      },
+    };
+  };
+  const decisionPrompts = (router: { calls: Ask[] }) => router.calls.filter((c) => c.purpose === 'decision-model').map((c) => c.messages.map((m) => m.content).join('\n'));
+
+  it('never shows a case that shares only common words with the question: the glamping case is no example for a stag question', async () => {
+    const router = exampleRouter(() => true);
+    const model = await new DecisionModeler({ router, cases: new CaseBank() } as never).build({ id: 'stag', question: stag, guidance: '', acceptance: { expected: '40 providers' } }, { force: true });
+    expect(decisionPrompts(router).length).toBeGreaterThan(0);
+    expect(decisionPrompts(router).filter((text) => text.includes(REFERENCE_CASE.question))).toEqual([]);
+    expect(model.caseIds).toEqual([]);
+    expect(router.calls.filter((c) => c.task === 'example-kind')).toHaveLength(0);
+    expect(rankCases(stag, [REFERENCE_CASE])).toEqual([]);
+    expect(caseSimilarity(stag, REFERENCE_CASE.question)).toBeLessThan(CASE_SIMILARITY_FLOOR);
+    expect(caseSimilarity('glamping plots near the sea', 'glamping plots near the sea in Spain')).toBe(1);
+  });
+
+  it('shows a similar case only when two provider families agree it asks for the same kind of item', async () => {
+    const sheds = { id: 'garden-sheds', question: 'Find garden sheds for a glamping site near the sea under 30000 EUR', concept: 'sheds', kind: { label: 'garden shed', terms: ['shed'] }, criteria: [], approved: true, utility: 0.5 };
+    const cases = { retrieve: async () => [REFERENCE_CASE, sheds], record: async () => {} };
+    const router = exampleRouter((earlier) => earlier === REFERENCE_CASE.question);
+    const model = await new DecisionModeler({ router, cases } as never).build({ id: 'q', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(decisionPrompts(router).every((text) => text.includes(REFERENCE_CASE.question) && !text.includes(sheds.question))).toBe(true);
+    expect(model.caseIds).toEqual([REFERENCE_CASE.id]);
+    const lone = exampleRouter(() => true, ['p1']);
+    const alone = await new DecisionModeler({ router: lone, cases } as never).build({ id: 'q', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(decisionPrompts(lone).some((text) => text.includes(REFERENCE_CASE.question))).toBe(false);
+    expect(alone.caseIds).toEqual([]);
+  });
+
+  it('labels an example nobody approved as such, never as approved', () => {
+    const earlier = { id: 'earlier', question: 'Find plots near the sea for glamping', concept: 'c', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [], approved: false };
+    const alone = decisionPrompt({ question, examples: [earlier] })[1].content;
+    expect(alone).not.toContain('Approved examples:');
+    expect(alone.startsWith('Models built earlier for other questions, which nobody approved, so they may be wrong:\nQuestion: Find plots near the sea for glamping')).toBe(true);
+    const both = decisionPrompt({ question, examples: [REFERENCE_CASE, earlier] })[1].content;
+    expect(both).toContain(`Approved examples:\nQuestion: ${REFERENCE_CASE.question}`);
+    expect(both).toContain(`${UNAPPROVED_EXAMPLES}:\nQuestion: ${earlier.question}`);
+    expect(both.indexOf(earlier.question)).toBeGreaterThan(both.indexOf(UNAPPROVED_EXAMPLES));
+    expect(both.endsWith(`\n\nQuestion: ${question}`)).toBe(true);
+    expect(decisionPrompt({ question, expected: '20 plots', guidance: 'near Faro' })[1].content).toBe(`Question: ${question}\nExpected result: 20 plots\nGuidance: near Faro`);
   });
 });
 
@@ -330,7 +499,7 @@ describe('decision model version', () => {
   it('treats a model built under an older logic version as stale so it is rebuilt', async () => {
     const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
-    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] }, version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION - 1 } };
+    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] }, version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION - 1, framing: { samples: 3 } } };
     expect(modeler.fresh(project)).toBe(false);
     expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, checklistVersion: CHECKLIST_VERSION } })).toBe(true);
   });
@@ -338,9 +507,73 @@ describe('decision model version', () => {
   it('treats a current model with no kind and no criteria as stale so the next run tries again', async () => {
     const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
-    const empty = { question: 'q', guidance: '', version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION, agreement: { samples: 3 }, kind: { label: '', terms: [] }, criteria: [], noLimit: [] };
+    const empty = { question: 'q', guidance: '', version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION, agreement: { samples: 3 }, kind: { label: '', terms: [] }, criteria: [], noLimit: [], framing: { samples: 3 } };
     expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: empty })).toBe(false);
     expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: { ...empty, criteria: [{ measure: 'priceEur', op: '<=', value: 1 }] } })).toBe(true);
+  });
+});
+
+describe('the concept feeds the decision model', () => {
+  const proposal = { concept: 'c', kind: { label: 'seller', terms: ['seller'] }, criteria: [], needs: [], purpose: '', value: '', unmodelled: [] };
+  const written = { items: [{ clause: 'graded a', question: 'Is it graded A?', hard: true, numeric: null }] };
+  const frame = { population: { quote: 'sellers of coats', label: 'seller' }, concept: [{ quote: 'proven quality', text: 'quality is proven', examples: [] }] };
+  const routerWith = (framed: unknown) => ({ complete: async (req: { purpose: string; task?: string }) => ({ provider: 'test', model: 'm', data: req.task === 'concept-frame' ? framed : req.purpose === 'checklist' ? written : proposal }) });
+  const router = routerWith(frame);
+  const question = 'Find sellers of coats, proven quality';
+
+  it('frames again, and only frames, a current model whose framing failed, and keeps that model while the framing keeps failing', async () => {
+    const { DecisionModeler } = await import('../../src/research/decision.mjs');
+    const calls: string[] = [];
+    let framed: unknown = { concept: [{ quote: 'not in the request', text: 'x' }] };
+    const counting = { complete: async (req: { purpose: string; task?: string }) => { calls.push(req.task ?? req.purpose); return { provider: 'test', model: 'm', data: req.task === 'concept-frame' ? framed : req.purpose === 'checklist' ? written : proposal }; } };
+    const modeler = new DecisionModeler({ router: counting } as never);
+    const project: Record<string, any> = { id: 'p', question, guidance: '', acceptance: { itemCount: 20, expected: '20 links' } };
+    await modeler.build(project);
+    expect(project.decisionModel.framing).toBeNull();
+    expect(project.decisionModel.checklist.map((c: { clause: string }) => c.clause)).toEqual(['graded a']);
+    expect(modeler.fresh(project)).toBe(false);
+    calls.length = 0;
+    const kept = project.decisionModel;
+    expect(await modeler.build(project)).toBe(kept);
+    expect([...new Set(calls)]).toEqual(['concept-frame']);
+    framed = frame;
+    calls.length = 0;
+    const model = await modeler.build(project);
+    expect(calls).not.toContain('decision-model');
+    expect(calls).not.toContain('checklist');
+    expect(model.requirements.map((r: { quote: string }) => r.quote)).toEqual(['proven quality']);
+    expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['appraisal', 'graded a', false]]);
+    expect(model.kind).toMatchObject({ label: 'seller', asked: 'sellers of coats' });
+    expect(model.version).toBe(kept.version);
+    expect(modeler.fresh(project)).toBe(true);
+  });
+
+  it('builds the hard checks from the requirements of the asker, asks the asker about a part no family placed, and keeps the model-written question as appraisal', async () => {
+    const { DecisionModeler } = await import('../../src/research/decision.mjs');
+    const project: Record<string, any> = { id: 'p', question, guidance: 'graded A', acceptance: { itemCount: 20, expected: '20 links' } };
+    const model = await new DecisionModeler({ router } as never).build(project);
+    expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['appraisal', 'graded a', false]]);
+    expect(model.requirements.map((r: { id: string; quote: string; unframed?: boolean }) => [r.id, r.quote, Boolean(r.unframed)])).toEqual([['E1', 'proven quality', false]]);
+    expect(model.framing.open.map((r: { id: string; quote: string }) => `${r.id} ${r.quote}`)).toEqual(['Q1 20 links']);
+    expect(modelText(model)).toContain('[Q1] to confirm with you: Is "20 links" a condition each result must meet?');
+    expect(model.kind).toMatchObject({ label: 'seller', asked: 'sellers of coats', described: 'Find sellers of coats', examples: [] });
+    expect(model.framing.population.quote).toBe('sellers of coats');
+    expect(model.missing).toEqual(['Find sellers of coats']);
+    expect(modelText(model)).toContain('[E1] must: quality is proven');
+  });
+
+  it('is stale when the expected result changes, and keeps the model-written checklist when no model frames the request', async () => {
+    const { DecisionModeler } = await import('../../src/research/decision.mjs');
+    const modeler = new DecisionModeler({ router } as never);
+    const project: Record<string, any> = { id: 'p', question, guidance: '', acceptance: { itemCount: 20, expected: '' } };
+    await modeler.build(project);
+    expect(modeler.fresh(project)).toBe(true);
+    expect(modeler.fresh({ ...project, acceptance: { itemCount: 20, expected: 'recently posted' } })).toBe(false);
+    const plain: Record<string, any> = { id: 'q', question, guidance: '', acceptance: { itemCount: 20 } };
+    const model = await new DecisionModeler({ router: routerWith({ concept: [{ quote: 'not in the request', text: 'x' }] }) } as never).build(plain);
+    expect(model.requirements).toEqual([]);
+    expect(model.framing).toBeNull();
+    expect(model.checklist.map((c: { clause: string; single?: boolean; items: Array<{ hard: boolean }> }) => [c.clause, c.items[0].hard, c.single])).toEqual([['graded a', false, true]]);
   });
 });
 
