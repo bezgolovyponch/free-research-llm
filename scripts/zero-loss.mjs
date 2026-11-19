@@ -10,6 +10,7 @@ import { ChecklistJudge } from '../src/research/checklist.mjs';
 import { sentenceSpans } from '../src/research/spans.mjs';
 import { ModelRouter } from '../src/llm/router.mjs';
 import { ProviderFactory, routeOrderFrom } from '../src/app.mjs';
+import { verdict, hardIdsOf, itemTier, qualifies } from '../src/research/verdict.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -68,10 +69,101 @@ function hardChecklistItemsCount(project) {
   return clusters.flatMap((c) => c.items ?? []).filter((i) => i.hard).length;
 }
 
+function extractJudgedItems(project) {
+  const items = project?.acceptanceResult?.items ?? [];
+  if (!items.length) return [];
+
+  const checklist = project?.decisionModel?.checklist ?? project?.checklist ?? [];
+  const kind = project?.decisionModel?.kind ?? null;
+  const spec = project?.acceptance ?? {};
+
+  return items.map((item) => {
+    let checks = item.checks ?? [];
+    if (!checks.length && item.plan?.checks) {
+      checks = item.plan.checks.map((c) => ({
+        id: c.id,
+        answer: c.ok ? 'yes' : 'no',
+        quote: c.detail ?? '',
+        hard: true,
+        clause: c.label,
+      }));
+    }
+    return {
+      url: item.url,
+      title: item.title,
+      evidence: item.evidence ?? item.pageUrl ?? item.url,
+      live: item.live ?? true,
+      listing: item.listing ?? false,
+      inRange: item.inRange ?? null,
+      purpose: item.purpose ?? [],
+      checks,
+      tier: item.tier ?? null,
+      support: item.support ?? null,
+      valid: item.valid ?? false,
+      proposal: item.proposal ?? null,
+    };
+  });
+}
+
+function computeTiers(project) {
+  const judgedItems = extractJudgedItems(project);
+  if (!judgedItems.length) return { items: [], tiers: { confirmed: 0, 'to-confirm': 0, rejected: 0, 'not-judged': 0 }, summary: '' };
+
+  const checklist = project?.decisionModel?.checklist ?? project?.checklist ?? [];
+  const kind = project?.decisionModel?.kind ?? null;
+  const spec = project?.acceptance ?? {};
+
+  const result = verdict(judgedItems, spec, checklist, kind);
+
+  return {
+    items: result.items.map((item) => ({
+      url: item.url,
+      tier: item.tier,
+      support: item.support,
+      checks: item.checks,
+    })),
+    tiers: {
+      confirmed: result.tiers.confirmed ?? 0,
+      'to-confirm': result.tiers.toConfirm ?? 0,
+      rejected: result.tiers.rejected ?? 0,
+      'not-judged': result.tiers.notJudged ?? 0,
+    },
+    summary: result.summary,
+    perCheck: result.perCheck,
+  };
+}
+
+function extractStoredJudgeAnswers(project) {
+  const items = project?.acceptanceResult?.items ?? [];
+  if (!items.length) return [];
+
+  const outcomes = [];
+  for (const item of items) {
+    const checks = item.checks ?? [];
+    if (!checks.length && item.plan?.checks) {
+      continue;
+    }
+    for (const check of checks) {
+      if (check.answer !== undefined && check.answer !== null && check.answer !== '') {
+        outcomes.push({
+          project: project.id,
+          url: item.url,
+          clause: check.clause,
+          question: check.id.split('|')[1] ?? check.id,
+          hard: check.hard ?? false,
+          measure: 'judge-stored',
+          outcome: check.answer,
+          quote: check.quote ?? '',
+        });
+      }
+    }
+  }
+  return outcomes;
+}
+
 async function outcomesOf(projectFile, srcDir) {
   const project = JSON.parse(await fs.readFile(projectFile, 'utf8'));
   const items = checklistItems(project);
-  if (!items.length) return { outcomes: [], criteriaCount: decisionCriteriaCount(project), hardCount: hardChecklistItemsCount(project) };
   const M = adaptForChecklist(MEASURES);
   const decisionCriteria = project.decisionModel?.criteria ?? [];
   const ctx = {
@@ -114,7 +206,33 @@ async function outcomesOf(projectFile, srcDir) {
       outcomes.push({ url, clause: item.clause, question: item.question, hard: item.hard, measure: usedMeasure, outcome });
     }
   }
-  return { outcomes, criteriaCount: decisionCriteriaCount(project), hardCount: hardChecklistItemsCount(project) };
+
+  const tierResult = computeTiers(project);
+  const tierOutcomes = [];
+  for (const item of tierResult.items) {
+    tierOutcomes.push({
+      url: item.url,
+      clause: 'verdict',
+      question: 'tier',
+      hard: false,
+      measure: 'tier',
+      outcome: item.tier,
+      support: item.support,
+    });
+  }
+
+  const storedJudgeOutcomes = extractStoredJudgeAnswers(project);
+
+  return {
+    outcomes,
+    tierOutcomes,
+    storedJudgeOutcomes,
+    criteriaCount: decisionCriteriaCount(project),
+    hardCount: hardChecklistItemsCount(project),
+    tierSummary: tierResult.summary,
+    tierCounts: tierResult.tiers,
+    perCheck: tierResult.perCheck,
+  };
 }
 
 function keyOf(outcome) {
@@ -127,6 +245,104 @@ function negativeFlips(baseline, current) {
   for (const curr of current.outcomes) {
     const base = baseByKey.get(keyOf(curr));
     if (base && base.outcome === 'yes' && curr.outcome !== 'yes') {
+      flips.push({ url: curr.url, project: curr.project, clause: curr.clause, question: curr.question, baselineMeasure: base.measure, currentMeasure: curr.measure });
+    }
+  }
+  return flips;
+}
+
+function tierKey(outcome) {
+  return outcome.project + '|' + outcome.url;
+}
+
+function negativeTierFlips(baseline, current) {
+  const baseByKey = new Map();
+  if (baseline.tierOutcomes) {
+    for (const o of baseline.tierOutcomes) {
+      baseByKey.set(tierKey(o), o);
+    }
+  }
+  const flips = [];
+  if (current.tierOutcomes) {
+    for (const curr of current.tierOutcomes) {
+      const base = baseByKey.get(tierKey(curr));
+      if (base && base.outcome === 'confirmed' && curr.outcome !== 'confirmed') {
+        flips.push({ url: curr.url, project: curr.project, baselineTier: base.outcome, currentTier: curr.outcome });
+      }
+    }
+  }
+  return flips;
+}
+
+function positiveTierFlips(baseline, current) {
+  const baseByKey = new Map();
+  if (baseline.tierOutcomes) {
+    for (const o of baseline.tierOutcomes) {
+      baseByKey.set(tierKey(o), o);
+    }
+  }
+  const flips = [];
+  if (current.tierOutcomes) {
+    for (const curr of current.tierOutcomes) {
+      const base = baseByKey.get(tierKey(curr));
+      if (base && base.outcome !== 'confirmed' && curr.outcome === 'confirmed') {
+        flips.push({ url: curr.url, project: curr.project, baselineTier: base.outcome, currentTier: curr.outcome });
+      }
+    }
+  }
+  return flips;
+}
+
+function checkKey(outcome) {
+  return outcome.project + '|' + outcome.url + '|' + outcome.clause + '|' + outcome.question;
+}
+
+function negativeHardCheckFlips(baseline, current) {
+  const baseByKey = new Map();
+  if (baseline.storedJudgeOutcomes) {
+    for (const o of baseline.storedJudgeOutcomes) {
+      if (o.hard) baseByKey.set(checkKey(o), o);
+    }
+  }
+  const flips = [];
+  if (current.storedJudgeOutcomes) {
+    for (const curr of current.storedJudgeOutcomes) {
+      if (!curr.hard) continue;
+      const base = baseByKey.get(checkKey(curr));
+      if (base && base.outcome === 'yes' && curr.outcome !== 'yes') {
+        flips.push({ url: curr.url, project: curr.project, checkId: curr.clause + '|' + curr.question, baselineAnswer: base.outcome, currentAnswer: curr.outcome });
+      }
+    }
+  }
+  return flips;
+}
+
+function positiveHardCheckFlips(baseline, current) {
+  const baseByKey = new Map();
+  if (baseline.storedJudgeOutcomes) {
+    for (const o of baseline.storedJudgeOutcomes) {
+      if (o.hard) baseByKey.set(checkKey(o), o);
+    }
+  }
+  const flips = [];
+  if (current.storedJudgeOutcomes) {
+    for (const curr of current.storedJudgeOutcomes) {
+      if (!curr.hard) continue;
+      const base = baseByKey.get(checkKey(curr));
+      if (base && base.outcome !== 'yes' && curr.outcome === 'yes') {
+        flips.push({ url: curr.url, project: curr.project, checkId: curr.clause + '|' + curr.question, baselineAnswer: base.outcome, currentAnswer: curr.outcome });
+      }
+    }
+  }
+  return flips;
+}
+
+function positiveFlips(baseline, current) {
+  const baseByKey = new Map(baseline.outcomes.map((o) => [keyOf(o), o]));
+  const flips = [];
+  for (const curr of current.outcomes) {
+    const base = baseByKey.get(keyOf(curr));
+    if (base && base.outcome !== 'yes' && curr.outcome === 'yes') {
       flips.push({ url: curr.url, project: curr.project, clause: curr.clause, question: curr.question, baselineMeasure: base.measure, currentMeasure: curr.measure });
     }
   }
@@ -159,18 +375,37 @@ async function checkSnapshot(snapshotDir, baselineFile, judge = false) {
   const baseline = JSON.parse(await fs.readFile(baselineFile, 'utf8'));
   const projectsDir = path.join(snapshotDir, 'projects');
   const projects = await loadProjects(projectsDir);
+
   const allOutcomes = [];
+  const allTierOutcomes = [];
+  const allStoredJudgeOutcomes = [];
   let totalCriteria = 0;
   let totalHard = 0;
+
   for (const project of projects) {
-    const { outcomes, criteriaCount, hardCount } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
+    const { outcomes, tierOutcomes, storedJudgeOutcomes, criteriaCount, hardCount } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
     allOutcomes.push(...outcomes.map((o) => ({ ...o, project: project.id })));
+    allTierOutcomes.push(...tierOutcomes.map((o) => ({ ...o, project: project.id })));
+    allStoredJudgeOutcomes.push(...storedJudgeOutcomes);
     totalCriteria += criteriaCount;
     totalHard += hardCount;
   }
-  const current = { outcomes: allOutcomes, totalCriteria, totalHard };
+
+  const current = {
+    outcomes: allOutcomes,
+    tierOutcomes: allTierOutcomes,
+    storedJudgeOutcomes: allStoredJudgeOutcomes,
+    totalCriteria,
+    totalHard
+  };
 
   const flips = negativeFlips(baseline, current);
+  const tierFlips = negativeTierFlips(baseline, current);
+  const hardCheckFlips = negativeHardCheckFlips(baseline, current);
+  const positiveNumericFlips = positiveFlips(baseline, current);
+  const positiveTierFlipsResult = positiveTierFlips(baseline, current);
+  const positiveHardCheckFlipsResult = positiveHardCheckFlips(baseline, current);
+
   const criteriaDrop = current.totalCriteria < baseline.totalCriteria;
   const hardDrop = current.totalHard < baseline.totalHard;
 
@@ -196,12 +431,27 @@ async function checkSnapshot(snapshotDir, baselineFile, judge = false) {
   console.log('\n=== Zero-Loss Check ===');
   console.log('Baseline: ' + baseline.outcomes.length + ' outcomes, ' + baselineYes + ' yes (' + (baselineYes / baselineTotal * 100).toFixed(1) + '%), criteria ' + baseline.totalCriteria + ', hard ' + baseline.totalHard);
   console.log('Current:  ' + current.outcomes.length + ' outcomes, ' + currentYes + ' yes (' + (currentYes / currentTotal * 100).toFixed(1) + '%), criteria ' + current.totalCriteria + ', hard ' + current.totalHard);
-  console.log('Negative flips: ' + flips.length);
+  console.log('Negative flips (numeric): ' + flips.length);
   if (flips.length) {
     for (const flip of flips) {
       console.log('  ' + flip.project + ' | ' + flip.url + ' | ' + flip.clause + ' | ' + flip.question);
     }
   }
+  console.log('Negative tier flips (confirmed->not confirmed): ' + tierFlips.length);
+  if (tierFlips.length) {
+    for (const flip of tierFlips) {
+      console.log('  ' + flip.project + ' | ' + flip.url + ' | baseline tier: ' + flip.baselineTier + ' -> current tier: ' + flip.currentTier);
+    }
+  }
+  console.log('Negative hard-check flips (yes->not yes): ' + hardCheckFlips.length);
+  if (hardCheckFlips.length) {
+    for (const flip of hardCheckFlips) {
+      console.log('  ' + flip.project + ' | ' + flip.url + ' | ' + flip.checkId + ' | baseline: ' + flip.baselineAnswer + ' -> current: ' + flip.currentAnswer);
+    }
+  }
+  console.log('Positive flips (numeric): ' + positiveNumericFlips.length);
+  console.log('Positive tier flips (not confirmed->confirmed): ' + positiveTierFlipsResult.length);
+  console.log('Positive hard-check flips (not yes->yes): ' + positiveHardCheckFlipsResult.length);
   console.log('Criteria count: ' + (criteriaDrop ? 'DROP' : 'OK') + ' (' + baseline.totalCriteria + ' -> ' + current.totalCriteria + ')');
   console.log('Hard checklist: ' + (hardDrop ? 'DROP' : 'OK') + ' (' + baseline.totalHard + ' -> ' + current.totalHard + ')');
   console.log('Yes-rate diff: ' + (yesRateDiff * 100).toFixed(2) + ' points');
@@ -210,15 +460,12 @@ async function checkSnapshot(snapshotDir, baselineFile, judge = false) {
     console.log('Interval entirely below 0: ' + (intervalBelowZero ? 'YES' : 'NO'));
   }
 
-  const b = flips.length;
-  const c = current.outcomes.filter((o) => {
-    const base = baseline.outcomes.find((bo) => keyOf(bo) === keyOf(o));
-    return base && base.outcome !== 'yes' && o.outcome === 'yes';
-  }).length;
+  const b = flips.length + tierFlips.length + hardCheckFlips.length;
+  const c = positiveNumericFlips.length + positiveTierFlipsResult.length + positiveHardCheckFlipsResult.length;
   const pValue = mcNemarExact(b, c);
   console.log('McNemar exact (b=' + b + ', c=' + c + '): p = ' + pValue.toFixed(6));
 
-  const failed = flips.length > 0 || criteriaDrop || hardDrop || intervalBelowZero;
+  const failed = flips.length > 0 || tierFlips.length > 0 || hardCheckFlips.length > 0 || criteriaDrop || hardDrop || intervalBelowZero;
 
   if (judge) {
     const judgeResult = await runJudgeCheck(snapshotDir, baseline, current);
@@ -391,11 +638,22 @@ async function recordSnapshot(snapshotDir, outFile, judge = false) {
     console.log('Recorded ' + tape.stats.recorded + ' model answers to tape at ' + tapeDir);
   }
 
+  let allTierOutcomes = [];
+  let allStoredJudgeOutcomes = [];
+  const tierSummaries = {};
+  const tierCountsPerProject = {};
+  const perCheckPerProject = {};
+
   for (const project of projects) {
-    const { outcomes, criteriaCount, hardCount } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
+    const { outcomes, tierOutcomes, storedJudgeOutcomes, criteriaCount, hardCount, tierSummary, tierCounts, perCheck } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
     allOutcomes.push(...outcomes.map((o) => ({ ...o, project: project.id })));
+    allTierOutcomes.push(...tierOutcomes.map((o) => ({ ...o, project: project.id })));
+    allStoredJudgeOutcomes.push(...storedJudgeOutcomes);
     totalCriteria += criteriaCount;
     totalHard += hardCount;
+    if (tierSummary) tierSummaries[project.id] = tierSummary;
+    if (tierCounts) tierCountsPerProject[project.id] = tierCounts;
+    if (perCheck) perCheckPerProject[project.id] = perCheck;
   }
 
   const snapshot = {
@@ -404,10 +662,23 @@ async function recordSnapshot(snapshotDir, outFile, judge = false) {
     totalCriteria,
     totalHard,
     outcomes: allOutcomes,
+    tierOutcomes: allTierOutcomes,
+    storedJudgeOutcomes: allStoredJudgeOutcomes,
+    tierSummaries,
+    tierCountsPerProject,
+    perCheckPerProject,
   };
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await fs.writeFile(outFile, JSON.stringify(snapshot, null, 1));
   console.log('Recorded ' + allOutcomes.length + ' outcomes from ' + projects.length + ' projects (criteria: ' + totalCriteria + ', hard: ' + totalHard + ') to ' + outFile);
+  console.log('  Tier outcomes: ' + allTierOutcomes.length);
+  console.log('  Stored judge outcomes: ' + allStoredJudgeOutcomes.length);
+  for (const pid of projects.map(p => p.id)) {
+    if (tierCountsPerProject[pid]) {
+      const tc = tierCountsPerProject[pid];
+      console.log('  ' + pid + ': confirmed=' + tc.confirmed + ', to-confirm=' + tc['to-confirm'] + ', rejected=' + tc.rejected + ', not-judged=' + tc['not-judged']);
+    }
+  }
 }
 
 async function main(argv) {
@@ -424,4 +695,4 @@ async function main(argv) {
 
 if (process.argv[1] && import.meta.url === 'file://' + process.argv[1]) process.exit(await main(process.argv.slice(2)));
 
-export { outcomesOf, negativeFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, getTapeDir, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject };
+export { outcomesOf, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, getTapeDir, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers };
