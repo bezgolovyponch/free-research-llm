@@ -1,3 +1,4 @@
+import { startedDirectly } from './tool-entry.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +13,7 @@ const ALLOWED_COMMAND_PREFIXES = [
   'grep ',
 ];
 
-function isAllowedCommand(cmd) {
+export function isAllowedCommand(cmd) {
   const trimmed = cmd.trim();
   return ALLOWED_COMMAND_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
 }
@@ -95,4 +96,4 @@ async function main() {
   if (!allPassed) process.exitCode = 1;
 }
 
-main();
+if (startedDirectly(import.meta.url)) main();

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { isAllowedCommand } from '../../scripts/claims.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -12,7 +13,7 @@ describe('claims.mjs', () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-claims-'));
     try {
       const claimsFile = path.join(tmpDir, 'claims.md');
-      await fs.writeFile(claimsFile, 'claim: git status works | cmd: git status | expect: On branch\n');
+      await fs.writeFile(claimsFile, 'claim: git works | cmd: git rev-parse --is-inside-work-tree | expect: true\n');
 
       const result = spawnSync('node', ['scripts/claims.mjs', claimsFile], {
         cwd: ROOT,
@@ -22,7 +23,7 @@ describe('claims.mjs', () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain('VERIFIED');
-      expect(result.stdout).toContain('git status works');
+      expect(result.stdout).toContain('git works');
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
@@ -32,7 +33,7 @@ describe('claims.mjs', () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-claims-'));
     try {
       const claimsFile = path.join(tmpDir, 'claims.md');
-      await fs.writeFile(claimsFile, 'claim: git status fails | cmd: git status | expect: this string does not exist\n');
+      await fs.writeFile(claimsFile, 'claim: git output mismatch | cmd: git rev-parse --is-inside-work-tree | expect: this string does not exist\n');
 
       const result = spawnSync('node', ['scripts/claims.mjs', claimsFile], {
         cwd: ROOT,
@@ -42,7 +43,7 @@ describe('claims.mjs', () => {
 
       expect(result.status).toBe(1);
       expect(result.stdout).toContain('FAILED');
-      expect(result.stdout).toContain('git status fails');
+      expect(result.stdout).toContain('git output mismatch');
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
@@ -72,7 +73,7 @@ describe('claims.mjs', () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-claims-'));
     try {
       const claimsFile = path.join(tmpDir, 'claims.md');
-      await fs.writeFile(claimsFile, 'claim: git log works | cmd: git log --oneline -1 | expect: fix\n');
+      await fs.writeFile(claimsFile, 'claim: git version works | cmd: git --version | expect: git version\n');
 
       const result = spawnSync('node', ['scripts/claims.mjs', claimsFile], {
         cwd: ROOT,
@@ -106,24 +107,9 @@ describe('claims.mjs', () => {
     }
   });
 
-  it('allows npx vitest run commands', async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-claims-'));
-    try {
-      const claimsFile = path.join(tmpDir, 'claims.md');
-      await fs.writeFile(claimsFile, 'claim: vitest runs testIntegrity | cmd: npx vitest run tests/scripts/testintegrity.test.ts | expect: Test Files  1 passed\n');
-
-      const result = spawnSync('node', ['scripts/claims.mjs', claimsFile], {
-        cwd: ROOT,
-        encoding: 'utf8',
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 60000,
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('VERIFIED');
-    } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true });
-    }
+  it('allows npx vitest run commands without running a nested suite', () => {
+    expect(isAllowedCommand('npx vitest run tests/scripts/waste.test.ts')).toBe(true);
+    expect(isAllowedCommand('npx vitest watch')).toBe(false);
   });
 
   it('allows node scripts/ commands', async () => {
