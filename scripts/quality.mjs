@@ -15,6 +15,35 @@ import { parse as parseYaml } from 'yaml';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
 
+function testFileForSource(file) {
+  if (file.startsWith('src/')) return `tests/${file.slice(4, -4)}.test.ts`;
+  if (file.startsWith('verifier/')) return `tests/${file.slice(0, -4)}.test.ts`;
+  return null;
+}
+
+export function checkTestsChanged(changedFiles, commitMessages, root = ROOT) {
+  const srcChanged = changedFiles.filter((f) => /^(src|verifier)\/.*\.mjs$/.test(f));
+  const missingTestChanges = [];
+  for (const src of srcChanged) {
+    if (UNTESTED_ENTRYPOINTS.has(src)) continue;
+    const testFile = testFileForSource(src);
+    if (!testFile) continue;
+    if (!fs.existsSync(path.join(root, testFile))) continue;
+    if (!changedFiles.includes(testFile)) {
+      let allowed = false;
+      for (const msg of commitMessages) {
+        const match = msg.match(/^no-test:\s*(\S+)\s+[—-]\s+(.+)$/);
+        if (match && match[1].trim() === src) {
+          allowed = true;
+          break;
+        }
+      }
+      if (!allowed) missingTestChanges.push(`${src} → ${testFile}`);
+    }
+  }
+  return { passed: missingTestChanges.length === 0, detail: missingTestChanges.length ? `changed source file without test change: ${missingTestChanges.join('; ')}` : 'every changed source file has a corresponding test change' };
+}
+
 const EGRESS_PATTERNS = [
   /\bfetch\s*\(/,
   /\bfetchImpl\s*=\s*fetch\b/,
@@ -428,6 +457,17 @@ const gates = {
       .filter((f) => (f.startsWith('src/') || f.startsWith('verifier/')) && !UNTESTED_ENTRYPOINTS.has(f))
       .filter((f) => !fs.existsSync(path.join(ROOT, f.startsWith('src/') ? `tests/${f.slice(4, -4)}.test.ts` : `tests/${f.slice(0, -4)}.test.ts`)));
     return { passed: missing.length === 0, detail: missing.length ? `no test file for: ${missing.join(', ')}` : 'every logic module has a matching test file' };
+  },
+
+  testsChanged(files) {
+    const base = mergeBase();
+    if (!base) return { passed: true, detail: 'skipped: no git history for testsChanged gate' };
+    const logged = run('git', ['log', '--pretty=%B', `${base}..HEAD`]).stdout.trim();
+    const commitMessages = logged.split('\n').filter(Boolean);
+    const changedFromDiff = run('git', ['diff', '--name-only', '--diff-filter=AM', base]).stdout.split('\n').filter(Boolean);
+    const changedStaged = run('git', ['diff', '--cached', '--name-only', '--diff-filter=AM']).stdout.split('\n').filter(Boolean);
+    const changed = [...new Set([...changedFromDiff, ...changedStaged])];
+    return checkTestsChanged(changed, commitMessages, ROOT);
   },
 
   e2e() {
