@@ -1,0 +1,1 @@
+Electre Tri is a set of methods designed to sort alternatives evaluated on several criteria into ordered categories. In these methods, alternatives are assigned to categories by comparing them with reference profiles that represent either the boundary or central elements of the category.

@@ -14,6 +14,10 @@ import { parse as parseYaml } from 'yaml';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
 
+function normalizeWhitespace(text) {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 export function checkWaste(dataDir) {
   const logPath = path.join(dataDir, 'logs', 'model-calls.jsonl');
   if (!fs.existsSync(logPath)) {
@@ -65,6 +69,33 @@ function mergeBase() {
 }
 
 const gates = {
+  methods(files) {
+    const methodsPath = path.join(ROOT, 'src', 'research', 'methods.json');
+    if (!fs.existsSync(methodsPath)) {
+      return { passed: false, detail: 'src/research/methods.json not found' };
+    }
+    const methods = JSON.parse(fs.readFileSync(methodsPath, 'utf8'));
+    const verified = methods.filter((m) => m.status === 'verified');
+    const failures = [];
+    for (const method of verified) {
+      const fixturePath = path.join(ROOT, 'tests', 'fixtures', 'methods', `${method.id}.txt`);
+      if (!fs.existsSync(fixturePath)) {
+        failures.push(`${method.id}: fixture not found at ${fixturePath}`);
+        continue;
+      }
+      const fixture = fs.readFileSync(fixturePath, 'utf8');
+      const normQuote = normalizeWhitespace(method.quote);
+      const normFixture = normalizeWhitespace(fixture);
+      if (!normFixture.includes(normQuote)) {
+        failures.push(`${method.id}: quote not found in fixture (whitespace-normalised)`);
+      }
+    }
+    return {
+      passed: failures.length === 0,
+      detail: failures.length ? failures.join('; ') : `${verified.length} verified method quote(s) found in fixtures`
+    };
+  },
+
   syntax(files) {
     const failures = sourceModules(files).filter((f) => run(process.execPath, ['--check', f]).status !== 0);
     const html = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
