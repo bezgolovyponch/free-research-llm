@@ -11,6 +11,7 @@ import { sentenceSpans } from '../src/research/spans.mjs';
 import { ModelRouter } from '../src/llm/router.mjs';
 import { ProviderFactory, routeOrderFrom } from '../src/app.mjs';
 import { verdict, hardIdsOf, itemTier, qualifies } from '../src/research/verdict.mjs';
+import { startedDirectly } from './tool-entry.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -749,6 +750,6 @@ async function main(argv) {
   return await checkSnapshot(args.snapshotDir, args.baseline, args.judge);
 }
 
-if (process.argv[1] && import.meta.url === 'file://' + process.argv[1]) process.exit(await main(process.argv.slice(2)));
+if (startedDirectly(import.meta.url)) process.exit(await main(process.argv.slice(2)));
 
 export { outcomesOf, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, getTapeDir, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers, outcomesDiffer, exercisedSnapshot };

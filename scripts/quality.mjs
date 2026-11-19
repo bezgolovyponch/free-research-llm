@@ -191,7 +191,7 @@ function diffAgainstBaseDir(baseDir, currentDir = ROOT) {
     const glob = pattern.replace(/\*\*/g, '*');
     const files = run('find', [currentDir, '-path', `*/${glob}`, '-type', 'f']).stdout.trim().split('\n').filter(Boolean);
     for (const file of files) {
-      const relPath = path.relative(currentDir, file);
+      const relPath = path.relative(currentDir, file).split(path.sep).join('/');
       const baseFile = path.join(baseDir, relPath);
       if (!fs.existsSync(baseFile)) continue;
       const currentContent = fs.readFileSync(file, 'utf8');
