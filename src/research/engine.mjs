@@ -7,7 +7,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { currencyOf } from './acceptance.mjs';
-import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, keepJudged, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { verdict, itemTier, verdictInvariants, hardIdsOf, awaitsSecondFamily, acceptanceSummaryOf, scoreOf, verdictReport, verdictLines } from './verdict.mjs';
 import { notJudged } from './checklist.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
@@ -1757,9 +1757,10 @@ export class ResearchEngine {
       return version === JUDGE_VERSION;
     });
     const kindRejectedSet = new Set(project.kindRejected.map((e) => (typeof e === 'object' ? e.url : e)));
-    const deliverables = (brief.located === false
+    const built = (brief.located === false
       ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage, kindTerms: project.decisionModel?.kind?.terms ?? [], findWebsite: this.search?.search ? (name) => this.search.search([`"${name}"`], { maxSources: 5 }) : null })
-      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
+      : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]));
+    const deliverables = keepJudged(built, project.acceptanceResult?.items ?? [], { carry: brief.located === false })
       .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
     if (project.report) project.report.deliverables = deliverables;
     const convert = this.rates ? await this.rates.converter() : undefined;

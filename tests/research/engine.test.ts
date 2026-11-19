@@ -2682,6 +2682,25 @@ describe('hub search', () => {
       expect(cached.checks.find((check) => check.id === e1)).not.toHaveProperty('pending');
     });
 
+    it('keeps the providers judged in the last measure in the delivered set when a new build of the list no longer names them', async () => {
+      const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+      const mockSearch = { enabled: true, lastErrors: [], async search() { return []; }, async readPage() { return { status: 200, text: 'We sell wholesale clothing in bulk to shops across Europe. '.repeat(10) }; } };
+      const engine = new ResearchEngine({ router, search: mockSearch, store: new ProjectStore({ dir }), lanes: 1 });
+      const project = await engine.createProject({ question: 'Find 2 wholesale clothing providers', expected: '2 providers' });
+      project.acceptance = { itemCount: 2, valueRange: null, unit: '', urlsLive: false, mustMention: [] };
+      project.brief = { located: false, kind: null, regions: [] };
+      project.decisionModel = { checklist: [{ clause: 'bulk', items: [{ clause: 'bulk', question: 'Does it sell in bulk?', hard: true }] }] };
+      project.hubSources = [];
+      project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+      const kept = { url: 'https://kept.example/', title: 'Kept wholesaler', evidence: 'https://kept.example/', named: true, live: true, checks: [{ id: 'bulk|Does it sell in bulk?', answer: 'unknown', quote: '', hard: true, clause: 'bulk' }], tier: 'to-confirm' };
+      const dropped = { url: 'https://dropped.example/', title: 'Rejected', evidence: 'https://dropped.example/', named: true, live: true, checks: [{ id: 'bulk|Does it sell in bulk?', answer: 'no', quote: 'retail only', hard: true, clause: 'bulk' }], tier: 'rejected' };
+      project.acceptanceResult = { items: [kept, dropped], checks: [], score: 0, validCount: 0, totalAsked: 2 } as never;
+      engine.checklistJudge.judge = async () => [{ id: 'bulk|Does it sell in bulk?', answer: 'unknown', quote: '', hard: true, clause: 'bulk' }];
+      await engine.checkAcceptance(project);
+      expect(project.report!.deliverables!.map((d: { url: string }) => d.url)).toEqual(['https://kept.example/']);
+      expect(project.acceptanceResult!.items.map((item) => [item.url, item.tier])).toEqual([['https://kept.example/', 'to-confirm']]);
+    });
+
     it('cached verdicts do not count against judge budget', async () => {
       const router = new ModelRouter({ providers: [new ScriptedProvider()] });
       const mockSearch = {

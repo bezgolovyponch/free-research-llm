@@ -589,6 +589,20 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
 
 const identity = (value) => value;
 
+const INSPECTED = ['live', 'pageUrl', 'pageText', 'links', 'listing', 'inRange', 'mentions', 'purpose', 'checks', 'checklist', 'tier', 'support', 'valid', 'softYes'];
+
+export function keepJudged(deliverables, previous = [], { carry = false } = {}) {
+  const fresh = deliverables ?? [];
+  const byUrl = new Map(fresh.map((deliverable) => [deliverable.url, deliverable]));
+  const judged = (previous ?? []).filter((item) => item?.url && (item.checks ?? []).length && item.tier !== 'rejected');
+  const kept = judged.flatMap((item) => {
+    if (byUrl.has(item.url)) return [byUrl.get(item.url)];
+    return carry ? [Object.fromEntries(Object.entries(item).filter(([key]) => !INSPECTED.includes(key)))] : [];
+  });
+  const first = new Set(kept.map((deliverable) => deliverable.url));
+  return [...kept, ...fresh.filter((deliverable) => !first.has(deliverable.url))];
+}
+
 export function inRange(amounts, spec, itemValue, convert = identity, itemUnit = '') {
   const [min, max] = spec.valueRange;
   const wanted = currencyOf(spec.unit);

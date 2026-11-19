@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { AcceptanceChecker, MAX_ITEM_CHECKS, INSPECT_PER_ASKED, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, entityProfile, ownWebsite, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, keepJudged, MAX_ITEM_CHECKS, INSPECT_PER_ASKED, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, entityProfile, ownWebsite, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -967,5 +967,28 @@ describe('a page is a candidate whatever words it holds; the kind judge decides'
   it('keeps a page whose title holds an excluded word as a candidate, ordered last', async () => {
     const deliverables = await entityDeliverables(nodes as never, { terms: ['vintage clothing wholesale', 'graded A'], not: ['vintage'] });
     expect(deliverables.map((d: { named: boolean }) => d.named)).toEqual([false, false]);
+  });
+});
+
+describe('a judged item is never displaced by a new admission', () => {
+  const judged = (url: string, tier: string, extra: Record<string, unknown> = {}) => ({ url, title: url, named: true, evidence: url, live: true, pageText: 'text', links: [], purpose: [], checks: [{ id: 'k', answer: 'unknown' }], checklist: {}, support: {}, tier, valid: false, softYes: 0, ...extra });
+
+  it('puts the items judged in the last measure first, then the new named ones, the unnamed last', () => {
+    const fresh = [{ url: 'n1', named: true }, { url: 'u1', named: false }, { url: 'j1', named: true, title: 'new title' }];
+    const out = keepJudged(fresh, [judged('j1', 'to-confirm')]);
+    expect(out.map((d: { url: string }) => d.url)).toEqual(['j1', 'n1', 'u1']);
+    expect(out[0]).toEqual({ url: 'j1', named: true, title: 'new title' });
+    expect(keepJudged(fresh, [])).toEqual(fresh);
+  });
+
+  it('carries a judged item the new build no longer produced, without what the last inspection added, only where asked', () => {
+    const out = keepJudged([{ url: 'u1', named: false }], [judged('j2', 'to-confirm', { value: 5 }), judged('j3', 'confirmed')], { carry: true });
+    expect(out.map((d: { url: string }) => d.url)).toEqual(['j2', 'j3', 'u1']);
+    expect(out[0]).toEqual({ url: 'j2', title: 'j2', named: true, evidence: 'j2', value: 5 });
+    expect(keepJudged([{ url: 'u1' }], [judged('j2', 'to-confirm')]).map((d: { url: string }) => d.url)).toEqual(['u1']);
+  });
+
+  it('lets a rejected or an unread item go', () => {
+    expect(keepJudged([{ url: 'u1' }], [judged('r1', 'rejected'), { url: 'x', checks: [] }, null as never], { carry: true }).map((d: { url: string }) => d.url)).toEqual(['u1']);
   });
 });
