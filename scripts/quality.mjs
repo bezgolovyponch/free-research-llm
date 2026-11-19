@@ -6,11 +6,28 @@ import { fileURLToPath } from 'node:url';
 import { SECRET_PATTERNS } from '../src/secrets.mjs';
 import { acquireQualityLock, releaseQualityLock, LOCK_WAIT_MS } from './quality-lock.mjs';
 import { binEntry } from './tool-entry.mjs';
+import { computeWasteStats } from './waste.mjs';
 
 import { parse as parseYaml } from 'yaml';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
+
+export function checkWaste(dataDir) {
+  const logPath = path.join(dataDir, 'logs', 'model-calls.jsonl');
+  if (!fs.existsSync(logPath)) {
+    return { passed: true, detail: 'model-calls.jsonl not found (CI), waste check skipped' };
+  }
+  const now = new Date();
+  const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const { total, failed, failPct } = computeWasteStats(logPath, since);
+  if (total === 0) return { passed: true, detail: 'no model calls in last 24h' };
+  const warn = failPct > 15;
+  return {
+    passed: true,
+    detail: `last 24h: ${total} calls, ${failed} failed (${failPct}%)${warn ? ' ⚠ WARN: exceeds 15%' : ' OK'}`,
+  };
+}
 
 const FLAKE_ROUNDS = 3;
 
@@ -156,13 +173,24 @@ const gates = {
     const failing = result.status === 0 ? [] : failingLines(output, /^\s*(?:×|FAIL\s|AssertionError|Error:)/);
     return { passed: result.status === 0, detail: `${summary ? summary[1].trim() : result.stderr.slice(-300)}${failing.length ? `\n      ${failing.join('\n      ')}` : ''}` };
   },
+
+  waste() {
+    const dataDir = process.env.FRL_DATA_DIR || path.join(ROOT, 'data');
+    return checkWaste(dataDir);
+  },
 };
 
-const files = repoFiles();
-const results = Object.entries(gates).map(([name, gate]) => ({ gate: name, ...gate(files) }));
-const verdict = { at: new Date().toISOString(), passed: results.every((r) => r.passed), results };
-fs.mkdirSync(path.join(ROOT, 'data/logs'), { recursive: true });
-fs.appendFileSync(path.join(ROOT, 'data/logs/quality.jsonl'), `${JSON.stringify(verdict)}\n`);
-for (const r of results) console.log(`${r.passed ? 'PASS' : 'FAIL'}  ${r.gate.padEnd(13)} ${r.detail}`);
-console.log(verdict.passed ? '\nquality gate: PASSED' : '\nquality gate: FAILED');
-process.exitCode = verdict.passed ? 0 : 1;
+function runQualityGate() {
+  const files = repoFiles();
+  const results = Object.entries(gates).map(([name, gate]) => ({ gate: name, ...gate(files) }));
+  const verdict = { at: new Date().toISOString(), passed: results.every((r) => r.passed), results };
+  fs.mkdirSync(path.join(ROOT, 'data/logs'), { recursive: true });
+  fs.appendFileSync(path.join(ROOT, 'data/logs/quality.jsonl'), `${JSON.stringify(verdict)}\n`);
+  for (const r of results) console.log(`${r.passed ? 'PASS' : 'FAIL'}  ${r.gate.padEnd(13)} ${r.detail}`);
+  console.log(verdict.passed ? '\nquality gate: PASSED' : '\nquality gate: FAILED');
+  process.exitCode = verdict.passed ? 0 : 1;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runQualityGate();
+}
