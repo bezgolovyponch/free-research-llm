@@ -5,6 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { candidateDeliverables } from '../src/research/candidates.mjs';
 import { adaptForChecklist, MEASURES, compare } from '../src/research/measures.mjs';
 import { pairRuns, bootstrapDifference } from '../src/research/agreement.mjs';
+import { createAnswerTape } from './answer-tape.mjs';
+import { ChecklistJudge } from '../src/research/checklist.mjs';
+import { sentenceSpans } from '../src/research/spans.mjs';
+import { ModelRouter } from '../src/llm/router.mjs';
+import { ProviderFactory, routeOrderFrom } from '../src/app.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -12,17 +17,19 @@ function parseArgs(argv) {
   const command = argv[0];
   const values = (flag) => argv.flatMap((arg, index) => (arg === flag && argv[index + 1] !== undefined ? [argv[index + 1]] : []));
   const value = (flag) => values(flag)[0] ?? null;
-  if (!['record', 'check'].includes(command)) return { error: 'usage:\n  node scripts/zero-loss.mjs record <snapshotDir> --out <file>\n  node scripts/zero-loss.mjs check <snapshotDir> --baseline <file>' };
+  const hasFlag = (flag) => argv.includes(flag);
+  if (!['record', 'check'].includes(command)) return { error: 'usage:\n  node scripts/zero-loss.mjs record <snapshotDir> --out <file> [--judge]\n  node scripts/zero-loss.mjs check <snapshotDir> --baseline <file> [--judge]' };
   const snapshotDir = path.resolve(value('<snapshotDir>') ?? argv[1]);
   if (!snapshotDir) return { error: 'snapshotDir is required' };
+  const judge = hasFlag('--judge');
   if (command === 'record') {
     const out = value('--out');
     if (!out) return { error: '--out is required' };
-    return { command, snapshotDir, out: path.resolve(out) };
+    return { command, snapshotDir, out: path.resolve(out), judge };
   }
   const baseline = value('--baseline');
   if (!baseline) return { error: '--baseline is required' };
-  return { command, snapshotDir, baseline: path.resolve(baseline) };
+  return { command, snapshotDir, baseline: path.resolve(baseline), judge };
 }
 
 async function loadProjects(dir) {
@@ -110,30 +117,6 @@ async function outcomesOf(projectFile, srcDir) {
   return { outcomes, criteriaCount: decisionCriteriaCount(project), hardCount: hardChecklistItemsCount(project) };
 }
 
-async function recordSnapshot(snapshotDir, outFile) {
-  const projectsDir = path.join(snapshotDir, 'projects');
-  const projects = await loadProjects(projectsDir);
-  const allOutcomes = [];
-  let totalCriteria = 0;
-  let totalHard = 0;
-  for (const project of projects) {
-    const { outcomes, criteriaCount, hardCount } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
-    allOutcomes.push(...outcomes.map((o) => ({ ...o, project: project.id })));
-    totalCriteria += criteriaCount;
-    totalHard += hardCount;
-  }
-  const snapshot = {
-    recordedAt: new Date().toISOString(),
-    projects: projects.map((p) => p.id),
-    totalCriteria,
-    totalHard,
-    outcomes: allOutcomes,
-  };
-  await fs.mkdir(path.dirname(outFile), { recursive: true });
-  await fs.writeFile(outFile, JSON.stringify(snapshot, null, 1));
-  console.log('Recorded ' + allOutcomes.length + ' outcomes from ' + projects.length + ' projects (criteria: ' + totalCriteria + ', hard: ' + totalHard + ') to ' + outFile);
-}
-
 function keyOf(outcome) {
   return outcome.project + '|' + outcome.url + '|' + outcome.clause + '|' + outcome.question;
 }
@@ -172,7 +155,7 @@ function binomialCoefficient(n, k) {
   return Math.round(result);
 }
 
-async function checkSnapshot(snapshotDir, baselineFile) {
+async function checkSnapshot(snapshotDir, baselineFile, judge = false) {
   const baseline = JSON.parse(await fs.readFile(baselineFile, 'utf8'));
   const projectsDir = path.join(snapshotDir, 'projects');
   const projects = await loadProjects(projectsDir);
@@ -236,8 +219,195 @@ async function checkSnapshot(snapshotDir, baselineFile) {
   console.log('McNemar exact (b=' + b + ', c=' + c + '): p = ' + pValue.toFixed(6));
 
   const failed = flips.length > 0 || criteriaDrop || hardDrop || intervalBelowZero;
-  console.log(failed ? '\nFAIL' : '\nPASS');
+
+  if (judge) {
+    const judgeResult = await runJudgeCheck(snapshotDir, baseline, current);
+    console.log('\n=== Judge Check ===');
+    console.log('Judge negative flips: ' + judgeResult.flips.length);
+    if (judgeResult.flips.length) {
+      for (const flip of judgeResult.flips) {
+        console.log('  ' + flip.project + ' | ' + flip.url + ' | ' + flip.clause + ' | ' + flip.question + ' (baseline: ' + flip.baselineAnswer + ' -> current: ' + flip.currentAnswer + ')');
+      }
+    }
+    console.log('Unrecorded prompts: ' + judgeResult.unrecorded.length);
+    if (judgeResult.unrecorded.length) {
+      for (const u of judgeResult.unrecorded) {
+        console.log('  ' + u.project + ' | ' + u.url + ' | ' + u.clause + ' | ' + u.question);
+      }
+    }
+    if (judgeResult.flips.length > 0) {
+      console.log('\nFAIL (judge flips)');
+      return 1;
+    }
+    console.log('\nPASS (judge)');
+  } else {
+    console.log(failed ? '\nFAIL' : '\nPASS');
+  }
   return failed ? 1 : 0;
+}
+
+function getTapeDir(snapshotDir) {
+  const envTape = process.env.FRL_TAPE_DIR;
+  if (envTape) return path.resolve(envTape);
+  return path.join(snapshotDir, 'tape');
+}
+
+function createTapeRouter(tapeDir, mode) {
+  const tape = createAnswerTape({ dir: tapeDir, mode, fetchImpl: fetch });
+  const factory = new ProviderFactory({ env: process.env, fetchImpl: tape.fetch });
+  const providers = factory.order().map((preset) => factory.build(preset));
+  const router = new ModelRouter({ providers, routeOrder: routeOrderFrom(process.env) });
+  return { router, tape, providers };
+}
+
+async function loadFullProject(projectFile) {
+  return JSON.parse(await fs.readFile(projectFile, 'utf8'));
+}
+
+function findPageText(project, url) {
+  for (const node of project.nodes ?? []) {
+    for (const source of node.sources ?? []) {
+      if (source.url === url && source.text) {
+        return source.text;
+      }
+    }
+  }
+  return null;
+}
+
+function getQualitativeItems(checklist) {
+  const items = checklistItems({ decisionModel: { checklist } });
+  return items.filter((item) => !item.numeric?.measure);
+}
+
+async function runJudgeOnItem(judge, item, pageText, checklist, kind, decisionCriteria) {
+  if (!pageText) return [];
+  return judge.judge(item, pageText, checklist, kind, decisionCriteria, {});
+}
+
+function judgeKey(projectId, url, clause, question) {
+  return projectId + '|' + url + '|' + clause + '|' + question;
+}
+
+async function runJudgeCheck(snapshotDir, baseline, current) {
+  const tapeDir = getTapeDir(snapshotDir);
+  const tapeExists = await fs.stat(tapeDir).then(() => true).catch(() => false);
+  if (!tapeExists) {
+    console.log('Tape directory not found: ' + tapeDir + ' (skipping judge check)');
+    return { flips: [], unrecorded: [] };
+  }
+
+  const { router, tape } = createTapeRouter(tapeDir, 'replay');
+  const judge = new ChecklistJudge({ router });
+
+  const projectsDir = path.join(snapshotDir, 'projects');
+  const projects = await loadProjects(projectsDir);
+
+  const baselineByKey = new Map();
+  for (const outcome of baseline.outcomes) {
+    if (outcome.measure === 'judge') {
+      baselineByKey.set(judgeKey(outcome.project, outcome.url, outcome.clause, outcome.question), outcome);
+    }
+  }
+
+  const flips = [];
+  const unrecorded = [];
+
+  for (const project of projects) {
+    const fullProject = await loadFullProject(path.join(projectsDir, project.id + '.json'));
+    const checklist = fullProject.decisionModel?.checklist ?? fullProject.checklist ?? [];
+    const decisionCriteria = fullProject.decisionModel?.criteria ?? [];
+    const kind = fullProject.brief?.kind ?? null;
+    const qualitativeItems = getQualitativeItems(checklist);
+
+    if (!qualitativeItems.length) continue;
+
+    const deliverables = candidateDeliverables(fullProject.candidates);
+    for (const deliverable of deliverables) {
+      const pageText = findPageText(fullProject, deliverable.url);
+      if (!pageText) continue;
+
+      const checks = await runJudgeOnItem(judge, deliverable, pageText, checklist, kind, decisionCriteria);
+      for (const check of checks) {
+        const key = judgeKey(project.id, deliverable.url, check.clause, check.id.split('|')[1] ?? check.id);
+        const baselineOutcome = baselineByKey.get(key);
+        const currentAnswer = check.answer;
+
+        if (tape.stats.misses > 0 || tape.stats.blocked > 0) {
+          unrecorded.push({ project: project.id, url: deliverable.url, clause: check.clause, question: check.id.split('|')[1] ?? check.id });
+        }
+
+        if (baselineOutcome && baselineOutcome.outcome === 'yes' && currentAnswer !== 'yes') {
+          flips.push({ project: project.id, url: deliverable.url, clause: check.clause, question: check.id.split('|')[1] ?? check.id, baselineAnswer: baselineOutcome.outcome, currentAnswer });
+        }
+      }
+    }
+  }
+
+  return { flips, unrecorded };
+}
+
+async function recordSnapshot(snapshotDir, outFile, judge = false) {
+  const projectsDir = path.join(snapshotDir, 'projects');
+  const projects = await loadProjects(projectsDir);
+  const allOutcomes = [];
+  let totalCriteria = 0;
+  let totalHard = 0;
+
+  if (judge) {
+    const tapeDir = getTapeDir(snapshotDir);
+    const { router, tape } = createTapeRouter(tapeDir, 'record');
+    const judgeInstance = new ChecklistJudge({ router });
+
+    for (const project of projects) {
+      const fullProject = await loadFullProject(path.join(projectsDir, project.id + '.json'));
+      const checklist = fullProject.decisionModel?.checklist ?? fullProject.checklist ?? [];
+      const decisionCriteria = fullProject.decisionModel?.criteria ?? [];
+      const kind = fullProject.brief?.kind ?? null;
+      const qualitativeItems = getQualitativeItems(checklist);
+
+      if (!qualitativeItems.length) continue;
+
+      const deliverables = candidateDeliverables(fullProject.candidates);
+      for (const deliverable of deliverables) {
+        const pageText = findPageText(fullProject, deliverable.url);
+        if (!pageText) continue;
+
+        const checks = await runJudgeOnItem(judgeInstance, deliverable, pageText, checklist, kind, decisionCriteria);
+        for (const check of checks) {
+          allOutcomes.push({
+            project: project.id,
+            url: deliverable.url,
+            clause: check.clause,
+            question: check.id.split('|')[1] ?? check.id,
+            hard: check.hard,
+            measure: 'judge',
+            outcome: check.answer,
+          });
+        }
+      }
+    }
+
+    console.log('Recorded ' + tape.stats.recorded + ' model answers to tape at ' + tapeDir);
+  }
+
+  for (const project of projects) {
+    const { outcomes, criteriaCount, hardCount } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
+    allOutcomes.push(...outcomes.map((o) => ({ ...o, project: project.id })));
+    totalCriteria += criteriaCount;
+    totalHard += hardCount;
+  }
+
+  const snapshot = {
+    recordedAt: new Date().toISOString(),
+    projects: projects.map((p) => p.id),
+    totalCriteria,
+    totalHard,
+    outcomes: allOutcomes,
+  };
+  await fs.mkdir(path.dirname(outFile), { recursive: true });
+  await fs.writeFile(outFile, JSON.stringify(snapshot, null, 1));
+  console.log('Recorded ' + allOutcomes.length + ' outcomes from ' + projects.length + ' projects (criteria: ' + totalCriteria + ', hard: ' + totalHard + ') to ' + outFile);
 }
 
 async function main(argv) {
@@ -247,11 +417,11 @@ async function main(argv) {
     return 1;
   }
   if (args.command === 'record') {
-    return await recordSnapshot(args.snapshotDir, args.out);
+    return await recordSnapshot(args.snapshotDir, args.out, args.judge);
   }
-  return await checkSnapshot(args.snapshotDir, args.baseline);
+  return await checkSnapshot(args.snapshotDir, args.baseline, args.judge);
 }
 
 if (process.argv[1] && import.meta.url === 'file://' + process.argv[1]) process.exit(await main(process.argv.slice(2)));
 
-export { outcomesOf, negativeFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot };
+export { outcomesOf, negativeFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, getTapeDir, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject };
