@@ -21,7 +21,7 @@ export function applyQuoteCheck(replies, spans) {
 }
 
 export const CHECKLIST_VERSION = 6;
-export const JUDGE_VERSION = 4;
+export const JUDGE_VERSION = 5;
 export const JUDGE_QUESTIONS_PER_CALL = 4;
 export const JUDGE_BLOCK_CHARS = 6000;
 export const JUDGE_PAGE_CHARS = 40000;

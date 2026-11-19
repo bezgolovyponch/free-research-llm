@@ -670,7 +670,7 @@ describe('item-level checklist with a kind check and code-measured values', () =
   });
 
   it('the fingerprint carries the judge version, so answers of an older judge are not reused', () => {
-    expect(JUDGE_VERSION).toBe(4);
+    expect(JUDGE_VERSION).toBe(5);
     expect(CHECKLIST_VERSION).toBe(6);
     expect(checklistFingerprint(checklist).endsWith(`judge:${JUDGE_VERSION}`)).toBe(true);
   });
