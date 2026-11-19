@@ -67,6 +67,20 @@ describe('router admin', () => {
     await expect(t.a.order([])).rejects.toThrow(/at least one/);
   });
 
+  it('shows why a provider rests instead of calling every rest a rate limit', () => {
+    const env = { SAMBANOVA_API_KEY: 'k', COHERE_API_KEY: 'k', GROQ_API_KEY: 'k' };
+    const statuses = [
+      { id: 'sambanova', state: 'ready', modelCount: 2, coolingDownMs: 86400000, coolingReason: 'credits used up (needs payment); rests 24 h, add credit or remove the key' },
+      { id: 'cohere', state: 'ready', modelCount: 1, coolingDownMs: 1003260000, coolingReason: 'monthly quota used up; waits for the monthly reset (2026-12-01 UTC)' },
+      { id: 'groq', state: 'ready', modelCount: 12, coolingDownMs: 30000, coolingReason: null },
+    ];
+    const rows = catalogRows({ env, statuses }).models;
+    const row = (id: string) => rows.find((m: { id: string }) => m.id === id);
+    expect(row('sambanova')).toMatchObject({ state: 'cooling', detail: 'cooling down 86400 s: credits used up (needs payment); rests 24 h, add credit or remove the key' });
+    expect(row('cohere')).toMatchObject({ state: 'cooling', detail: 'cooling down 1003260 s: monthly quota used up; waits for the monthly reset (2026-12-01 UTC)' });
+    expect(row('groq')).toMatchObject({ state: 'cooling', detail: 'cooling down 30 s: rate limit' });
+  });
+
   it('judges a source link by its HTTP status and caches the result', async () => {
     expect([linkVerdict(200).ok, linkVerdict(403).ok, linkVerdict(404).ok, linkVerdict(0, 'timed out').ok]).toEqual([true, true, false, false]);
     let calls = 0;

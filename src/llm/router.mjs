@@ -34,7 +34,7 @@ const BAD_KEY_MS = 6 * 3600 * 1000;
 export const PAYMENT_REST_MS = 24 * 3600 * 1000;
 export const WAIT_NOTICE_MS = 60000;
 const PAYMENT_REQUIRED = /payment required|needs payment|subscription (?:is )?required|requires? a (?:paid|subscription)|upgrade your plan/i;
-const CREDIT_EXHAUSTED = /balance_units|billing_portal|insufficient (?:credit|funds|balance)|out of credits?/i;
+const CREDIT_EXHAUSTED = /balance_units|billing_portal|insufficient (?:credit|funds|balance)|out of credits?|credits?[_ ](?:exhausted|depleted|used up)/i;
 const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
 const PER_MODEL_DAY = /quota window: per day, per model/;
@@ -59,7 +59,9 @@ export function planGated(error) {
 
 export function paymentRequired(error) {
   const message = String(error?.message ?? '');
-  return PAYMENT_REQUIRED.test(message) || (error?.status === 402 && !SHORT_LIMIT.test(message) && !CREDIT_EXHAUSTED.test(message));
+  if (PAYMENT_REQUIRED.test(message)) return true;
+  if (SHORT_LIMIT.test(message) || quotaWindowOf(message)) return false;
+  return error?.status === 402 || CREDIT_EXHAUSTED.test(message);
 }
 
 export function modelGone(error) {
@@ -534,7 +536,7 @@ export class ModelRouter {
     const now = this.now();
     if (error.status === 401 || error.status === 403) return { until: now + BAD_KEY_MS, reason: 'key rejected; check it on Models & router' };
     const message = String(error.message ?? '');
-    if (paymentRequired(error)) return { until: now + PAYMENT_REST_MS, reason: 'needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key' };
+    if (paymentRequired(error)) return { until: now + PAYMENT_REST_MS, reason: CREDIT_EXHAUSTED.test(message) ? 'credits used up (needs payment); rests 24 h, add credit or remove the key' : 'needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key' };
     const until = now + (error.retryAfterMs || this.cooldownMs);
     if (quotaWindowOf(message) === 'month') {
       const reset = Math.max(until, nextUtcMonth(now));

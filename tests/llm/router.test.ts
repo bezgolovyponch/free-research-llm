@@ -107,7 +107,7 @@ describe('ModelRouter', () => {
     expect(router.available().map((p) => p.id)).toEqual(['a', 'b']);
   });
 
-  it('benches a rejected key for hours and a spent daily quota or credit until the next UTC day', async () => {
+  it('benches a rejected key for hours, used-up credit for 24 h as a payment state, and a spent daily quota until the next UTC day', async () => {
     const now = Date.parse('2026-10-20T10:00:00Z');
     const key = provider('key', [new ProviderError('key HTTP 401: invalid', { status: 401 })]);
     const credit = provider('credit', [new ProviderError('credit HTTP 402: {"balance_units":0}', { status: 402 })]);
@@ -118,7 +118,10 @@ describe('ModelRouter', () => {
     const st = Object.fromEntries(router.status().map((p: { id: string; coolingDownMs: number; coolingReason: string }) => [p.id, p]));
     expect(st.key.coolingDownMs).toBe(6 * 3600 * 1000);
     expect(st.key.coolingReason).toContain('key rejected');
-    expect(st.credit.coolingDownMs).toBe(Date.parse('2026-10-21T00:01:00Z') - now);
+    expect(st.credit.coolingDownMs).toBe(PAYMENT_REST_MS);
+    expect(st.credit.coolingReason).toBe('credits used up (needs payment); rests 24 h, add credit or remove the key');
+    expect(router.needsPayment('credit')).toBe(true);
+    expect(st.daily.coolingDownMs).toBe(Date.parse('2026-10-21T00:01:00Z') - now);
     expect(st.daily.coolingReason).toContain('daily quota');
     expect(st.ok.coolingReason).toBeNull();
     expect(nextUtcMidnight(now)).toBe(Date.parse('2026-10-21T00:01:00Z'));
@@ -229,14 +232,56 @@ describe('ModelRouter.restoreCooldowns', () => {
       { ts: '2026-10-23T09:57:00Z', provider: 'groq', ok: false, error: 'groq HTTP 429: You exceeded your current quota, please check your plan' },
     ]);
     expect(restored.sort()).toEqual(['sambanova']);
-    expect(router.cooldownReason.get('sambanova')).toMatch(/daily quota or credit/);
-    expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
+    expect(router.cooldownReason.get('sambanova')).toBe('credits used up (needs payment); rests 24 h, add credit or remove the key');
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + PAYMENT_REST_MS);
+    expect(router.needsPayment('sambanova')).toBe(true);
     expect(router.cooldownUntil.has('groq')).toBe(false);
   });
 });
 
 const COHERE_MONTH_BODY = '{"error":{"message":"You are using a Trial key, which is limited to 1000 API calls / month. You can continue to use the Trial key for free or upgrade to a Production key with higher r';
 const COHERE_MONTH = `cohere HTTP 429: ${COHERE_MONTH_BODY}`;
+const SAMBANOVA_CREDITS_BODY = '{"error":{"code":"CREDITS_EXHAUSTED","message":"You have run out of credits..."}}';
+const SAMBANOVA_CREDITS = `sambanova HTTP 402: ${SAMBANOVA_CREDITS_BODY}`;
+
+describe('ModelRouter used-up credits', () => {
+  it('excludes a provider whose credits ran out from the free route like one that needs payment, says why once, and calls it no more', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const clock = { now: Date.parse('2026-11-19T08:10:13Z') };
+    const asked: string[] = [];
+    const fetchImpl = async (url: string, init: { body?: string }) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'gpt-oss-120b' }, { id: 'DeepSeek-V3.2' }] }));
+      asked.push(JSON.parse(init.body ?? '{}').model);
+      return new Response(SAMBANOVA_CREDITS_BODY, { status: 402 });
+    };
+    const preset = { id: 'sambanova', label: 's', baseURL: 'https://s.example/v1', keyEnv: 'K', prefer: { fast: ['gpt-oss-120b'], deep: ['DeepSeek-V3.2', 'gpt-oss-120b'] } };
+    const sambanova = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: fetchImpl as never, now: () => clock.now }).discover();
+    expect(sambanova.state).toBe('ready');
+    const events: Array<{ kind: string }> = [];
+    const router = new ModelRouter({ providers: [sambanova, provider('free', [])], now: () => clock.now, sleep: async () => {}, onWait: (event: { kind: string }) => events.push(event) });
+    for (let i = 0; i < 3; i++) {
+      await expect(router.complete({ purpose: 'research', messages: [{ role: 'user', content: 'x' }] })).resolves.toMatchObject({ provider: 'free' });
+      clock.now += 60 * 60 * 1000;
+    }
+    expect(asked).toEqual(['gpt-oss-120b']);
+    expect(router.needsPayment('sambanova')).toBe(true);
+    expect(router.route().fast).toEqual(['free']);
+    expect(router.cooldownReason.get('sambanova')).toBe('credits used up (needs payment); rests 24 h, add credit or remove the key');
+    expect(router.ledger.filter((row: { purpose: string }) => row.purpose === 'router').map((row: { error: string }) => row.error)).toEqual(['sambanova needs payment: excluded from the free route']);
+    expect(events.filter((event) => event.kind === 'excluded')).toEqual([{ kind: 'excluded', provider: 'sambanova', message: 'sambanova needs payment: excluded from the free route' }]);
+  });
+
+  it('keeps that exclusion after a restart from the raw error in the call log', () => {
+    const now = Date.parse('2026-11-19T11:16:07Z');
+    const p = (id: string) => ({ id, ready: true, keyCount: 1, describe: () => ({ id }), chat: async () => ({}) });
+    const router = new ModelRouter({ providers: [p('sambanova'), p('free')], now: () => now });
+    expect(router.restoreCooldowns([{ ts: '2026-11-19T08:10:13.789Z', purpose: 'research', tier: 'fast', provider: 'sambanova', ok: false, ms: 190, error: SAMBANOVA_CREDITS, keys: 1, model: 'gpt-oss-120b' }])).toEqual(['sambanova']);
+    expect(router.needsPayment('sambanova')).toBe(true);
+    expect(router.route().fast).toEqual(['free']);
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + PAYMENT_REST_MS);
+    expect(router.cooldownReason.get('sambanova')).toBe('credits used up (needs payment); rests 24 h, add credit or remove the key');
+  });
+});
 
 describe('ModelRouter monthly quota window', () => {
   it('rests a provider whose trial key used its month until the next month starts (UTC), after one call', async () => {
@@ -341,7 +386,7 @@ describe('ModelRouter dead providers', () => {
 });
 
 describe('ModelRouter.coolDown', () => {
-  it('treats a 402 that states a short retry as a short throttle, not a daily bench', () => {
+  it('treats a 402 that states a short retry as a short throttle, one that states a day as a daily bench, and used-up credit as a payment state', () => {
     const now = Date.parse('2026-10-23T10:00:00Z');
     const router = new ModelRouter({ providers: [], now: () => now });
     router.coolDown({ id: 'pollinations' }, new ProviderError('pollinations HTTP 402: Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s', { status: 402, retryAfterMs: 5000 }));
@@ -351,7 +396,9 @@ describe('ModelRouter.coolDown', () => {
     router.coolDown({ id: 'gemini-day' }, new ProviderError('gemini HTTP 429: You exceeded your current quota [quota window: per day]', { status: 429 }));
     expect(router.cooldownUntil.get('gemini-day')).toBe(nextUtcMidnight(now));
     router.coolDown({ id: 'sambanova' }, new ProviderError('sambanova HTTP 402: balance_units 0', { status: 402 }));
-    expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
+    expect(router.cooldownUntil.get('sambanova')).toBe(now + PAYMENT_REST_MS);
+    router.coolDown({ id: 'daily-credit' }, new ProviderError('x HTTP 402 [quota window: per day]: daily credits used up', { status: 402 }));
+    expect(router.cooldownUntil.get('daily-credit')).toBe(nextUtcMidnight(now));
   });
 });
 
@@ -1399,7 +1446,7 @@ describe('ModelRouter.restoreCooldowns model-aware streak', () => {
 
 describe('ModelRouter.restoreCooldowns key count', () => {
 
-  it('restores a daily-quota bench when the provider has the same number of keys as the ledger row', () => {
+  it('restores a used-up-credit bench when the provider has the same number of keys as the ledger row', () => {
     const now = Date.parse('2026-11-13T10:00:00Z');
     const p = (id: string, keyCount: number) => ({ id, ready: true, keyCount, preset: {}, describe: () => ({}), chat: async () => ({}) });
     const router = new ModelRouter({ providers: [p('groq', 2)], now: () => now });
@@ -1407,11 +1454,11 @@ describe('ModelRouter.restoreCooldowns key count', () => {
       { ts: '2026-11-13T09:00:00Z', provider: 'groq', ok: false, error: 'groq HTTP 402: {"balance_units":0}', keys: 2 },
     ]);
     expect(restored).toEqual(['groq']);
-    expect(router.cooldownUntil.get('groq')).toBe(nextUtcMidnight(now));
-    expect(router.cooldownReason.get('groq')).toContain('daily quota');
+    expect(router.cooldownUntil.get('groq')).toBe(now + PAYMENT_REST_MS);
+    expect(router.cooldownReason.get('groq')).toContain('needs payment');
   });
 
-  it('restores a daily-quota bench when the ledger row has no keys field', () => {
+  it('restores a used-up-credit bench when the ledger row has no keys field', () => {
     const now = Date.parse('2026-11-13T10:00:00Z');
     const p = (id: string, keyCount: number) => ({ id, ready: true, keyCount, preset: {}, describe: () => ({}), chat: async () => ({}) });
     const router = new ModelRouter({ providers: [p('groq', 2)], now: () => now });
@@ -1419,7 +1466,7 @@ describe('ModelRouter.restoreCooldowns key count', () => {
       { ts: '2026-11-13T09:00:00Z', provider: 'groq', ok: false, error: 'groq HTTP 402: {"balance_units":0}' },
     ]);
     expect(restored).toEqual(['groq']);
-    expect(router.cooldownUntil.get('groq')).toBe(nextUtcMidnight(now));
+    expect(router.cooldownUntil.get('groq')).toBe(now + PAYMENT_REST_MS);
   });
 
   it('skips restoring a failure-streak bench when the provider now has more keys than the last failed row', () => {
@@ -1627,11 +1674,15 @@ describe('ModelRouter wait, give-up and payment events', () => {
     expect(router.route().fast).toEqual(['pay', 'free']);
   });
 
-  it('tells payment required from a short limit and from used-up credit', () => {
+  it('tells payment required and used-up credit from a short limit and from a stated quota window', () => {
     expect(paymentRequired({ status: 402, message: 'x HTTP 402: Payment required' })).toBe(true);
     expect(paymentRequired({ status: 429, message: 'x HTTP 429: A subscription is required' })).toBe(true);
     expect(paymentRequired({ status: 402, message: 'Free limit reached: 1 reply every 30 seconds per IP. Retry after 5s' })).toBe(false);
-    expect(paymentRequired({ status: 402, message: 'x HTTP 402: insufficient credit' })).toBe(false);
+    expect(paymentRequired({ status: 402, message: 'x HTTP 402: insufficient credit' })).toBe(true);
+    expect(paymentRequired({ status: 402, message: SAMBANOVA_CREDITS })).toBe(true);
+    expect(paymentRequired({ status: 402, message: 'x HTTP 402 [quota window: per day]: daily credits used up' })).toBe(false);
+    expect(paymentRequired({ status: 429, message: COHERE_MONTH })).toBe(false);
+    expect(paymentRequired({ status: 403, message: CLOUDFLARE_PLAN })).toBe(false);
     expect(paymentRequired({ status: 429, message: 'x HTTP 429: slow down' })).toBe(false);
   });
 });
