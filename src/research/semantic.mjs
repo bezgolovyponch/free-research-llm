@@ -302,11 +302,11 @@ export async function familyProposals({ router, n = 3, tier = 'deep', purpose, t
     if (targets && !targets.length) break;
     const want = targets ? Math.min(n - proposals.length, targets.length) : 1;
     const ahead = (targets ?? []).map((family) => family.stack).filter(Boolean);
-    const waves = await Promise.all(Array.from({ length: want }, (_, index) => {
+    const perCall = await Promise.all(Array.from({ length: want }, (_, index) => {
       const away = !targets || !earlier.has(targets[index]?.stack) ? [...earlier] : [];
       return draw([...new Set([...used, ...away, ...ahead.slice(0, index)])]);
     }));
-    const replies = waves.flat();
+    const replies = perCall.flat();
     const novel = replies.some(({ reply }) => !used.has(reply.provider));
     for (const { reply, value } of replies) {
       if (reply.provider) used.add(reply.provider);

@@ -102,10 +102,10 @@ export const CHECKLIST_MATCH_TASK = 'checklist-match';
 
 export async function clusterChecklist(samples, { router, embedder = null } = {}) {
   const majority = Math.floor(samples.length / 2) + 1;
-  const agreed = await agreeAcrossSamples({ samples: samples.map((sample) => sample.items), textOf: (item) => item.question, minSamples: majority, embedder, router, prompt: matchPrompt('question about one result'), task: CHECKLIST_MATCH_TASK });
+  const groups = await agreeAcrossSamples({ samples: samples.map((sample) => sample.items), textOf: (item) => item.question, minSamples: majority, embedder, router, prompt: matchPrompt('question about one result'), task: CHECKLIST_MATCH_TASK });
   const clusters = [];
 
-  for (const { items: group } of agreed) {
+  for (const { items: group } of groups) {
     const questions = group.map((i) => i.question);
     const questionCounts = new Map();
     for (const q of questions) {

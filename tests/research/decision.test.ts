@@ -442,6 +442,8 @@ describe('examples shown to the decision model: a similar question about the sam
     expect(both).toContain(`Approved examples:\nQuestion: ${REFERENCE_CASE.question}`);
     expect(both).toContain(`${UNAPPROVED_EXAMPLES}:\nQuestion: ${earlier.question}`);
     expect(both.indexOf(earlier.question)).toBeGreaterThan(both.indexOf(UNAPPROVED_EXAMPLES));
+    expect(both.endsWith(`\n\nQuestion: ${question}`)).toBe(true);
+    expect(decisionPrompt({ question, expected: '20 plots', guidance: 'near Faro' })[1].content).toBe(`Question: ${question}\nExpected result: 20 plots\nGuidance: near Faro`);
   });
 });
 
