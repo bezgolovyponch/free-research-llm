@@ -35,7 +35,7 @@ import { listingKey, nextPageUrl } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { applyStrategy, asksSea, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
-import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
+import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, kindNote, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
 import { CandidateSweeper } from './sweep.mjs';
 import { applySchema, schemaPrompt, schemaSample, verifySchema } from '../search/schema.mjs';
@@ -637,11 +637,17 @@ export class ResearchEngine {
     await this.ensureArea(project);
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
     try {
+      const before = project.decisionModel ?? null;
+      const reframing = Boolean(before) && Boolean(this.modeler.current?.(project));
       const model = await this.modeler.build(project);
+      if (!model || (model === before && !reframing)) {
+        this.emit(project, 'decision', `decision model not built: no provider family returned a proposal that names the item to list${before ? '; the earlier model is kept' : ''}`);
+        return model ?? null;
+      }
       this.askAsker(project);
-      if (model?.requirements?.length) this.emit(project, 'decision', `requirements judged by meaning, from your words: ${conceptText(conceptOf(model)).split('\n').join(' · ')}`);
-      else if (model && this.router) this.emit(project, 'warn', 'no model framed the request in your own words: only the measured criteria and the model-written checklist apply');
-      if (model) this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}`);
+      if (model.requirements?.length) this.emit(project, 'decision', `requirements judged by meaning, from your words: ${conceptText(conceptOf(model)).split('\n').join(' · ')}`);
+      else if (this.router) this.emit(project, 'warn', 'no model framed the request in your own words: only the measured criteria and the model-written checklist apply');
+      this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}; ${kindNote(model)}`);
       return model;
     } catch (error) {
       this.emit(project, 'decision', `decision model not built: ${String(error.message).slice(0, 160)}`);
@@ -654,10 +660,10 @@ export class ResearchEngine {
     if (asks.length) project.assumptionsToConfirm = [...new Set([...(project.assumptionsToConfirm ?? []), ...asks])];
   }
 
-  async rebuildDecisionModel(project) {
+  async rebuildDecisionModel(project, options = {}) {
     if (!this.modeler || this.demo) return project.decisionModel ?? null;
     try {
-      return await this.modeler.build(project, { force: true });
+      return await this.modeler.build(project, { force: true, ...options });
     } catch (error) {
       this.emit(project, 'decision', `decision model not rebuilt: ${String(error?.message ?? error).slice(0, 160)}`);
       return project.decisionModel ?? null;
@@ -847,6 +853,21 @@ export class ResearchEngine {
       return false;
     }
     return true;
+  }
+
+  async ensureKind(project) {
+    if (!this.modeler || this.demo || !project.acceptance?.itemCount || templateById(project.templateId).itemKind) return true;
+    if (project.decisionModel?.kind?.label) return true;
+    const earlier = project.decisionModel ?? null;
+    await this.rebuildDecisionModel(project, { askedBefore: [...(earlier?.providers ?? []), ...(earlier?.proposals?.refused ?? [])], grounded: true });
+    const model = project.decisionModel ?? null;
+    if (model?.kind?.label) {
+      this.emit(project, 'decision', `decision model rebuilt with other provider families and your own words: ${kindNote(model)}`);
+      return true;
+    }
+    this.setPhase(project, 'needs-kind');
+    this.emit(project, 'phase', `research paused: ${kindNote(model)}, after a rebuild with other provider families and your own words; without the item to list the plan cannot deliver anything, because no result can be screened — say what the item is in the Hints field, then press ▶ Run`);
+    return false;
   }
 
   async ensurePurpose(project) {
@@ -2041,6 +2062,10 @@ export class ResearchEngine {
       this.reground(project);
       if (!await this.ensurePurpose(project)) {
         await this.store.save(project, { reason: 'run paused: the purpose is not stated' });
+        return project;
+      }
+      if (!await this.ensureKind(project)) {
+        await this.store.save(project, { reason: 'run paused: the item to list is not agreed' });
         return project;
       }
       if (!await this.validateConcept(project)) {

@@ -664,6 +664,62 @@ describe('ResearchEngine', () => {
     expect(engine.modeler.fresh(project)).toBe(true);
   });
 
+  it('pauses a list research whose provider families named different items, after one rebuild with other families and the asker\'s own words, and says which family named what and why it pauses', async () => {
+    const proposals = [
+      normalizeSample({ concept: 'stag activities', kind: { label: 'activity provider', terms: ['activity provider'] }, criteria: [] }),
+      normalizeSample({ concept: 'glamping land', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] }),
+    ];
+    const builds: Record<string, unknown>[] = [];
+    const modeler = { fresh: () => false, build: async (p: Record<string, unknown>, options: Record<string, unknown> = {}) => {
+      builds.push(options);
+      p.decisionModel = { ...aggregate(proposals, { question: String(p.question), kindVoters: [] }), purpose: 'A stag group wants providers so that they book directly', caseIds: [], providers: ['groq', 'pollinations'], proposals: { families: 2, repeats: [], refused: [], kinds: [{ provider: 'groq', label: 'activity provider' }, { provider: 'pollinations', label: 'plot of land' }] } };
+      return p.decisionModel;
+    } };
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Find 40 activity providers for a stag party in Durres', templateId: 'generic', expected: '40 activity providers' });
+    project.acceptance = { ...project.acceptance, itemCount: 40, locked: true };
+    await engine.store.save(project, { reason: 'test' });
+    const done = await engine.run(project.id);
+    const named = '(groq: activity provider; pollinations: plot of land)';
+    expect(done.phase).toBe('needs-kind');
+    expect(done.nodes.every((n: { status: string }) => n.status !== 'verified')).toBe(true);
+    expect(done.log.filter((l: { type: string }) => l.type === 'phase').at(-1).message).toBe(`research paused: no item kind agreed: the provider families named different items ${named}, after a rebuild with other provider families and your own words; without the item to list the plan cannot deliver anything, because no result can be screened — say what the item is in the Hints field, then press ▶ Run`);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message.endsWith(`; no item kind agreed: the provider families named different items ${named}`))).toBe(true);
+    expect(builds.filter((options) => options.grounded)).toEqual([{ force: true, askedBefore: ['groq', 'pollinations'], grounded: true }]);
+  });
+
+  it('goes on when the families agreed a kind, when the grounded rebuild finds one, and for a research without an item count', async () => {
+    const agreedKind = normalizeSample({ concept: 'stag activities', purpose: 'A stag group wants providers so that they book directly', value: 'a list of providers', kind: { label: 'activity provider', terms: ['activity provider'] }, criteria: [] });
+    const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
+      p.decisionModel = { ...aggregate([agreedKind, agreedKind], { question: String(p.question) }), purpose: 'A stag group wants providers so that they book directly', caseIds: [] };
+      return p.decisionModel;
+    } };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Find 40 activity providers for a stag party in Durres', templateId: 'generic', expected: '40 activity providers' });
+    project.acceptance = { ...project.acceptance, itemCount: 40 };
+    project.decisionModel = { ...aggregate([agreedKind], { question: project.question, kindVoters: [] }), caseIds: [], providers: ['groq'] };
+    expect(await engine.ensureKind(project)).toBe(true);
+    expect(project.log.at(-1)).toMatchObject({ type: 'decision', message: 'decision model rebuilt with other provider families and your own words: item kind "activity provider" agreed by 2 of 2 provider families' });
+    expect(await engine.ensureKind(project)).toBe(true);
+    const plain = await engine.createProject({ question: 'Is a stag party in Durres cheaper than in Prague?', templateId: 'generic' });
+    expect(await engine.ensureKind(plain)).toBe(true);
+    expect(plain.decisionModel ?? null).toBeNull();
+  });
+
+  it('says the decision model was not built when no family returned a proposal that names the item, and keeps the earlier model', async () => {
+    const earlier = { ...aggregate([normalizeSample({ kind: { label: 'used car', terms: ['car'] }, criteria: [] })], { question: 'q' }), caseIds: [] };
+    const modeler = { fresh: () => false, current: () => false, build: async (p: Record<string, unknown>) => p.decisionModel ?? null };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Find 20 used cars under 5000 EUR', templateId: 'generic', expected: '20 cars' });
+    project.acceptance = { ...project.acceptance, itemCount: 20 };
+    expect(await engine.ensureDecisionModel(project)).toBeNull();
+    expect(project.log.at(-1)).toMatchObject({ type: 'decision', message: 'decision model not built: no provider family returned a proposal that names the item to list' });
+    project.decisionModel = earlier;
+    expect(await engine.ensureDecisionModel(project)).toBe(earlier);
+    expect(project.log.at(-1).message).toBe('decision model not built: no provider family returned a proposal that names the item to list; the earlier model is kept');
+  });
+
   it('reports the purpose and value stage 0 chose right after the decision model', async () => {
     const purpose = 'A buyer wants a used car under 50000 EUR so that they shortlist the best value listings';
     const value = 'a shortlist of used car listings under 50000 EUR below the median price of their model and year';

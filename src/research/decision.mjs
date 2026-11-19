@@ -7,7 +7,7 @@ import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 import { ELIGIBILITY, MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
 import { MEASURES, compare } from './measures.mjs';
-import { agreeAcrossSamples, agreed, closedVote, familyProposals, matchPrompt, optionLines } from './semantic.mjs';
+import { agreeAcrossSamples, agreed, closedVote, familyProposals, matchPrompt, optionLines, retrieveThenVerify } from './semantic.mjs';
 import { tokens } from '../search/search.mjs';
 
 export { CHECKLIST_VERSION };
@@ -114,18 +114,39 @@ function fromCases(measure, op, cases, id = '') {
 }
 
 export const KIND_MATCH_TASK = 'kind-match';
+export const GROUNDED_KIND_TASK = 'kind-grounded';
 
-export async function agreedKindVoters(samples, { router, embedder = null } = {}) {
-  if (!samples.length) return [];
+export function groundedKindPrompt({ query, options, none }) {
+  return [
+    { role: 'system', content: `You read what an asker wrote, in any language, and the items research assistants proposed to list for it. Pick the option that names the item the asker's own words ask to list, or ${none} when none does. Answer with JSON only: {"pick":"<one letter>"}.` },
+    { role: 'user', content: `The asker wrote:\n${query}\n\nItems proposed:\n${optionLines(options, none)}` },
+  ];
+}
+
+export function askerWords({ question = '', guidance = '' } = {}) {
+  return [`Request: ${String(question).trim()}`, ...(String(guidance).trim() ? [`Hints: ${String(guidance).trim()}`] : [])].join('\n');
+}
+
+export async function settleKind(samples, { router, embedder = null, grounding = '' } = {}) {
+  if (!samples.length) return { voters: [], grounded: false };
   const kinds = samples.map((sample, index) => ({ index, label: sample.kind.label }));
-  const clusters = await agreeAcrossSamples({ samples: kinds.map((kind) => [kind]), textOf: (kind) => kind.label, minSamples: Math.floor(samples.length / 2) + 1, embedder, router, prompt: matchPrompt('kind of item'), task: KIND_MATCH_TASK });
-  const [largest] = clusters.sort((a, b) => b.samples - a.samples);
-  return largest ? largest.items.map((kind) => kind.index) : [];
+  const clusters = await agreeAcrossSamples({ samples: kinds.map((kind) => [kind]), textOf: (kind) => kind.label, minSamples: 1, embedder, router, prompt: matchPrompt('kind of item'), task: KIND_MATCH_TASK });
+  const votersOf = (cluster) => cluster.items.map((kind) => kind.index);
+  const [largest] = clusters.filter((cluster) => cluster.samples >= Math.floor(samples.length / 2) + 1).sort((a, b) => b.samples - a.samples);
+  if (largest) return { voters: votersOf(largest), grounded: false };
+  if (!String(grounding).trim() || !clusters.length) return { voters: [], grounded: false };
+  const result = await retrieveThenVerify({ query: grounding, candidates: clusters.map((cluster, id) => ({ id, text: cluster.item.label })), fixed: true, router, prompt: groundedKindPrompt, task: GROUNDED_KIND_TASK });
+  return result.picked ? { voters: votersOf(clusters[result.picked.id]), grounded: true } : { voters: [], grounded: false };
+}
+
+export async function agreedKindVoters(samples, options = {}) {
+  return (await settleKind(samples, { ...options, grounding: '' })).voters;
 }
 
 export function aggregate(samples, { question = '', guidance = '', cases = [], id = '', kindVoters = null } = {}) {
   const agreeing = (kindVoters ?? []).map((index) => samples[index]).filter(Boolean);
-  const grounds = agreeing.length ? agreeing : samples;
+  const about = agreeing.length ? agreeing : samples;
+  const grounds = agreeing.length >= Math.floor(samples.length / 2) + 1 ? agreeing : samples;
   const named = kindVoters ? agreeing : samples;
   const n = grounds.length;
   const majority = Math.floor(n / 2) + 1;
@@ -174,7 +195,7 @@ export function aggregate(samples, { question = '', guidance = '', cases = [], i
   const wanted = contentWords(said);
   let chosen = null;
   let purposeGrounded = 0;
-  for (const sample of grounds) {
+  for (const sample of about) {
     const overlap = [...contentWords(`${sample.purpose ?? ''} ${sample.value ?? ''}`)].filter((w) => wanted.has(w)).length;
     if (!chosen || overlap > purposeGrounded) {
       chosen = sample;
@@ -183,7 +204,7 @@ export function aggregate(samples, { question = '', guidance = '', cases = [], i
   }
   const purpose = chosen?.purpose && chosen.value && purposeGrounded >= 2 && /so that/i.test(chosen.purpose) ? chosen.purpose : null;
   return {
-    concept: grounds.map((s) => s.concept).find(Boolean) ?? '',
+    concept: about.map((s) => s.concept).find(Boolean) ?? '',
     purpose,
     value: chosen?.value || null,
     needs: chosen?.needs ?? [],
@@ -195,6 +216,20 @@ export function aggregate(samples, { question = '', guidance = '', cases = [], i
     missing: clauses.filter((c) => !c.criteria.length).map((c) => c.text),
     agreement: { samples: samples.length, majority, proposed: groups.size, kept: criteria.length + noLimit.length, ...(kindVoters ? { kindVoters: agreeing.length } : {}) },
   };
+}
+
+export function kindNote(model) {
+  if (!model) return 'no provider family returned a decision model that names the item to list';
+  const kinds = model.proposals?.kinds ?? [];
+  const named = kinds.length ? ` (${kinds.map((entry) => `${entry.provider}: ${entry.label}`).join('; ')})` : '';
+  const families = model.agreement?.samples ?? kinds.length;
+  const voters = model.agreement?.kindVoters;
+  const label = model.kind?.label;
+  if (!label) return `no item kind agreed: the provider families named different items${named}`;
+  if (model.agreement?.kindGrounded) return `item kind "${label}" chosen by your own words (request and Hints) among the items the provider families named${named}`;
+  if (voters === 0 && model.kind.framed) return `item kind "${label}" taken from your own words: the provider families named different items${named}`;
+  if (voters === 0) return `item kind "${label}" kept from the earlier model: the provider families now named different items${named}`;
+  return `item kind "${label}" agreed by ${voters ?? families} of ${families} provider families${named}${model.single ? ', one family only, to confirm' : ''}`;
 }
 
 export function verifyKind(kind, titles) {
@@ -511,17 +546,18 @@ export class DecisionModeler {
     return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && (m.expected ?? '') === String(project.acceptance?.expected ?? '') && m.agreement?.samples >= 1 && !isDegenerate(m));
   }
 
-  async build(project, { force = false } = {}) {
+  async build(project, { force = false, askedBefore = [], grounded = false } = {}) {
     if (!force && this.current(project)) return project.decisionModel.framing ? project.decisionModel : this.reframe(project);
     const question = project.question;
     const guidance = String(project.guidance ?? '');
     const examples = this.cases ? await sameKindExamples(this.router, question, await this.cases.retrieve(question, CASES_RETRIEVED, project.id)) : [];
     const messages = decisionPrompt({ question, guidance, expected: project.acceptance?.expected ?? '', examples });
-    const drawn = await familyProposals({ router: this.router, n: this.samples, tier: 'deep', purpose: 'decision-model', temperature: SAMPLE_TEMPERATURE, messages, schema: proposalSchema });
+    const drawn = await familyProposals({ router: this.router, n: this.samples, tier: 'deep', purpose: 'decision-model', temperature: SAMPLE_TEMPERATURE, messages, schema: proposalSchema, askedBefore });
     const samples = drawn.proposals.map((proposal) => proposal.value);
     if (!samples.length) return project.decisionModel ?? null;
-    const kindVoters = await agreedKindVoters(samples, { router: this.router, embedder: this.embedder });
-    const model = aggregate(samples, { question, guidance, cases: examples, id: project.id, kindVoters });
+    const settled = await settleKind(samples, { router: this.router, embedder: this.embedder, grounding: grounded ? askerWords({ question, guidance }) : '' });
+    const model = aggregate(samples, { question, guidance, cases: examples, id: project.id, kindVoters: settled.voters });
+    if (settled.grounded) model.agreement.kindGrounded = true;
     const stored = project.decisionModel;
     let finalModel = model;
     let rebuildWeaker = false;

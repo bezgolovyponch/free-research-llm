@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CASE_SIMILARITY_FLOOR, CaseBank, DecisionModeler, KIND_MATCH_TASK, NO_ITEM_NAMED, REFERENCE_CASE, UNAPPROVED_EXAMPLES, UTILITY_PRIOR, agreedKindVoters, aggregate, applyCalibration, applyModel, calibrationPrompt, caseSimilarity, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
+import { CASE_SIMILARITY_FLOOR, CaseBank, DecisionModeler, GROUNDED_KIND_TASK, KIND_MATCH_TASK, NO_ITEM_NAMED, REFERENCE_CASE, UNAPPROVED_EXAMPLES, UTILITY_PRIOR, agreedKindVoters, aggregate, askerWords, kindNote, applyCalibration, applyModel, calibrationPrompt, caseSimilarity, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
 import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
 import { pickLetter } from '../helpers/fakes';
 
@@ -297,7 +297,43 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
     const none = aggregate([one, two], { question: stag, kindVoters: [] });
     expect([none.kind, none.concept, none.purpose, none.agreement.kindVoters]).toEqual([null, 'first', one.purpose, 0]);
     expect(aggregate([two, one], { question: stag }).concept).toBe('second');
-    expect(aggregate([two, one], { question: stag, kindVoters: [1] })).toMatchObject({ concept: 'first', kind: { label: 'activity provider', terms: ['tour'] }, agreement: { samples: 2, majority: 1, kindVoters: 1 } });
+    expect(aggregate([two, one], { question: stag, kindVoters: [1] })).toMatchObject({ concept: 'first', kind: { label: 'activity provider', terms: ['tour'] } });
+  });
+
+  it('tells the owner which family named which item, whatever became of the kind', () => {
+    const kinds = [{ provider: 'groq', label: 'activity provider' }, { provider: 'pollinations', label: 'plot of land' }];
+    const named = '(groq: activity provider; pollinations: plot of land)';
+    expect(kindNote(null)).toBe('no provider family returned a decision model that names the item to list');
+    expect(kindNote({ kind: null, agreement: { samples: 2, kindVoters: 0 }, proposals: { kinds } })).toBe(`no item kind agreed: the provider families named different items ${named}`);
+    expect(kindNote({ kind: { label: 'activity provider' }, agreement: { samples: 3, kindVoters: 2 }, proposals: { kinds } })).toBe(`item kind "activity provider" agreed by 2 of 3 provider families ${named}`);
+    expect(kindNote({ kind: { label: 'used car' }, agreement: { samples: 2, kindVoters: 0 }, proposals: { kinds } })).toBe(`item kind "used car" kept from the earlier model: the provider families now named different items ${named}`);
+    expect(kindNote({ kind: { label: 'activity providers', framed: true }, agreement: { samples: 2, kindVoters: 0 }, proposals: { kinds } })).toBe(`item kind "activity providers" taken from your own words: the provider families named different items ${named}`);
+    expect(kindNote({ kind: { label: 'activity provider' }, agreement: { samples: 1, kindVoters: 1 }, single: true, proposals: { kinds: kinds.slice(0, 1) } })).toBe('item kind "activity provider" agreed by 1 of 1 provider families (groq: activity provider), one family only, to confirm');
+  });
+
+  it('lets a kind one family named, chosen by the asker\'s words, decide no criterion alone: the criteria still need a majority of every family', () => {
+    const one = normalizeSample({ concept: 'first', kind: { label: 'activity provider', terms: ['tour'] }, criteria: [sea] });
+    const two = normalizeSample({ concept: 'second', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] });
+    const chosen = aggregate([two, one], { question, kindVoters: [1] });
+    expect(chosen).toMatchObject({ concept: 'first', kind: { label: 'activity provider' }, criteria: [], agreement: { samples: 2, majority: 2, kindVoters: 1 } });
+    expect(aggregate([one, one, two], { question, kindVoters: [0, 1] }).criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+  });
+
+  it('rebuilds with other families first and, when they still name different items, lets independent families pick the item the asker\'s own words ask for', async () => {
+    const pickFromWords = (req: Ask) => ({ pick: req.messages[1].content.includes('Hints: the item is an activity provider') ? pickLetter(req as never, (text) => text === 'activity provider') : 'N' });
+    const router = familyRouter(
+      { p1: { concept: 'glamping', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] }, p2: { concept: 'stag activities', kind: { label: 'activity provider', terms: ['tour'] }, criteria: [] }, p3: { concept: 'boats', kind: { label: 'boat', terms: ['boat'] }, criteria: [] } },
+      { tasks: { [GROUNDED_KIND_TASK]: pickFromWords } },
+    );
+    const project = { id: 'grounded', question: stag, guidance: 'the item is an activity provider', acceptance: { expected: '40 providers' } };
+    const model = await new DecisionModeler({ router } as never).build(project, { force: true, askedBefore: ['p1'], grounded: true });
+    expect(router.calls.find((c) => c.purpose === 'decision-model')?.avoid).toEqual(['p1']);
+    expect(model.kind).toMatchObject({ label: 'activity provider', terms: ['tour'] });
+    expect(model.agreement).toMatchObject({ kindVoters: 1, kindGrounded: true });
+    expect(kindNote(model)).toBe('item kind "activity provider" chosen by your own words (request and Hints) among the items the provider families named (p2: activity provider; p3: boat; p1: plot of land)');
+    expect(router.calls.find((c) => c.task === GROUNDED_KIND_TASK)?.messages[1].content).toContain(askerWords({ question: stag, guidance: project.guidance }));
+    const ungrounded = familyRouter({ p1: { concept: 'c', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] }, p2: { concept: 'c', kind: { label: 'activity provider', terms: ['tour'] }, criteria: [] } }, { tasks: { [GROUNDED_KIND_TASK]: pickFromWords } });
+    expect((await new DecisionModeler({ router: ungrounded } as never).build({ id: 'ungrounded', question: stag, guidance: '', acceptance: { expected: '40 providers' } }, { force: true, grounded: true })).kind).toBeNull();
   });
 
   it('a rebuild with fewer kept criteria keeps the stored criteria', async () => {
