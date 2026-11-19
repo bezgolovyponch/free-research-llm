@@ -3,10 +3,17 @@ import { isUmbrella } from './concept.mjs';
 import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
 import { agreed, closedVote } from './semantic.mjs';
 
+const isAnswer = (entry) => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry) && 'id' in entry && 'answer' in entry;
+
 export function replyList(data) {
   if (Array.isArray(data)) return data;
-  return Object.values(data ?? {}).find(Array.isArray) ?? [];
+  if (!data || typeof data !== 'object') return [];
+  if (Array.isArray(data.answers)) return data.answers;
+  if (isAnswer(data)) return [data];
+  return Object.values(data).find((value) => Array.isArray(value) && value.some(isAnswer)) ?? [];
 }
+
+const shortIdOf = (reply) => String(reply?.id ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '');
 
 const ANSWERS = ['yes', 'no', 'unknown'];
 
@@ -20,7 +27,7 @@ export function applyQuoteCheck(replies, spans) {
 }
 
 export const CHECKLIST_VERSION = 6;
-export const JUDGE_VERSION = 4;
+export const JUDGE_VERSION = 5;
 export const JUDGE_QUESTIONS_PER_CALL = 4;
 export const JUDGE_BLOCK_CHARS = 6000;
 export const JUDGE_PAGE_CHARS = 40000;
@@ -318,6 +325,17 @@ export class ChecklistJudge {
     }
   }
 
+  async answersFromPage(asked, spans) {
+    const shown = spans.length ? await shownSpans(spans, asked.map((q) => q.question).join(' '), this.embedder) : [];
+    if (!shown.length) return new Map();
+    const reply = await this.complete(judgePrompt({ questions: asked, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
+    const validated = applyQuoteCheck(replyList(reply?.data), shown);
+    return new Map(asked.flatMap((q) => {
+      const found = validated.find((r) => shortIdOf(r) === q.short);
+      return found ? [[q.short, found]] : [];
+    }));
+  }
+
   async judgeKind(spans, cluster) {
     const question = cluster.items[0];
     const check = { id: `${cluster.clause}|${question.question}`, answer: 'unknown', quote: '', hard: question.hard, clause: cluster.clause };
@@ -382,11 +400,13 @@ export class ChecklistJudge {
 
     for (let at = 0; at < questions.length; at += JUDGE_QUESTIONS_PER_CALL) {
       const asked = questions.slice(at, at + JUDGE_QUESTIONS_PER_CALL);
-      const shown = spans.length ? await shownSpans(spans, asked.map((q) => q.question).join(' '), this.embedder) : [];
-      const reply = shown.length ? await this.complete(judgePrompt({ questions: asked, block: spansBlock(shown, JUDGE_BLOCK_CHARS) })) : null;
-      const validated = applyQuoteCheck(replyList(reply?.data), shown);
+      const answers = await this.answersFromPage(asked, spans);
+      const missing = asked.filter((q) => !answers.has(q.short));
+      if (missing.length) {
+        for (const [short, found] of await this.answersFromPage(missing, spans)) answers.set(short, found);
+      }
       for (const q of asked) {
-        const found = validated.find((r) => String(r?.id ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '') === q.short);
+        const found = answers.get(q.short);
         checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause });
       }
     }
@@ -401,7 +421,7 @@ export class ChecklistJudge {
 }
 
 export function judgePrompt({ questions, block }) {
-  const sys = 'You are a strict judge of one item page. The page is shown as numbered sentences. For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it. Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only: [{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]';
+  const sys = 'You are a strict judge of one item page. The page is shown as numbered sentences. For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it. Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only, one entry per question: {"answers":[{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]}';
   const qText = questions.map((q) => `${q.short}: ${q.question}`).join('\n');
   return [
     { role: 'system', content: sys },

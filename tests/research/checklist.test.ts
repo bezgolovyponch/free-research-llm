@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
@@ -380,6 +380,73 @@ describe('ChecklistJudge reply binding with short IDs', () => {
   });
 });
 
+describe('replyList', () => {
+  const answer = { id: 'q1', answer: 'yes', spans: ['S1'] };
+
+  it('reads a bare list, an answers envelope and a single answer object', () => {
+    expect(replyList([answer])).toEqual([answer]);
+    expect(replyList({ answers: [answer] })).toEqual([answer]);
+    expect(replyList(answer)).toEqual([answer]);
+  });
+
+  it('never takes a nested list such as spans for the answers', () => {
+    expect(replyList({ id: 'q1', answer: 'yes', spans: ['S22'] })).toEqual([{ id: 'q1', answer: 'yes', spans: ['S22'] }]);
+    expect(replyList({ note: 'none', spans: ['S1'] })).toEqual([]);
+    expect(replyList(null)).toEqual([]);
+    expect(replyList('yes')).toEqual([]);
+  });
+
+  it('accepts a list of answer objects under another key', () => {
+    expect(replyList({ results: [answer] })).toEqual([answer]);
+  });
+});
+
+describe('judge replies in JSON-object mode', () => {
+  const fourChecklist = [{ clause: 'c', items: [1, 2, 3, 4].map((n) => ({ clause: 'c', question: `Is property ${n} stated?`, hard: true, numeric: null })) }];
+  const askedIds = (content: string) => [...content.matchAll(/^(q\d+):/gm)].map((m) => m[1]);
+
+  function scriptedRouter(replies: unknown[]) {
+    const calls: string[][] = [];
+    return {
+      calls,
+      complete: async (req: { messages: { content: string }[] }) => {
+        calls.push(askedIds(req.messages[1].content));
+        return { provider: 'test', data: replies[Math.min(calls.length - 1, replies.length - 1)] };
+      },
+    };
+  }
+
+  it('a reply that is one answer object binds that answer and asks the other questions once more, only them', async () => {
+    const router = scriptedRouter([
+      { id: 'q1', answer: 'yes', spans: ['S1'] },
+      { answers: [{ id: 'q2', answer: 'no', spans: ['S1'] }, { id: 'q3', answer: 'unknown', spans: [] }, { id: 'q4', answer: 'yes', spans: ['S1'] }] },
+    ]);
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'Property one is stated here', fourChecklist);
+    expect(router.calls).toEqual([['q1', 'q2', 'q3', 'q4'], ['q2', 'q3', 'q4']]);
+    expect(checks.map((c) => c.answer)).toEqual(['yes', 'no', 'unknown', 'yes']);
+    expect(checks[0].quote).toBe('Property one is stated here');
+  });
+
+  it('the follow-up is asked once: questions it leaves uncovered count as unknown without a third call', async () => {
+    const router = scriptedRouter([{ id: 'q1', answer: 'yes', spans: ['S1'] }]);
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'Property one is stated here', fourChecklist);
+    expect(router.calls).toEqual([['q1', 'q2', 'q3', 'q4'], ['q2', 'q3', 'q4']]);
+    expect(checks.map((c) => c.answer)).toEqual(['yes', 'unknown', 'unknown', 'unknown']);
+  });
+
+  it('a reply that covers every question is not followed up', async () => {
+    const router = scriptedRouter([{ answers: [1, 2, 3, 4].map((n) => ({ id: `q${n}`, answer: 'unknown', spans: [] })) }]);
+    await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'Property one is stated here', fourChecklist);
+    expect(router.calls).toEqual([['q1', 'q2', 'q3', 'q4']]);
+  });
+
+  it('the prompt asks for an object with an answers list, the shape JSON-object mode allows', () => {
+    const sys = judgePrompt({ questions: [{ short: 'q1', question: 'Is it stated?' }], block: '[S1] It is stated' })[0].content;
+    expect(sys).toContain('{"answers":[{"id":"q1"');
+    expect(sys).not.toContain('only: [');
+  });
+});
+
 describe('checklistFingerprint and caching', () => {
   const testChecklist = [
     { clause: 'brand', items: [
@@ -670,7 +737,7 @@ describe('item-level checklist with a kind check and code-measured values', () =
   });
 
   it('the fingerprint carries the judge version, so answers of an older judge are not reused', () => {
-    expect(JUDGE_VERSION).toBe(4);
+    expect(JUDGE_VERSION).toBe(5);
     expect(CHECKLIST_VERSION).toBe(6);
     expect(checklistFingerprint(checklist).endsWith(`judge:${JUDGE_VERSION}`)).toBe(true);
   });
