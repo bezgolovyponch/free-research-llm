@@ -28,7 +28,7 @@ export function applyQuoteCheck(replies, spans) {
 }
 
 export const CHECKLIST_VERSION = 6;
-export const JUDGE_VERSION = 6;
+export const JUDGE_VERSION = 7;
 export const JUDGE_QUESTIONS_PER_CALL = 4;
 export const JUDGE_BLOCK_CHARS = 6000;
 export const JUDGE_PAGE_CHARS = 40000;
@@ -276,24 +276,25 @@ export class ChecklistModeler {
 }
 
 export function askedKind(kind) {
-  return String(kind?.asked ?? '').trim() || kind?.label || '';
+  return String(kind?.label ?? '').trim() || String(kind?.asked ?? '').trim();
 }
 
 export function kindCluster(kind) {
   const label = askedKind(kind);
   const not = (kind.not ?? []).length ? ` and not ${kind.not.join(', ')}` : '';
+  const others = (kind.not ?? []).length ? `, such as ${kind.not.join(', ')}` : '';
   const kinds = isUmbrella(kind) ? `, of one of these kinds: ${kind.members.map((member) => member.label).join(', ')}` : '';
   if (kind.entity) {
     const described = String(kind.described ?? '').trim();
     const examples = (kind.examples ?? []).length ? `; the asker's examples: ${kind.examples.join(', ')}, and similar ones count` : '';
     const offer = described ? `a single business that offers what the asker described ("${described}"${examples})${kinds}, on its own website or its own profile page` : `one ${label}${kinds}: a single business, on its own website or its own profile page`;
-    const other = described ? `a wanted ad, or a business that does not offer what the asker described${not}` : `a wanted ad, or a business that is not ${label}${not}`;
+    const other = described ? 'a wanted ad, or a business that does not offer what the asker described' : `a wanted ad, or a business that is not ${label}`;
     const options = [
       { letter: 'A', text: offer },
       { letter: 'B', text: `a directory, list or search page of several businesses` },
       { letter: 'C', text: 'an article, guide, course, news or blog page' },
       { letter: 'D', text: other },
-      { letter: 'E', text: 'something else' },
+      { letter: 'E', text: `something else${others}` },
       { letter: 'U', text: 'cannot tell from these sentences' },
     ];
     const question = described ? `Is this page a single business that offers what the asker described ("${described}")${kinds}, on its own site or profile (not a directory of several, an article, or a wanted ad${not})?` : `Is this page one ${label}${kinds}, a single business on its own site or profile (not a directory of several, an article, or a wanted ad${not})?`;
@@ -301,13 +302,14 @@ export function kindCluster(kind) {
   }
   const options = [
     { letter: 'A', text: `one ${label}, offered as asked${kinds}` },
-    { letter: 'B', text: `a part or an accessory of it${not}` },
+    { letter: 'B', text: 'a part or an accessory of it' },
     { letter: 'C', text: 'several items or a list' },
     { letter: 'D', text: 'a wanted ad or a service' },
-    { letter: 'E', text: 'something else' },
+    { letter: 'E', text: `something else${others}` },
     { letter: 'U', text: 'cannot tell from these sentences' },
   ];
-  return { clause: 'kind', options, items: [{ question: `Is this page one ${label} offered as asked${kinds} (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
+  const context = String(kind.described ?? '').trim();
+  return { clause: 'kind', options, ...(context ? { context } : {}), items: [{ question: `Is this page one ${label} offered as asked${kinds} (not a part, accessory, wanted ad or list${not})?`, hard: true, numeric: null }] };
 }
 
 async function shownSpans(spans, query, embedder, always = []) {
@@ -363,7 +365,7 @@ export class ChecklistJudge {
     const shown = await shownSpans(spans, question.question, this.embedder);
     if (!shown) return { ...check, provider: null, notJudged: true, reason: NOT_RANKED_REASON };
     if (!shown.length) return { ...check, provider: null };
-    const reply = await this.completeFull(kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
+    const reply = await this.completeFull(kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS), context: cluster.context }));
     const letter = String(reply?.data?.kind ?? '').trim().toUpperCase();
     const answer = KIND_ANSWERS[letter] ?? 'unknown';
     const quote = answer === 'unknown' ? '' : quoteFromSpans(reply?.data?.span ?? reply?.data?.spans, shown);
@@ -385,7 +387,7 @@ export class ChecklistJudge {
       const quote = answer === 'unknown' ? '' : quoteFromSpans(data?.span ?? data?.spans, shown);
       return { value: { answer: quote ? answer : 'unknown', quote } };
     };
-    const result = await closedVote({ router: this.router, task: 'kind-second', tier: 'fast', options: closed.map((option) => ({ id: option.letter, text: option.text })), field: 'kind', none: KIND_NONE, seed: block, prompt: (options) => kindPrompt({ options: [...options, ...cluster.options.filter((option) => option.letter === KIND_NONE)], block, price }), extra, n: KIND_SECOND_VOTES, quorum: first.length ? 1 : 2, keyOf: (_id, more) => more.answer, avoid: avoid ? [avoid] : undefined, exclude: first });
+    const result = await closedVote({ router: this.router, task: 'kind-second', tier: 'fast', options: closed.map((option) => ({ id: option.letter, text: option.text })), field: 'kind', none: KIND_NONE, seed: block, prompt: (options) => kindPrompt({ options: [...options, ...cluster.options.filter((option) => option.letter === KIND_NONE)], block, price, context: cluster.context }), extra, n: KIND_SECOND_VOTES, quorum: first.length ? 1 : 2, keyOf: (_id, more) => more.answer, avoid: avoid ? [avoid] : undefined, exclude: first });
     const voted = agreed(result)?.extra ?? null;
     return { answer: voted?.answer ?? 'unknown', quote: voted?.quote ?? '', tally: result.tally, ...(result.single ? { single: true } : {}) };
   }
@@ -530,11 +532,11 @@ export function judgePrompt({ questions, block }) {
   ];
 }
 
-export function kindPrompt({ options, block, price = null }) {
+export function kindPrompt({ options, block, price = null, context = '' }) {
   const sys = `You are a strict judge of one item page. The page is shown as numbered sentences. Select the one option that says what this page offers, and give in "span" the id of the sentence that shows it. Never write the sentence itself.${price ? ' The price of this item is far below the usual price of such items: a low price alone proves nothing, so decide from what the sentences say is offered.' : ''} Answer with JSON only: {"kind":"<letter>","span":"S<n>"}`;
   const prices = price ? `\n\nPrice of this item: ${price.value} ${price.unit}`.trimEnd() + (price.median !== null && price.median !== undefined ? `\nMedian price of its comparable items: ${price.median} ${price.unit}`.trimEnd() : '') : '';
   return [
     { role: 'system', content: sys },
-    { role: 'user', content: `Item page text:\n${block}${prices}\n\nThis page offers:\n${options.map((option) => `${option.letter}) ${option.text}`).join('\n')}` },
+    { role: 'user', content: `Item page text:\n${block}${prices}\n\n${context ? `The asker's request, for context only (what kind of thing the page offers is decided here; every other requirement is judged apart): "${context}"\n\n` : ''}This page offers:\n${options.map((option) => `${option.letter}) ${option.text}`).join('\n')}` },
   ];
 }

@@ -682,7 +682,8 @@ describe('item-level checklist with a kind check and code-measured values', () =
       expect(router.calls).toHaveLength(2);
       expect(router.calls[0]).toMatchObject({ tier: 'fast', task: 'kind-second' });
       expect(router.userText('kind-second')).toContain('Price of this item: 2000 CZK\nMedian price of its comparable items: 25000 CZK');
-      expect(router.userText('kind-second')).toMatch(/^[A-E]\) a part or an accessory of it and not spare part/m);
+      expect(router.userText('kind-second')).toMatch(/^[A-E]\) a part or an accessory of it$/m);
+      expect(router.userText('kind-second')).toMatch(/^[A-E]\) something else, such as spare part$/m);
       expect(router.userText('kind-second')).toContain('U) cannot tell from these sentences');
       expect(router.calls[1].avoid).toEqual(['p1']);
     });
@@ -737,7 +738,7 @@ describe('item-level checklist with a kind check and code-measured values', () =
   });
 
   it('the fingerprint carries the judge version, so answers of an older judge are not reused', () => {
-    expect(JUDGE_VERSION).toBe(6);
+    expect(JUDGE_VERSION).toBe(7);
     expect(CHECKLIST_VERSION).toBe(6);
     expect(checklistFingerprint(checklist).endsWith(`judge:${JUDGE_VERSION}`)).toBe(true);
   });
@@ -853,8 +854,8 @@ describe('kind options for a research that looks for businesses', () => {
     expect(cluster.options.map((o: { letter: string }) => o.letter)).toEqual(['A', 'B', 'C', 'D', 'E', 'U']);
     expect(cluster.options[0].text).toBe('one wholesale clothing supplier: a single business, on its own website or its own profile page');
     const asked = kindCluster({ label: 'wholesale clothing supplier', asked: 'wholesale branded second hand clothing providers', terms: ['wholesale'], entity: true });
-    expect(asked.options[0].text).toBe('one wholesale branded second hand clothing providers: a single business, on its own website or its own profile page');
-    expect(asked.options[3].text).toBe('a wanted ad, or a business that is not wholesale branded second hand clothing providers');
+    expect(asked.options[0].text).toBe('one wholesale clothing supplier: a single business, on its own website or its own profile page');
+    expect(asked.options[3].text).toBe('a wanted ad, or a business that is not wholesale clothing supplier');
     expect(cluster.options.map((o: { text: string }) => o.text).join(' ')).not.toContain('whatever range of goods');
   });
 
@@ -862,10 +863,11 @@ describe('kind options for a research that looks for businesses', () => {
     const kind = { label: 'wholesale clothing supplier', asked: 'providers', described: 'Find the sellers of coats like Alpha Coats', examples: ['Alpha Coats', 'Betula'], not: ['retail'], terms: ['wholesale'], entity: true };
     const cluster = kindCluster(kind);
     expect(cluster.options[0].text).toBe('a single business that offers what the asker described ("Find the sellers of coats like Alpha Coats"; the asker\'s examples: Alpha Coats, Betula, and similar ones count), on its own website or its own profile page');
-    expect(cluster.options[3].text).toBe('a wanted ad, or a business that does not offer what the asker described and not retail');
+    expect(cluster.options[3].text).toBe('a wanted ad, or a business that does not offer what the asker described');
+    expect(cluster.options[4].text).toBe('something else, such as retail');
     expect(cluster.items[0].question).toBe('Is this page a single business that offers what the asker described ("Find the sellers of coats like Alpha Coats"), on its own site or profile (not a directory of several, an article, or a wanted ad and not retail)?');
     expect(kindCluster({ ...kind, examples: [] }).options[0].text).toBe('a single business that offers what the asker described ("Find the sellers of coats like Alpha Coats"), on its own website or its own profile page');
-    expect(kindCluster({ ...kind, entity: false }).options[0].text).toBe('one providers, offered as asked');
+    expect(kindCluster({ ...kind, entity: false }).options[0].text).toBe('one wholesale clothing supplier, offered as asked');
     expect(cluster.options[1].text).toBe('a directory, list or search page of several businesses');
   });
 
@@ -924,7 +926,7 @@ describe('screening a requirement of the asker by meaning', () => {
     expect(router.calls.find((call) => call.task === SECOND_TASK)!.avoid).toEqual(['p1']);
     expect(router.userText(SECOND_TASK)).toContain(`Requirement: ${question}`);
     expect(checks.find((check: { clause: string }) => check.clause === 'kind')).toMatchObject({ answer: 'yes' });
-    expect(checks.find((check: { clause: string }) => check.clause === 'kind')!.id).toContain('one sellers of coats');
+    expect(checks.find((check: { clause: string }) => check.clause === 'kind')!.id).toContain('one seller offered as asked');
   });
 
   it('leaves it to confirm with the first reading when only one family answers, and when the two families differ', async () => {
@@ -1035,5 +1037,37 @@ describe('a page longer than one reading', () => {
     const router = fakeRouter({ '': (request: { messages: Array<{ content: string }> }) => (request.messages[1].content.includes('This page offers:') ? { kind: 'A', span: 'S1' } : [{ id: 'q1', answer: 'yes', spans: ['S1'] }]) });
     const checks = await new ChecklistJudge({ router }).judge({ url: 'u' }, fact, checklist, kind);
     expect(checks.map((check: { answer: string }) => check.answer)).toEqual(['yes', 'yes']);
+  });
+});
+
+describe('the kind question names the validated kind, with the description of the asker as context', () => {
+  const kind = { label: 'plot of land', asked: 'Find appropriate plots to buy for glamping business', described: 'Find appropriate plots to buy for glamping business', not: ['house', 'villa'], terms: ['plot', 'terreno'] };
+
+  it('keeps kind.label as the noun of the question and of option A, never the population quote', () => {
+    const cluster = kindCluster(kind);
+    expect(cluster.items[0].question).toBe('Is this page one plot of land offered as asked (not a part, accessory, wanted ad or list and not house, villa)?');
+    expect(cluster.options[0].text).toBe('one plot of land, offered as asked');
+    expect(cluster.options.map((o: { text: string }) => o.text).join(' ')).not.toContain('Find appropriate');
+    expect(cluster.context).toBe('Find appropriate plots to buy for glamping business');
+    expect(kindCluster({ label: '', asked: 'plots to buy', terms: ['plot'] }).options[0].text).toBe('one plots to buy, offered as asked');
+  });
+
+  it('names the near-miss kinds as something else, never inside the option for a part or an accessory', () => {
+    const cluster = kindCluster(kind);
+    expect(cluster.options[1].text).toBe('a part or an accessory of it');
+    expect(cluster.options[4].text).toBe('something else, such as house, villa');
+    expect(kindCluster({ label: 'plot of land', terms: ['plot'] }).options[4].text).toBe('something else');
+  });
+
+  it('shows the description to the kind judge as context only, in the first reading and in the second opinion', async () => {
+    const router = fakeRouter({ '': { kind: 'A', span: 'S1' }, 'kind-second': { kind: 'A', span: 'S1' } });
+    const judge = new ChecklistJudge({ router });
+    const checks = await judge.judge({ url: 'u' }, 'Terreno para venda, 600 m2, Palmela.', [], kind);
+    expect(checks.at(-1)).toMatchObject({ clause: 'kind', answer: 'yes', quote: 'Terreno para venda, 600 m2, Palmela.' });
+    const first = router.calls[0].messages[1].content;
+    expect(first).toContain('for context only (what kind of thing the page offers is decided here; every other requirement is judged apart): "Find appropriate plots to buy for glamping business"');
+    expect(first).toContain('A) one plot of land, offered as asked');
+    await judge.judgeKindAgain('Terreno para venda, 600 m2, Palmela.', kind, { value: 600, unit: 'EUR', median: 9000 });
+    expect(router.userText('kind-second')).toContain('for context only');
   });
 });
