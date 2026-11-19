@@ -1,0 +1,1 @@
+Averaged over five reasoning benchmarks, CGES reduces the average number of calls by 58% on average (from 16.0 to 6.7) while matching its accuracy within 0.4 percentage points of self-consistency.

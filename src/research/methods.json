@@ -1,0 +1,160 @@
+[
+  {
+    "id": "M1",
+    "title": "sorting",
+    "source_url": "https://www.lamsade.dauphine.fr/~bouyssou/BMP_ETRI.pdf",
+    "quote": "Electre Tri is a set of methods designed to sort alternatives evaluated on several criteria into ordered categories.",
+    "context": "Multi-criteria SORTING: a decision maker defines ordered categories by reference profiles; each alternative is assigned by comparison with them. Profiles and thresholds are elicited from the decision maker.",
+    "transfer": "Direct fit: results are sorted into ordered categories — fits (base) > option (trade-off) > rejected. A category may have several limiting profiles: the BASE profile (every asked requirement incl. the anchor, e.g. the asked brands) and an OPTION profile (anchor partly missing, every other purpose requirement at a high level). Condition: profiles come from the asker's words, hints and the purpose, are shown to the owner and editable — never invented by the engine alone.",
+    "status": "verified",
+    "url": "https://www.lamsade.dauphine.fr/~bouyssou/BMP_ETRI.pdf"
+  },
+  {
+    "id": "M2",
+    "title": "alternatives",
+    "source_url": "https://webperso.info.ucl.ac.be/~avl/files/RE01.pdf",
+    "quote": "OR-refinement links relate a goal to an alternative set of refinements; this means that satisfying one of the refinements is sufficient for satisfying the parent goal.",
+    "context": "Requirements engineering for SYSTEM design: alternative refinements are alternative designs to satisfy a system goal; chosen by analysts.",
+    "transfer": "Transfer by analogy only: a purpose goal of the asker (\"guests come for the natural setting\") may be met by alternative means (sea near OR scenic surroundings). Condition: the parent goal is found by WHY from the asker's words/purpose; alternatives are proposed, voted and owner-confirmed; the asker's own requirement always stays one alternative. Does not license dropping an asker's must-have.",
+    "status": "verified",
+    "url": "https://webperso.info.ucl.ac.be/~avl/files/RE01.pdf"
+  },
+  {
+    "id": "M3",
+    "title": "LLM reliability",
+    "source_url": "https://arxiv.org/abs/2509.01048",
+    "quote": "In addition, when evaluated by human annotators, GPT-4o generates goal model refinement relationships among extracted goals with 72.2% accuracy.",
+    "context": "Goals extracted from stakeholder interview transcripts, judged by human annotators.",
+    "transfer": "A model-proposed refinement (alternative, category profile) is wrong about 1 time in 4 in that setting: every such proposal needs independent-family votes (#212) and owner confirmation before it can change which items count.",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2509.01048"
+  },
+  {
+    "id": "M4",
+    "title": "means vs ends",
+    "source_url": "",
+    "quote": "not verified on the original text",
+    "context": "Structuring a decision maker's own objectives: means objectives matter only through fundamental objectives, found by asking \"why is this important?\".",
+    "transfer": "Supporting only; never the sole basis of a rule until a quote is verified on an open text.",
+    "status": "supporting"
+  },
+  {
+    "id": "M5",
+    "title": "trade-offs",
+    "source_url": "",
+    "quote": "not verified on the original text",
+    "context": "The decision maker makes each trade-off; dominated alternatives are eliminated.",
+    "transfer": "Supporting only: OPTIONS are shown with what they give up (the missing anchor) and what they gain, so the OWNER makes the trade-off; the engine never counts an option as meeting every must-have.",
+    "status": "supporting"
+  },
+  {
+    "id": "M6",
+    "title": "verifier",
+    "source_url": "https://arxiv.org/abs/2402.01817",
+    "quote": "We argue that auto-regressive LLMs cannot, by themselves, do planning or self-verification (which is after all a form of reasoning), and shed some light on the reasons for misunderstandings in the literature.",
+    "context": "Planning benchmarks",
+    "transfer": "Every model output is a proposal; it counts after a code check",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2402.01817"
+  },
+  {
+    "id": "M7",
+    "title": "domain knowledge",
+    "source_url": "https://arxiv.org/abs/1209.1551",
+    "quote": "Zave and Jackson’s famous conceptualization of requirements engineering, that is, K, S ⊢ R",
+    "context": "Software requirements",
+    "transfer": "Domain knowledge is a slot of the request model, not background",
+    "status": "verified",
+    "url": "https://arxiv.org/pdf/1209.1551"
+  },
+  {
+    "id": "M8",
+    "title": "goal → metric",
+    "source_url": "https://arxiv.org/abs/2604.22207",
+    "quote": "GQM goals are defined in terms of purpose, focus, object of study, viewpoint, and context.",
+    "context": "Measurement programmes",
+    "transfer": "Each requirement carries viewpoint and context (roles) and a measure",
+    "status": "verified",
+    "url": "https://www.cs.umd.edu/users/basili/publications/proceedings/P124.pdf"
+  },
+  {
+    "id": "M9",
+    "title": "LLM goal extraction",
+    "source_url": "https://arxiv.org/abs/2604.22207",
+    "quote": "Although the pipeline achieved 61% accuracy in low-level goal identification, the final stage, these results indicate the approach is best suited as a tool to accelerate manual extraction rather than as a full replacement.",
+    "context": "4 software projects",
+    "transfer": "The request model is checked by a second family and by trace gates",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2604.22207"
+  },
+  {
+    "id": "M10",
+    "title": "implicit requirements",
+    "source_url": "https://arxiv.org/abs/2602.20424",
+    "quote": "Evaluating 16 frontier and open-weight models across 205 scenarios, we find that even the best-performing model achieves only 48.3% scenario pass rate, revealing substantial room for improvement in bridging the gap between literal instruction-following and human-like contextual reasoning.",
+    "context": "Agent scenarios; deep research rubrics",
+    "transfer": "Implicit requirements stated and labelled derived",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2602.20424"
+  },
+  {
+    "id": "M11",
+    "title": "checklists",
+    "source_url": "https://arxiv.org/abs/2410.03608",
+    "quote": "We demonstrate that using TICK leads to a significant increase (46.4% $\\to$ 52.2%) in the frequency of exact agreements between LLM judgements and human preferences, as compared to having an LLM directly score an output.",
+    "context": "Instruction following; agentic rubrics",
+    "transfer": "Hard checks in small batches",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2410.03608"
+  },
+  {
+    "id": "M12",
+    "title": "early stopping",
+    "source_url": "https://arxiv.org/abs/2511.02603",
+    "quote": "Averaged over five reasoning benchmarks, CGES reduces the average number of calls by 58% on average (from 16.0 to 6.7) while matching its accuracy within 0.4 percentage points of self-consistency.",
+    "context": "Reasoning benchmarks",
+    "transfer": "Second opinions stop at agreement",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2511.02603"
+  },
+  {
+    "id": "M13",
+    "title": "plan once",
+    "source_url": "https://arxiv.org/abs/2305.18323",
+    "quote": "Evaluation across multiple real-world agent applications shows that our system can reduce costs by 50.31% and latency by 27.28% on average while maintaining performance, offering a more efficient solution for serving LLM-based agents that complements existing LLM serving infrastructures.",
+    "context": "Tool-using agents",
+    "transfer": "Decompose once, every stage reads it; reuse per kind",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2506.14852"
+  },
+  {
+    "id": "M14",
+    "title": "early pruning",
+    "source_url": "https://arxiv.org/abs/2608.08389",
+    "quote": "Our results show that pruning effectiveness depends more on where pruning is applied than on the specific scoring rule: early pruning yields the largest end-to-end savings, while later pruning mainly refines the final synthesis context.",
+    "context": "Deep research agents",
+    "transfer": "Code checks before page judging",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2608.08389"
+  },
+  {
+    "id": "M15",
+    "title": "self-improvement",
+    "source_url": "https://arxiv.org/abs/2507.19457",
+    "quote": "Across six tasks, GEPA outperforms GRPO by 6% on average and by up to 20%, while using up to 35x fewer rollouts.",
+    "context": "Prompt optimisation; agent contexts",
+    "transfer": "Loop proposals reflect on failing traces; lessons as itemised playbook",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2507.19457"
+  },
+  {
+    "id": "M16",
+    "title": "eval statistics",
+    "source_url": "https://arxiv.org/abs/2411.00640",
+    "quote": "Evaluations are critical for understanding the capabilities of large language models (LLMs).",
+    "context": "LLM evals",
+    "transfer": "Reference gate compares paired with intervals",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2411.00640"
+  }
+]

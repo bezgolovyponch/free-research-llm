@@ -1,0 +1,1 @@
+The specification is of a machine that can suitably control the environment. In other words, I abide by Zave and Jackson’s famous conceptualization of requirements engineering, that is, K, S ⊢ R, where K, S, and R are the 2 the designated set. Alternatively, he could elevate either {r1 } or {r0 , r1 } to that status.
