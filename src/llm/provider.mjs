@@ -36,11 +36,21 @@ const LOCAL_OUTPUT_RESERVE = 3000;
 export const LOCAL_TIMEOUT_MIN_MS = 60000;
 export const LOCAL_TIMEOUT_MAX_MS = 480000;
 
+const WINDOW_LABELS = { 'day-model': 'per day, per model', day: 'per day', month: 'per month', minute: 'per minute' };
+
+export function quotaWindowOf(body) {
+  const text = String(body ?? '');
+  if (/PerDay[A-Za-z]*PerModel/.test(text) || /limit reached for model[\s\S]*(?:per day|\bTPD\b|\bRPD\b)/i.test(text) || /(?:tokens|requests) per day limit exceeded/i.test(text)) return 'day-model';
+  if (/PerDay|per day|daily/i.test(text)) return 'day';
+  if (/PerMonth|per month|monthly|\/\s*month\b/i.test(text)) return 'month';
+  if (/PerMinute|per minute/i.test(text)) return 'minute';
+  return null;
+}
+
 export function quotaWindow(body) {
   const text = String(body);
-  if (/PerDay[A-Za-z]*PerModel/.test(text) || /limit reached for model[\s\S]*(?:per day|\bTPD\b|\bRPD\b)/i.test(text) || /(?:tokens|requests) per day limit exceeded/i.test(text)) return ' [quota window: per day, per model]';
-  if (/PerDay|per day|daily/i.test(text)) return ' [quota window: per day]';
-  if (/PerMinute|per minute/i.test(text)) return ' [quota window: per minute]';
+  const window = quotaWindowOf(text);
+  if (window) return ` [quota window: ${WINDOW_LABELS[window]}]`;
   const delay = text.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
   return delay ? ` [retry after ${Math.ceil(Number(delay[1]))}s]` : '';
 }

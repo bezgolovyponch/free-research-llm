@@ -264,6 +264,18 @@ describe('quotaWindow', () => {
     expect(quotaWindow('{"error":{"message":"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_x` service tier `on_demand` on tokens per day (TPD): Limit 200000"}}')).toBe(' [quota window: per day, per model]');
     expect(retryAfterFromText(minute)).toBe(37000);
   });
+
+  it('reads the monthly window of a trial key from the raw cohere 429, and names every window it marks', async () => {
+    const { quotaWindow, quotaWindowOf } = await import('../../src/llm/provider.mjs');
+    const cohere = '{"error":{"message":"You are using a Trial key, which is limited to 1000 API calls / month. You can continue to use the Trial key for free or upgrade to a Production key with higher r';
+    expect(quotaWindow(cohere)).toBe(' [quota window: per month]');
+    expect(quotaWindowOf(cohere)).toBe('month');
+    expect(quotaWindowOf(`cohere HTTP 429 [quota window: per month]: ${cohere}`)).toBe('month');
+    expect(quotaWindowOf('{"quotaId":"GenerateRequestsPerDayPerProject-FreeTier"}')).toBe('day');
+    expect(quotaWindowOf('{"message":"Tokens per day limit exceeded - too many tokens processed."}')).toBe('day-model');
+    expect(quotaWindowOf('{"message":"Requests per minute limit exceeded - too many requests sent."}')).toBe('minute');
+    expect(quotaWindowOf('plain error')).toBeNull();
+  });
 });
 
 describe('Ollama with no model', () => {

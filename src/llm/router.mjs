@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { PURPOSE_CLASS } from './ranking.mjs';
 import { extractJson } from '../research/json.mjs';
-import { ProviderError } from './provider.mjs';
+import { ProviderError, quotaWindowOf } from './provider.mjs';
 import { CHOICE_LETTERS, MAX_PROMPT_TOKENS, familyOf, independentFamilies, letterBias, letterTallies, replyFamily } from './ranking.mjs';
 import { paidDailyTokens, paidProviderIds } from './presets.mjs';
 
@@ -65,6 +65,11 @@ export function modelGone(error) {
 export function nextUtcMidnight(now) {
   const d = new Date(now);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) + 60000;
+}
+
+export function nextUtcMonth(now) {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) + 60000;
 }
 
 function utcOffsetMs(timeZone, at) {
@@ -444,6 +449,7 @@ export class ModelRouter {
       }
       const noCredit = !SHORT_LIMIT.test(text) && (status === 402 || CREDIT_EXHAUSTED.test(text)) && !/exceeded your current quota|per day/i.test(text);
       const daily = noCredit && nextUtcMidnight(at) > this.now();
+      const monthly = quotaWindowOf(text) === 'month' && Number.isFinite(at) && nextUtcMonth(at) > this.now();
       const modelGoneError = modelGone({ status, message: text });
       if (modelGoneError) {
         if (row.model && !this.isModelCurrent(provider, row.model)) continue;
@@ -451,7 +457,7 @@ export class ModelRouter {
         restored.push(id);
         continue;
       }
-      if (!badKey && !daily) continue;
+      if (!badKey && !daily && !monthly) continue;
       this.coolDown({ id }, { status, message: String(row.error ?? '') });
       restored.push(id);
     }
@@ -475,8 +481,10 @@ export class ModelRouter {
       const rest = Math.min(STREAK_BENCH_MS * 2 ** benches, STREAK_BENCH_MAX_MS);
       const until = at + rest;
       if (until <= now) continue;
-      this.cooldownUntil.set(id, Math.max(this.cooldownUntil.get(id) ?? 0, until));
-      this.cooldownReason.set(id, `${streak} failed calls in a row before the restart; rests ${Math.round(rest / 60000)} min`);
+      if ((this.cooldownUntil.get(id) ?? 0) < until) {
+        this.cooldownUntil.set(id, until);
+        this.cooldownReason.set(id, `${streak} failed calls in a row before the restart; rests ${Math.round(rest / 60000)} min`);
+      }
       if (!restored.includes(id)) restored.push(id);
     }
     return restored;
@@ -493,6 +501,10 @@ export class ModelRouter {
     const message = String(error.message ?? '');
     if (paymentRequired(error)) return { until: now + PAYMENT_REST_MS, reason: 'needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key' };
     const until = now + (error.retryAfterMs || this.cooldownMs);
+    if (quotaWindowOf(message) === 'month') {
+      const reset = Math.max(until, nextUtcMonth(now));
+      return { until: reset, reason: `monthly quota used up; waits for the monthly reset (${new Date(reset).toISOString().slice(0, 10)} UTC)` };
+    }
     if (!SHORT_LIMIT.test(message) && (error.status === 402 || DAILY.test(message))) return { until: Math.max(until, quotaResetAt(provider, now)), reason: 'daily quota or credit used up; waits for the daily reset' };
     return { until, reason: 'rate limit' };
   }

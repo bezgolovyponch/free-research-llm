@@ -110,8 +110,8 @@ Every trial is recorded with before/after score (`project.improve.trials`). Test
 ## 4f. Models: per-model quotas, withdrawn models, benches
 
 - A provider whose models each have their own daily quota (Gemini: `quotaId …PerDayPerProjectPerModel…`) is not benched when one model runs out: that model is retired until the UTC reset and the provider switches to its next preferred model (`retireModel`, `ModelRouter.switchModel`). A model the provider withdrew (HTTP 404 "no longer available") is retired for good. The provider is benched only when no preferred model is left.
-- The provider adds the quota window it read from the full error body to the start of the message (`[quota window: per minute | per day | per day, per model]`, or the `retryDelay`), so a per-minute limit is never benched until midnight.
-- After a restart only lasting benches are restored from the ledger: no credit (402, `balance_units`) until the UTC reset, a rejected key (401/403) for 6 h. A daily 429 is re-checked by the first live call.
+- The provider adds the quota window it read from the full error body to the start of the message (`[quota window: per minute | per day | per day, per model | per month]`, or the `retryDelay`), so a per-minute limit is never benched until midnight. A per-month window (a trial key limited to N calls / month) rests the provider until the next month starts (UTC), not for a minute.
+- After a restart only lasting benches are restored from the ledger: no credit (402, `balance_units`) until the UTC reset, a rejected key (401/403) for 6 h, a used-up monthly window until the next month starts (UTC). A failure-streak rest restored next to a longer one keeps the longer rest and its reason. A daily 429 is re-checked by the first live call.
 - **Local models:** `llamacpp` is llama.cpp on this computer (`node src/frl.mjs local start --model …`); `llamacpp-lan` is llama.cpp on another computer in the same network, reached at `LLAMACPP_LAN_URL` (steps: Models & router → How to get it, or `src/llm/guides.mjs`). Both are unlimited and cost no quota.
 
 ## 4g. Running without stops

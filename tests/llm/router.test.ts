@@ -3,7 +3,7 @@ import { OutcomeBook } from '../../src/llm/outcomes.mjs';
 import { ProviderError } from '../../src/llm/provider.mjs';
 import { PROVIDER_PRESETS } from '../../src/llm/presets.mjs';
 import { PURPOSE_CLASS } from '../../src/llm/ranking.mjs';
-import { EXPECTED_OUTPUT_TOKENS, COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, WAIT_NOTICE_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, overloaded, paymentRequired, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { EXPECTED_OUTPUT_TOKENS, COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, WAIT_NOTICE_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, nextUtcMonth, overloaded, paymentRequired, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -232,6 +232,48 @@ describe('ModelRouter.restoreCooldowns', () => {
     expect(router.cooldownReason.get('sambanova')).toMatch(/daily quota or credit/);
     expect(router.cooldownUntil.get('sambanova')).toBe(nextUtcMidnight(now));
     expect(router.cooldownUntil.has('groq')).toBe(false);
+  });
+});
+
+const COHERE_MONTH_BODY = '{"error":{"message":"You are using a Trial key, which is limited to 1000 API calls / month. You can continue to use the Trial key for free or upgrade to a Production key with higher r';
+const COHERE_MONTH = `cohere HTTP 429: ${COHERE_MONTH_BODY}`;
+
+describe('ModelRouter monthly quota window', () => {
+  it('rests a provider whose trial key used its month until the next month starts (UTC), after one call', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    let now = Date.parse('2026-11-19T08:10:17Z');
+    const asked: string[] = [];
+    const fetchImpl = async (url: string, init: { body?: string }) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'command-a-plus-05-2026' }] }));
+      asked.push(JSON.parse(init.body ?? '{}').model);
+      return new Response(COHERE_MONTH_BODY, { status: 429 });
+    };
+    const preset = { id: 'cohere', label: 'c', baseURL: 'https://c.example/v1', keyEnv: 'K', prefer: { fast: ['command-a'], deep: ['command-a'] } };
+    const cohere = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: fetchImpl as never, now: () => now }).discover();
+    const b = provider('b', []);
+    const router = new ModelRouter({ providers: [cohere, b], now: () => now, sleep: async () => {} });
+    for (let i = 0; i < 3; i++) {
+      await expect(router.complete({ purpose: 'checklist', tier: 'deep', messages: [{ role: 'user', content: 'x' }] })).resolves.toMatchObject({ provider: 'b' });
+      now += 31 * 60 * 1000;
+    }
+    expect(asked).toEqual(['command-a-plus-05-2026']);
+    expect(router.ledger[0].error).toMatch(/^cohere HTTP 429 \[quota window: per month\]: /);
+    expect(nextUtcMonth(Date.parse('2026-11-19T08:10:17Z'))).toBe(Date.parse('2026-12-01T00:01:00Z'));
+    expect(router.cooldownUntil.get('cohere')).toBe(Date.parse('2026-12-01T00:01:00Z'));
+    expect(router.cooldownReason.get('cohere')).toBe('monthly quota used up; waits for the monthly reset (2026-12-01 UTC)');
+    expect(router.status().find((s: { id: string }) => s.id === 'cohere')).toMatchObject({ coolingReason: 'monthly quota used up; waits for the monthly reset (2026-12-01 UTC)' });
+  });
+
+  it('keeps that rest after a restart from the raw call log, with its own reason, until the month is over', () => {
+    const now = Date.parse('2026-11-19T08:53:05Z');
+    const p = (id: string) => ({ id, ready: true, keyCount: 1, selected: { fast: 'command-a-plus-05-2026', deep: 'command-a-plus-05-2026' }, describe: () => ({}), chat: async () => ({}) });
+    const rows = Array.from({ length: 25 }, (_, i) => ({ ts: new Date(Date.parse('2026-11-19T08:10:17Z') + i * 60000).toISOString(), purpose: 'checklist', tier: 'deep', provider: 'cohere', ok: false, ms: 201, error: COHERE_MONTH, keys: 1, model: 'command-a-plus-05-2026' }));
+    const router = new ModelRouter({ providers: [p('cohere')], now: () => now });
+    expect(router.restoreCooldowns(rows)).toEqual(['cohere']);
+    expect(router.cooldownUntil.get('cohere')).toBe(Date.parse('2026-12-01T00:01:00Z'));
+    expect(router.cooldownReason.get('cohere')).toBe('monthly quota used up; waits for the monthly reset (2026-12-01 UTC)');
+    const december = new ModelRouter({ providers: [p('cohere')], now: () => Date.parse('2026-12-01T00:02:00Z') });
+    expect(december.restoreCooldowns(rows.slice(-1))).toEqual([]);
   });
 });
 
