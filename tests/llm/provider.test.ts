@@ -78,6 +78,40 @@ describe('OpenAICompatibleProvider', () => {
     expect(JSON.parse(String(fetchImpl.calls.at(-1)!.init.body)).response_format).toBeUndefined();
   });
 
+  it('drops temperature for a model whose endpoint rejects it, keeps JSON mode, and never sends it to that model again', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'deepseek/deepseek-r1:free' }] })],
+      [/\/chat\/completions$/, (_url: string, init: RequestInit) => {
+        const sent = JSON.parse(String(init.body));
+        bodies.push(sent);
+        return 'temperature' in sent
+          ? new Response('{"error":{"code":"invalid_request_error","message":"`temperature` is deprecated for this model."}}', { status: 400 })
+          : jsonResponse({ choices: [{ message: { content: 'x' } }] });
+      }],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: openrouter, apiKey: 'k', fetchImpl }).discover();
+    await expect(p.chat({ messages: [] })).resolves.toMatchObject({ content: 'x' });
+    await expect(p.chat({ messages: [] })).resolves.toMatchObject({ content: 'x' });
+    expect(bodies.map((b) => 'temperature' in b)).toEqual([true, false, false]);
+    expect(bodies.every((b) => (b.response_format as { type?: string } | undefined)?.type === 'json_object')).toBe(true);
+  });
+
+  it('keeps temperature when a 400 is about something else', async () => {
+    let n = 0;
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = fakeFetch([
+      [/\/models$/, () => jsonResponse({ data: [{ id: 'deepseek/deepseek-r1:free' }] })],
+      [/\/chat\/completions$/, (_url: string, init: RequestInit) => {
+        bodies.push(JSON.parse(String(init.body)));
+        return ++n === 1 ? new Response('bad response_format', { status: 400 }) : jsonResponse({ choices: [{ message: { content: 'x' } }] });
+      }],
+    ]);
+    const p = await new OpenAICompatibleProvider({ preset: openrouter, apiKey: 'k', fetchImpl }).discover();
+    await expect(p.chat({ messages: [] })).resolves.toMatchObject({ content: 'x' });
+    expect(bodies.map((b) => 'temperature' in b)).toEqual([true, true]);
+  });
+
   it('turns 429 into a retryable error carrying retry-after', async () => {
     const fetchImpl = fakeFetch([
       [/\/models$/, () => jsonResponse({ data: [{ id: 'llama-3.1-8b-instant' }] })],
