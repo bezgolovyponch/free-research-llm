@@ -836,5 +836,33 @@
     "signal": "2026-11-19 after #220: on Windows `npm run quality` printed only \"No calls found for 2026-11-19 to 2026-11-19\" and exited 0, with no syntax, test or e2e check; a merge commit on fix/judge-reply-and-unmeasured passed its pre-commit hook in seconds. The same gate ran fully on macOS and Linux, so CI and the author did not see it.",
     "cause": "quality.mjs wrapped its run in a check that compared import.meta.url with the string \"file://\" + process.argv[1]; on Windows import.meta.url is file:///C:/... while argv[1] is a C:\\ path, so the check was never true. The other scripts already compared through pathToFileURL(argv[1]).href. waste.mjs called main() unconditionally, so importing it from the gate printed its report.",
     "prevention": "One helper, startedDirectly(metaUrl, argv1, platform) in scripts/tool-entry.mjs, compares through pathToFileURL with the platform path rules (drive letter case ignored on Windows); quality.mjs and waste.mjs use it. Tests: tests/scripts/toolentry.test.ts (Windows and POSIX paths) and tests/scripts/waste.test.ts (importing prints nothing, starting directly prints the report). Rule: a change to how a script starts is checked by running it on Windows, and a gate that prints no verdict line is a failure, not a pass."
+  },
+  {
+    "id": "F58",
+    "title": "a judge prompt asked for a JSON array while the transport forced a JSON object, and the parser took any array it found",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/deeper.mjs",
+      "src/llm/provider.mjs",
+      "src/llm/router.mjs",
+      "tests/research/checklist.test.ts",
+      "tests/research/deeper.test.ts"
+    ],
+    "signal": "Gran Canaria stag research find-40-activity-providers-in-gr-fbadb7 (2026-11-19): all 7 hard checklist questions were unknown with no quote on the only judged page, although its first sentence is \"About Yellow Boat Mogan | Boat Tours in Gran Canaria\"; all 11 checklist calls of the run went to the local gpt-oss-20b. The same judge prompt sent by hand to three models for https://yellowboatmogan.com/: gpt-oss-20b answered one object {\"id\":\"q1\",\"answer\":\"yes\",\"spans\":[\"S22\"]} covering q1 only, and replyList returned [\"S22\"] as the answer list, so every question became unknown; gemini-3.5-flash-lite and claude-sonnet-5-5 answered bare arrays that parsed. The defect stayed hidden while cloud models answered the checklist calls.",
+    "cause": "judgePrompt demanded a top-level array while OpenAICompatibleProvider sends response_format json_object, which allows only an object; each model family resolves that conflict its own way. replyList took the first array value of any object, so a nested field (spans) was read as the answers. Questions a partial reply left out became unknown without being asked again. Deeper-read verdicts were cached under url::checkId with no judge version, so a corrected judge would still have reused the broken answers.",
+    "prevention": "PR #214 commit fed0739: the prompt asks for {\"answers\":[...]}, the shape JSON-object mode allows; replyList reads a bare list, the answers envelope or a single answer object, and never a list whose entries are not answers; questions a reply does not cover are asked once more in one follow-up call, only them; JUDGE_VERSION 5 is part of the checklist fingerprint and of the deeper cache key (url::checkId::judge:N). Tests: tests/research/checklist.test.ts (replyList; judge replies in JSON-object mode) and tests/research/deeper.test.ts (a deeper verdict cached by an older judge is judged again). Rule: a prompt and the transport mode that carries it are tested together with every reply shape a provider family is seen to return, and a parser accepts only entries of the shape it asked for."
+  },
+  {
+    "id": "F59",
+    "title": "a requirement turned into a number the engine cannot measure for the item was never asked, and it blocked every result",
+    "touches": [
+      "src/research/checklist.mjs",
+      "src/research/decision.mjs",
+      "src/research/engine.mjs",
+      "tests/research/checklist.test.ts"
+    ],
+    "signal": "Durres stag research find-40-activity-providers-in-du-3e0586 (2026-11-19): the clause \"within about 60 km\" became the hard numeric item distanceKm <= 60. None of the 23 delivered items carried distanceKm, because distance is measured only for candidate-table rows with coordinates or a stated place. All 19 judged items were unknown on that check with no quote and no model call, including 6 whose fetched page names the town, so 0 of 40 were confirmed while the own-website check was answered on the same pages.",
+    "cause": "ChecklistJudge.judge() compared numeric items in code and left them unknown when the item had no value for the measure; nothing asked the page instead. The decision model picks a measure without knowing whether the delivered item can carry it. A hard check that is unknown on every item left no signal in the log or the audit. A null value also passed the old val !== undefined test and compared as 0.",
+    "prevention": "Item own measure first, then the measure of the decision criterion the item states (#215, measures.mjs), and only a finite reading counts as a measurement (null, empty or non-numeric is not); when neither reads a value the question is asked from the item page with the same id, hard flag and quote check, instead of being left unknown. measuredReading/measuredValue in src/research/checklist.mjs; tests in tests/research/checklist.test.ts (an item with no measured distance is asked the distance question from its page; a null or non-numeric value is not a measurement). Rule: unknown is reserved for a question that was asked and not shown."
   }
 ]

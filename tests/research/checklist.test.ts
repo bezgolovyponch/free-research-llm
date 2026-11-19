@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
@@ -380,6 +380,73 @@ describe('ChecklistJudge reply binding with short IDs', () => {
   });
 });
 
+describe('replyList', () => {
+  const answer = { id: 'q1', answer: 'yes', spans: ['S1'] };
+
+  it('reads a bare list, an answers envelope and a single answer object', () => {
+    expect(replyList([answer])).toEqual([answer]);
+    expect(replyList({ answers: [answer] })).toEqual([answer]);
+    expect(replyList(answer)).toEqual([answer]);
+  });
+
+  it('never takes a nested list such as spans for the answers', () => {
+    expect(replyList({ id: 'q1', answer: 'yes', spans: ['S22'] })).toEqual([{ id: 'q1', answer: 'yes', spans: ['S22'] }]);
+    expect(replyList({ note: 'none', spans: ['S1'] })).toEqual([]);
+    expect(replyList(null)).toEqual([]);
+    expect(replyList('yes')).toEqual([]);
+  });
+
+  it('accepts a list of answer objects under another key', () => {
+    expect(replyList({ results: [answer] })).toEqual([answer]);
+  });
+});
+
+describe('judge replies in JSON-object mode', () => {
+  const fourChecklist = [{ clause: 'c', items: [1, 2, 3, 4].map((n) => ({ clause: 'c', question: `Is property ${n} stated?`, hard: true, numeric: null })) }];
+  const askedIds = (content: string) => [...content.matchAll(/^(q\d+):/gm)].map((m) => m[1]);
+
+  function scriptedRouter(replies: unknown[]) {
+    const calls: string[][] = [];
+    return {
+      calls,
+      complete: async (req: { messages: { content: string }[] }) => {
+        calls.push(askedIds(req.messages[1].content));
+        return { provider: 'test', data: replies[Math.min(calls.length - 1, replies.length - 1)] };
+      },
+    };
+  }
+
+  it('a reply that is one answer object binds that answer and asks the other questions once more, only them', async () => {
+    const router = scriptedRouter([
+      { id: 'q1', answer: 'yes', spans: ['S1'] },
+      { answers: [{ id: 'q2', answer: 'no', spans: ['S1'] }, { id: 'q3', answer: 'unknown', spans: [] }, { id: 'q4', answer: 'yes', spans: ['S1'] }] },
+    ]);
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'Property one is stated here', fourChecklist);
+    expect(router.calls).toEqual([['q1', 'q2', 'q3', 'q4'], ['q2', 'q3', 'q4']]);
+    expect(checks.map((c) => c.answer)).toEqual(['yes', 'no', 'unknown', 'yes']);
+    expect(checks[0].quote).toBe('Property one is stated here');
+  });
+
+  it('the follow-up is asked once: questions it leaves uncovered count as unknown without a third call', async () => {
+    const router = scriptedRouter([{ id: 'q1', answer: 'yes', spans: ['S1'] }]);
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'Property one is stated here', fourChecklist);
+    expect(router.calls).toEqual([['q1', 'q2', 'q3', 'q4'], ['q2', 'q3', 'q4']]);
+    expect(checks.map((c) => c.answer)).toEqual(['yes', 'unknown', 'unknown', 'unknown']);
+  });
+
+  it('a reply that covers every question is not followed up', async () => {
+    const router = scriptedRouter([{ answers: [1, 2, 3, 4].map((n) => ({ id: `q${n}`, answer: 'unknown', spans: [] })) }]);
+    await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'Property one is stated here', fourChecklist);
+    expect(router.calls).toEqual([['q1', 'q2', 'q3', 'q4']]);
+  });
+
+  it('the prompt asks for an object with an answers list, the shape JSON-object mode allows', () => {
+    const sys = judgePrompt({ questions: [{ short: 'q1', question: 'Is it stated?' }], block: '[S1] It is stated' })[0].content;
+    expect(sys).toContain('{"answers":[{"id":"q1"');
+    expect(sys).not.toContain('only: [');
+  });
+});
+
 describe('checklistFingerprint and caching', () => {
   const testChecklist = [
     { clause: 'brand', items: [
@@ -670,7 +737,7 @@ describe('item-level checklist with a kind check and code-measured values', () =
   });
 
   it('the fingerprint carries the judge version, so answers of an older judge are not reused', () => {
-    expect(JUDGE_VERSION).toBe(5);
+    expect(JUDGE_VERSION).toBe(6);
     expect(CHECKLIST_VERSION).toBe(6);
     expect(checklistFingerprint(checklist).endsWith(`judge:${JUDGE_VERSION}`)).toBe(true);
   });
@@ -697,10 +764,42 @@ describe('item-level checklist with a kind check and code-measured values', () =
     expect(router.asked.flat()).not.toContain(id);
   });
 
-  it('an item with no measured distance leaves the distance check unknown', async () => {
-    const router = recordingRouter(() => []);
-    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'page', checklist);
-    expect(checks.find((c) => c.clause === 'within 50 km of the town')?.answer).toBe('unknown');
+  it('an item with no measured distance is asked the distance question from its page, with the same id, hard flag and quote check', async () => {
+    const seen: string[][] = [];
+    const router = {
+      complete: async (req: { messages: { content: string }[] }) => {
+        const asked = [...req.messages[1].content.matchAll(/^(q\d+):\s*(.+)$/gm)].map((m) => m[2]);
+        seen.push(asked);
+        return { provider: 'test', data: { answers: asked.map((q, i) => (q.includes('50 km') ? { id: `q${i + 1}`, answer: 'yes', spans: ['S2'] } : { id: `q${i + 1}`, answer: 'unknown', spans: [] })) } };
+      },
+    };
+    const page = 'A round thing for sale. Our yard is in the town, ten minutes from the harbour.';
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, page, checklist);
+    const id = 'within 50 km of the town|Is this within 50 km of the town?';
+    expect(seen.flat()).toContain('Is this within 50 km of the town?');
+    expect(checks.find((c) => c.id === id)).toMatchObject({ answer: 'yes', quote: 'Our yard is in the town, ten minutes from the harbour.', hard: true, clause: 'within 50 km of the town' });
+  });
+
+  it('a measured distance keeps the code comparison and that question is never sent to the page', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'unknown', spans: [] })));
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 30 }, 'A round thing for sale.', checklist);
+    const id = 'within 50 km of the town|Is this within 50 km of the town?';
+    expect(checks.find((c) => c.id === id)).toMatchObject({ answer: 'yes', quote: 'distanceKm: 30 km' });
+    expect(router.asked).toEqual([['q1']]);
+  });
+
+  it('a null or non-numeric value is not a measurement: the question joins the page batch', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'unknown', spans: [] })));
+    await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: null }, 'A round thing for sale.', checklist);
+    expect(router.asked).toEqual([['q1', 'q2']]);
+    const numeric = { measure: 'distanceKm', op: '<=', value: 50, unit: 'km' };
+    expect(measuredValue({ distanceKm: 30 }, numeric)).toBe(30);
+    expect(measuredValue({ distanceKm: '12' }, numeric)).toBe(12);
+    expect(measuredValue({ distanceKm: null }, numeric)).toBeUndefined();
+    expect(measuredValue({ distanceKm: 'far' }, numeric)).toBeUndefined();
+    expect(measuredValue({}, numeric)).toBeUndefined();
+    expect(measuredValue({ distanceKm: 30 }, { ...numeric, value: null })).toBeUndefined();
+    expect(measuredValue({ distanceKm: 30 }, null)).toBeUndefined();
   });
 });
 

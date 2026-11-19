@@ -1,4 +1,5 @@
 import { plain } from './itemgate.mjs';
+import { JUDGE_VERSION } from './checklist.mjs';
 import { hardIdsOf, itemTier } from './verdict.mjs';
 import { ENTITY_PATH } from './entitypath.mjs';
 
@@ -101,7 +102,7 @@ export class DeeperReader {
       const keyWords = extractKeyWords(check.clause + ' ' + check.id.split('|').pop());
       const relevantUrls = await findRelevantLinks(links, item.url, keyWords);
       for (const url of relevantUrls) {
-        const cacheKey = `${url}::${check.id}`;
+        const cacheKey = `${url}::${check.id}::judge:${JUDGE_VERSION}`;
         let deeperChecks;
         if (cache[cacheKey]) {
           deeperChecks = cache[cacheKey];

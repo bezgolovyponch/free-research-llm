@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DeeperReader, deeperOrder } from '../../src/research/deeper.mjs';
+import { JUDGE_VERSION } from '../../src/research/checklist.mjs';
 
 const CHECK_ID = 'ships abroad|Does this ship to other countries?';
 const checklist = [
@@ -77,10 +78,25 @@ describe('DeeperReader', () => {
   it('a cached deeper verdict is reused without reading or judging that page again', async () => {
     const { reader, readPage, judge } = setup({ [ITEM_URL]: itemPage([{ url: DEEP_URL, text: 'Shipping countries' }]) });
     const item = unknownItem();
-    await reader.readDeeperForUnknown(item, checklist, { [`${DEEP_URL}::${CHECK_ID}`]: yes('cached quote') });
+    await reader.readDeeperForUnknown(item, checklist, { [`${DEEP_URL}::${CHECK_ID}::judge:${JUDGE_VERSION}`]: yes('cached quote') });
     expect(readPage.mock.calls.map((c) => c[0])).toEqual([ITEM_URL]);
     expect(judge.judge).not.toHaveBeenCalled();
     expect(item.checks[0]).toMatchObject({ answer: 'yes', quote: 'cached quote', source: DEEP_URL });
+  });
+
+  it('a deeper verdict cached by an older judge is not reused: the page is read and judged again under the current version', async () => {
+    const { reader, readPage, judge } = setup(
+      { [ITEM_URL]: itemPage([{ url: DEEP_URL, text: 'Shipping countries' }]), [DEEP_URL]: { text: 'We ship to 30 countries', status: 200, links: [] } },
+      { [DEEP_URL]: yes('We ship to 30 countries') },
+    );
+    const item = unknownItem();
+    const stale = [{ id: CHECK_ID, answer: 'unknown', quote: '' }];
+    const cache: Record<string, unknown> = { [`${DEEP_URL}::${CHECK_ID}`]: stale, [`${DEEP_URL}::${CHECK_ID}::judge:${JUDGE_VERSION - 1}`]: stale };
+    await reader.readDeeperForUnknown(item, checklist, cache);
+    expect(readPage.mock.calls.map((c) => c[0])).toEqual([ITEM_URL, DEEP_URL]);
+    expect(judge.judge).toHaveBeenCalledTimes(1);
+    expect(item.checks[0]).toMatchObject({ answer: 'yes', quote: 'We ship to 30 countries', source: DEEP_URL });
+    expect(cache[`${DEEP_URL}::${CHECK_ID}::judge:${JUDGE_VERSION}`]).toEqual(yes('We ship to 30 countries'));
   });
 
   it('reads at most 3 deeper pages and stops at the first yes', async () => {

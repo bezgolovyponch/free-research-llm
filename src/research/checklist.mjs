@@ -4,10 +4,17 @@ import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mj
 import { agreed, closedVote } from './semantic.mjs';
 import { MEASURES as DecisionMeasures, compare, adaptForChecklist } from './measures.mjs';
 
+const isAnswer = (entry) => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry) && 'id' in entry && 'answer' in entry;
+
 export function replyList(data) {
   if (Array.isArray(data)) return data;
-  return Object.values(data ?? {}).find(Array.isArray) ?? [];
+  if (!data || typeof data !== 'object') return [];
+  if (Array.isArray(data.answers)) return data.answers;
+  if (isAnswer(data)) return [data];
+  return Object.values(data).find((value) => Array.isArray(value) && value.some(isAnswer)) ?? [];
 }
+
+const shortIdOf = (reply) => String(reply?.id ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '');
 
 const ANSWERS = ['yes', 'no', 'unknown'];
 
@@ -21,7 +28,7 @@ export function applyQuoteCheck(replies, spans) {
 }
 
 export const CHECKLIST_VERSION = 6;
-export const JUDGE_VERSION = 5;
+export const JUDGE_VERSION = 6;
 export const JUDGE_QUESTIONS_PER_CALL = 4;
 export const JUDGE_BLOCK_CHARS = 6000;
 export const JUDGE_PAGE_CHARS = 40000;
@@ -180,6 +187,28 @@ function getMeasures() {
   return adaptForChecklist(DecisionMeasures);
 }
 
+function finiteReading(measure, item, ctx) {
+  if (!measure) return undefined;
+  const raw = measure.read(item ?? {}, ctx);
+  return raw !== null && raw !== undefined && raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+}
+
+export function measuredReading(item, numeric, { measures = getMeasures(), criteria = [], ctx = {} } = {}) {
+  if (!numeric?.measure || !numeric.op || numeric.value === null || numeric.value === undefined) return undefined;
+  const own = finiteReading(measures[numeric.measure], item, ctx);
+  if (own !== undefined) return { value: own, measure: numeric.measure };
+  for (const criterion of criteria ?? []) {
+    if (!criterion?.measure || criterion.op !== numeric.op || criterion.value !== numeric.value) continue;
+    const stated = finiteReading(measures[criterion.measure], item, ctx);
+    if (stated !== undefined) return { value: stated, measure: criterion.measure };
+  }
+  return undefined;
+}
+
+export function measuredValue(item, numeric, options = {}) {
+  return measuredReading(item, numeric, options)?.value;
+}
+
 export function checklistSummary(items) {
   return items.map((item) => {
     const checks = item.checks ?? [];
@@ -299,6 +328,17 @@ export class ChecklistJudge {
     }
   }
 
+  async answersFromPage(asked, spans) {
+    const shown = spans.length ? await shownSpans(spans, asked.map((q) => q.question).join(' '), this.embedder) : [];
+    if (!shown.length) return new Map();
+    const reply = await this.complete(judgePrompt({ questions: asked, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
+    const validated = applyQuoteCheck(replyList(reply?.data), shown);
+    return new Map(asked.flatMap((q) => {
+      const found = validated.find((r) => shortIdOf(r) === q.short);
+      return found ? [[q.short, found]] : [];
+    }));
+  }
+
   async judgeKind(spans, cluster) {
     const question = cluster.items[0];
     const check = { id: `${cluster.clause}|${question.question}`, answer: 'unknown', quote: '', hard: question.hard, clause: cluster.clause };
@@ -339,38 +379,18 @@ export class ChecklistJudge {
     const measures = getMeasures();
     for (const cluster of checklist) {
       for (const ci of cluster.items) {
-        if (ci.numeric?.measure && ci.numeric.op && ci.numeric.value !== null && measures[ci.numeric.measure]) {
-          numericItems.push({ cluster, item: ci });
+        const reading = measuredReading(item, ci.numeric, { measures, criteria: decisionCriteria, ctx });
+        if (reading) {
+          numericItems.push({ cluster, item: ci, ...reading });
         } else {
           qualitativeItems.push({ cluster, item: ci });
         }
       }
     }
 
-    for (const { cluster, item: ci } of numericItems) {
-      const m = measures[ci.numeric.measure];
-      let val = m.read(item, ctx);
-      let usedMeasure = ci.numeric.measure;
-      if (val === undefined) {
-        for (const criterion of decisionCriteria) {
-          if (criterion.measure && criterion.op === ci.numeric.op && criterion.value === ci.numeric.value && measures[criterion.measure]) {
-            const criterionMeasure = measures[criterion.measure];
-            const criterionVal = criterionMeasure.read(item, ctx);
-            if (criterionVal !== undefined) {
-              val = criterionVal;
-              usedMeasure = criterion.measure;
-              break;
-            }
-          }
-        }
-      }
-      let answer = 'unknown';
-      let quote = '';
-      if (val !== undefined) {
-        answer = compare(val, ci.numeric.op, ci.numeric.value) ? 'yes' : 'no';
-        quote = `${usedMeasure}: ${val} ${ci.numeric.unit}`;
-      }
-      checks.push({ id: cluster.clause + '|' + ci.question, answer, quote, hard: ci.hard, clause: cluster.clause });
+    for (const { cluster, item: ci, value, measure } of numericItems) {
+      const answer = compare(value, ci.numeric.op, ci.numeric.value) ? 'yes' : 'no';
+      checks.push({ id: cluster.clause + '|' + ci.question, answer, quote: `${measure}: ${value} ${ci.numeric.unit}`, hard: ci.hard, clause: cluster.clause });
     }
 
     const questions = qualitativeItems.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, hard: ci.hard, clause: cluster.clause }));
@@ -378,11 +398,13 @@ export class ChecklistJudge {
 
     for (let at = 0; at < questions.length; at += JUDGE_QUESTIONS_PER_CALL) {
       const asked = questions.slice(at, at + JUDGE_QUESTIONS_PER_CALL);
-      const shown = spans.length ? await shownSpans(spans, asked.map((q) => q.question).join(' '), this.embedder) : [];
-      const reply = shown.length ? await this.complete(judgePrompt({ questions: asked, block: spansBlock(shown, JUDGE_BLOCK_CHARS) })) : null;
-      const validated = applyQuoteCheck(replyList(reply?.data), shown);
+      const answers = await this.answersFromPage(asked, spans);
+      const missing = asked.filter((q) => !answers.has(q.short));
+      if (missing.length) {
+        for (const [short, found] of await this.answersFromPage(missing, spans)) answers.set(short, found);
+      }
       for (const q of asked) {
-        const found = validated.find((r) => String(r?.id ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '') === q.short);
+        const found = answers.get(q.short);
         checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause });
       }
     }
@@ -397,7 +419,7 @@ export class ChecklistJudge {
 }
 
 export function judgePrompt({ questions, block }) {
-  const sys = 'You are a strict judge of one item page. The page is shown as numbered sentences. For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it. Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only: [{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]';
+  const sys = 'You are a strict judge of one item page. The page is shown as numbered sentences. For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it. Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only, one entry per question: {"answers":[{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]}';
   const qText = questions.map((q) => `${q.short}: ${q.question}`).join('\n');
   return [
     { role: 'system', content: sys },
