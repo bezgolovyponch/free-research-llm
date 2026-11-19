@@ -2,6 +2,7 @@ import { plain } from './itemgate.mjs';
 import { isUmbrella } from './concept.mjs';
 import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
 import { agreed, closedVote } from './semantic.mjs';
+import { MEASURES as DecisionMeasures, compare, adaptForChecklist } from './measures.mjs';
 
 export function replyList(data) {
   if (Array.isArray(data)) return data;
@@ -175,29 +176,9 @@ function jaccard(a, b) {
 
 const OPS = ['<=', '>=', '<', '>'];
 
-export function compare(value, op, limit) {
-  if (op === '<=') return value <= limit;
-  if (op === '>=') return value >= limit;
-  if (op === '<') return value < limit;
-  return value > limit;
+function getMeasures() {
+  return adaptForChecklist(DecisionMeasures);
 }
-
-export const MEASURES = {
-  priceEur: { read: (row) => row.value !== null && row.value !== undefined ? Number(row.value) : undefined },
-  distanceKm: { read: (row) => row.distanceKm },
-  coastKm: { read: (row) => row.site?.coastKm },
-  beachKm: { read: (row) => row.site?.beachKm },
-  lakeKm: { read: (row) => row.site?.lakeKm },
-  workableMonths: { read: (row) => row.site?.climate?.workable },
-  comfortableMonths: { read: (row) => row.site?.climate?.comfortable },
-  optimalDays: { read: (row) => row.site?.climate?.cci?.optimalDays },
-  hotDays: { read: (row) => row.site?.climate?.cci?.hotDays },
-  hottestC: { read: (row) => row.site?.climate?.hottest },
-  coldestC: { read: (row) => row.site?.climate?.coldest },
-  explorePoints: { read: (row) => row.site ? (row.site.beaches ?? 0) + (row.site.viewpoints ?? 0) + (row.site.attractions ?? 0) + (row.site.reserves ?? 0) + (row.site.protectedAreas ?? 0) + (row.site.hikingRoutes ?? 0) : undefined },
-  staysNearby: { read: (row) => row.site ? (row.site.lodging ?? 0) + (row.site.campsites ?? 0) : undefined },
-  areaM2: { read: (row) => row.area ?? row.size },
-};
 
 export function checklistSummary(items) {
   return items.map((item) => {
@@ -221,7 +202,7 @@ export function checklistFingerprint(checklist) {
 }
 
 function checklistPrompt({ question, guidance = '' }) {
-  const sys = 'You turn a research question into a checklist of yes/no questions about ONE delivered item. Each clause of the question produces items that test that single item. Answer with JSON only: {"items": [{"clause": "short phrase from the question naming the property", "question": "Does this <kind> ...?", "hard": true/false, "numeric": {"measure": "distanceKm|areaM2|coastKm|...", "op": "<=|>=|<|>", "value": 123, "unit": "km|m2|..."} | null}]}.\n\n- "clause" is a short phrase naming the property tested (e.g. "<property> is <value>", "within <distance> of <place>"), NOT the whole sentence.\n- "question" is a yes/no question about ONE item: "Does this <kind> ...?".\n- "hard" = true when the user stated it as a requirement (must have, required, up to, at least, within). Soft = preference (highest, best, prefer, ratio).\n- "numeric" is present only when the question asks for a measurable quantity that code can verify. Use only these measures: distanceKm (distance from the asked place), priceEur, coastKm, beachKm, lakeKm, workableMonths, comfortableMonths, optimalDays, hotDays, hottestC, coldestC, explorePoints, staysNearby, areaM2. When the question gives no number, set value to null. Never invent a number.\n- DROP price limits (checked by the acceptance value range in any currency) and collection/count clauses ("at least N items", "up to M as trade-off", "list of X") — they are checked at acceptance level, not per item.\n- Each clause must yield at least one item. If a clause has no numeric measure, numeric is null and the question is qualitative.\n- The guidance field may add constraints; treat them as additional clauses.';
+  const sys = 'You turn a research question into a checklist of yes/no questions about ONE delivered item. Each clause of the question produces items that test that single item. Answer with JSON only: {"items": [{"clause": "short phrase from the question naming the property", "question": "Does this <kind> ...?", "hard": true/false, "numeric": {"measure": "distanceKm|areaM2|coastKm|...", "op": "<=|>=|<|>", "value": 123, "unit": "km|m2|..."} | null}]}.\n\n- "clause" is a short phrase naming the property tested (e.g. "<property> is <value>", "within <distance> of <place>"), NOT the whole sentence.\n- "question" is a yes/no question about ONE item: "Does this <kind> ...?".\n- "hard" = true when the user stated it as a requirement (must have, required, up to, at least, within). Soft = preference (highest, best, prefer, ratio).\n- "numeric" is present only when the question asks for a measurable quantity that code can verify. Use only these measures: distanceKm (distance from the asked place), priceEur, coastKm, beachKm, lakeKm, workableMonths, comfortableMonths, optimalDays, hotDays, hottestC, coldestC, explorePoints, staysNearby, areaM2, realTrendVsEu. When the question gives no number, set value to null. Never invent a number.\n- DROP price limits (checked by the acceptance value range in any currency) and collection/count clauses ("at least N items", "up to M as trade-off", "list of X") — they are checked at acceptance level, not per item.\n- Each clause must yield at least one item. If a clause has no numeric measure, numeric is null and the question is qualitative.\n- The guidance field may add constraints; treat them as additional clauses.';
   return [
     { role: 'system', content: sys },
     { role: 'user', content: 'Question: ' + question + (guidance ? '\nGuidance: ' + guidance : '') }
@@ -350,14 +331,15 @@ export class ChecklistJudge {
     return { answer: voted?.answer ?? 'unknown', quote: voted?.quote ?? '', tally: result.tally, ...(result.single ? { single: true } : {}) };
   }
 
-  async judge(item, pageText, checklist, kind = null) {
+  async judge(item, pageText, checklist, kind = null, decisionCriteria = [], ctx = {}) {
     const checks = [];
     const numericItems = [];
     const qualitativeItems = [];
 
+    const measures = getMeasures();
     for (const cluster of checklist) {
       for (const ci of cluster.items) {
-        if (ci.numeric?.measure && ci.numeric.op && ci.numeric.value !== null && MEASURES[ci.numeric.measure]) {
+        if (ci.numeric?.measure && ci.numeric.op && ci.numeric.value !== null && measures[ci.numeric.measure]) {
           numericItems.push({ cluster, item: ci });
         } else {
           qualitativeItems.push({ cluster, item: ci });
@@ -366,13 +348,27 @@ export class ChecklistJudge {
     }
 
     for (const { cluster, item: ci } of numericItems) {
-      const m = MEASURES[ci.numeric.measure];
-      const val = m.read(item, {});
+      const m = measures[ci.numeric.measure];
+      let val = m.read(item, ctx);
+      let usedMeasure = ci.numeric.measure;
+      if (val === undefined) {
+        for (const criterion of decisionCriteria) {
+          if (criterion.measure && criterion.op === ci.numeric.op && criterion.value === ci.numeric.value && measures[criterion.measure]) {
+            const criterionMeasure = measures[criterion.measure];
+            const criterionVal = criterionMeasure.read(item, ctx);
+            if (criterionVal !== undefined) {
+              val = criterionVal;
+              usedMeasure = criterion.measure;
+              break;
+            }
+          }
+        }
+      }
       let answer = 'unknown';
       let quote = '';
       if (val !== undefined) {
         answer = compare(val, ci.numeric.op, ci.numeric.value) ? 'yes' : 'no';
-        quote = `${ci.numeric.measure}: ${val} ${ci.numeric.unit}`;
+        quote = `${usedMeasure}: ${val} ${ci.numeric.unit}`;
       }
       checks.push({ id: cluster.clause + '|' + ci.question, answer, quote, hard: ci.hard, clause: cluster.clause });
     }
