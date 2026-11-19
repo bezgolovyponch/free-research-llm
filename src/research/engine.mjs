@@ -69,6 +69,28 @@ export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
 export class ResearchCancelled extends Error {}
 
+export function deriveRequirementIds(model) {
+  if (!model) return [];
+  const fromRequirements = model.requirements ?? [];
+  if (fromRequirements.length) {
+    return fromRequirements.map((r, i) => ({ id: r.measure ?? `R${i + 1}`, label: r.clause ?? r.measure ?? `Requirement ${i + 1}` }));
+  }
+  const criteria = model.criteria ?? [];
+  const checklist = model.checklist ?? [];
+  const ids = [];
+  for (let i = 0; i < criteria.length; i++) {
+    const c = criteria[i];
+    ids.push({ id: c.id ?? c.measure ?? `C${i + 1}`, label: c.clause ?? `${c.measure} ${c.op} ${c.value ?? ''}`.trim() });
+  }
+  let kIndex = 1;
+  for (const cluster of checklist) {
+    for (const item of cluster.items ?? []) {
+      ids.push({ id: item.clause ? `K${kIndex++}` : `K${kIndex++}`, label: item.clause ?? `Checklist item ${kIndex}` });
+    }
+  }
+  return ids;
+}
+
 function fullPriceTitles(pages) {
   const byUnit = new Map();
   for (const page of pages ?? []) {
@@ -478,7 +500,8 @@ export class ResearchEngine {
     await this.ensureDecisionModel(project);
     const model = project.decisionModel;
     const purpose = model?.purpose ?? '';
-    const requirements = (model?.requirements ?? []).map((r) => ({ id: r.measure, clause: r.clause, measure: r.measure, op: r.op, value: r.value, quote: r.quote }));
+    const requirementIds = deriveRequirementIds(model);
+    const requirements = requirementIds.map((r) => ({ id: r.id, clause: r.label, measure: r.id, op: '', value: null, quote: '' }));
     const domainCard = project.domain ? {
       terms: project.domain.terms,
       not: project.domain.not,

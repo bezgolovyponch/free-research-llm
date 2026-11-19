@@ -3161,3 +3161,172 @@ describe('ResearchEngine router lines', () => {
     expect(ledger.filter((row) => row.provider !== 'router' && !row.project)).toEqual([]);
   });
 });
+
+describe('purpose-first: ensurePurpose runs before decompose and requirement ids', () => {
+  it('run calls ensurePurpose before decompose', async () => {
+    const callOrder: string[] = [];
+    const modeler = {
+      fresh: () => false,
+      build: async (p: Record<string, unknown>) => {
+        callOrder.push('build');
+        p.decisionModel = {
+          purpose: 'A buyer wants a plot so that they build a glamping site',
+          value: 'a shortlist of plots under 20000 EUR',
+          kind: { label: 'plot of land', terms: ['plot', 'land'] },
+          criteria: [{ id: 'priceEur', measure: 'priceEur', op: '<=', value: 20000, clause: '20000EUR max', quote: '20000EUR max', source: 'question' }],
+          noLimit: [],
+          checklist: [],
+          requirements: [],
+        };
+        return p.decisionModel;
+      },
+    };
+    const tree = {
+      decision: 'Choose plots under 20000 EUR',
+      successCriteria: 'live plot listings under 20000 EUR',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: 5, valueRange: [0, 20000], unit: 'EUR', mustMention: [] },
+      nodes: [
+        { id: 'D1', parentId: null, title: 'Candidate plots', question: 'Which plots are for sale under 20000 EUR?', method: 'lookup', searchQueries: ['plots for sale'] },
+        { id: 'D1.1', parentId: 'D1', title: 'Region A', question: 'Which plots in region A?', method: 'lookup', searchQueries: ['region A plots'] },
+        { id: 'D1.2', parentId: 'D1', title: 'Region B', question: 'Which plots in region B?', method: 'lookup', searchQueries: ['region B plots'] },
+      ],
+    };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { callOrder.push('decompose'); return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Find plots for glamping, 20000EUR max', templateId: 'generic', expected: '5 plots under 20000 EUR' });
+    await engine.run(project.id);
+    expect(callOrder.indexOf('build')).toBeLessThan(callOrder.indexOf('decompose'));
+  });
+
+  it('decomposePrompt contains the purpose and requirement ids from requirements when present', async () => {
+    const prompts: Array<{ purpose: string; requirements: Array<{ id: string }> }> = [];
+    const modeler = {
+      fresh: () => false,
+      build: async (p: Record<string, unknown>) => {
+        p.decisionModel = {
+          purpose: 'A buyer wants a plot so that they build a glamping site',
+          value: 'a shortlist of plots under 20000 EUR',
+          kind: { label: 'plot of land', terms: ['plot', 'land'] },
+          criteria: [{ id: 'priceEur', measure: 'priceEur', op: '<=', value: 20000, clause: '20000EUR max', quote: '20000EUR max', source: 'question' }],
+          noLimit: [],
+          checklist: [],
+          requirements: [
+            { measure: 'priceEur', clause: 'price at most 20000 EUR', op: '<=', value: 20000, quote: '20000EUR max' },
+            { measure: 'coastKm', clause: 'near the sea', op: '<=', value: 20, quote: 'near the sea' },
+          ],
+        };
+        return p.decisionModel;
+      },
+    };
+    const tree = {
+      decision: 'Choose plots under 20000 EUR near the sea',
+      successCriteria: 'live plot listings under 20000 EUR within 20km of coast',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: 5, valueRange: [0, 20000], unit: 'EUR', mustMention: [] },
+      nodes: [
+        { id: 'D1', parentId: null, title: 'Candidate plots', question: 'Which plots are for sale under 20000 EUR?', method: 'lookup', searchQueries: ['plots for sale'] },
+      ],
+    };
+    const scripted = new ScriptedProvider();
+    const provider = { id: 'demo', ready: true, describe: () => scripted.describe(), async chat(args: { messages: Array<{ content: string }> }) { const prompt = args.messages.at(-1)!.content; if (prompt.includes(TASK_MARKERS.decompose)) { const purposeMatch = prompt.match(/PURPOSE \(why this research matters; every piece must serve it\):\n([\s\S]*?)\n/); const reqMatch = prompt.match(/ASKER'S REQUIREMENTS \(each has an id; every node must name the requirement id\(s\) it serves in field "serves"\):([\s\S]*?)\n\n/); prompts.push({ purpose: purposeMatch?.[1]?.trim() ?? '', requirements: (reqMatch?.[1]?.match(/- (\w+):/g) ?? []).map((m) => ({ id: m.replace(/- (\w+):/, '$1') })) }); } return scripted.chat(args as never); } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Find plots for glamping, 20000EUR max', templateId: 'generic', expected: '5 plots under 20000 EUR' });
+    await engine.decompose(project);
+    expect(prompts.length).toBeGreaterThanOrEqual(1);
+    expect(prompts[0].purpose).toBe('A buyer wants a plot so that they build a glamping site');
+    expect(prompts[0].requirements.map((r) => r.id)).toEqual(['priceEur', 'coastKm']);
+  });
+
+  it('unknown serves ids are dropped and logged', async () => {
+    const logs: string[] = [];
+    const modeler = {
+      fresh: () => false,
+      build: async (p: Record<string, unknown>) => {
+        p.decisionModel = {
+          purpose: 'A buyer wants a plot so that they build a glamping site',
+          value: 'a shortlist of plots under 20000 EUR',
+          kind: { label: 'plot of land', terms: ['plot', 'land'] },
+          criteria: [
+            { id: 'priceEur', measure: 'priceEur', op: '<=', value: 20000, clause: '20000EUR max', quote: '20000EUR max', source: 'question' },
+            { id: 'coastKm', measure: 'coastKm', op: '<=', value: 20, clause: 'near the sea', quote: 'near the sea', source: 'guidance' },
+          ],
+          noLimit: [],
+          checklist: [],
+          requirements: [{ measure: 'priceEur', clause: 'price at most 20000 EUR', op: '<=', value: 20000, quote: '20000EUR max' }],
+          agreement: { samples: 2, majority: 2, proposed: 2, kept: 2 },
+        };
+        return p.decisionModel;
+      },
+    };
+    const tree = {
+      decision: 'Choose plots under 20000 EUR near the sea',
+      successCriteria: 'live plot listings under 20000 EUR within 20km of coast',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: 5, valueRange: [0, 20000], unit: 'EUR', mustMention: [] },
+      nodes: [
+        { id: 'D1', parentId: null, title: 'Candidate plots', question: 'Which plots are for sale?', method: 'lookup', searchQueries: ['plots'], serves: ['priceEur', 'unknownReq'] },
+        { id: 'D1.1', parentId: 'D1', title: 'Region A', question: 'Which plots in region A?', method: 'lookup', searchQueries: ['region A'], serves: ['unknownReq2'] },
+        { id: 'D1.2', parentId: 'D1', title: 'Region B', question: 'Which plots in region B?', method: 'lookup', searchQueries: ['region B'], serves: ['priceEur'] },
+      ],
+    };
+    const scripted = new ScriptedProvider();
+    const provider = { id: 'demo', ready: true, describe: () => scripted.describe(), async chat() { return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler, onEvent: (_id: string, event: { type: string; message: string }) => { if (event.type === 'tree') logs.push(event.message); } } as never);
+    const project = await engine.createProject({ question: 'Find plots for glamping, 20000EUR max', templateId: 'generic', expected: '5 plots under 20000 EUR' });
+    await engine.decompose(project);
+    expect(logs.some((l) => l.includes('unknown requirement id(s)') && l.includes('dropped'))).toBe(true);
+    const nodeD1 = project.nodes.find((n) => n.id === 'D1');
+    expect(nodeD1.serves).toEqual(['priceEur']);
+    const nodeD11 = project.nodes.find((n) => n.id === 'D1.1');
+    expect(nodeD11.serves).toEqual([]);
+  });
+
+  it('derives requirement ids from criteria and checklist when requirements is empty', async () => {
+    const prompts: Array<{ requirements: Array<{ id: string; clause: string }> }> = [];
+    const modeler = {
+      fresh: () => false,
+      build: async (p: Record<string, unknown>) => {
+        p.decisionModel = {
+          purpose: 'A buyer wants a plot so that they build a glamping site',
+          value: 'a shortlist of plots under 20000 EUR',
+          kind: { label: 'plot of land', terms: ['plot', 'land'] },
+          criteria: [
+            { id: 'priceEur', measure: 'priceEur', op: '<=', value: 20000, clause: '20000EUR max', quote: '20000EUR max', source: 'question' },
+            { id: 'coastKm', measure: 'coastKm', op: '<=', value: 20, clause: 'near the sea', quote: 'near the sea', source: 'guidance' },
+          ],
+          noLimit: [],
+          checklist: [
+            { clause: 'Legal permits', role: 'eligibility', items: [{ clause: 'Has building permit', question: 'Does it have a building permit?', hard: true }] },
+            { clause: 'Utilities', role: 'appraisal', items: [{ clause: 'Has water', question: 'Does it have water connection?', hard: false }, { clause: 'Has electricity', question: 'Does it have electricity?', hard: false }] },
+          ],
+          requirements: [],
+        };
+        return p.decisionModel;
+      },
+    };
+    const tree = {
+      decision: 'Choose plots under 20000 EUR near the sea',
+      successCriteria: 'live plot listings under 20000 EUR within 20km of coast',
+      assumptionsToConfirm: [],
+      acceptance: { itemCount: 5, valueRange: [0, 20000], unit: 'EUR', mustMention: [] },
+      nodes: [{ id: 'D1', parentId: null, title: 'Candidate plots', question: 'Which plots are for sale?', method: 'lookup', searchQueries: ['plots'] }],
+    };
+    const scripted = new ScriptedProvider();
+    const provider = { id: 'demo', ready: true, describe: () => scripted.describe(), async chat(args: { messages: Array<{ content: string }> }) { const prompt = args.messages.at(-1)!.content; if (prompt.includes(TASK_MARKERS.decompose)) { const reqMatch = prompt.match(/ASKER'S REQUIREMENTS \(each has an id; every node must name the requirement id\(s\) it serves in field "serves"\):([\s\S]*?)\n\n/); if (reqMatch) { const lines = reqMatch[1].split('\n').filter((l) => l.trim().startsWith('- ')); prompts.push({ requirements: lines.map((l) => { const match = l.match(/- (\S+): (.+)/); return { id: match?.[1] ?? '', clause: match?.[2] ?? '' }; }) }); } } return scripted.chat(args as never); } };
+    const router = new ModelRouter({ providers: [provider] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+    const project = await engine.createProject({ question: 'Find plots for glamping, 20000EUR max', templateId: 'generic', expected: '5 plots under 20000 EUR' });
+    await engine.decompose(project);
+    expect(prompts.length).toBeGreaterThanOrEqual(1);
+    const reqIds = prompts[0].requirements.map((r) => r.id).sort();
+    expect(reqIds).toContain('priceEur');
+    expect(reqIds).toContain('coastKm');
+    expect(reqIds).toContain('K1');
+    expect(reqIds).toContain('K2');
+    expect(reqIds).toContain('K3');
+  });
+});
