@@ -3,7 +3,27 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { LlamaCppInstaller, MODELS, aliasFor, assetNames, helperArgs, isPrivateHost, nglFor, parseHelpers, pickAssets, recommendModel, serverArgs, speedOf } from '../../src/local/llamacpp.mjs';
+import { LlamaCppInstaller, MODELS, aliasFor, assetNames, helpCacheFile, helperArgs, isPrivateHost, listsFlag, nglFor, noMmapArgs, parseHelpers, pickAssets, recommendModel, serverArgs, serverHelp, speedOf } from '../../src/local/llamacpp.mjs';
+
+const HELP_LOAD_MODE = [
+  '-lm,   --load-mode MODE                 model loading mode (default: auto)',
+  '                                        - auto: mmap, unless a device does not support it',
+  '                                        - none: no special loading mode',
+  '                                        - mmap: memory-map model (if mmap disabled, slower load but may reduce',
+  '                                        pageouts if not using mlock)',
+  '-ngl,  --gpu-layers, --n-gpu-layers N   max. number of layers to store in VRAM, either an exact number,',
+  '',
+].join('\n');
+const HELP_NO_MMAP = [
+  '--no-mmap                       do not memory-map model (slower load but may reduce pageouts if not using mlock)',
+  '-ngl, --gpu-layers N            number of layers to store in VRAM',
+  '',
+].join('\n');
+const HELP_NEITHER = [
+  '-ngl,  --gpu-layers, --n-gpu-layers N   max. number of layers to store in VRAM',
+  '                                        see --load-mode-x and --no-mmapping for details; use --load-mode',
+  '',
+].join('\n');
 
 describe('llama.cpp on this computer', () => {
   it('picks the official build for Windows (Vulkan by default, CUDA with its runtime), macOS and Linux', () => {
@@ -35,6 +55,55 @@ describe('llama.cpp on this computer', () => {
     expect(nglFor({ model: 'ggml-org/Qwen3-32B-GGUF:Q4_K_M', vramMb: 24 * 1024, ctx: 16384 })).toBe(0);
     expect(nglFor({ model: 'unknown-model', vramMb: 0 })).toBe(99);
     expect(serverArgs({ model: 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', ctx: 16384, parallel: 1, kv: 'q8_0' })).toEqual(['-hf', 'ggml-org/Qwen3-4B-GGUF:Q4_K_M', '-ngl', '0', '-c', '16384', '-np', '1', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'Qwen3-4B']);
+  });
+
+  it('reads which no-mmap flag a build lists, from the head of a help line only, never from a description', () => {
+    expect(listsFlag(HELP_LOAD_MODE, '--load-mode')).toBe(true);
+    expect(listsFlag(HELP_LOAD_MODE, '--n-gpu-layers')).toBe(true);
+    expect(listsFlag(HELP_LOAD_MODE, '--no-mmap')).toBe(false);
+    expect(listsFlag(HELP_NEITHER, '--load-mode')).toBe(false);
+    expect(listsFlag(HELP_NEITHER, '--no-mmap')).toBe(false);
+    expect(noMmapArgs(HELP_LOAD_MODE)).toEqual(['--load-mode', 'none']);
+    expect(noMmapArgs(HELP_NO_MMAP)).toEqual(['--no-mmap']);
+    expect(noMmapArgs(`${HELP_NO_MMAP}${HELP_LOAD_MODE}`)).toEqual(['--load-mode', 'none']);
+    expect(noMmapArgs(HELP_NEITHER)).toEqual([]);
+    expect(noMmapArgs('')).toEqual([]);
+    expect(noMmapArgs(undefined)).toEqual([]);
+  });
+
+  it('on Windows asks llama-server not to memory-map a model that lives entirely on the GPU, with the flag this build lists, and keeps mmap for a partial offload or another OS', () => {
+    const full = { model: 'ggml-org/gpt-oss-20b-GGUF', ctx: 16384, parallel: 2, vramMb: 48 * 1024, help: HELP_LOAD_MODE };
+    expect(serverArgs({ ...full, platform: 'win32' })).toEqual(['-hf', 'ggml-org/gpt-oss-20b-GGUF', '-ngl', '99', '-c', '32768', '-np', '2', '--load-mode', 'none', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'gpt-oss-20b']);
+    expect(serverArgs({ ...full, kv: 'q8_0', platform: 'win32' })).toEqual(['-hf', 'ggml-org/gpt-oss-20b-GGUF', '-ngl', '99', '-c', '32768', '-np', '2', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '--load-mode', 'none', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'gpt-oss-20b']);
+    expect(serverArgs({ ...full, platform: 'win32', help: HELP_NO_MMAP })).toEqual(expect.arrayContaining(['-ngl', '99', '--no-mmap']));
+    expect(serverArgs({ ...full, platform: 'win32', help: HELP_NEITHER })).toEqual(['-hf', 'ggml-org/gpt-oss-20b-GGUF', '-ngl', '99', '-c', '32768', '-np', '2', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'gpt-oss-20b']);
+    expect(serverArgs({ ...full, platform: 'win32', help: '' })).not.toContain('--load-mode');
+    expect(serverArgs({ ...full, platform: 'win32', vramMb: 8 * 1024 })).toEqual(['-hf', 'ggml-org/gpt-oss-20b-GGUF', '-ngl', '0', '-c', '32768', '-np', '2', '--cache-ram', '0', '--sleep-idle-seconds', '300', '--host', '127.0.0.1', '--port', '8090', '-a', 'gpt-oss-20b']);
+    expect(serverArgs({ ...full, platform: 'linux' })).not.toContain('--load-mode');
+    expect(serverArgs({ ...full, platform: 'darwin' })).not.toContain('--load-mode');
+    expect(serverArgs({ ...full, platform: 'win32', model: 'D:\\llama-cache\\gpt-oss-20b-mxfp4.gguf', vramMb: 0 })).toEqual(expect.arrayContaining(['-m', 'D:\\llama-cache\\gpt-oss-20b-mxfp4.gguf', '-ngl', '99', '--load-mode', 'none']));
+  });
+
+  it('reads the build\'s --help once per binary and keeps it next to the install, rereading only when the binary changes', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-llama-help-'));
+    const server = path.join(dir, 'b12034-vulkan', 'llama-server.exe');
+    await fs.mkdir(path.dirname(server), { recursive: true });
+    await fs.writeFile(server, 'build one');
+    const cacheFile = helpCacheFile(dir);
+    expect(cacheFile).toBe(path.join(dir, 'server-help.json'));
+    const calls: string[][] = [];
+    const exec = async (command: string, args: string[]) => { calls.push([command, ...args]); return HELP_LOAD_MODE; };
+    expect(await serverHelp({ server, cacheFile, exec })).toBe(HELP_LOAD_MODE);
+    expect(await serverHelp({ server, cacheFile, exec })).toBe(HELP_LOAD_MODE);
+    expect(calls).toEqual([[server, '--help']]);
+    expect(JSON.parse(await fs.readFile(cacheFile, 'utf8'))).toMatchObject({ server, help: HELP_LOAD_MODE });
+    await new Promise((r) => setTimeout(r, 20));
+    await fs.writeFile(server, 'build two, a different size');
+    expect(await serverHelp({ server, cacheFile, exec: async () => HELP_NO_MMAP })).toBe(HELP_NO_MMAP);
+    expect(await serverHelp({ server, cacheFile, exec })).toBe(HELP_NO_MMAP);
+    expect(calls).toHaveLength(1);
+    await expect(serverHelp({ server: path.join(dir, 'missing'), cacheFile, exec })).rejects.toThrow();
+    await fs.rm(dir, { recursive: true, force: true });
   });
 
   it('lets a helper device listen only on a private or Tailscale address, because the RPC server has no password', () => {

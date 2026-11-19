@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -86,20 +87,62 @@ export function modelSizeMb(model) {
   return found ? found.size * 1024 : null;
 }
 
+export const ALL_LAYERS = 99;
+
 export function nglFor({ model, vramMb = 0, ctx = 4096 } = {}) {
   const sizeMb = modelSizeMb(model);
-  if (!sizeMb) return 99;
+  if (!sizeMb) return ALL_LAYERS;
   const kvMb = Math.round(ctx * KV_MB_PER_TOKEN);
-  return vramMb > 0 && vramMb >= sizeMb + kvMb + GPU_OVERHEAD_MB ? 99 : 0;
+  return vramMb > 0 && vramMb >= sizeMb + kvMb + GPU_OVERHEAD_MB ? ALL_LAYERS : 0;
 }
 
-export function serverArgs({ model, helpers = [], port = SERVER_PORT, ctx = 16384, split = '', parallel = 2, kv = '', cacheRam = PROMPT_CACHE_MIB, sleepIdle = SLEEP_IDLE_SECONDS, vramMb = 0 }) {
+export const NO_MMAP_FLAGS = [['--load-mode', ['--load-mode', 'none']], ['--no-mmap', ['--no-mmap']]];
+
+export function listedFlagPattern(flag) {
+  return `^\\s*(?:-[^\\s,]+,\\s*)*${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s,]|$)`;
+}
+
+export function listsFlag(help, flag) {
+  return new RegExp(listedFlagPattern(flag), 'm').test(String(help ?? ''));
+}
+
+export function noMmapArgs(help) {
+  const listed = NO_MMAP_FLAGS.find(([flag]) => listsFlag(help, flag));
+  return listed ? [...listed[1]] : [];
+}
+
+export function keepsMappedModel(platform) {
+  return platform === 'win32';
+}
+
+export function helpCacheFile(dir) {
+  return path.join(dir, 'server-help.json');
+}
+
+function helpText(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => (error && !stdout && !stderr ? reject(error) : resolve(`${stdout}${stderr}`)));
+  });
+}
+
+export async function serverHelp({ server, cacheFile, exec = helpText }) {
+  const { size, mtimeMs } = await fs.stat(server);
+  const cached = await fs.readFile(cacheFile, 'utf8').then(JSON.parse, () => null);
+  if (cached?.server === server && cached.size === size && cached.mtimeMs === mtimeMs) return cached.help;
+  const help = await exec(server, ['--help']);
+  await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+  await fs.writeFile(cacheFile, JSON.stringify({ server, size, mtimeMs, help, savedAt: new Date().toISOString() }));
+  return help;
+}
+
+export function serverArgs({ model, helpers = [], port = SERVER_PORT, ctx = 16384, split = '', parallel = 2, kv = '', cacheRam = PROMPT_CACHE_MIB, sleepIdle = SLEEP_IDLE_SECONDS, vramMb = 0, help = '', platform = process.platform }) {
   if (!model) throw new Error('choose a model, e.g. --model ggml-org/gpt-oss-20b-GGUF');
   if (kv && !KV_TYPES.has(kv)) throw new Error(`--kv takes one of ${[...KV_TYPES].join(', ')}`);
   const source = /\.gguf$/i.test(model) ? ['-m', model] : ['-hf', model];
   const slots = Math.max(1, Math.floor(Number(parallel) || 1));
   const ngl = nglFor({ model, vramMb, ctx: ctx * slots });
-  return [...source, '-ngl', String(ngl), '-c', String(ctx * slots), '-np', String(slots), ...(kv && ngl ? ['-fa', 'on', '-ctk', kv, '-ctv', kv] : []), '--cache-ram', String(cacheRam), ...(sleepIdle > 0 ? ['--sleep-idle-seconds', String(sleepIdle)] : []), '--host', '127.0.0.1', '--port', String(port), '-a', aliasFor(model), ...(helpers.length ? ['--rpc', helpers.join(',')] : []), ...(split ? ['-ts', split] : [])];
+  const noMmap = ngl >= ALL_LAYERS && keepsMappedModel(platform) ? noMmapArgs(help) : [];
+  return [...source, '-ngl', String(ngl), '-c', String(ctx * slots), '-np', String(slots), ...(kv && ngl ? ['-fa', 'on', '-ctk', kv, '-ctv', kv] : []), ...noMmap, '--cache-ram', String(cacheRam), ...(sleepIdle > 0 ? ['--sleep-idle-seconds', String(sleepIdle)] : []), '--host', '127.0.0.1', '--port', String(port), '-a', aliasFor(model), ...(helpers.length ? ['--rpc', helpers.join(',')] : []), ...(split ? ['-ts', split] : [])];
 }
 
 export function helperArgs({ host, port = HELPER_PORT, cache = true }) {
