@@ -206,6 +206,12 @@ export const MEASURES = {
   areaM2: { read: (row) => row.area ?? row.size },
 };
 
+export function measuredValue(item, numeric) {
+  if (!numeric?.measure || !numeric.op || numeric.value === null || numeric.value === undefined || !MEASURES[numeric.measure]) return undefined;
+  const raw = MEASURES[numeric.measure].read(item ?? {}, {});
+  return raw !== null && raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+}
+
 export function checklistSummary(items) {
   return items.map((item) => {
     const checks = item.checks ?? [];
@@ -375,24 +381,18 @@ export class ChecklistJudge {
 
     for (const cluster of checklist) {
       for (const ci of cluster.items) {
-        if (ci.numeric?.measure && ci.numeric.op && ci.numeric.value !== null && MEASURES[ci.numeric.measure]) {
-          numericItems.push({ cluster, item: ci });
+        const value = measuredValue(item, ci.numeric);
+        if (value !== undefined) {
+          numericItems.push({ cluster, item: ci, value });
         } else {
           qualitativeItems.push({ cluster, item: ci });
         }
       }
     }
 
-    for (const { cluster, item: ci } of numericItems) {
-      const m = MEASURES[ci.numeric.measure];
-      const val = m.read(item, {});
-      let answer = 'unknown';
-      let quote = '';
-      if (val !== undefined) {
-        answer = compare(val, ci.numeric.op, ci.numeric.value) ? 'yes' : 'no';
-        quote = `${ci.numeric.measure}: ${val} ${ci.numeric.unit}`;
-      }
-      checks.push({ id: cluster.clause + '|' + ci.question, answer, quote, hard: ci.hard, clause: cluster.clause });
+    for (const { cluster, item: ci, value } of numericItems) {
+      const answer = compare(value, ci.numeric.op, ci.numeric.value) ? 'yes' : 'no';
+      checks.push({ id: cluster.clause + '|' + ci.question, answer, quote: `${ci.numeric.measure}: ${value} ${ci.numeric.unit}`, hard: ci.hard, clause: cluster.clause });
     }
 
     const questions = qualitativeItems.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, hard: ci.hard, clause: cluster.clause }));

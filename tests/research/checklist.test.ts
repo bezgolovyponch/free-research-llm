@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
@@ -764,10 +764,42 @@ describe('item-level checklist with a kind check and code-measured values', () =
     expect(router.asked.flat()).not.toContain(id);
   });
 
-  it('an item with no measured distance leaves the distance check unknown', async () => {
-    const router = recordingRouter(() => []);
-    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, 'page', checklist);
-    expect(checks.find((c) => c.clause === 'within 50 km of the town')?.answer).toBe('unknown');
+  it('an item with no measured distance is asked the distance question from its page, with the same id, hard flag and quote check', async () => {
+    const seen: string[][] = [];
+    const router = {
+      complete: async (req: { messages: { content: string }[] }) => {
+        const asked = [...req.messages[1].content.matchAll(/^(q\d+):\s*(.+)$/gm)].map((m) => m[2]);
+        seen.push(asked);
+        return { provider: 'test', data: { answers: asked.map((q, i) => (q.includes('50 km') ? { id: `q${i + 1}`, answer: 'yes', spans: ['S2'] } : { id: `q${i + 1}`, answer: 'unknown', spans: [] })) } };
+      },
+    };
+    const page = 'A round thing for sale. Our yard is in the town, ten minutes from the harbour.';
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com' }, page, checklist);
+    const id = 'within 50 km of the town|Is this within 50 km of the town?';
+    expect(seen.flat()).toContain('Is this within 50 km of the town?');
+    expect(checks.find((c) => c.id === id)).toMatchObject({ answer: 'yes', quote: 'Our yard is in the town, ten minutes from the harbour.', hard: true, clause: 'within 50 km of the town' });
+  });
+
+  it('a measured distance keeps the code comparison and that question is never sent to the page', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'unknown', spans: [] })));
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: 30 }, 'A round thing for sale.', checklist);
+    const id = 'within 50 km of the town|Is this within 50 km of the town?';
+    expect(checks.find((c) => c.id === id)).toMatchObject({ answer: 'yes', quote: 'distanceKm: 30 km' });
+    expect(router.asked).toEqual([['q1']]);
+  });
+
+  it('a null or non-numeric value is not a measurement: the question joins the page batch', async () => {
+    const router = recordingRouter((qs) => qs.map((q) => ({ id: q.id, answer: 'unknown', spans: [] })));
+    await new ChecklistJudge({ router }).judge({ url: 'http://example.com', distanceKm: null }, 'A round thing for sale.', checklist);
+    expect(router.asked).toEqual([['q1', 'q2']]);
+    const numeric = { measure: 'distanceKm', op: '<=', value: 50, unit: 'km' };
+    expect(measuredValue({ distanceKm: 30 }, numeric)).toBe(30);
+    expect(measuredValue({ distanceKm: '12' }, numeric)).toBe(12);
+    expect(measuredValue({ distanceKm: null }, numeric)).toBeUndefined();
+    expect(measuredValue({ distanceKm: 'far' }, numeric)).toBeUndefined();
+    expect(measuredValue({}, numeric)).toBeUndefined();
+    expect(measuredValue({ distanceKm: 30 }, { ...numeric, value: null })).toBeUndefined();
+    expect(measuredValue({ distanceKm: 30 }, null)).toBeUndefined();
   });
 });
 
