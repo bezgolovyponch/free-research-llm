@@ -7,6 +7,8 @@ import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 import { ELIGIBILITY, MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
 import { MEASURES, compare } from './measures.mjs';
+import { agreed, closedVote, optionLines } from './semantic.mjs';
+import { tokens } from '../search/search.mjs';
 
 export { CHECKLIST_VERSION };
 export const DECISION_MODEL_VERSION = 9;
@@ -228,13 +230,43 @@ export function applyCalibration(kind, reply, titles, { itemTitles = [] } = {}) 
   };
 }
 
+export const UNAPPROVED_EXAMPLES = 'Models built earlier for other questions, which nobody approved, so they may be wrong';
+
+function exampleShot(c) {
+  return `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [], ...(c.kind.members?.length ? { members: c.kind.members.map((m) => ({ label: m.label, terms: m.terms })) } : {}) } : null, criteria: (c.criteria ?? []).map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`;
+}
+
+export function exampleBlocks(examples = []) {
+  const approved = examples.filter((c) => c.approved === true);
+  const unapproved = examples.filter((c) => c.approved !== true);
+  return [approved.length ? `Approved examples:\n${approved.map(exampleShot).join('\n\n')}` : '', unapproved.length ? `${UNAPPROVED_EXAMPLES}:\n${unapproved.map(exampleShot).join('\n\n')}` : ''].filter(Boolean).join('\n\n');
+}
+
 export function decisionPrompt({ question, guidance = '', expected = '', examples = [] }) {
   const measures = Object.entries(MEASURES).map(([id, m]) => `- ${id}: ${m.label} (${m.unit})`).join('\n');
-  const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [], ...(c.kind.members?.length ? { members: c.kind.members.map((m) => ({ label: m.label, terms: m.terms })) } : {}) } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
+  const shots = exampleBlocks(examples);
   return [
     { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label, the words (in English and in the languages of the named countries) that listing titles use for it, and "not", the words (in English and in the languages of the named countries, and of the countries around a named place) that listing titles use for things sold alongside the item that are not the item itself (parts, accessories, wanted ads, services). When the item asked is a category that covers several distinct kinds of seller or item (one asks for "home improvement contractors" and means roofers, plumbers, electricians and the like), "kind" also lists in "members" every kind the question reasonably covers, each {"label": "...", "terms": ["..."]} with the words its own sellers use, and "terms" holds the words for the category as a whole; "members" is [] when the item is one kind.\n"purpose" is one sentence "<who> wants <outcome> so that <value>" in the user's own terms, naming the decision the result serves. "value" is one sentence naming the result worth having and how it is judged (for example "a shortlist of <N> <items> within <distance> of <place>, each at or below <limit> and below the median price of comparable items"). "needs" is up to 8 items {"need": "...", "kind": "listings" | "knowledge" | "computed", "sources": ["a domain or a source type", up to 4]} where listings are read by code from portals, knowledge is researched by tree pieces, and computed is derived by code from the listings table. Answer with JSON only: {"concept": "...", "purpose": "...", "value": "...", "needs": [...], "kind": {"label": "...", "terms": ["..."], "not": ["..."], "members": [{"label": "...", "terms": ["..."]}]}, "criteria": [...], "unmodelled": ["..."]}` },
-    { role: 'user', content: `${shots ? `Approved examples:\n${shots}\n\n` : ''}Question: ${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
+    { role: 'user', content: `${shots ? `${shots}\n\n` : ''}Question:${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
   ];
+}
+
+export const EXAMPLE_TASK = 'example-kind';
+export const EXAMPLE_OPTIONS = [{ id: 'same', text: 'the same kind of item as the new question' }, { id: 'other', text: 'a different kind of item' }];
+
+export function examplePrompt({ question, example, options }) {
+  return [
+    { role: 'system', content: 'You compare two research questions by meaning, in any language. Say what the earlier question asks to find, compared with the new question. Answer with JSON only: {"same":"<one letter>"}.' },
+    { role: 'user', content: `New question: ${question}\n\nEarlier question: ${example.question}\n\nThe earlier question asks to find:\n${optionLines(options)}` },
+  ];
+}
+
+export async function sameKindExamples(router, question, examples) {
+  const judged = await Promise.all((examples ?? []).map(async (example) => {
+    const result = await closedVote({ router, task: EXAMPLE_TASK, tier: 'fast', options: EXAMPLE_OPTIONS, field: 'same', seed: `${question}|${example.question}`, prompt: (shown) => examplePrompt({ question, example, options: shown }) });
+    return agreed(result)?.id === 'same' ? example : null;
+  }));
+  return judged.filter(Boolean);
 }
 
 export function evaluateCriterion(row, criterion, ctx = {}) {
@@ -321,8 +353,17 @@ export const REFERENCE_CASE = {
   uses: 0,
 };
 
+export const CASE_SIMILARITY_FLOOR = 0.2;
+
+export function caseSimilarity(question, earlier) {
+  const asked = new Set(tokens(question));
+  if (!asked.size) return 0;
+  const said = new Set(tokens(earlier));
+  return [...asked].filter((word) => said.has(word)).length / asked.size;
+}
+
 export function rankCases(question, cases, k = CASES_RETRIEVED, exclude = '') {
-  const pool = cases.filter((c) => c.question && !(exclude && c.id === exclude));
+  const pool = cases.filter((c) => c.question && !(exclude && c.id === exclude) && caseSimilarity(question, c.question) >= CASE_SIMILARITY_FLOOR);
   if (!pool.length) return [];
   const sims = bm25(pool.map((c) => c.question), question);
   const top = Math.max(...sims);
@@ -444,7 +485,7 @@ export class DecisionModeler {
     if (!force && this.current(project)) return project.decisionModel.framing ? project.decisionModel : this.reframe(project);
     const question = project.question;
     const guidance = String(project.guidance ?? '');
-    const examples = this.cases ? await this.cases.retrieve(question, CASES_RETRIEVED, project.id) : [];
+    const examples = this.cases ? await sameKindExamples(this.router, question, await this.cases.retrieve(question, CASES_RETRIEVED, project.id)) : [];
     const messages = decisionPrompt({ question, guidance, expected: project.acceptance?.expected ?? '', examples });
     const replies = await Promise.all(Array.from({ length: this.samples }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
     const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));

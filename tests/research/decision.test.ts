@@ -2,8 +2,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CaseBank, DecisionModeler, REFERENCE_CASE, UTILITY_PRIOR, aggregate, applyCalibration, applyModel, calibrationPrompt, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
+import { CASE_SIMILARITY_FLOOR, CaseBank, DecisionModeler, REFERENCE_CASE, UNAPPROVED_EXAMPLES, UTILITY_PRIOR, aggregate, applyCalibration, applyModel, calibrationPrompt, caseSimilarity, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
 import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
+import { pickLetter } from '../helpers/fakes';
 
 const question = 'Find plots for a glamping site under 30000 EUR, at most 15 km from the sea, hottest month under 29 °C, with a strong price trend';
 const sample = (criteria: object[], terms = ['plot', 'terreno']) => normalizeSample({ concept: 'cheap coastal glamping land', kind: { label: 'plot of land', terms }, criteria });
@@ -174,8 +175,9 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
     const checklistAnswers = [checklistReply, checklistReply, checklistReply];
     let decisionCalls = 0;
     let checklistCalls = 0;
-    const router = { complete: async (req: { temperature: number; purpose: string; task?: string }) => {
+    const router = { complete: async (req: { temperature: number; purpose: string; task?: string; avoid?: string[]; messages: { role: string; content: string }[] }) => {
       if (req.task === 'concept-frame') return null;
+      if (req.task === 'example-kind') return { provider: req.avoid?.length ? 'e2' : 'e1', data: { same: pickLetter(req as never, (text) => text === 'the same kind of item as the new question') } };
       calls.push(req);
       if (req.purpose === 'checklist') {
         const next = checklistAnswers.shift();
@@ -276,6 +278,68 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
     const project = { id: 'p-degenerate', question, guidance: '', acceptance: { expected: '20 cars' } };
     await new DecisionModeler({ router, cases }).build(project, { force: true });
     expect(recorded).toEqual([]);
+  });
+});
+
+describe('examples shown to the decision model: a similar question about the same kind of item, labelled as it is', () => {
+  const stag = 'Find 40 activity providers in Durres (Albania) that a stag party of 8 to 15 men could book directly';
+  type Ask = { purpose: string; task?: string; avoid?: string[]; messages: { role: string; content: string }[] };
+  const exampleRouter = (same: (earlier: string) => boolean, providers = ['p1', 'p2', 'p3']) => {
+    const calls: Ask[] = [];
+    return {
+      calls,
+      async complete(req: Ask) {
+        calls.push(req);
+        const avoided = new Set(req.avoid ?? []);
+        const provider = providers.find((id) => !avoided.has(id)) ?? providers[0];
+        const answer = (data: unknown) => ({ provider, model: `${provider}-model`, data });
+        if (req.task === 'concept-frame') return null;
+        if (req.task === 'example-kind') {
+          const earlier = /Earlier question: (.+)/.exec(req.messages[1].content)?.[1] ?? '';
+          const wanted = same(earlier) ? 'the same kind of item as the new question' : 'a different kind of item';
+          return answer({ same: pickLetter(req as never, (text) => text === wanted) });
+        }
+        if (req.purpose === 'checklist') return answer({ items: [{ clause: 'sea', question: 'Is the sea within 15 km?', hard: true, numeric: null }] });
+        return answer({ concept: 'c', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [sea] });
+      },
+    };
+  };
+  const decisionPrompts = (router: { calls: Ask[] }) => router.calls.filter((c) => c.purpose === 'decision-model').map((c) => c.messages.map((m) => m.content).join('\n'));
+
+  it('never shows a case that shares only common words with the question: the glamping case is no example for a stag question', async () => {
+    const router = exampleRouter(() => true);
+    const model = await new DecisionModeler({ router, cases: new CaseBank() } as never).build({ id: 'stag', question: stag, guidance: '', acceptance: { expected: '40 providers' } }, { force: true });
+    expect(decisionPrompts(router).length).toBeGreaterThan(0);
+    expect(decisionPrompts(router).filter((text) => text.includes(REFERENCE_CASE.question))).toEqual([]);
+    expect(model.caseIds).toEqual([]);
+    expect(router.calls.filter((c) => c.task === 'example-kind')).toHaveLength(0);
+    expect(rankCases(stag, [REFERENCE_CASE])).toEqual([]);
+    expect(caseSimilarity(stag, REFERENCE_CASE.question)).toBeLessThan(CASE_SIMILARITY_FLOOR);
+    expect(caseSimilarity('glamping plots near the sea', 'glamping plots near the sea in Spain')).toBe(1);
+  });
+
+  it('shows a similar case only when two provider families agree it asks for the same kind of item', async () => {
+    const sheds = { id: 'garden-sheds', question: 'Find garden sheds for a glamping site near the sea under 30000 EUR', concept: 'sheds', kind: { label: 'garden shed', terms: ['shed'] }, criteria: [], approved: true, utility: 0.5 };
+    const cases = { retrieve: async () => [REFERENCE_CASE, sheds], record: async () => {} };
+    const router = exampleRouter((earlier) => earlier === REFERENCE_CASE.question);
+    const model = await new DecisionModeler({ router, cases } as never).build({ id: 'q', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(decisionPrompts(router).every((text) => text.includes(REFERENCE_CASE.question) && !text.includes(sheds.question))).toBe(true);
+    expect(model.caseIds).toEqual([REFERENCE_CASE.id]);
+    const lone = exampleRouter(() => true, ['p1']);
+    const alone = await new DecisionModeler({ router: lone, cases } as never).build({ id: 'q', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(decisionPrompts(lone).some((text) => text.includes(REFERENCE_CASE.question))).toBe(false);
+    expect(alone.caseIds).toEqual([]);
+  });
+
+  it('labels an example nobody approved as such, never as approved', () => {
+    const earlier = { id: 'earlier', question: 'Find plots near the sea for glamping', concept: 'c', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [], approved: false };
+    const alone = decisionPrompt({ question, examples: [earlier] })[1].content;
+    expect(alone).not.toContain('Approved examples:');
+    expect(alone.startsWith('Models built earlier for other questions, which nobody approved, so they may be wrong:\nQuestion: Find plots near the sea for glamping')).toBe(true);
+    const both = decisionPrompt({ question, examples: [REFERENCE_CASE, earlier] })[1].content;
+    expect(both).toContain(`Approved examples:\nQuestion: ${REFERENCE_CASE.question}`);
+    expect(both).toContain(`${UNAPPROVED_EXAMPLES}:\nQuestion: ${earlier.question}`);
+    expect(both.indexOf(earlier.question)).toBeGreaterThan(both.indexOf(UNAPPROVED_EXAMPLES));
   });
 });
 
