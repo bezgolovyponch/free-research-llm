@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged, NO_ANSWER_REASON, SECOND_PENDING_REASON } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged, NO_ANSWER_REASON, SECOND_PENDING_REASON, NO_CHECKLIST_ITEM } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq, fakeEmbedder } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 import { hardIdsOf, itemTier, awaitsSecondFamily } from '../../src/research/verdict.mjs';
@@ -161,17 +161,23 @@ describe('ChecklistModeler with fake router', () => {
     ],
   };
 
-  it('builds supplier checklist matching expected clauses', async () => {
-    let callCount = 0;
+  const byFamily = (data: unknown) => {
     const router = {
-      complete: async () => {
-        callCount++;
-        return { provider: 'test', data: supplierProposal };
+      calls: 0,
+      complete: async (req: { avoid?: string[] }) => {
+        router.calls++;
+        const avoided = new Set(req.avoid ?? []);
+        return { provider: ['a', 'b', 'c'].find((id) => !avoided.has(id)) ?? 'a', data };
       },
     };
+    return router;
+  };
+
+  it('builds supplier checklist matching expected clauses', async () => {
+    const router = byFamily(supplierProposal);
     const modeler = new ChecklistModeler({ router, samples: 3 });
     const checklist = await modeler.build(supplierQuestion, 'NL, DE, UK, IT, PL, LT');
-    expect(callCount).toBe(3);
+    expect(router.calls).toBe(3);
     expect(checklist).not.toBeNull();
     const clauses = checklist!.map((c) => c.clause);
     expect(clauses).toContain('wholesale');
@@ -183,16 +189,10 @@ describe('ChecklistModeler with fake router', () => {
   });
 
   it('builds car checklist matching expected clauses', async () => {
-    let callCount = 0;
-    const router = {
-      complete: async () => {
-        callCount++;
-        return { provider: 'test', data: carProposal };
-      },
-    };
+    const router = byFamily(carProposal);
     const modeler = new ChecklistModeler({ router, samples: 3 });
     const checklist = await modeler.build(carQuestion, 'prefer petrol engines');
-    expect(callCount).toBe(3);
+    expect(router.calls).toBe(3);
     expect(checklist).not.toBeNull();
     const clauses = checklist!.map((c) => c.clause);
     expect(clauses).toContain('hatchback');
@@ -203,18 +203,29 @@ describe('ChecklistModeler with fake router', () => {
     expect(clauses).toContain('price/value');
   });
 
-  it('returns null when fewer than 2 samples succeed', async () => {
+  it('counts one checklist proposal per provider family: three replies of one family are one proposal and repeats', async () => {
     let callCount = 0;
     const router = {
       complete: async () => {
         callCount++;
-        if (callCount <= 1) return { provider: 'test', data: supplierProposal };
-        return null;
+        return { provider: 'test', data: supplierProposal };
       },
     };
-    const modeler = new ChecklistModeler({ router, samples: 3 });
-    const checklist = await modeler.build(supplierQuestion, '');
-    expect(checklist).toBeNull();
+    expect(await proposeChecklist({ router, question: supplierQuestion, samples: 3 })).toHaveLength(1);
+    expect(callCount).toBe(2);
+  });
+
+  it('builds no checklist when no reply holds an item, and asks once more with the reason before giving a provider up', async () => {
+    const asked: string[] = [];
+    const router = {
+      complete: async (req: { messages: Array<{ content: string }> }) => {
+        asked.push(req.messages[req.messages.length - 1].content);
+        return { provider: 'test', data: { items: [{ clause: '', question: '' }] } };
+      },
+    };
+    expect(await new ChecklistModeler({ router, samples: 3 }).build(supplierQuestion, '')).toBeNull();
+    expect(asked[1]).toBe(`Your last answer was not accepted: ${NO_CHECKLIST_ITEM}. Answer again with JSON only, in the exact format asked.`);
+    expect(await new ChecklistModeler({ router: { complete: async () => { throw new Error('down'); } }, samples: 3 }).build(supplierQuestion, '')).toBeNull();
   });
 });
 

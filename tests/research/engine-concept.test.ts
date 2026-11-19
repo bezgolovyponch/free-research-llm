@@ -29,11 +29,11 @@ function engineFor(framed: unknown, seen: string[] = []) {
   const counts: Record<string, number> = {};
   const router = {
     counts,
-    complete: async (request: { task?: string; purpose?: string; messages: Array<{ content: string }> }) => {
+    complete: async (request: { task?: string; purpose?: string; avoid?: string[]; messages: Array<{ content: string }> }) => {
       const text = request.messages.map((message) => message.content).join('\n');
       const key = request.task ?? request.purpose ?? '';
       counts[key] = (counts[key] ?? 0) + 1;
-      if (request.task === 'concept-frame') return { provider: 'p1', model: 'm', data: framed };
+      if (request.task === 'concept-frame') return { provider: ['p1', 'p2', 'p3'].find((id) => !(request.avoid ?? []).includes(id)) ?? 'p1', model: 'm', data: framed };
       if (text.includes('TASK=DOMAIN_QUERIES')) {
         seen.push(text);
         return { provider: 'p1', data: { queries: ['Alpha Coats Betula sellers', 'coat sellers list'] } };

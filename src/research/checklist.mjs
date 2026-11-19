@@ -1,7 +1,7 @@
 import { plain } from './itemgate.mjs';
 import { isUmbrella } from './concept.mjs';
 import { MAX_SPAN_CHARS, pickRanked, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
-import { agreed, closedVote } from './semantic.mjs';
+import { agreed, closedVote, familyProposals } from './semantic.mjs';
 import { MEASURES as DecisionMeasures, compare, adaptForChecklist } from './measures.mjs';
 
 const isAnswer = (entry) => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry) && 'id' in entry && 'answer' in entry;
@@ -72,14 +72,16 @@ export function migrateChecks(project) {
   return changed;
 }
 
+export const NO_CHECKLIST_ITEM = 'it holds no item with a "clause" and a "question"';
+
+const checklistProposal = (data) => {
+  const sample = normalizeSample(data);
+  return sample.items.length ? { value: sample } : { error: NO_CHECKLIST_ITEM };
+};
+
 export async function proposeChecklist({ router, question, guidance = '', samples = 3 }) {
-  const messages = checklistPrompt({ question, guidance });
-  const replies = await Promise.all(
-    Array.from({ length: samples }, () =>
-      router.complete({ purpose: 'checklist', tier: 'deep', temperature: 0.7, messages }).catch(() => null)
-    )
-  );
-  return replies.filter((r) => r?.data?.items?.length).map((r) => normalizeSample(r.data));
+  const drawn = await familyProposals({ router, n: samples, tier: 'deep', purpose: 'checklist', temperature: 0.7, messages: checklistPrompt({ question, guidance }), schema: checklistProposal });
+  return drawn.proposals.map((proposal) => proposal.value);
 }
 
 export function normalizeSample(raw) {
@@ -270,7 +272,7 @@ export class ChecklistModeler {
 
   async build(question, guidance = '') {
     const samples = await proposeChecklist({ router: this.router, question, guidance, samples: this.samples });
-    if (samples.length < 2) return null;
+    if (!samples.length) return null;
     return clusterChecklist(samples);
   }
 }

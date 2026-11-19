@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CallBudget, EXHAUSTIVE_CAP, STAGE_CAPS, agreeAcrossSamples, agreed, ask, matchPrompt, optionLines, retrieveThenVerify, rotate, turnOf, vote } from '../../src/research/semantic.mjs';
+import { CallBudget, EXHAUSTIVE_CAP, STAGE_CAPS, agreeAcrossSamples, agreed, ask, familyProposals, matchPrompt, optionLines, retrieveThenVerify, rotate, turnOf, vote } from '../../src/research/semantic.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, lettersOf, pickLetter, seq } from '../helpers/fakes';
 
 const messages = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'user' }];
@@ -268,5 +268,97 @@ describe('vote with a provider to avoid', () => {
     const result = await vote({ router, messages: [], schema, n: 3, quorum: 2, avoid: ['first'] } as never);
     expect(result.value).toBe('A');
     expect(avoided).toEqual([['first'], ['first', 'p1']]);
+  });
+});
+
+describe('familyProposals', () => {
+  type Family = { stack: string; vendor: string; paid?: boolean };
+  type Ask = { avoid?: string[]; outside?: Family[]; purpose?: string; task?: string; tier?: string; temperature?: number; messages: { role: string; content: string }[] };
+  const schema = (data: { pick?: string }) => (data?.pick ? { value: { pick: data.pick } } : { error: '"pick" is missing' });
+  const stepped = (byProvider: Record<string, unknown>, { families = Object.keys(byProvider).map((id) => ({ stack: id, vendor: id })) as Family[] | null, vendors = {} as Record<string, string> } = {}) => {
+    const providers = Object.keys(byProvider);
+    const calls: Ask[] = [];
+    const asked: Record<string, number> = {};
+    const outcomes: { provider: string; purpose: string; passed: boolean }[] = [];
+    const familyOf = (id: string) => ({ stack: id, vendor: vendors[id] ?? id, ...(families?.find((family) => family.stack === id)?.paid ? { paid: true } : {}) });
+    return {
+      calls,
+      outcomes,
+      familyOf,
+      recordOutcome: (outcome: { provider: string; purpose: string; passed: boolean }) => outcomes.push(outcome),
+      ...(families ? { families: () => families } : {}),
+      async complete(request: Ask) {
+        calls.push(request);
+        const avoided = new Set(request.avoid ?? []);
+        const provider = providers.find((id) => !avoided.has(id)) ?? providers[0];
+        const index = asked[provider] ?? 0;
+        asked[provider] = index + 1;
+        const entry = byProvider[provider];
+        const data = Array.isArray(entry) ? entry[Math.min(index, entry.length - 1)] : entry;
+        if (data === FAIL) throw new Error(`${provider} failed`);
+        return { provider, model: `${provider}-model`, data };
+      },
+    };
+  };
+  const providersOf = (list: { provider: string }[]) => list.map((entry) => entry.provider);
+
+  it('steers each proposal to a family not yet asked, in one wave, with the purpose, task, tier and temperature asked', async () => {
+    const router = stepped({ p1: { pick: 'a' }, p2: { pick: 'b' }, p3: { pick: 'c' } });
+    const drawn = await familyProposals({ router, n: 3, tier: 'deep', purpose: 'decision-model', task: 'frame', temperature: 0.7, messages, schema } as never);
+    expect(drawn.proposals.map((proposal: { provider: string; value: unknown }) => [proposal.provider, proposal.value])).toEqual([['p1', { pick: 'a' }], ['p2', { pick: 'b' }], ['p3', { pick: 'c' }]]);
+    expect(router.calls.map((call) => call.avoid)).toEqual([undefined, ['p1'], ['p1', 'p2']]);
+    expect(router.calls.every((call) => call.purpose === 'decision-model' && call.task === 'frame' && call.tier === 'deep' && call.temperature === 0.7 && call.outside === undefined)).toBe(true);
+  });
+
+  it('counts a second reply of a counted family as a repeat, not a proposal, and asks another family in its place', async () => {
+    const router = stepped({ p1: { pick: 'a' }, p2: { pick: 'b' } }, { families: null, vendors: { p1: 'same', p2: 'same' } });
+    const drawn = await familyProposals({ router, n: 3, purpose: 'decision-model', messages, schema } as never);
+    expect(providersOf(drawn.proposals)).toEqual(['p1']);
+    expect(providersOf(drawn.repeats)).toEqual(['p2', 'p1']);
+    expect(router.calls.map((call) => call.avoid)).toEqual([undefined, ['p1'], ['p1', 'p2']]);
+  });
+
+  it('asks a reply that is not a proposal once more with the reason, never counts it, and asks the open families outside the counted ones', async () => {
+    const router = stepped({ p1: { pick: 'a' }, p2: { answer: 'ok' }, p3: { pick: 'c' } });
+    const drawn = await familyProposals({ router, n: 3, purpose: 'decision-model', messages, schema } as never);
+    expect(providersOf(drawn.proposals)).toEqual(['p1', 'p3']);
+    expect(providersOf(drawn.refused)).toEqual(['p2', 'p2']);
+    expect(router.calls.filter((call) => call.messages.length === 3).map((call) => [call.avoid, call.messages[2].content])).toEqual([[['p1'], 'Your last answer was not accepted: "pick" is missing. Answer again with JSON only, in the exact format asked.']]);
+    expect(router.calls.at(-1)).toMatchObject({ avoid: ['p1', 'p2', 'p3'], outside: [{ stack: 'p1', vendor: 'p1' }, { stack: 'p3', vendor: 'p3' }] });
+    const corrected = stepped({ p1: { pick: 'a' }, p2: [{ answer: 'ok' }, { pick: 'b' }] });
+    expect(providersOf((await familyProposals({ router: corrected, n: 2, purpose: 'decision-model', messages, schema } as never)).proposals)).toEqual(['p1', 'p2']);
+  });
+
+  it('asks once when one family is reachable, and returns no proposal when every call fails', async () => {
+    const lone = stepped({ p1: { pick: 'a' } });
+    expect((await familyProposals({ router: lone, n: 3, purpose: 'decision-model', messages, schema } as never)).proposals).toHaveLength(1);
+    expect(lone.calls).toHaveLength(1);
+    const down = stepped({ p1: FAIL, p2: FAIL });
+    const none = await familyProposals({ router: down, n: 3, purpose: 'decision-model', messages, schema } as never);
+    expect([none.proposals.length, down.calls.length]).toEqual([0, 2]);
+  });
+
+  it('asks a paid family only to reach two families, outside the counted ones', async () => {
+    const families = [{ stack: 'p1', vendor: 'p1' }, { stack: 'paid', vendor: 'paid', paid: true }];
+    const router = stepped({ p1: { pick: 'a' }, paid: { pick: 'b' } }, { families });
+    const drawn = await familyProposals({ router, n: 3, purpose: 'decision-model', messages, schema } as never);
+    expect(drawn.proposals.map((proposal: { provider: string; paid?: boolean }) => [proposal.provider, proposal.paid ?? false])).toEqual([['p1', false], ['paid', true]]);
+    expect(router.calls.map((call) => [call.avoid, call.outside])).toEqual([[undefined, undefined], [['p1'], [{ stack: 'p1', vendor: 'p1' }]]]);
+    const both = stepped({ p1: { pick: 'a' }, p2: { pick: 'b' }, paid: { pick: 'c' } }, { families: [{ stack: 'p1', vendor: 'p1' }, { stack: 'p2', vendor: 'p2' }, { stack: 'paid', vendor: 'paid', paid: true }] });
+    const free = await familyProposals({ router: both, n: 3, purpose: 'decision-model', messages, schema } as never);
+    expect(providersOf(free.proposals)).toEqual(['p1', 'p2']);
+    expect(both.calls).toHaveLength(2);
+  });
+
+  it('asks the families an earlier build asked after the others, and stops at the call budget of its stage', async () => {
+    const router = stepped({ p1: { pick: 'a' }, p2: { pick: 'b' }, p3: { pick: 'c' }, p4: { pick: 'd' } });
+    const drawn = await familyProposals({ router, n: 3, purpose: 'decision-model', messages, schema, askedBefore: ['p1', 'p2'] } as never);
+    expect(providersOf(drawn.proposals)).toEqual(['p3', 'p4', 'p1']);
+    expect(router.calls.map((call) => call.avoid)).toEqual([['p1', 'p2'], ['p1', 'p2', 'p3'], ['p3', 'p4']]);
+    const budget = new CallBudget({ purpose: 2 });
+    const capped = stepped({ p1: { pick: 'a' }, p2: { pick: 'b' }, p3: { pick: 'c' } });
+    const held = await familyProposals({ router: capped, n: 3, purpose: 'purpose-draft', messages, schema, budget, stage: 'purpose', record: true } as never);
+    expect([providersOf(held.proposals), capped.calls.length, budget.report().purpose]).toEqual([['p1', 'p2'], 2, { used: 2, cap: 2, skipped: 1 }]);
+    expect(capped.outcomes).toEqual([{ provider: 'p1', model: 'p1-model', purpose: 'purpose-draft', passed: true }, { provider: 'p2', model: 'p2-model', purpose: 'purpose-draft', passed: true }]);
   });
 });

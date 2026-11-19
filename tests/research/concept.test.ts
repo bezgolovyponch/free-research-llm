@@ -144,10 +144,12 @@ describe('concept framing', () => {
     expect(unframed).toEqual(['proven good quality', 'assortiment for the appropriate retail second hand shop business in Czech Republic', '20 direct links to the providers with proof']);
   });
 
-  it('asks three samples, returns nothing when none quotes the request, and is read back from the decision model', async () => {
+  it('asks one sample per provider family, asks a reply that quotes nothing again with the reason, returns nothing when none quotes the request, and is read back from the decision model', async () => {
     const router = fakeRouter({ [FRAME_TASK]: seq(full, { concept: [{ quote: 'not in the request', text: 'x' }] }, { concept: [] }, full) });
     const concept = await frameConcept({ router }, said);
-    expect(router.count(FRAME_TASK)).toBe(FRAME_SAMPLES + 1);
+    expect(router.count(FRAME_TASK)).toBe(FRAME_SAMPLES + 2);
+    expect(router.outcomes.map((outcome: { provider: string; passed: boolean }) => [outcome.provider, outcome.passed])).toEqual([['p1', true], ['p2', false], ['p2', false], ['p3', true], ['p1', true]]);
+    expect(router.calls.filter((call: { task?: string }) => call.task === FRAME_TASK)[2].messages.at(-1)?.content).toMatch(/^Your last answer was not accepted: no "quote" was copied letter for letter/);
     expect(router.userText(FRAME_TASK)).toContain(`Request: ${question.replace(/\s+/g, ' ')}`);
     expect(router.userText(FRAME_TASK)).toContain(`Expected result: ${expected}`);
     expect(concept.samples).toBe(2);
@@ -230,7 +232,7 @@ describe('a part of the request that no single result page can show is never a p
   const population = { quote: 'wholesale branded second hand clothing providers', label: 'clothing wholesaler' };
   const brands = { quote: 'similar to Ralph Lauren, Monclair, North face, Barbour', text: 'brands of the class the examples stand for', ask: 'Does this provider sell brands like Ralph Lauren, Monclair, North face or Barbour?', examples: ['Ralph Lauren', 'Barbour'] };
   const thin = { population, concept: [brands], ranks: [{ quote: 'highest price/value ratio', text: 'best price for value' }] };
-  const roleOf: Record<string, string> = { 'proven good quality': CRITERION, 'assortiment for the appropriate retail second hand shop business in Czech Republic': CONTEXT, '20 direct links to the providers with proof': LIMIT };
+  const roleOf: Record<string, string> = { 'highest price/value ratio': RANK, 'proven good quality': CRITERION, 'assortiment for the appropriate retail second hand shop business in Czech Republic': CONTEXT, '20 direct links to the providers with proof': LIMIT };
   const voter = (request: { messages: Array<{ content: string }> }) => ({ role: roleOf[Object.keys(roleOf).find((quote) => request.messages[1].content.includes(`Part: "${quote}"`))!] });
 
   it('keeps the question a framer wrote about one result, unless it carries a number the asker did not write, and asks it with the examples', () => {
@@ -251,13 +253,15 @@ describe('a part of the request that no single result page can show is never a p
     expect(conceptChecklist(concept, null).map((c: { clause: string }) => c.clause)).toEqual(['brands of the class the examples stand for', 'proven good quality']);
   });
 
-  it('makes an unframed part a question for the asker when the families do not agree on it, and keeps an uncertain requirement a requirement', async () => {
+  it('makes an unframed part, and a rank one provider family alone framed and placed, a question for the asker, never a page check, and keeps an uncertain requirement a requirement', async () => {
     const alone = fakeRouter({ [FRAME_TASK]: thin, [ROLE_TASK]: voter }, { providers: ['p1'] });
     const concept = await frameConcept({ router: alone }, said);
+    expect(concept.samples).toBe(1);
     expect(concept.criteria.map((c: { quote: string }) => c.quote)).toEqual(['similar to Ralph Lauren, Monclair, North face, Barbour']);
-    expect(concept.open.map((c: { id: string; quote: string }) => `${c.id} ${c.quote}`)).toEqual(['Q1 proven good quality', 'Q2 assortiment for the appropriate retail second hand shop business in Czech Republic', 'Q3 20 direct links to the providers with proof']);
-    expect(conceptText(concept)).toContain('[Q1] to confirm with you: Is "proven good quality" a condition each result must meet? If it is, say in Hints how a result shows it.');
-    expect(askerQuestions({ framing: { open: concept.open } })).toHaveLength(3);
+    expect(concept.open.map((c: { id: string; quote: string }) => `${c.id} ${c.quote}`)).toEqual(['Q1 highest price/value ratio', 'Q2 proven good quality', 'Q3 assortiment for the appropriate retail second hand shop business in Czech Republic', 'Q4 20 direct links to the providers with proof']);
+    expect(conceptText(concept)).toContain('[Q2] to confirm with you: Is "proven good quality" a condition each result must meet? If it is, say in Hints how a result shows it.');
+    expect(conceptChecklist(concept, null).map((c: { clause: string }) => c.clause)).toEqual(['brands of the class the examples stand for']);
+    expect(askerQuestions({ framing: { open: concept.open } })).toHaveLength(4);
     expect(askerQuestions(null)).toEqual([]);
     const demoting = { ...thin, concept: [brands, { quote: 'proven good quality', text: 'quality is proven' }], method: [{ quote: 'proven good quality', text: 'how to research' }] };
     const split = fakeRouter({ [FRAME_TASK]: seq(demoting, thin, thin), [ROLE_TASK]: { role: 'method' } }, { providers: ['p1'] });

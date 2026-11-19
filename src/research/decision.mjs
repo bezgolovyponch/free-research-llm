@@ -7,7 +7,7 @@ import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 import { ELIGIBILITY, MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
 import { MEASURES, compare } from './measures.mjs';
-import { agreed, closedVote, optionLines } from './semantic.mjs';
+import { agreed, closedVote, familyProposals, optionLines } from './semantic.mjs';
 import { tokens } from '../search/search.mjs';
 
 export { CHECKLIST_VERSION };
@@ -63,6 +63,19 @@ export function normalizeSample(raw) {
     unmodelled: (Array.isArray(raw?.unmodelled) ? raw.unmodelled : []).map((u) => String(u).slice(0, 200)).filter(Boolean).slice(0, 12),
   };
 }
+
+export const NO_ITEM_NAMED = 'it names no item to list: "kind.label" is empty';
+
+export function proposalOf(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const sample = normalizeSample(data);
+  return sample.kind.label.trim() ? sample : null;
+}
+
+const proposalSchema = (data) => {
+  const sample = proposalOf(data);
+  return sample ? { value: sample } : { error: NO_ITEM_NAMED };
+};
 
 const median = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -478,7 +491,7 @@ export class DecisionModeler {
 
   current(project) {
     const m = project.decisionModel;
-    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && (m.expected ?? '') === String(project.acceptance?.expected ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
+    return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && (m.expected ?? '') === String(project.acceptance?.expected ?? '') && m.agreement?.samples >= 1 && !isDegenerate(m));
   }
 
   async build(project, { force = false } = {}) {
@@ -487,9 +500,9 @@ export class DecisionModeler {
     const guidance = String(project.guidance ?? '');
     const examples = this.cases ? await sameKindExamples(this.router, question, await this.cases.retrieve(question, CASES_RETRIEVED, project.id)) : [];
     const messages = decisionPrompt({ question, guidance, expected: project.acceptance?.expected ?? '', examples });
-    const replies = await Promise.all(Array.from({ length: this.samples }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
-    const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));
-    if (samples.length < 2) return project.decisionModel ?? null;
+    const drawn = await familyProposals({ router: this.router, n: this.samples, tier: 'deep', purpose: 'decision-model', temperature: SAMPLE_TEMPERATURE, messages, schema: proposalSchema });
+    const samples = drawn.proposals.map((proposal) => proposal.value);
+    if (!samples.length) return project.decisionModel ?? null;
     const model = aggregate(samples, { question, guidance, cases: examples, id: project.id });
     const stored = project.decisionModel;
     let finalModel = model;
@@ -515,7 +528,8 @@ export class DecisionModeler {
     const expected = String(project.acceptance?.expected ?? '');
     const framed = await frameConcept({ router: this.router }, { question, expected }).catch(() => null);
     const { checklist, requirements, framing, ...withConcept } = withFraming(finalModel, framed, await this.checklistModeler.build(question, guidance));
-    project.decisionModel = { ...carried(stored, withConcept), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, expected, requirements, framing, rebuildWeaker };
+    const proposals = { families: samples.length, repeats: drawn.repeats.map((entry) => entry.provider), refused: drawn.refused.map((entry) => entry.provider) };
+    project.decisionModel = { ...carried(stored, withConcept), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: drawn.proposals.map((proposal) => proposal.provider), proposals, ...(samples.length === 1 ? { single: true } : {}), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, expected, requirements, framing, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
     return project.decisionModel;
   }

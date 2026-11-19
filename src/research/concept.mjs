@@ -1,5 +1,5 @@
 import { plain } from './itemgate.mjs';
-import { SAMPLE_TEMPERATURE, agreed, ask, closedVote } from './semantic.mjs';
+import { DRAFT_PURPOSE, SAMPLE_TEMPERATURE, agreed, closedVote, familyProposals } from './semantic.mjs';
 
 export const CONCEPT_QUERIES = 6;
 export const CONCEPT_PAGES = 10;
@@ -337,7 +337,8 @@ export function agreeFrames(samples, { question, expected = '' }) {
     const role = votedRole(cluster);
     const element = settled(cluster, role);
     const uncertain = role === CRITERION && cluster.some((member) => DEMOTING_ROLES.includes(member.role));
-    byRole[role].push(uncertain ? { ...element, uncertain: true } : element);
+    const unclaimed = uncertain && !cluster.some((member) => member.role === CRITERION);
+    byRole[role].push(uncertain ? { ...element, uncertain: true, ...(unclaimed ? { unclaimed: true } : {}) } : element);
     framed.push(element);
   }
   const head = population ? settled(population, POPULATION) : null;
@@ -381,9 +382,10 @@ export async function settleRoles(ctx, concept) {
     }
     const result = ctx?.router ? await closedVote({ router: ctx.router, task: ROLE_TASK, tier: 'fast', options: ROLE_OPTIONS, field: 'role', seed: criterion.quote, prompt: (options) => rolePrompt({ question: concept.question, expected: concept.expected, quote: criterion.quote, options }), n: ROLE_VOTES, quorum: ROLE_QUORUM, budget: ctx.budget, stage: FRAME_STAGE }) : null;
     const role = agreed(result)?.id ?? null;
-    const element = { ...without(criterion, ['id', 'unframed', 'uncertain']), ...(result ? { roleVote: result.tally } : {}) };
+    const leaning = result?.single ? result.value?.id ?? null : null;
+    const element = { ...without(criterion, ['id', 'unframed', 'uncertain', 'unclaimed']), ...(result ? { roleVote: result.tally } : {}) };
     if (role) lists[LISTS[role][0]].push(element);
-    else if (criterion.uncertain) lists.criteria.push({ ...without(criterion, ['id']), ...(result ? { roleVote: result.tally } : {}) });
+    else if (criterion.uncertain && !(criterion.unclaimed && leaning && leaning !== CRITERION)) lists.criteria.push({ ...without(criterion, ['id', 'unclaimed']), ...(result ? { roleVote: result.tally } : {}) });
     else lists.open.push(element);
   }
   const numbered = Object.fromEntries(Object.values(LISTS).map(([name, prefix]) => [name, lists[name].sort(inOrder).map((element, index) => ({ ...without(element, ['id']), id: `${prefix}${index + 1}` }))]));
@@ -400,11 +402,8 @@ export function askerQuestions(model) {
 
 export async function frameConcept(ctx, { question, expected = '' }) {
   const said = { question, expected };
-  const samples = [];
-  for (let index = 0; index < FRAME_SAMPLES; index++) {
-    const reply = await ask({ router: ctx.router, task: FRAME_TASK, tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: framePrompt(said), schema: (data) => frameSample(data, said), budget: ctx.budget, stage: FRAME_STAGE });
-    if (reply) samples.push(reply.value);
-  }
+  const drawn = await familyProposals({ router: ctx.router, n: FRAME_SAMPLES, tier: 'deep', purpose: DRAFT_PURPOSE, task: FRAME_TASK, temperature: SAMPLE_TEMPERATURE, messages: framePrompt(said), schema: (data) => frameSample(data, said), budget: ctx.budget, stage: FRAME_STAGE, record: true });
+  const samples = drawn.proposals.map((proposal) => proposal.value);
   return samples.length ? settleRoles(ctx, agreeFrames(samples, said)) : null;
 }
 

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CASE_SIMILARITY_FLOOR, CaseBank, DecisionModeler, REFERENCE_CASE, UNAPPROVED_EXAMPLES, UTILITY_PRIOR, aggregate, applyCalibration, applyModel, calibrationPrompt, caseSimilarity, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
+import { CASE_SIMILARITY_FLOOR, CaseBank, DecisionModeler, NO_ITEM_NAMED, REFERENCE_CASE, UNAPPROVED_EXAMPLES, UTILITY_PRIOR, aggregate, applyCalibration, applyModel, calibrationPrompt, caseSimilarity, decisionPrompt, modelText, normalizeSample, planByModel, quoteStates, rankCases, verifyKind, withModelRules } from '../../src/research/decision.mjs';
 import { foundationOf, strategyFor } from '../../src/research/strategy.mjs';
 import { pickLetter } from '../helpers/fakes';
 
@@ -169,66 +169,83 @@ describe('DecisionModeler: several independent model calls, code decides', () =>
   const reply = (criteria: object[]) => ({ provider: 'p', data: { concept: 'c', kind: { label: 'plot', terms: ['plot'] }, criteria } });
   const checklistReply = { items: [{ clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] };
 
-  it('asks several times with sampling, keeps the agreed criteria and records the case', async () => {
-    const calls: { temperature: number; purpose: string }[] = [];
-    const answers = [reply([sea, heat]), reply([sea]), null];
-    const checklistAnswers = [checklistReply, checklistReply, checklistReply];
-    let decisionCalls = 0;
-    let checklistCalls = 0;
-    const router = { complete: async (req: { temperature: number; purpose: string; task?: string; avoid?: string[]; messages: { role: string; content: string }[] }) => {
-      if (req.task === 'concept-frame') return null;
-      if (req.task === 'example-kind') return { provider: req.avoid?.length ? 'e2' : 'e1', data: { same: pickLetter(req as never, (text) => text === 'the same kind of item as the new question') } };
-      calls.push(req);
-      if (req.purpose === 'checklist') {
-        const next = checklistAnswers.shift();
-        checklistCalls++;
-        if (!next) throw new Error('quota');
-        return { provider: 'p', data: next };
-      }
-      const next = answers.shift();
-      decisionCalls++;
-      if (!next) throw new Error('quota');
-      return next;
-    } };
+  type Ask = { temperature: number; purpose: string; task?: string; avoid?: string[]; messages: { role: string; content: string }[] };
+  const sameKind = (req: Ask) => ({ same: pickLetter(req as never, (text) => text === 'the same kind of item as the new question') });
+  const familyRouter = (byProvider: Record<string, unknown>, { checklist = checklistReply as unknown, tasks = {} as Record<string, (req: Ask) => unknown> } = {}) => {
+    const providers = Object.keys(byProvider);
+    const calls: (Ask & { provider: string })[] = [];
+    return {
+      calls,
+      families: () => providers.map((id) => ({ stack: id, vendor: id })),
+      familyOf: (id: string) => ({ stack: id, vendor: id }),
+      async complete(req: Ask) {
+        const avoided = new Set(req.avoid ?? []);
+        const provider = providers.find((id) => !avoided.has(id)) ?? providers[0];
+        calls.push({ ...req, provider });
+        const handler = req.task ? tasks[req.task] : undefined;
+        const data = handler ? handler(req) : req.task ? null : req.purpose === 'checklist' ? checklist : byProvider[provider];
+        if (data === null || data === undefined) throw new Error('quota');
+        return { provider, model: `${provider}-model`, data };
+      },
+    };
+  };
+
+  it('asks one proposal of each provider family with sampling, keeps the agreed criteria and records the case', async () => {
+    const router = familyRouter({ p1: reply([sea, heat]).data, p2: reply([sea]).data, p3: null }, { tasks: { 'example-kind': sameKind } });
     const recorded: string[] = [];
     const cases = { retrieve: async () => [REFERENCE_CASE], record: async (id: string) => { recorded.push(id); } };
     const project: Record<string, unknown> = { id: 'p9', question, guidance: '', acceptance: { expected: '20 plots' } };
-    const model = await new DecisionModeler({ router, cases }).build(project);
-    expect(decisionCalls).toBe(3);
-    expect(checklistCalls).toBe(3);
-    expect(calls.every((c) => (c.purpose === 'decision-model' || c.purpose === 'checklist') && c.temperature > 0)).toBe(true);
+    const model = await new DecisionModeler({ router, cases } as never).build(project);
+    expect(router.calls.filter((c) => c.purpose === 'decision-model').map((c) => c.provider)).toEqual(['p1', 'p2', 'p3', 'p3']);
+    expect(router.calls.filter((c) => c.purpose === 'checklist').map((c) => c.provider)).toEqual(['p1', 'p2', 'p3']);
+    expect(router.calls.filter((c) => c.purpose === 'decision-model' || c.purpose === 'checklist').every((c) => c.temperature > 0)).toBe(true);
     expect(model.criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+    expect(model.agreement).toMatchObject({ samples: 2, majority: 2 });
+    expect(model).toMatchObject({ providers: ['p1', 'p2'], proposals: { families: 2, repeats: [], refused: [] } });
+    expect(model.single).toBeUndefined();
     expect(model.checklist).toBeDefined();
     expect(model.caseIds).toEqual([REFERENCE_CASE.id]);
     expect(recorded).toEqual(['p9']);
-    expect(await new DecisionModeler({ router: { complete: async () => { throw new Error('no call expected'); } } }).build(project)).toBe(model);
+    expect(await new DecisionModeler({ router: { complete: async () => { throw new Error('no call expected'); } } } as never).build(project)).toBe(model);
   });
 
-  it('keeps no model when fewer than two proposals came back', async () => {
+  it('counts one proposal per provider family: a second reply of a counted family is a repeat, not a second vote', async () => {
+    const replies = [reply([sea, heat]), reply([sea, heat]), reply([sea])];
+    const router = { complete: async (req: Ask) => { if (req.task) throw new Error('none'); return req.purpose === 'checklist' ? { provider: 'p', data: checklistReply } : replies.shift(); } };
+    const model = await new DecisionModeler({ router } as never).build({ id: 'one-family', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(model.agreement).toMatchObject({ samples: 1, majority: 1 });
+    expect(model).toMatchObject({ single: true, providers: ['p'], proposals: { families: 1, repeats: ['p'], refused: [] } });
+    expect(replies).toHaveLength(1);
+  });
+
+  it('never counts a reply that names no item: it is asked once more with the reason, and stays no proposal', async () => {
+    const router = familyRouter({ p1: reply([sea]).data, p2: { answer: 'ok' }, p3: reply([sea, heat]).data });
+    const model = await new DecisionModeler({ router } as never).build({ id: 'junk', question, guidance: '', acceptance: { expected: '20 plots' } }, { force: true });
+    expect(model.agreement).toMatchObject({ samples: 2, majority: 2 });
+    expect(model.proposals).toEqual({ families: 2, repeats: ['p1'], refused: ['p2', 'p2'] });
+    expect(model.criteria.map((c: { measure: string }) => c.measure)).toEqual(['coastKm']);
+    const retried = router.calls.filter((c) => c.purpose === 'decision-model' && c.messages.length === 3);
+    expect(retried.map((c) => c.messages[2].content)).toEqual([`Your last answer was not accepted: ${NO_ITEM_NAMED}. Answer again with JSON only, in the exact format asked.`]);
+  });
+
+  it('keeps no model when no proposal came back, and keeps the earlier model untouched when no reply names an item', async () => {
     const router = { complete: async () => { throw new Error('down'); } };
-    expect(await new DecisionModeler({ router }).build({ id: 'x', question })).toBeNull();
+    expect(await new DecisionModeler({ router } as never).build({ id: 'x', question })).toBeNull();
+    const stored = { kind: { label: 'used car', terms: ['hatchback'] }, criteria: [], noLimit: [], agreement: { samples: 2, majority: 2, proposed: 0, kept: 0 } };
+    const unnamed = familyRouter({ p1: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] }, p2: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } });
+    expect(await new DecisionModeler({ router: unnamed } as never).build({ id: 'y', question, guidance: '', acceptance: { expected: '20 cars' }, decisionModel: stored }, { force: true })).toBe(stored);
   });
 
-  it('a rebuild with an empty aggregate keeps the stored kind and criteria', async () => {
+  it('a rebuild whose proposals name different items keeps the stored kind and criteria', async () => {
     const stored = {
       kind: { label: 'used car', terms: ['hatchback'], not: ['parts'], verified: { titles: 10, matched: 5, share: 0.5 } },
       criteria: [{ measure: 'priceEur', op: '<=', value: 50000, quote: 'under 50000', source: 'question' }],
       noLimit: [],
       agreement: { samples: 3, majority: 2, proposed: 5, kept: 1 },
     };
-    const answers = [
-      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
-      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
-      { provider: 'p', data: { concept: 'c', kind: { label: '', terms: [] }, criteria: [] } },
-    ];
-    const router = {
-      complete: async (req: { purpose: string }) => {
-        if (req.purpose === 'checklist') return { provider: 'p', data: { items: [{ clause: 'sea', question: 'Is sea nearby?', hard: true, numeric: { measure: 'coastKm', op: '<=', value: 20, unit: 'km' } }] } };
-        return answers.shift()!;
-      }
-    };
+    const router = familyRouter({ p1: { concept: 'c', kind: { label: 'used car', terms: [] }, criteria: [] }, p2: { concept: 'c', kind: { label: 'car wheel', terms: [] }, criteria: [] } });
     const project = { id: 'p-rebuild', question, guidance: '', acceptance: { expected: '20 cars' }, decisionModel: stored };
-    const model = await new DecisionModeler({ router }).build(project, { force: true });
+    const model = await new DecisionModeler({ router } as never).build(project, { force: true });
     expect(model.kind).toEqual(stored.kind);
     expect(model.criteria).toEqual(stored.criteria);
     expect(model.rebuildWeaker).toBe(true);
