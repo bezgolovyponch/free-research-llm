@@ -1,0 +1,5 @@
+#!/bin/sh
+node scripts/integrity-msg.mjs "$1" || {
+  echo "commit refused: an existing test, fixture, baseline or gate line changed without a 'test-change: <path> — <reason>' line in the commit message."
+  exit 1
+}

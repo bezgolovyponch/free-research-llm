@@ -213,3 +213,12 @@ describe('testIntegrity gate', () => {
     expect(result.detail).toContain('expect(2).toBe(3)');
   });
 });
+
+describe('testIntegrity at commit time', () => {
+  it('counts a test-change line from the message being written', async () => {
+    const { checkTestIntegrity } = await import('../../scripts/quality.mjs');
+    const diff = 'diff --git a/tests/research/x.test.ts b/tests/research/x.test.ts\n--- a/tests/research/x.test.ts\n+++ b/tests/research/x.test.ts\n@@ -1 +1 @@\n-    expect(a).toBe(1);\n+    expect(a).toBe(2);\n';
+    expect(checkTestIntegrity(diff, []).passed).toBe(false);
+    expect(checkTestIntegrity(diff, ['test-change: tests/research/x.test.ts — expected value corrected']).passed).toBe(true);
+  });
+});
