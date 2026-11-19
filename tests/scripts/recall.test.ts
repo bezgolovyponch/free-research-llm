@@ -12,9 +12,11 @@ function runCli(args: string[]): string {
 }
 
 describe('process lessons store', () => {
-  it('holds one entry per failure class F1 to F40, F44 to F46, F41, F43, F42, F47, F49, F48, F52, F51, F53, F54, F55, F56, F57, F62, F63, F66, F58 and F59, in file order', () => {
-    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F26', 'F27', 'F28', 'F29', 'F30', 'F31', 'F32', 'F33', 'F34', 'F35', 'F36', 'F37', 'F38', 'F39', 'F40', 'F44', 'F45', 'F46', 'F41', 'F43', 'F42', 'F47', 'F49', 'F48', 'F52', 'F51', 'F53', 'F54', 'F55', 'F56', 'F57', 'F62', 'F63', 'F66', 'F58', 'F59']);
+  it('holds one entry per failure class F1 to F40, F44 to F46, F41, F43, F42, F47, F49, F48, F52, F51, F53, F54, F55, F56, F57, F62, F63, F66, F58, F59 and F65, in file order', () => {
+    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F26', 'F27', 'F28', 'F29', 'F30', 'F31', 'F32', 'F33', 'F34', 'F35', 'F36', 'F37', 'F38', 'F39', 'F40', 'F44', 'F45', 'F46', 'F41', 'F43', 'F42', 'F47', 'F49', 'F48', 'F52', 'F51', 'F53', 'F54', 'F55', 'F56', 'F57', 'F62', 'F63', 'F66', 'F58', 'F59', 'F65']);
     expect(matchLessons(lessons, ['src/research/semantic.mjs']).map((lesson: { id: string }) => lesson.id)).toContain('F56');
+    expect(matchLessons(lessons, ['src/research/decision.mjs', 'src/research/concept.mjs']).map((lesson: { id: string }) => lesson.id)).toContain('F65');
+    expect(formatLesson(lessons.find((lesson: { id: string }) => lesson.id === 'F65'))).toMatch(/^F65 \| an unrelated stored case was shown as an approved example.+ \| signal: .+glamping.+ \| prevention: .+every count of proposals is a count of families\.$/);
     expect(matchLessons(lessons, ['src/research/checklist.mjs']).map((lesson: { id: string }) => lesson.id)).toEqual(expect.arrayContaining(['F58', 'F59']));
     expect(matchLessons(lessons, ['scripts/headline-replay.mjs']).map((lesson: { id: string }) => lesson.id)).toContain('F55');
     const scoping = matchLessons(lessons, ['src/research/scoping.mjs']).map((lesson: { id: string }) => lesson.id);
