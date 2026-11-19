@@ -14,6 +14,25 @@ import { parse as parseYaml } from 'yaml';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UNTESTED_ENTRYPOINTS = new Set(['src/frl.mjs', 'src/cli.mjs', 'src/llm/presets.mjs', 'src/research/prompts.mjs', 'src/llm/scripted-provider.mjs']);
 
+const EGRESS_PATTERNS = [
+  /\bfetch\s*\(/,
+  /\bfetchImpl\s*=\s*fetch\b/,
+  /\bglobalThis\.fetch\b/,
+  /\bhttp\.request\s*\(/,
+  /\bhttps\.request\s*\(/,
+  /\bnet\.connect\s*\(/,
+  /\bnew\s+WebSocket\s*\(/,
+  /\bchild_process\b.*\b(spawn|exec|execFile|spawnSync)\b.*\b(curl|wget)\b/,
+  /import\s+.*\s+from\s+['"]node:http['"]/,
+  /import\s+.*\s+from\s+['"]node:https['"]/,
+  /import\s+.*\s+from\s+['"]node:net['"]/,
+  /import\s+.*\s+from\s+['"]node:tls['"]/,
+  /import\s+.*\s+from\s+['"]node:dgram['"]/,
+  /import\s+.*\s+from\s+['"]http2['"]/,
+  /import\s+.*\s+from\s+['"]undici['"]/,
+  /import\s+.*\s+from\s+['"]ws['"]/,
+];
+
 function normalizeWhitespace(text) {
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -147,6 +166,83 @@ const gates = {
     return { passed: hits.length === 0, detail: hits.length ? hits.join('; ') : `${files.length} files scanned${leaksRan ? ' + gitleaks' : ' (gitleaks not installed: built-in patterns only)'}` };
   },
 
+  dependencies(files) {
+    const allowedPath = path.join(ROOT, 'tests', 'fixtures', 'security', 'allowed-dependencies.json');
+    if (!fs.existsSync(allowedPath)) return { passed: false, detail: 'missing tests/fixtures/security/allowed-dependencies.json' };
+    const allowed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
+    const failures = [];
+
+    for (const [section, deps] of Object.entries({ dependencies: pkg.dependencies, devDependencies: pkg.devDependencies, optionalDependencies: pkg.optionalDependencies })) {
+      const allowedDeps = allowed[section] || {};
+      for (const [name, version] of Object.entries(deps || {})) {
+        if (!allowedDeps[name] || allowedDeps[name] !== version) {
+          failures.push(`${section}: ${name}@${version} not in allowed list`);
+        }
+      }
+      for (const name of Object.keys(allowedDeps)) {
+        if (!deps?.[name]) {
+          failures.push(`${section}: ${name} missing from package.json but in allowed list`);
+        }
+      }
+    }
+
+    const allowedScripts = allowed.allowScripts || {};
+    const allowedScriptNames = new Set(Object.keys(allowedScripts).filter((k) => allowedScripts[k]).map((k) => k.split('@')[0]));
+    for (const [pkgPath, info] of Object.entries(lock.packages || {})) {
+      if (info.hasInstallScript && pkgPath !== '' && !pkgPath.endsWith('/free-research-llm')) {
+        const name = pkgPath.replace('node_modules/', '');
+        if (!allowedScriptNames.has(name)) {
+          failures.push(`install script: ${name} has install script but not in allowScripts`);
+        }
+      }
+    }
+
+    for (const [name, allowed] of Object.entries(allowedScripts)) {
+      if (!allowed) continue;
+      const pkgName = name.split('@')[0];
+      const pkgInfo = lock.packages[`node_modules/${pkgName}`];
+      if (!pkgInfo || !pkgInfo.hasInstallScript) {
+        failures.push(`allowScripts: ${name} listed but has no install script in lockfile`);
+      }
+    }
+
+    return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : 'package.json and lockfile match allowed-dependencies.json; no unauthorized install scripts' };
+  },
+
+  egress(files) {
+    const allowedPath = path.join(ROOT, 'tests', 'fixtures', 'security', 'egress-allowed.json');
+    if (!fs.existsSync(allowedPath)) return { passed: false, detail: 'missing tests/fixtures/security/egress-allowed.json' };
+    const allowed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
+    const sourceFiles = sourceModules(files);
+    const failures = [];
+
+    for (const file of sourceFiles) {
+      const filePath = path.join(ROOT, file);
+      if (!fs.existsSync(filePath)) continue;
+      const content = fs.readFileSync(filePath, 'utf8');
+      let hasEgress = false;
+      for (const pattern of EGRESS_PATTERNS) {
+        if (pattern.test(content)) {
+          hasEgress = true;
+          break;
+        }
+      }
+      if (hasEgress && !allowed[file]) {
+        failures.push(`${file}: makes outbound network calls but not in egress-allowed.json`);
+      }
+    }
+
+    for (const file of Object.keys(allowed)) {
+      if (!sourceFiles.includes(file)) {
+        failures.push(`egress-allowed.json: ${file} listed but not found in source modules`);
+      }
+    }
+
+    return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : `${Object.keys(allowed).length} egress-allowed file(s) verified` };
+  },
+
   noComments(files) {
     const offenders = [];
     for (const file of sourceModules(files)) {
@@ -217,10 +313,21 @@ const gates = {
     if (!fs.existsSync(snapshotDir) || !fs.existsSync(baselineFile)) {
       return { passed: true, detail: 'skipped: baseline or snapshot not found' };
     }
-    const failed = await checkSnapshot(snapshotDir, baselineFile);
-    return { passed: !failed, detail: failed ? 'zero-loss check failed' : 'zero-loss check passed' };
+    const tapeDir = process.env.FRL_TAPE_DIR || path.join(snapshotDir, 'tape');
+    const hasTape = fs.existsSync(tapeDir);
+    const failed = await checkSnapshot(snapshotDir, baselineFile, hasTape);
+    const detail = failed ? 'zero-loss check failed' : 'zero-loss check passed';
+    return { passed: !failed, detail: hasTape ? detail + ' (with judge)' : detail };
   },
 };
+
+export function dependencies(files) {
+  return gates.dependencies(files);
+}
+
+export function egress(files) {
+  return gates.egress(files);
+}
 
 async function runQualityGate() {
   const files = repoFiles();
