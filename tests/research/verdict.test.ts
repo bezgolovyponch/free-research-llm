@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome, headlineOf, scoreOf, verdictReport, verdictLines } from "../../src/research/verdict.mjs";
-import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome, headlineOf, scoreOf, verdictReport, verdictLines, KIND_OPEN_REASON } from "../../src/research/verdict.mjs";
+import { ChecklistJudge, LOW_PRICE_REASON, SINGLE_KIND_OPINION, SINGLE_KIND_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
 import { lowPriceStats } from "../../src/research/candidates.mjs";
 import { fakeRouter } from "../helpers/fakes";
 import fixture from "../fixtures/verdict-0c750f.json";
@@ -341,6 +341,45 @@ describe("the single headline owner (C9, C10; from origin/fix/honest-headline c5
     expect(verdictReport(memoOnly)!.recheckCancelled).toBe("");
     expect(verdictReport({ ...memoOnly, acceptanceRecheck: { cancelled: true, at: "2026-11-18T20:00:00.000Z" } })!.recheckCancelled).toBe("a later re-check was cancelled at 2026-11-18T20:00:00.000Z; this is the last complete result");
     expect(verdictLines(null)).toEqual([]);
+  });
+});
+
+describe("the kind check follows the rule of every hard check: unanswered is to confirm, only a no with a quote rejects", () => {
+  const kind = { label: "plot of land", terms: ["plot"] };
+  const kindId = "kind|" + kindCluster(kind).items[0].question;
+  const checklist = [{ clause: "price", items: [{ clause: "price", question: "Is it cheap?", hard: true }] }];
+  const hardIds = hardIdsOf(checklist, kind);
+  const plot = (kindCheck: Record<string, unknown>, purpose = [{ id: "purpose-kind", passed: false }]) => ({ url: "https://imo.example/terreno-ID1", title: "Terreno para venda", live: true, listing: true, inRange: true, purpose, checks: [{ id: "price|Is it cheap?", answer: "yes", quote: "4 900 €", hard: true, clause: "price" }, { id: kindId, clause: "kind", hard: true, ...kindCheck }] });
+  const unanswered = [
+    { answer: "unknown", quote: "", provider: null },
+    { answer: "unknown", quote: "", reason: SINGLE_KIND_REASON, second: { answer: "unknown", single: true } },
+    { answer: "unknown", quote: "", reason: SINGLE_KIND_OPINION, leaning: { answer: "no", quote: "Terreno" } },
+    { answer: "unknown", quote: "", notJudged: true },
+    { answer: "unknown", quote: "", option: "U", provider: "p1" },
+  ];
+
+  it("a kind call no provider answered, a single-family opinion, or a cannot-tell answer leaves a plot whose page lacks the asker's word to confirm", () => {
+    for (const kindCheck of unanswered) expect(itemTier(plot(kindCheck), hardIds, {})).toBe("to-confirm");
+    const result = verdict(unanswered.map((kindCheck, i) => ({ ...plot(kindCheck), url: `u${i}` })), { itemCount: 5 }, checklist, kind);
+    expect(result.tiers).toEqual({ confirmed: 0, toConfirm: 5, rejected: 0, notJudged: 0 });
+  });
+
+  it("a kind no with a quote rejects, a kind yes with a quote passes the purpose check and can confirm", () => {
+    expect(itemTier(plot({ answer: "no", quote: "Moradia T3 para venda" }), hardIds, {})).toBe("rejected");
+    expect(itemTier(plot({ answer: "yes", quote: "Terreno para venda" }), hardIds, {})).toBe("confirmed");
+    expect(qualifies(plot({ answer: "unknown", quote: "" }), {})).toBe(false);
+  });
+
+  it("a code check of the asker's own words that the page fails still rejects, and so does a dead link", () => {
+    expect(itemTier(plot({ answer: "yes", quote: "Terreno" }, [{ id: "purpose-names-1", passed: false }]), hardIds, {})).toBe("rejected");
+    expect(itemTier({ ...plot({ answer: "unknown", quote: "" }), live: false }, hardIds, {})).toBe("rejected");
+  });
+
+  it("the report names the kind as the open proof of an item to confirm", () => {
+    const item = plot({ answer: "unknown", quote: "", provider: null });
+    const report = verdictReport({ acceptance: { itemCount: 1 }, checklist, decisionModel: { kind }, acceptanceResult: { items: [item], checks: [], totalAsked: 1 } })!;
+    expect(report.items[0].tier).toBe("to-confirm");
+    expect(report.items[0].reasons.find((r: { requirement: string }) => r.requirement === "purpose-kind")).toMatchObject({ answer: "unknown", reason: KIND_OPEN_REASON });
   });
 });
 

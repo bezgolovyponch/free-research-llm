@@ -2,17 +2,30 @@ import { kindCluster } from './checklist.mjs';
 
 const KIND_PURPOSE_ID = 'purpose-kind';
 
-function judgedAsAskedKind(item) {
-  return (item.checks ?? []).some((c) => c.clause === 'kind' && String(c.id ?? '').startsWith('kind|') && c.answer === 'yes' && Boolean(c.quote));
+const isKindCheck = (check) => check?.clause === 'kind' && String(check.id ?? '').startsWith('kind|');
+
+export const KIND_OPEN_REASON = 'the page does not use the asked words and the kind judge has not answered with a quote: to confirm';
+
+function purposeState(item, criterion) {
+  if (criterion.passed) return 'yes';
+  if (criterion.id !== KIND_PURPOSE_ID) return 'no';
+  const judged = (item.checks ?? []).filter(isKindCheck);
+  if (judged.some((c) => c.answer === 'yes' && c.quote)) return 'yes';
+  if (judged.some((c) => c.answer === 'no' && c.quote)) return 'no';
+  return judged.length ? 'unknown' : 'no';
 }
 
-function purposeMet(item, criterion) {
-  return criterion.passed || (criterion.id === KIND_PURPOSE_ID && judgedAsAskedKind(item));
+function opens(item, spec) {
+  const entity = Boolean(item.evidence);
+  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange));
 }
 
 export function qualifies(item, spec) {
-  const entity = Boolean(item.evidence);
-  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => purposeMet(item, c)));
+  return opens(item, spec) && (item.purpose ?? []).every((c) => purposeState(item, c) === 'yes');
+}
+
+export function refused(item, spec) {
+  return !opens(item, spec) || (item.purpose ?? []).some((c) => purposeState(item, c) === 'no');
 }
 
 export function itemTier(item, hardIds, spec) {
@@ -28,12 +41,12 @@ export function itemTier(item, hardIds, spec) {
     return "not-judged";
   }
 
-  if (!qualified || hardChecks.some((c) => c.answer === "no")) {
+  if (refused(item, spec) || hardChecks.some((c) => c.answer === "no")) {
     return "rejected";
   }
 
   const hasHardUnknown = new Set(hardChecks.map((c) => c.id)).size < hardIds.length || hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "");
-  if (hasHardUnknown) {
+  if (!qualified || hasHardUnknown) {
     return "to-confirm";
   }
 
@@ -192,7 +205,8 @@ function itemReasons(item, hardIds, spec) {
   if (!item.live) reasons.push({ requirement: 'the link opens a page', answer: 'no', quote: '', reason: 'the page did not open' });
   if (spec?.valueRange && item.live && !item.inRange) reasons.push({ requirement: `value within ${spec.valueRange.join('–')} ${spec.unit ?? ''}`.trim(), answer: 'no', quote: '', reason: item.value === undefined || item.value === null ? 'no value read on the page' : `the page shows ${item.value} ${item.unit ?? ''}`.trim() });
   for (const criterion of item.purpose ?? []) {
-    if (!purposeMet(item, criterion)) reasons.push({ requirement: criterion.label ?? criterion.id, answer: 'no', quote: '', reason: criterion.detail ?? '' });
+    const state = purposeState(item, criterion);
+    if (state !== 'yes') reasons.push({ requirement: criterion.label ?? criterion.id, answer: state, quote: '', reason: state === 'unknown' ? KIND_OPEN_REASON : criterion.detail ?? '' });
   }
   for (const id of hardIds) {
     const check = (item.checks ?? []).find((c) => c.id === id);
