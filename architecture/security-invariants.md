@@ -13,7 +13,9 @@ that are specific to this system — the ones where money, identity or data can 
 | Invariant | Enforced by |
 |-----------|-------------|
 | No secret, token or connection string in any file, including gitignored ones; config references `${VAR}` placeholders | `.github/workflows/security.yml` runs gitleaks over the history on every push and pull request (`.gitleaks.toml` keeps the default ruleset live); review |
-| Dependencies with known high-severity vulnerabilities are visible | `security.yml` runs `pnpm audit` weekly and on pull requests, reporting only |
+| Dependencies with known high-severity vulnerabilities are visible | `.github/workflows/security.yml` runs `npm audit --audit-level=high` weekly and on pull requests, reporting only |
+| No new dependency or install script without review | `scripts/quality.mjs` gate `dependencies` compares `package.json` and `package-lock.json` `hasInstallScript` against `tests/fixtures/security/allowed-dependencies.json`; fails on drift |
+| No outbound network call outside the listed modules; research data stays local | `scripts/quality.mjs` gate `egress` scans `src/**/*.mjs` and `scripts/**/*.mjs` for `fetch`, `http.request`, `https.request`, `net.connect`, `new WebSocket`, `child_process` with `curl`/`wget` against `tests/fixtures/security/egress-allowed.json`; fails on unlisted callers |
 <!-- construct:discover:security-invariants -->
 | External verifier shares no code with the app | `scripts/quality.mjs` gate `independence` scans `verifier/**/*.mjs` for imports from `../src/`; fails if found |
 | Research engine never writes to live app from a chat model | `src/chat/reply-audit.mjs` strips claims of create/delete/open/push unless the action ran; `src/coder/free-coder.mjs` runs in sandbox `data/work/C<n>/` and only copies on `npm run quality` PASS |
