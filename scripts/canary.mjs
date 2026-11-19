@@ -306,6 +306,7 @@ function candidateDeliverables(candidates) {
     ...(Number.isFinite(row.distanceKm) ? { distanceKm: row.distanceKm } : {}),
     ...(row.site ? { site: row.site } : {}),
     ...(row.plan ? { plan: row.plan } : {}),
+    ...(row.verified ? { verified: row.verified } : {}),
     nodeId: row.nodeId,
     harvested: true,
     candidate: true,
@@ -368,8 +369,9 @@ function getDecisionModelFits(project) {
   return { fits, confirmedFits };
 }
 
-async function computeFailedCallShare() {
-  const filePath = path.join(LOGS_DIR, 'model-calls.jsonl');
+async function computeFailedCallShare(dataDir) {
+  const logsDir = path.join(dataDir, 'logs');
+  const filePath = path.join(logsDir, 'model-calls.jsonl');
   const since = new Date(Date.now() - 60 * 60 * 1000);
   const stats = computeWasteStats(filePath, since);
   return stats.failPct;
@@ -413,7 +415,7 @@ async function snapAll(dataDir, useApi) {
   for (const project of projects) {
     results.push(await snapOne(projectsDir, project));
   }
-  const failedCallShare = await computeFailedCallShare();
+  const failedCallShare = await computeFailedCallShare(dataDir);
   return {
     timestamp: new Date().toISOString(),
     projects: results,
