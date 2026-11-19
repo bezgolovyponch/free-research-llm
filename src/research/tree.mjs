@@ -110,6 +110,7 @@ export function normalizeTree(raw, question) {
       dependsOn: list(item?.dependsOn, 6),
       impact: clampScore(item?.impact),
       uncertainty: clampScore(item?.uncertainty),
+      serves: Array.isArray(item?.serves) ? item.serves : [],
     }));
   });
   fixParents(nodes);
