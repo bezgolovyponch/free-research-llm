@@ -1,8 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { NO_ITEMS_DETAIL, asksForItems, deliversItems, missingItems } from '../../src/research/deliverable.mjs';
+import { NO_ITEMS_DETAIL, asksForItems, deliversItems, missingItems, contractClass } from '../../src/research/deliverable.mjs';
 import { effectiveGrade } from '../../src/research/result.mjs';
 
 const piece = (question: string, items: Array<{ url?: string }> = [], status = 'verified') => ({ id: 'D9', title: '', question, status, finding: { answer: 'x', items } });
+
+describe('contractClass', () => {
+  it('classifies list projects from itemCount in expected', () => {
+    const b7772e = {
+      question: 'Find appropriate plots to buy for a low-entry glamping business in the EU: affordable and valuable, with a scenic location and future upside',
+      acceptance: { expected: '50 Plots In EU, Vietnam and Turkey strongly feasible for Glamping business 10 minth, 1 year' },
+    };
+    expect(contractClass(b7772e)).toBe('list');
+  });
+
+  it('classifies list projects from decisionModel kind', () => {
+    const b2f5b7 = {
+      question: 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio , proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic',
+      acceptance: { expected: '20 direct links to the providers with proposal and proof that those particular companies do have highest proce/value ratio, quality, assortiment and appropriate setup for local Prague branded second hand shop retail' },
+      decisionModel: { kind: { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing', 'used clothing wholesale'] } },
+    };
+    expect(contractClass(b2f5b7)).toBe('list');
+  });
+
+  it('classifies list projects from itemCount in question', () => {
+    const c0c750f = {
+      question: 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent',
+      acceptance: { expected: 'The list of 20 highest possible price/value ratio to buy, working links, no broken links, verified with the research logic, recently posted, 80 trade offs to confirm and review' },
+      decisionModel: { kind: { label: 'used car', terms: ['hatchback'] } },
+    };
+    expect(contractClass(c0c750f)).toBe('list');
+  });
+
+  it('classifies analysis projects without itemCount or kind', () => {
+    const analysis = {
+      question: 'Is buying fermented bean paste for resale in Poland profitable?',
+      acceptance: {},
+    };
+    expect(contractClass(analysis)).toBe('analysis');
+  });
+});
 
 describe('listing pieces', () => {
   it('knows which pieces ask for specific listings', () => {
