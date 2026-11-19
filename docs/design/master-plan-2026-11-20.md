@@ -1,0 +1,79 @@
+# Master plan — human-line decomposition engine (2026-11-20)
+
+One plan for the owner, the Mac lead (Claude), Fable 5.2 (PC lead) and the fcc workers on both machines. It replaces every earlier list. Item names below are the only names used.
+
+## 1. The logic we implement (the human line)
+
+A careful human researcher works in this order, and the engine follows it, each step proposed by a model and decided by code:
+
+1. **Purpose** — why the asker wants this (from their words; quoted, or labelled "derived").
+2. **Contract** — what is delivered: a list of items, an analysis (data, trend, forecast, causes), or a decision; its unit and output format.
+3. **Requirements** — what must hold (AND), each traced to the asker's words; implicit ones stated and labelled "derived".
+4. **Alternative means** — ways each requirement can be met (OR), found on pages, never imagined by a model.
+5. **Roles** — actors and places with their role (location, origin, delivery, place of use).
+6. **Domain knowledge** — what the researcher must know to judge (prices, norms, terms, trends), gathered by its own pieces.
+7. **Research path** — tree pieces, each naming the requirement it serves.
+8. **Evidence** — code reads pages; every value carries a quote found on the decoded page; numbers recomputed by code.
+9. **Verdict** — sorted by the requirements (meets every must-have / to confirm / rejected), with coverage and confidence stated; never asks the owner for what sources can establish.
+10. **Learning** — verified outcomes improve later researches of the same contract; nothing learned from a model's word alone.
+
+## 2. Method basis (verified quotes live in src/research/methods.json and docs/design/methods-baseline.md)
+
+| Step | Fundamental (verified) | Recent LLM evidence (verified) | Use |
+|---|---|---|---|
+| 1–5 request model | Zave & Jackson K,S⊢R (M7); KAOS AND/OR refinement (M2); GQM purpose/viewpoint/context (M8); iStar roles | LLM goal extraction F1 0.61–0.76, best as an accelerator (M9); implicit requirements are the main agent failure (M10) | model proposes the model, code checks quotes and trace; a second family reviews |
+| 2 contract | systematic review stages (PRISMA, FOUNDATIONS) for lists only | — | routes stages by class (E-A merged) |
+| 4 alternative means | KAOS OR-refinement (M2) | grounded expansion from pages, not model memory (LLM-Modulo M6) | pages name alternatives |
+| 8 evidence | wrapper induction | LLM-Modulo (M6); checklists TICK (M11); early pruning (M14) | code first, judge only what code cannot measure |
+| 9 verdict | ELECTRE TRI-nB sorting (M1) | rubric judges are noisy, batching trades accuracy (M11); judge relevance inflation (arXiv 2602.17170, PC-verified) | tiers by requirements; confidence never from a model's own score |
+| 9 coverage | Chao2 / Chao–Jost incidence coverage (Chao 1987; Chao & Colwell 2017; Chao et al. 2014 — quotes verified on PC) | completeness is the dominant failure of wide search (WideSearch, reference) | report floor + coverage deficit; stop rule only after Phase 1 |
+| cost | plan once (M13) | early stopping of votes −58% calls (M12); plan caching (M13) | fewer, earlier, cheaper calls |
+| 10 learning | case-based reasoning | GEPA reflective evolution, ACE itemised playbook (M15) | lessons as items with counters, verified tier only |
+| eval | regression testing; canary analysis (SRE) | negative flips (CVPR'21, ACL'21); error bars (M16); evaluator locking | zero-loss union per class, canary, integrity |
+
+Pending, nothing built until read by the lead and the owner: **S1** (prediction-powered inference, conformal bounds, claim factuality, domain-knowledge structure, pipeline optimisation, retrieve-when-needed, entity resolution) and **S2** (2024–2026 time and token savers). Both on the PC.
+
+## 3. Phases (each starts only when the previous exit holds)
+
+| Phase | Content | Exit |
+|---|---|---|
+| **0 Foundation** | E-A contract class (merged #242); E-B analysis skips item-only stages; E-C tree-clearing cause; 0.2 a version rebuild reproduces stored verdicts (pre-merge); 0.3 zero-loss union over classes (list + analysis/memo rules); E-Q action queue (no "stop it first"); P0 quote-on-page core | an analysis research runs end to end; list researches unchanged (zero-loss 0 flips, canary clean) |
+| **1 Request model** | B3 design (owner review) → B3.1 purpose + requirements + trace (`serves`) for all classes → B3.2 roles (was B2) → B3.3 knowledge pieces get sources (was B1) → B3.4 alternative means (OR) | three unrelated researches (plots, freight, action plan) get a correct model on paper and in replay; stored criteria never rebuilt |
+| **2 Evidence & verdict** | P2 quote integrity (adds matches only); verdict sorted by requirements; P3 climate index optional; code answers clauses a criterion measures (B5 merged) | headline = items meeting every must-have; memo numbers carry source + method |
+| **3 Coverage & cost** | P4 coverage figures (report only) → stop rule; adaptive second opinions (M12); waste meter actions; router waste (R) | calls per valid result not higher; coverage stated in every list memo |
+| **4 Learning** | loop target = requirement outcomes + zero-loss; itemised lessons (verified only); plan reuse per contract | loop keeps changes on all three classes |
+| **5 Composition & fields** | fields from the request's own frame (P1 returns here), composed results from confirmed fields only | no knowledge in code (5-question check) |
+
+## 4. Who does what (file ownership prevents collisions)
+
+| Role | Owns | Does |
+|---|---|---|
+| **Owner** | priorities, labels, cost ratio, approvals | reviews B3 design and every phase exit |
+| **Mac lead (Claude)** | the plan, specs, review, merges, canary | writes each spec through the 5-question check; reads every diff and real output; never writes large code |
+| **Mac fcc** (2 instances, NVIDIA keys 2 and 3) | engine.mjs routing, deliverable.mjs, server/action queue, router, proposal/index.html, harness scripts | E-B, E-C, E-Q, 0.2, 0.3, B3.x, R, S |
+| **Fable 5.2 (PC lead)** | design validity, specs and reviews for its lane, the sweeps | S1, S2; Phase 1 coverage formulas; validity checks for P-packages |
+| **PC fcc** | quote.mjs, acceptance.mjs, listings.mjs, cci.mjs | P0, P2, P3, P4, later fields |
+
+A change touching the other machine's files goes to that machine as a patch.
+
+## 5. Every change passes, in order
+
+1. **5-question check** before dispatch: knowledge in code? behaviour on three unrelated research kinds incl. a decision memo? in phase order? evidence from more than one kind of request? defects about logic, not the world?
+2. Proven method named with its verified quote; logic ported, no new dependency or egress.
+3. One mechanism per PR; tests that fail on main; existing expectations changed only with a `test-change:` line.
+4. `npm run quality` (integrity, zero-loss union, testsChanged, methods, egress, dependencies) → CI Node 22 and 24.
+5. Canary snap → merge → restart → canary compare; a lost clause, criterion or confirmed item = revert.
+6. Lessons get ids `F-<date>-<short-name>`.
+
+## 6. Keeping the work moving
+
+- At most 4 fcc workers at once; a watchdog kills a worker with no file change for 30 min; attempts end at 45 min; orphans are cleaned at each start.
+- Specs are small (one step); the lead finishes a step itself when the worker's diff is right but the model stalls.
+- Free providers only for research; any paid fallback is the owner's decision and shows on the waste meter.
+- Researches are never asked to stop for an action (E-Q); the owner's actions queue.
+
+## 7. Owner decisions open
+
+- B3 design approval (next).
+- Paid fallback on the PC runner (Haiku): keep or free lanes only.
+- Cost ratio and ~30 labels for Phase 2/4 calibration (later).
