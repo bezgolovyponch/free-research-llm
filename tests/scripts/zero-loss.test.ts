@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { binomialCoefficient, mcNemarExact, negativeFlips, outcomesOf, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject } from '../../scripts/zero-loss.mjs';
+import { binomialCoefficient, mcNemarExact, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, outcomesOf, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers } from '../../scripts/zero-loss.mjs';
 import { createAnswerTape, tapeKey } from '../../scripts/answer-tape.mjs';
 import { ChecklistJudge } from '../../src/research/checklist.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
@@ -151,8 +151,6 @@ describe('zero-loss: judge flip detection logic', () => {
 
 describe('zero-loss: judge unrecorded tracking', () => {
   it('tracks unrecorded prompts separately from flips in runJudgeCheck logic', () => {
-    // This test verifies the logic that unrecorded prompts are tracked separately
-    // and don't cause flips. The actual integration test requires provider setup.
     const baseline = {
       outcomes: [
         { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge', outcome: 'yes' },
@@ -164,8 +162,111 @@ describe('zero-loss: judge unrecorded tracking', () => {
       ],
     };
     const flips = negativeFlips(baseline, current);
-    // yes->unknown is a flip, but in runJudgeCheck this would be tracked as unrecorded
-    // if the tape missed the prompt. The gate fails on flips, but unrecorded are reported separately.
     expect(flips.length).toBe(1);
+  });
+});
+
+describe('zero-loss: tier flip detection', () => {
+  const baseline = {
+    outcomes: [],
+    tierOutcomes: [
+      { project: 'p1', url: 'https://example.test/1', clause: 'verdict', question: 'tier', measure: 'tier', outcome: 'confirmed' },
+      { project: 'p1', url: 'https://example.test/2', clause: 'verdict', question: 'tier', measure: 'tier', outcome: 'to-confirm' },
+      { project: 'p1', url: 'https://example.test/3', clause: 'verdict', question: 'tier', measure: 'tier', outcome: 'rejected' },
+    ],
+  };
+  const current = {
+    outcomes: [],
+    tierOutcomes: [
+      { project: 'p1', url: 'https://example.test/1', clause: 'verdict', question: 'tier', measure: 'tier', outcome: 'to-confirm' },
+      { project: 'p1', url: 'https://example.test/2', clause: 'verdict', question: 'tier', measure: 'tier', outcome: 'confirmed' },
+      { project: 'p1', url: 'https://example.test/3', clause: 'verdict', question: 'tier', measure: 'tier', outcome: 'rejected' },
+    ],
+  };
+  it('detects confirmed->to-confirm as negative tier flip', () => {
+    const flips = negativeTierFlips(baseline, current);
+    expect(flips).toHaveLength(1);
+    expect(flips[0]).toMatchObject({ url: 'https://example.test/1', baselineTier: 'confirmed', currentTier: 'to-confirm' });
+  });
+  it('detects to-confirm->confirmed as positive tier flip', () => {
+    const flips = positiveTierFlips(baseline, current);
+    expect(flips).toHaveLength(1);
+    expect(flips[0]).toMatchObject({ url: 'https://example.test/2', baselineTier: 'to-confirm', currentTier: 'confirmed' });
+  });
+  it('ignores rejected->rejected', () => {
+    const flips = negativeTierFlips(baseline, current);
+    expect(flips.every(f => f.url !== 'https://example.test/3')).toBe(true);
+  });
+});
+
+describe('zero-loss: hard check flip detection', () => {
+  const baseline = {
+    outcomes: [],
+    storedJudgeOutcomes: [
+      { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge-stored', outcome: 'yes' },
+      { project: 'p1', url: 'https://example.test/2', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge-stored', outcome: 'no' },
+      { project: 'p1', url: 'https://example.test/3', clause: 'quality', question: 'Is it high quality?', hard: false, measure: 'judge-stored', outcome: 'yes' },
+    ],
+  };
+  const current = {
+    outcomes: [],
+    storedJudgeOutcomes: [
+      { project: 'p1', url: 'https://example.test/1', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge-stored', outcome: 'no' },
+      { project: 'p1', url: 'https://example.test/2', clause: 'quality', question: 'Is it high quality?', hard: true, measure: 'judge-stored', outcome: 'yes' },
+      { project: 'p1', url: 'https://example.test/3', clause: 'quality', question: 'Is it high quality?', hard: false, measure: 'judge-stored', outcome: 'yes' },
+    ],
+  };
+  it('detects hard check yes->no as negative flip', () => {
+    const flips = negativeHardCheckFlips(baseline, current);
+    expect(flips).toHaveLength(1);
+    expect(flips[0]).toMatchObject({ url: 'https://example.test/1', baselineAnswer: 'yes', currentAnswer: 'no' });
+  });
+  it('detects hard check no->yes as positive flip', () => {
+    const flips = positiveHardCheckFlips(baseline, current);
+    expect(flips).toHaveLength(1);
+    expect(flips[0]).toMatchObject({ url: 'https://example.test/2', baselineAnswer: 'no', currentAnswer: 'yes' });
+  });
+  it('ignores soft checks', () => {
+    const flips = negativeHardCheckFlips(baseline, current);
+    expect(flips.every(f => f.url !== 'https://example.test/3')).toBe(true);
+  });
+});
+
+describe('zero-loss: extractJudgedItems and computeTiers', () => {
+  it('extracts items with checks from acceptanceResult', () => {
+    const project = {
+      id: 'test-project',
+      acceptance: { itemCount: 2 },
+      decisionModel: { checklist: [{ clause: 'quality', items: [{ question: 'Good?', hard: true }] }], kind: null },
+      acceptanceResult: {
+        items: [
+          { url: 'https://a.example.org/1', title: 'Item 1', checks: [{ id: 'quality|Good?', answer: 'yes', quote: 'q1', hard: true, clause: 'quality' }], tier: 'confirmed' },
+          { url: 'https://a.example.org/2', title: 'Item 2', checks: [{ id: 'quality|Good?', answer: 'no', quote: '', hard: true, clause: 'quality' }], tier: 'rejected' },
+        ],
+      },
+    };
+    const items = extractJudgedItems(project);
+    expect(items).toHaveLength(2);
+    expect(items[0].url).toBe('https://a.example.org/1');
+    expect(items[0].checks).toHaveLength(1);
+    expect(items[0].checks[0].answer).toBe('yes');
+    expect(items[1].checks[0].answer).toBe('no');
+  });
+
+  it('extracts items from plan.checks when checks not present', () => {
+    const project = {
+      id: 'test-project',
+      acceptance: { itemCount: 1 },
+      decisionModel: { checklist: [{ clause: 'quality', items: [{ question: 'Good?', hard: true }] }], kind: null },
+      acceptanceResult: {
+        items: [
+          { url: 'https://a.example.org/1', title: 'Item 1', plan: { checks: [{ id: 'sea', ok: true, detail: 'sea 5km', label: 'sea within 20km' }] }, tier: 'confirmed' },
+        ],
+      },
+    };
+    const items = extractJudgedItems(project);
+    expect(items).toHaveLength(1);
+    expect(items[0].checks).toHaveLength(1);
+    expect(items[0].checks[0].answer).toBe('yes');
   });
 });
