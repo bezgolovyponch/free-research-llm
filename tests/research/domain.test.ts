@@ -220,3 +220,12 @@ describe('domain understanding', () => {
     expect(understanding.hosts).toEqual(['vintagehub.com']);
   });
 });
+
+describe('understanding for a research that lists no items', () => {
+  it('is ready when sources explain the subject even without trade names', async () => {
+    const { domainUnderstanding } = await import('../../src/research/domain.mjs');
+    const findings = [{ aspect: 'object', statement: 'Tonnage availability is limited for prompt dates and the next couple of weeks', sourceIds: ['S1'] }, { aspect: 'process', statement: 'Container shipping rates across the sea stabilized in October after rising since the beginning of the year', sourceIds: ['S1'] }];
+    expect(domainUnderstanding(findings, { listsItems: false }).ready).toBe(true);
+    expect(domainUnderstanding(findings, { listsItems: true }).ready).toBe(false);
+  });
+});
