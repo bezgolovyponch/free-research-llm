@@ -3,10 +3,27 @@ import { zipSync, strToU8 } from 'fflate';
 import { templateById } from './research/templates.mjs';
 import { ROOT_ID, childrenOf } from './research/tree.mjs';
 import { actionPlan, resultStatus } from './research/gaps.mjs';
+import { preconditions, effect } from './research/nodevalidity.mjs';
 import { ACTION_LABEL, itemRows, piecesRows, plotRows } from './workbook.mjs';
 
 function bullets(items) {
   return items?.length ? items.map((i) => `- ${i}`).join('\n') : '- none';
+}
+
+function brokenNodes(project) {
+  const broken = [];
+  for (const node of project.nodes ?? []) {
+    const pre = preconditions(node, project);
+    if (pre.length) {
+      broken.push({ node, reason: pre.map((p) => `${p.check}: ${p.reason}`).join('; ') });
+      continue;
+    }
+    const eff = effect(node);
+    if (eff.broken) {
+      broken.push({ node, reason: eff.reason });
+    }
+  }
+  return broken;
 }
 
 function nodeSection(project, node, depth) {
@@ -77,6 +94,7 @@ export function candidatesCsv(project) {
 
 export function resultsJson(project) {
   const status = resultStatus(project);
+  const broken = brokenNodes(project);
   return {
     question: project.question,
     expected: project.acceptance?.expected ?? null,
@@ -86,6 +104,7 @@ export function resultsJson(project) {
     confidence: { model: project.report?.confidence ?? null, byChecks: status.confidence, coverage: status.coverage, provisional: status.provisional },
     expectedResult: project.acceptanceResult ? { score: project.acceptanceResult.score, checks: project.acceptanceResult.checks } : null,
     actions: status.plan,
+    brokenNodes: broken.map((b) => ({ nodeId: b.node.id, title: b.node.title, reason: b.reason, nextStep: 'Fix the failed precondition or effect: ' + b.reason + '. Press Re-research on this row.' })),
     pieces: project.nodes.map((n) => ({ id: n.id, parentId: n.parentId, title: n.title, question: n.question, grade: n.status, answer: n.finding?.answer ?? null, claims: n.finding?.claims ?? [], gaps: n.finding?.gaps ?? [], sources: (n.sources ?? []).filter((x) => x.url).map((x) => ({ id: x.id, title: x.title, url: x.url })) })),
     items: project.acceptanceResult?.items ?? project.report?.deliverables ?? [],
     candidates: project.candidates ?? null,
@@ -115,6 +134,12 @@ export function toMarkdown(project) {
   if (plan.length) {
     out.push('## What to fix, research further or clarify', '', '| Piece | Action | Why | Next step | Priority |', '|---|---|---|---|---|');
     for (const a of plan) out.push(`| ${a.nodeId} · ${cell(a.title)} | ${ACTION_LABEL[a.action]}${a.decisive ? ' (moves the verdict)' : ''} | ${cell(a.why)} | ${cell(a.next)} | ${a.priority} |`);
+    out.push('');
+  }
+  const broken = brokenNodes(project);
+  if (broken.length) {
+    out.push('## Pieces that produced no value', '', '| Piece | Reason | Next step |', '|---|---|---|');
+    for (const b of broken) out.push(`| ${b.node.id} · ${cell(b.node.title)} | ${cell(b.reason)} | ${cell('Fix the failed precondition or effect: ' + b.reason + '. Press Re-research on this row.')} |`);
     out.push('');
   }
   if (project.assumptionsToConfirm?.length) out.push('## Assumptions to confirm', '', bullets(project.assumptionsToConfirm), '');
