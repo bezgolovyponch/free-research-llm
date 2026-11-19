@@ -9,7 +9,7 @@ import { MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptDescribed, conceptEx
 import { MEASURES, compare } from './measures.mjs';
 
 export { CHECKLIST_VERSION };
-export const DECISION_MODEL_VERSION = 8;
+export const DECISION_MODEL_VERSION = 9;
 export const SAMPLES = 3;
 export const SAMPLE_TEMPERATURE = 0.7;
 export const CASES_RETRIEVED = 2;
@@ -462,7 +462,7 @@ export class DecisionModeler {
     const framed = await frameConcept({ router: this.router }, { question, expected }).catch(() => null);
     const checklist = conceptChecklist(framed, await this.checklistModeler.build(question, guidance), { criteria: finalModel.criteria ?? [] });
     const requirements = framed?.criteria ?? [];
-    const framing = framed ? { population: framed.population, limits: framed.limits, ranks: framed.ranks, context: framed.context, method: framed.method, samples: framed.samples } : null;
+    const framing = framed ? { population: framed.population, limits: framed.limits, ranks: framed.ranks, context: framed.context, method: framed.method, open: framed.open ?? [], samples: framed.samples } : null;
     const covered = (text) => requirements.some((requirement) => quoteFound(text, requirement.quote) || quoteFound(requirement.quote, text));
     finalModel = { ...finalModel, missing: (finalModel.missing ?? []).filter((text) => !covered(text)) };
     const asked = conceptKindLabel(framed);

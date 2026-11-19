@@ -353,12 +353,14 @@ describe('the concept feeds the decision model', () => {
   const router = routerWith(frame);
   const question = 'Find sellers of coats, proven quality';
 
-  it('builds the hard checks from the requirements of the asker and keeps the model-written question as appraisal', async () => {
+  it('builds the hard checks from the requirements of the asker, asks the asker about a part no family placed, and keeps the model-written question as appraisal', async () => {
     const { DecisionModeler } = await import('../../src/research/decision.mjs');
     const project: Record<string, any> = { id: 'p', question, guidance: 'graded A', acceptance: { itemCount: 20, expected: '20 links' } };
     const model = await new DecisionModeler({ router } as never).build(project);
-    expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['eligibility', '20 links', true], ['appraisal', 'graded a', false]]);
-    expect(model.requirements.map((r: { id: string; quote: string; unframed?: boolean }) => [r.id, r.quote, Boolean(r.unframed)])).toEqual([['E1', 'proven quality', false], ['E2', '20 links', true]]);
+    expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['appraisal', 'graded a', false]]);
+    expect(model.requirements.map((r: { id: string; quote: string; unframed?: boolean }) => [r.id, r.quote, Boolean(r.unframed)])).toEqual([['E1', 'proven quality', false]]);
+    expect(model.framing.open.map((r: { id: string; quote: string }) => `${r.id} ${r.quote}`)).toEqual(['Q1 20 links']);
+    expect(modelText(model)).toContain('[Q1] to confirm with you: Is "20 links" a condition each result must meet?');
     expect(model.kind).toMatchObject({ label: 'seller', asked: 'sellers of coats', described: 'Find sellers of coats', examples: [] });
     expect(model.framing.population.quote).toBe('sellers of coats');
     expect(model.missing).toEqual(['Find sellers of coats']);

@@ -70,6 +70,15 @@ describe('the decision model holds every requirement of the request', () => {
     expect(router.counts['concept-frame']).toBe(calls);
   });
 
+  it('puts a part of the request no provider family could place among the questions for the asker, never among the page checks', async () => {
+    const { engine } = engineFor(frame);
+    const p: Record<string, any> = project({ question: 'Find 20 sellers of coats like Alpha Coats, Betula, cheapest first, open on sundays', assumptionsToConfirm: ['an earlier question'] });
+    await engine.ensureDecisionModel(p);
+    expect(p.decisionModel.framing.open.map((r: { quote: string }) => r.quote)).toEqual(['open on sundays']);
+    expect(p.decisionModel.checklist.map((c: { clause: string }) => c.clause)).not.toContain('open on sundays');
+    expect(p.assumptionsToConfirm).toEqual(['an earlier question', 'Is "open on sundays" a condition each result must meet? If it is, say in Hints how a result shows it.']);
+  });
+
   it('says so and keeps the model-written checklist when no model frames the request in the words of the asker', async () => {
     const { engine } = engineFor({ concept: [{ quote: 'not in the request', text: 'x' }] });
     const p: Record<string, any> = project();

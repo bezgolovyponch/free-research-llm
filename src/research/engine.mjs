@@ -24,7 +24,7 @@ import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
-import { conceptExamples, conceptOf, conceptText } from './concept.mjs';
+import { askerQuestions, conceptExamples, conceptOf, conceptText } from './concept.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, describedItem, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
 import { listedKind } from './portals.mjs';
 import { buildCandidates, candidateDeliverables, lowPriceCut, lowPriceStats, shortlistText, tableVerdict } from './candidates.mjs';
@@ -500,6 +500,7 @@ export class ResearchEngine {
     const acceptance = proposed.spec;
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
+    this.askAsker(project);
     if (acceptance?.itemCount) {
       await this.ensureDecisionModel(project);
       const brief = this.briefOf(project);
@@ -637,6 +638,7 @@ export class ResearchEngine {
     if (!this.modeler || this.demo || !project.acceptance?.itemCount || this.modeler.fresh(project)) return project.decisionModel ?? null;
     try {
       const model = await this.modeler.build(project);
+      this.askAsker(project);
       if (model?.requirements?.length) this.emit(project, 'decision', `requirements judged by meaning, from your words: ${conceptText(conceptOf(model)).split('\n').join(' · ')}`);
       else if (model && this.router) this.emit(project, 'warn', 'no model framed the request in your own words: only the measured criteria and the model-written checklist apply');
       if (model) this.emit(project, 'decision', `decision model: ${model.criteria.length} criteria kept by ${model.agreement.majority} of ${model.agreement.samples} independent proposals (${model.criteria.map((c) => `${c.measure} ${c.op} ${c.value} from ${c.source}`).join('; ') || 'none'})${model.noLimit.length ? `; asked without a limit: ${model.noLimit.map((c) => c.measure).join(', ')}` : ''}${model.missing.length ? `; not modelled: ${model.missing.length} clause(s)` : ''}${model.caseIds.length ? `; examples: ${model.caseIds.join(', ')}` : ''}`);
@@ -645,6 +647,11 @@ export class ResearchEngine {
       this.emit(project, 'decision', `decision model not built: ${String(error.message).slice(0, 160)}`);
       return project.decisionModel ?? null;
     }
+  }
+
+  askAsker(project) {
+    const asks = askerQuestions(project.decisionModel);
+    if (asks.length) project.assumptionsToConfirm = [...new Set([...(project.assumptionsToConfirm ?? []), ...asks])];
   }
 
   async rebuildDecisionModel(project) {

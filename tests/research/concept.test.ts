@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, ASKED_LIMIT, agreeFrames, askedWithUnit, conceptChecklist, definedByHint, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
+import { CONCEPT_MARKER, CONCEPT_PAGES, CONCEPT_QUERIES, CONCEPT_SAMPLES, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPages, conceptQueries, conceptQueryPrompt, mergeConceptCards, mentionsPhrase, APPRAISAL, CRITERION, CONTEXT, ELIGIBILITY, FRAME_SAMPLES, FRAME_TASK, LIMIT, POPULATION, RANK, ROLE_TASK, ASKED_LIMIT, agreeFrames, askerQuestions, askedWithUnit, conceptChecklist, definedByHint, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, framePrompt, criterionQuestion, frameSample, spanIn } from '../../src/research/concept.mjs';
 import { fakeRouter, seq } from '../helpers/fakes';
 
 describe('concept card', () => {
@@ -182,8 +182,8 @@ describe('eligibility criteria fed into the decision model checklist', () => {
   it('makes every requirement of the asker a hard check, with the examples as anchors of its class', () => {
     const checklist = conceptChecklist(concept, modelWritten);
     expect(checklist.slice(0, 2).map((c: { role: string; criterion: string; quote: string; items: Array<{ hard: boolean }> }) => [c.role, c.criterion, c.quote, c.items[0].hard])).toEqual([[ELIGIBILITY, 'E1', 'coats like Alpha Coats, Betula', true], [ELIGIBILITY, 'E2', 'proven quality', true]]);
-    expect(checklist[0].items[0].question).toBe('Does this page show that the result meets this requirement of the request: "sells coats of makers like the named ones"? The asker named Alpha Coats, Betula as examples; another member of the same class counts as well.');
-    expect(criterionQuestion(concept.criteria[1])).toBe('Does this page show that the result meets this requirement of the request: "quality is proven"?');
+    expect(checklist[0].items[0].question).toBe('Does this result meet the asker\'s requirement "sells coats of makers like the named ones"? The asker named Alpha Coats, Betula as examples; another member of the same class counts as well.');
+    expect(criterionQuestion(concept.criteria[1])).toBe('Does this result meet the asker\'s requirement "quality is proven"?');
   });
 
   it('keeps the questions a model wrote as appraisal that never vetoes, except a limit whose number the asker wrote', () => {
@@ -220,5 +220,52 @@ describe('eligibility criteria fed into the decision model checklist', () => {
     expect(conceptChecklist({ criteria: [] }, modelWritten)).toBe(modelWritten);
     expect(conceptChecklist(null)).toBeNull();
     expect(conceptChecklist(concept, null)).toHaveLength(2);
+  });
+});
+
+describe('a part of the request that no single result page can show is never a page check', () => {
+  const question = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
+  const expected = '20 direct links to the providers with proof';
+  const said = { question, expected };
+  const population = { quote: 'wholesale branded second hand clothing providers', label: 'clothing wholesaler' };
+  const brands = { quote: 'similar to Ralph Lauren, Monclair, North face, Barbour', text: 'brands of the class the examples stand for', ask: 'Does this provider sell brands like Ralph Lauren, Monclair, North face or Barbour?', examples: ['Ralph Lauren', 'Barbour'] };
+  const thin = { population, concept: [brands], ranks: [{ quote: 'highest price/value ratio', text: 'best price for value' }] };
+  const roleOf: Record<string, string> = { 'proven good quality': CRITERION, 'assortiment for the appropriate retail second hand shop business in Czech Republic': CONTEXT, '20 direct links to the providers with proof': LIMIT };
+  const voter = (request: { messages: Array<{ content: string }> }) => ({ role: roleOf[Object.keys(roleOf).find((quote) => request.messages[1].content.includes(`Part: "${quote}"`))!] });
+
+  it('keeps the question a framer wrote about one result, unless it carries a number the asker did not write, and asks it with the examples', () => {
+    const sample = frameSample({ population, concept: [brands, { quote: 'proven good quality', text: 'quality is proven', ask: 'Is the quality rated above 4.5?' }] }, said).value;
+    expect(sample[1].ask).toBe('Does this provider sell brands like Ralph Lauren, Monclair, North face or Barbour?');
+    expect(sample[2]).not.toHaveProperty('ask');
+    expect(criterionQuestion({ ...sample[1], examples: ['Ralph Lauren', 'Barbour'] })).toBe('Does this provider sell brands like Ralph Lauren, Monclair, North face or Barbour? The asker named Ralph Lauren, Barbour as examples; another member of the same class counts as well.');
+  });
+
+  it('asks two provider families what an unframed part is: a condition of one result stays a requirement, a context, a rank or a count of the list leaves the page checks', async () => {
+    const router = fakeRouter({ [FRAME_TASK]: thin, [ROLE_TASK]: voter });
+    const concept = await frameConcept({ router }, said);
+    expect(concept.criteria.map((c: { id: string; quote: string; unframed?: boolean }) => [c.id, c.quote, Boolean(c.unframed)])).toEqual([['E1', 'similar to Ralph Lauren, Monclair, North face, Barbour', false], ['E2', 'proven good quality', false]]);
+    expect(concept.context.map((c: { quote: string }) => c.quote)).toEqual(['assortiment for the appropriate retail second hand shop business in Czech Republic']);
+    expect(concept.limits.map((c: { id: string; quote: string }) => `${c.id} ${c.quote}`)).toEqual(['L1 20 direct links to the providers with proof']);
+    expect(concept.open).toEqual([]);
+    expect(router.userText(ROLE_TASK)).toContain('Part: "proven good quality"');
+    expect(conceptChecklist(concept, null).map((c: { clause: string }) => c.clause)).toEqual(['brands of the class the examples stand for', 'proven good quality']);
+  });
+
+  it('makes an unframed part a question for the asker when the families do not agree on it, and keeps an uncertain requirement a requirement', async () => {
+    const alone = fakeRouter({ [FRAME_TASK]: thin, [ROLE_TASK]: voter }, { providers: ['p1'] });
+    const concept = await frameConcept({ router: alone }, said);
+    expect(concept.criteria.map((c: { quote: string }) => c.quote)).toEqual(['similar to Ralph Lauren, Monclair, North face, Barbour']);
+    expect(concept.open.map((c: { id: string; quote: string }) => `${c.id} ${c.quote}`)).toEqual(['Q1 proven good quality', 'Q2 assortiment for the appropriate retail second hand shop business in Czech Republic', 'Q3 20 direct links to the providers with proof']);
+    expect(conceptText(concept)).toContain('[Q1] to confirm with you: Is "proven good quality" a condition each result must meet? If it is, say in Hints how a result shows it.');
+    expect(askerQuestions({ framing: { open: concept.open } })).toHaveLength(3);
+    expect(askerQuestions(null)).toEqual([]);
+    const demoting = { ...thin, concept: [brands, { quote: 'proven good quality', text: 'quality is proven' }], method: [{ quote: 'proven good quality', text: 'how to research' }] };
+    const split = fakeRouter({ [FRAME_TASK]: seq(demoting, thin, thin), [ROLE_TASK]: { role: 'method' } }, { providers: ['p1'] });
+    const kept = await frameConcept({ router: split }, said);
+    expect(kept.criteria.map((c: { quote: string; uncertain?: boolean }) => [c.quote, Boolean(c.uncertain)])).toContainEqual(['proven good quality', true]);
+    const voted = fakeRouter({ [FRAME_TASK]: seq(demoting, thin, thin), [ROLE_TASK]: (request: { messages: Array<{ content: string }> }) => (request.messages[1].content.includes('Part: "proven good quality"') ? { role: 'method' } : voter(request)) });
+    const moved = await frameConcept({ router: voted }, said);
+    expect(moved.method.map((c: { quote: string }) => c.quote)).toEqual(['proven good quality']);
+    expect(moved.criteria.map((c: { quote: string }) => c.quote)).not.toContain('proven good quality');
   });
 });

@@ -1,5 +1,5 @@
 import { plain } from './itemgate.mjs';
-import { SAMPLE_TEMPERATURE, ask } from './semantic.mjs';
+import { SAMPLE_TEMPERATURE, agreed, ask, closedVote } from './semantic.mjs';
 
 export const CONCEPT_QUERIES = 6;
 export const CONCEPT_PAGES = 10;
@@ -206,15 +206,29 @@ export const LIMIT = 'limit';
 export const RANK = 'rank';
 export const CONTEXT = 'context';
 export const METHOD = 'method';
+export const OPEN = 'open';
+export const ROLE_TASK = 'concept-role';
+export const ROLE_VOTES = 3;
+export const ROLE_QUORUM = 2;
 export const DEMOTING_ROLES = [RANK, CONTEXT, METHOD];
 export const PIECE_MIN_WORDS = 2;
 export const KIND_LABEL_CHARS = 80;
 export const CRITERION_TEXT_CHARS = 200;
 const FRAME_FIELDS = { concept: CRITERION, limits: LIMIT, ranks: RANK, context: CONTEXT, method: METHOD };
+const LISTS = { [CRITERION]: ['criteria', 'E'], [LIMIT]: ['limits', 'L'], [RANK]: ['ranks', 'R'], [CONTEXT]: ['context', 'X'], [METHOD]: ['method', 'M'], [OPEN]: ['open', 'Q'] };
+export const ROLE_OPTIONS = [
+  { id: CRITERION, text: 'a condition that each single result must meet, which the page of one result can show' },
+  { id: METHOD, text: 'how the research is to be done or the results compared; no single result can meet it' },
+  { id: CONTEXT, text: 'why the results are wanted or where they will be used' },
+  { id: RANK, text: 'which results come first: the most or the least of something across the results' },
+  { id: LIMIT, text: 'how many results are wanted, or a number that applies to the list as a whole' },
+  { id: OPEN, text: 'not a condition on its own: a piece of another part of the request' },
+];
 const ROLE_ORDER = [CRITERION, LIMIT, RANK, CONTEXT, METHOD];
 const ASKED = [['question', 'Request'], ['expected', 'Expected result']];
 
 const squeeze = (text) => String(text ?? '').replace(/\s+/g, ' ').trim();
+const numbersOf = (text) => String(text ?? '').match(/\d+(?:[.,]\d+)?/g) ?? [];
 const folded = (text) => squeeze(text).toLowerCase();
 
 export function spanIn(text, quote) {
@@ -235,7 +249,7 @@ function located(quote, said) {
 export function framePrompt({ question, expected = '' }) {
   const said = { question, expected };
   return [
-    { role: 'system', content: 'You frame one request for a list of results the way a review protocol does (population, concept, context), in any language. Every "quote" is copied letter for letter from the request or its expected result. "population": the one thing each result is, the unit that is delivered: {"quote":"...","label":"at most 8 words"}. "concept": what every single result must be, have or offer to count, one entry per separate condition: {"quote":"...","text":"the condition in at most 16 words","examples":["..."]}; when the request names examples of something, the condition is the class those examples stand for, "examples" lists them as written in the quote, and a result with another member of that class meets it. "limits": conditions stated with a number: {"quote":"..."}. "ranks": words that ask for the most or the least of something across the results, which order the results: {"quote":"...","text":"..."}. "context": why the result is wanted and where it is used: {"quote":"...","text":"..."}. "method": words about how the results are to be researched or compared, which no single result can meet: {"quote":"...","text":"..."}. Leave no part of the request out. Answer with JSON only: {"population":{"quote":"...","label":"..."},"concept":[],"limits":[],"ranks":[],"context":[],"method":[]}.' },
+    { role: 'system', content: 'You frame one request for a list of results the way a review protocol does (population, concept, context), in any language. Every "quote" is copied letter for letter from the request or its expected result. "population": the one thing each result is, the unit that is delivered: {"quote":"...","label":"at most 8 words"}. "concept": what every single result must be, have or offer to count, one entry per separate condition: {"quote":"...","text":"the condition in at most 16 words","ask":"the condition as one yes/no question about a single result, which the page of that result would answer","examples":["..."]}; when the request names examples of something, the condition is the class those examples stand for, "examples" lists them as written in the quote, and a result with another member of that class meets it. "limits": conditions stated with a number: {"quote":"..."}. "ranks": words that ask for the most or the least of something across the results, which order the results: {"quote":"...","text":"..."}. "context": why the result is wanted and where it is used: {"quote":"...","text":"..."}. "method": words about how the results are to be researched or compared, which no single result can meet: {"quote":"...","text":"..."}. Leave no part of the request out. Answer with JSON only: {"population":{"quote":"...","label":"..."},"concept":[],"limits":[],"ranks":[],"context":[],"method":[]}.' },
     { role: 'user', content: ASKED.map(([source, label]) => (squeeze(said[source]) ? `${label}: ${squeeze(said[source])}` : '')).filter(Boolean).join('\n') },
   ];
 }
@@ -247,7 +261,9 @@ export function frameSample(data, said) {
     const span = located(quote, said);
     if (!span) return;
     const examples = [...new Set((Array.isArray(entry?.examples) ? entry.examples : []).map(squeeze).filter((example) => example && spanIn(quote, example)))];
-    elements.push({ role, quote, text: squeeze(entry?.text ?? entry?.label).slice(0, CRITERION_TEXT_CHARS), examples, ...span });
+    const asked = role === CRITERION ? squeeze(entry?.ask).slice(0, CRITERION_TEXT_CHARS) : '';
+    const grounded = asked && numbersOf(asked).every((number) => numbersOf(quote).includes(number)) ? asked : '';
+    elements.push({ role, quote, text: squeeze(entry?.text ?? entry?.label).slice(0, CRITERION_TEXT_CHARS), examples, ...(grounded ? { ask: grounded } : {}), ...span });
   };
   if (data?.population) take(POPULATION, data.population);
   for (const [field, role] of Object.entries(FRAME_FIELDS)) for (const entry of Array.isArray(data?.[field]) ? data[field] : []) take(role, entry);
@@ -287,7 +303,8 @@ function settled(cluster, role) {
   const pool = members.length ? members : cluster;
   const widest = [...pool].sort((a, b) => (b.end - b.at) - (a.end - a.at) || a.at - b.at)[0];
   const examples = [...new Map(pool.flatMap((member) => member.examples).map((example) => [folded(example), example])).values()];
-  return { text: pool.map((member) => member.text).find(Boolean) || widest.quote, quote: widest.quote, source: widest.source, at: widest.at, end: widest.end, examples, samples: votersOf(cluster) };
+  const asked = pool.map((member) => member.ask).find(Boolean);
+  return { text: pool.map((member) => member.text).find(Boolean) || widest.quote, quote: widest.quote, source: widest.source, at: widest.at, end: widest.end, examples, ...(asked ? { ask: asked } : {}), samples: votersOf(cluster) };
 }
 
 function piecesOf(said) {
@@ -319,7 +336,8 @@ export function agreeFrames(samples, { question, expected = '' }) {
   for (const cluster of clustersOf(samples, (element) => element.role !== POPULATION)) {
     const role = votedRole(cluster);
     const element = settled(cluster, role);
-    byRole[role].push(element);
+    const uncertain = role === CRITERION && cluster.some((member) => DEMOTING_ROLES.includes(member.role));
+    byRole[role].push(uncertain ? { ...element, uncertain: true } : element);
     framed.push(element);
   }
   const head = population ? settled(population, POPULATION) : null;
@@ -340,7 +358,44 @@ export function agreeFrames(samples, { question, expected = '' }) {
     ranks: numbered(RANK, 'R'),
     context: numbered(CONTEXT, 'X'),
     method: numbered(METHOD, 'M'),
+    open: [],
   };
+}
+
+export function rolePrompt({ question, expected = '', quote, options }) {
+  return [
+    { role: 'system', content: 'You sort one part of a request for a list of results by what it asks, in any language. Pick the one option that fits that part. Answer with JSON only: {"role":"<letter>"}.' },
+    { role: 'user', content: `${ASKED.map(([source, label]) => (squeeze({ question, expected }[source]) ? `${label}: ${squeeze({ question, expected }[source])}` : '')).filter(Boolean).join('\n')}\n\nPart: "${quote}"\n\nThis part is:\n${options.map((option) => `${option.letter}) ${option.text}`).join('\n')}` },
+  ];
+}
+
+const without = (element, keys) => Object.fromEntries(Object.entries(element).filter(([key]) => !keys.includes(key)));
+
+export async function settleRoles(ctx, concept) {
+  if (!concept) return concept;
+  const lists = Object.fromEntries(Object.values(LISTS).map(([name]) => [name, [...(name === 'criteria' ? [] : concept[name] ?? [])]]));
+  for (const criterion of concept.criteria ?? []) {
+    if (!criterion.unframed && !criterion.uncertain) {
+      lists.criteria.push(criterion);
+      continue;
+    }
+    const result = ctx?.router ? await closedVote({ router: ctx.router, task: ROLE_TASK, tier: 'fast', options: ROLE_OPTIONS, field: 'role', seed: criterion.quote, prompt: (options) => rolePrompt({ question: concept.question, expected: concept.expected, quote: criterion.quote, options }), n: ROLE_VOTES, quorum: ROLE_QUORUM, budget: ctx.budget, stage: FRAME_STAGE }) : null;
+    const role = agreed(result)?.id ?? null;
+    const element = { ...without(criterion, ['id', 'unframed', 'uncertain']), ...(result ? { roleVote: result.tally } : {}) };
+    if (role) lists[LISTS[role][0]].push(element);
+    else if (criterion.uncertain) lists.criteria.push({ ...without(criterion, ['id']), ...(result ? { roleVote: result.tally } : {}) });
+    else lists.open.push(element);
+  }
+  const numbered = Object.fromEntries(Object.values(LISTS).map(([name, prefix]) => [name, lists[name].sort(inOrder).map((element, index) => ({ ...without(element, ['id']), id: `${prefix}${index + 1}` }))]));
+  return { ...concept, ...numbered };
+}
+
+export function openQuestion(entry) {
+  return `Is "${entry.quote}" a condition each result must meet? If it is, say in Hints how a result shows it.`;
+}
+
+export function askerQuestions(model) {
+  return (model?.framing?.open ?? []).map(openQuestion);
 }
 
 export async function frameConcept(ctx, { question, expected = '' }) {
@@ -350,7 +405,7 @@ export async function frameConcept(ctx, { question, expected = '' }) {
     const reply = await ask({ router: ctx.router, task: FRAME_TASK, tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: framePrompt(said), schema: (data) => frameSample(data, said), budget: ctx.budget, stage: FRAME_STAGE });
     if (reply) samples.push(reply.value);
   }
-  return samples.length ? agreeFrames(samples, said) : null;
+  return samples.length ? settleRoles(ctx, agreeFrames(samples, said)) : null;
 }
 
 export function conceptOf(model) {
@@ -375,7 +430,8 @@ export const APPRAISAL = 'appraisal';
 
 export function criterionQuestion(criterion) {
   const examples = criterion.examples?.length ? ` The asker named ${criterion.examples.join(', ')} as examples; another member of the same class counts as well.` : '';
-  return `Does this page show that the result meets this requirement of the request: "${criterion.text}"?${examples}`;
+  const asked = squeeze(criterion.ask);
+  return `${asked || `Does this result meet the asker's requirement "${criterion.text}"?`}${examples}`;
 }
 
 export function askedWithUnit(text, value, unit) {
@@ -404,7 +460,7 @@ export function conceptChecklist(concept, checklist = null, { criteria = [] } = 
     if (!item.hard || !item.numeric?.measure) return '';
     return askedWithUnit(asked, item.numeric.value, item.numeric.unit) ? ASKED_LIMIT : definedByHint(item.numeric, criteria, concept.question);
   };
-  const eligibility = concept.criteria.map((criterion) => ({ clause: criterion.text, role: ELIGIBILITY, criterion: criterion.id, quote: criterion.quote, items: [{ clause: criterion.text, question: criterionQuestion(criterion), hard: true, criterion: criterion.id, examples: criterion.examples ?? [] }] }));
+  const eligibility = concept.criteria.filter((criterion) => !criterion.unframed).map((criterion) => ({ clause: criterion.text, role: ELIGIBILITY, criterion: criterion.id, quote: criterion.quote, items: [{ clause: criterion.text, question: criterionQuestion(criterion), hard: true, criterion: criterion.id, examples: criterion.examples ?? [] }] }));
   const appraisal = (checklist ?? []).map((cluster) => ({ ...cluster, role: APPRAISAL, items: cluster.items.map((item) => {
     const source = limitSource(item);
     return { ...item, hard: Boolean(source), ...(source ? { limitSource: source } : {}) };
@@ -420,5 +476,6 @@ export function conceptText(concept) {
   for (const limit of concept.limits ?? []) lines.push(`[${limit.id}] limit: ${limit.quote}`);
   for (const rank of concept.ranks ?? []) lines.push(`[${rank.id}] ranks the eligible: ${rank.text}`);
   for (const entry of concept.context ?? []) lines.push(`Context: ${entry.text}`);
+  for (const entry of concept.open ?? []) lines.push(`[${entry.id}] to confirm with you: ${openQuestion(entry)}`);
   return lines.join('\n');
 }
