@@ -534,7 +534,7 @@ export class DecisionModeler {
     this.embedder = embedder;
     this.cases = cases;
     this.samples = samples;
-    this.checklistModeler = new ChecklistModeler({ router, samples });
+    this.checklistModeler = new ChecklistModeler({ router, samples, embedder });
   }
 
   fresh(project) {

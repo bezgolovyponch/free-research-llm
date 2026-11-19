@@ -1,7 +1,6 @@
-import { plain } from './itemgate.mjs';
 import { isUmbrella } from './concept.mjs';
 import { MAX_SPAN_CHARS, pickRanked, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
-import { agreed, closedVote, familyProposals } from './semantic.mjs';
+import { agreeAcrossSamples, agreed, closedVote, familyProposals, matchPrompt } from './semantic.mjs';
 import { MEASURES as DecisionMeasures, compare, adaptForChecklist } from './measures.mjs';
 
 const isAnswer = (entry) => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry) && 'id' in entry && 'answer' in entry;
@@ -99,34 +98,14 @@ export function normalizeSample(raw) {
   return { items };
 }
 
-export function clusterChecklist(samples) {
-  const allItems = [];
-  for (let sampleIdx = 0; sampleIdx < samples.length; sampleIdx++) {
-    for (const item of samples[sampleIdx].items) {
-      allItems.push({ ...item, sampleIdx });
-    }
-  }
+export const CHECKLIST_MATCH_TASK = 'checklist-match';
 
-  const groups = [];
-  for (const item of allItems) {
-    let placed = false;
-    for (const group of groups) {
-      if (sameMeaning(group[0].question, item.question)) {
-        group.push(item);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) groups.push([item]);
-  }
-
+export async function clusterChecklist(samples, { router, embedder = null } = {}) {
   const majority = Math.floor(samples.length / 2) + 1;
+  const agreed = await agreeAcrossSamples({ samples: samples.map((sample) => sample.items), textOf: (item) => item.question, minSamples: majority, embedder, router, prompt: matchPrompt('question about one result'), task: CHECKLIST_MATCH_TASK });
   const clusters = [];
 
-  for (const group of groups) {
-    const sampleCount = new Set(group.map((i) => i.sampleIdx)).size;
-    if (sampleCount < majority) continue;
-
+  for (const { items: group } of agreed) {
     const questions = group.map((i) => i.question);
     const questionCounts = new Map();
     for (const q of questions) {
@@ -164,23 +143,6 @@ export function clusterChecklist(samples) {
   }
 
   return clusters;
-}
-
-function sameMeaning(a, b) {
-  const wa = contentWords(a);
-  const wb = contentWords(b);
-  return jaccard(wa, wb) >= 0.3;
-}
-
-const QUESTION_SCAFFOLD = new Set(['does', 'this', 'that', 'these', 'have', 'with', 'from', 'page', 'state', 'stated', 'show', 'shows', 'list', 'listed', 'item', 'offer', 'offered', 'there', 'their', 'they', 'which', 'what', 'about', 'than', 'mention', 'mentions', 'include', 'includes', 'provide', 'provided']);
-
-function contentWords(text) {
-  return new Set(plain(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !QUESTION_SCAFFOLD.has(w)));
-}
-
-function jaccard(a, b) {
-  const union = new Set([...a, ...b]).size;
-  return union ? [...a].filter((w) => b.has(w)).length / union : 0;
 }
 
 const OPS = ['<=', '>=', '<', '>'];
@@ -265,15 +227,16 @@ export function filterCountItems(clusters, counts) {
 }
 
 export class ChecklistModeler {
-  constructor({ router, samples = 3 } = {}) {
+  constructor({ router, samples = 3, embedder = null } = {}) {
     this.router = router;
     this.samples = samples;
+    this.embedder = embedder;
   }
 
   async build(question, guidance = '') {
     const samples = await proposeChecklist({ router: this.router, question, guidance, samples: this.samples });
     if (!samples.length) return null;
-    return samples.length === 1 ? singleChecklist(samples[0]) : clusterChecklist(samples);
+    return samples.length === 1 ? singleChecklist(samples[0]) : clusterChecklist(samples, { router: this.router, embedder: this.embedder });
   }
 }
 

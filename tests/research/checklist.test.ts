@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged, NO_ANSWER_REASON, SECOND_PENDING_REASON, NO_CHECKLIST_ITEM } from '../../src/research/checklist.mjs';
-import { FAIL, fakeRouter, seq, fakeEmbedder } from '../helpers/fakes';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged, NO_ANSWER_REASON, SECOND_PENDING_REASON, NO_CHECKLIST_ITEM, CHECKLIST_MATCH_TASK } from '../../src/research/checklist.mjs';
+import { FAIL, fakeRouter, seq, fakeEmbedder, pickLetter } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 import { hardIdsOf, itemTier, awaitsSecondFamily } from '../../src/research/verdict.mjs';
+import { DecisionModeler } from '../../src/research/decision.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -29,13 +30,20 @@ describe('normalizeSample', () => {
 });
 
 describe('clusterChecklist', () => {
-  it('groups items by question meaning across samples and keeps majority groups', () => {
+  const sameAs = (groups: string[][]) => fakeRouter({ [CHECKLIST_MATCH_TASK]: (request: { messages: Array<{ content: string }> }) => {
+    const text = /^Text: (.+)$/m.exec(request.messages[1].content)?.[1] ?? '';
+    const group = groups.find((members) => members.includes(text)) ?? [text];
+    return { pick: pickLetter(request as never, (option) => option !== text && group.includes(option)) };
+  } });
+  const sellsWholesale = ['Does this sell wholesale?', 'Is this a wholesale supplier?', 'Does this offer wholesale?'];
+
+  it('groups items by question meaning across samples and keeps majority groups', async () => {
     const samples = [
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }, { clause: 'brands', question: 'Does this carry Ralph Lauren?', hard: true }] },
       { items: [{ clause: 'wholesale', question: 'Is this a wholesale supplier?', hard: true }, { clause: 'brands', question: 'Does this carry Moncler?', hard: true }] },
       { items: [{ clause: 'wholesale', question: 'Does this offer wholesale?', hard: true }, { clause: 'brands', question: 'Does this carry The North Face?', hard: true }] },
     ];
-    const clusters = clusterChecklist(samples);
+    const clusters = await clusterChecklist(samples, { router: sameAs([sellsWholesale, ['Is price <= 50?', 'Is price <= 100?']]) });
     expect(clusters.length).toBe(1);
     const wholesale = clusters.find((c) => c.clause === 'wholesale');
     expect(wholesale).toBeDefined();
@@ -44,32 +52,55 @@ describe('clusterChecklist', () => {
     expect(clusters.find((c) => c.clause === 'brands')).toBeUndefined();
   });
 
-  it('questions that share only question words are different questions', () => {
+  it('questions that share only question words are different questions', async () => {
     const samples = [0, 1, 2].map(() => ({ items: [
       { clause: 'size', question: 'Does this listing state the engine size?', hard: true },
       { clause: 'distance', question: 'Does this listing state the mileage?', hard: false },
     ] }));
-    const questions = clusterChecklist(samples).flatMap((c) => c.items.map((i) => i.question));
+    const questions = (await clusterChecklist(samples, { router: sameAs([]) })).flatMap((c) => c.items.map((i) => i.question));
     expect(questions.sort()).toEqual(['Does this listing state the engine size?', 'Does this listing state the mileage?']);
   });
 
-  it('keeps only groups with majority across samples', () => {
+  it('groups questions with no word in common when independent provider families say they ask the same, with the embedder shortlist', async () => {
+    const samples = [
+      { items: [{ clause: 'delivery', question: 'Does it ship to the Czech Republic?', hard: true }] },
+      { items: [{ clause: 'shipping', question: 'Can buyers in Prague receive deliveries?', hard: true }] },
+    ];
+    const router = sameAs([['Does it ship to the Czech Republic?', 'Can buyers in Prague receive deliveries?']]);
+    const embedder = fakeEmbedder();
+    const clusters = await clusterChecklist(samples, { router, embedder });
+    expect(clusters.map((c: { clause: string; items: Array<{ question: string; hard: boolean }> }) => [c.clause, c.items[0].question, c.items[0].hard])).toEqual([['delivery', 'Does it ship to the Czech Republic?', true]]);
+    expect(router.count(CHECKLIST_MATCH_TASK)).toBeGreaterThan(0);
+    expect(embedder.calls.map((call: { query: string }) => call.query)).toEqual(['Can buyers in Prague receive deliveries?']);
+  });
+
+  it('keeps questions that share most words but ask different things apart, and one provider family alone merges nothing', async () => {
+    const samples = [
+      { items: [{ clause: 'size', question: 'Does this listing state the engine size?', hard: true }] },
+      { items: [{ clause: 'power', question: 'Does this listing state the engine power?', hard: true }] },
+    ];
+    expect(await clusterChecklist(samples, { router: sameAs([]) })).toEqual([]);
+    const alone = fakeRouter({ [CHECKLIST_MATCH_TASK]: (request: { messages: Array<{ content: string }> }) => ({ pick: pickLetter(request as never, (option) => option.includes('engine')) }) }, { providers: ['p1'] });
+    expect(await clusterChecklist(samples, { router: alone })).toEqual([]);
+  });
+
+  it('keeps only groups with majority across samples', async () => {
     const samples = [
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
       { items: [{ clause: 'quality', question: 'Is quality proven?', hard: true }] },
       { items: [{ clause: 'assortment', question: 'Is assortment listed?', hard: false }] },
     ];
-    const clusters = clusterChecklist(samples);
+    const clusters = await clusterChecklist(samples, { router: sameAs([sellsWholesale, ['Is price <= 50?', 'Is price <= 100?']]) });
     expect(clusters.length).toBe(0);
   });
 
-  it('does not invent fallback questions', () => {
+  it('does not invent fallback questions', async () => {
     const samples = [
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
       { items: [{ clause: 'quality', question: 'Is quality proven?', hard: true }] },
       { items: [{ clause: 'assortment', question: 'Is assortment listed?', hard: false }] },
     ];
-    const clusters = clusterChecklist(samples);
+    const clusters = await clusterChecklist(samples, { router: sameAs([sellsWholesale, ['Is price <= 50?', 'Is price <= 100?']]) });
     for (const c of clusters) {
       for (const item of c.items) {
         expect(item.question).not.toMatch(/^Does this .+\?$/);
@@ -77,44 +108,44 @@ describe('clusterChecklist', () => {
     }
   });
 
-  it('uses most common wording for question', () => {
+  it('uses most common wording for question', async () => {
     const samples = [
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
       { items: [{ clause: 'wholesale', question: 'Is this a wholesale supplier?', hard: true }] },
     ];
-    const clusters = clusterChecklist(samples);
+    const clusters = await clusterChecklist(samples, { router: sameAs([sellsWholesale, ['Is price <= 50?', 'Is price <= 100?']]) });
     expect(clusters.length).toBe(1);
     expect(clusters[0].items[0].question).toBe('Does this sell wholesale?');
   });
 
-  it('hard is true when majority marked hard', () => {
+  it('hard is true when majority marked hard', async () => {
     const samples = [
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: false }] },
     ];
-    const clusters = clusterChecklist(samples);
+    const clusters = await clusterChecklist(samples, { router: sameAs([sellsWholesale, ['Is price <= 50?', 'Is price <= 100?']]) });
     expect(clusters[0].items[0].hard).toBe(true);
   });
 
-  it('hard is false when minority marked hard', () => {
+  it('hard is false when minority marked hard', async () => {
     const samples = [
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: true }] },
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: false }] },
       { items: [{ clause: 'wholesale', question: 'Does this sell wholesale?', hard: false }] },
     ];
-    const clusters = clusterChecklist(samples);
+    const clusters = await clusterChecklist(samples, { router: sameAs([sellsWholesale, ['Is price <= 50?', 'Is price <= 100?']]) });
     expect(clusters[0].items[0].hard).toBe(false);
   });
 
-  it('numeric from majority', () => {
+  it('numeric from majority', async () => {
     const samples = [
       { items: [{ clause: 'price', question: 'Is price <= 50?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 50, unit: 'EUR' } }] },
       { items: [{ clause: 'price', question: 'Is price <= 50?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 50, unit: 'EUR' } }] },
       { items: [{ clause: 'price', question: 'Is price <= 100?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 100, unit: 'EUR' } }] },
     ];
-    const clusters = clusterChecklist(samples);
+    const clusters = await clusterChecklist(samples, { router: sameAs([sellsWholesale, ['Is price <= 50?', 'Is price <= 100?']]) });
     expect(clusters.length).toBe(1);
     expect(clusters[0].items[0].numeric).toMatchObject({ measure: 'priceEur', op: '<=', value: 50, unit: 'EUR' });
   });
@@ -213,6 +244,22 @@ describe('ChecklistModeler with fake router', () => {
     };
     expect(await proposeChecklist({ router, question: supplierQuestion, samples: 3 })).toHaveLength(1);
     expect(callCount).toBe(2);
+  });
+
+  it('matches the questions of different families by meaning, with the embedder the decision model hands it', async () => {
+    const worded: Record<string, unknown> = { a: { items: [{ clause: 'delivery', question: 'Does it ship to the Czech Republic?', hard: true }] }, b: { items: [{ clause: 'shipping', question: 'Can buyers in Prague receive deliveries?', hard: true }] } };
+    const router = {
+      complete: async (req: { avoid?: string[]; task?: string; choice?: unknown; messages: Array<{ content: string }> }) => {
+        const avoided = new Set(req.avoid ?? []);
+        const provider = ['a', 'b'].find((id) => !avoided.has(id)) ?? 'a';
+        if (req.task === CHECKLIST_MATCH_TASK) return { provider, model: `${provider}-model`, data: { pick: pickLetter(req as never, (option) => option === 'Does it ship to the Czech Republic?') } };
+        return { provider, model: `${provider}-model`, data: worded[provider] };
+      },
+    };
+    const embedder = fakeEmbedder();
+    const checklist = await new DecisionModeler({ router, embedder } as never).checklistModeler.build('Find wholesalers that deliver to Prague', '');
+    expect(checklist!.map((c: { clause: string }) => c.clause)).toEqual(['delivery']);
+    expect(embedder.calls).toHaveLength(1);
   });
 
   it('keeps the checklist of the only provider family that answered, marked single, with no item hard: one family never vetoes', async () => {
