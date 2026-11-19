@@ -66,6 +66,28 @@ export class ProjectBusyError extends Error {}
 export class NotFoundError extends Error {}
 export class ResearchCancelled extends Error {}
 
+export function deriveRequirementIds(model) {
+  if (!model) return [];
+  const fromRequirements = model.requirements ?? [];
+  if (fromRequirements.length) {
+    return fromRequirements.map((r, i) => ({ id: r.measure ?? `R${i + 1}`, label: r.clause ?? r.measure ?? `Requirement ${i + 1}` }));
+  }
+  const criteria = model.criteria ?? [];
+  const checklist = model.checklist ?? [];
+  const ids = [];
+  for (let i = 0; i < criteria.length; i++) {
+    const c = criteria[i];
+    ids.push({ id: c.id ?? c.measure ?? `C${i + 1}`, label: c.clause ?? `${c.measure} ${c.op} ${c.value ?? ''}`.trim() });
+  }
+  let kIndex = 1;
+  for (const cluster of checklist) {
+    for (const item of cluster.items ?? []) {
+      ids.push({ id: item.clause ? `K${kIndex++}` : `K${kIndex++}`, label: item.clause ?? `Checklist item ${kIndex}` });
+    }
+  }
+  return ids;
+}
+
 function fullPriceTitles(pages) {
   const byUnit = new Map();
   for (const page of pages ?? []) {
@@ -473,13 +495,41 @@ export class ResearchEngine {
     const template = templateById(project.templateId);
     this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
+    const model = project.decisionModel;
+    const purpose = model?.purpose ?? '';
+    const requirementIds = deriveRequirementIds(model);
+    const requirements = requirementIds.map((r) => ({ id: r.id, clause: r.label, measure: r.id, op: '', value: null, quote: '' }));
+    const domainCard = project.domain ? {
+      terms: project.domain.terms,
+      not: project.domain.not,
+      where: project.domain.where,
+      process: project.domain.process,
+      quality: project.domain.quality,
+      actors: project.domain.actors,
+      use: project.domain.use,
+      object: project.domain.object,
+      members: project.domain.members,
+      evidence: project.domain.evidence,
+      ready: project.domain.ready,
+      basis: project.domain.basis,
+    } : null;
     const ask = async (feedback) => {
       const reply = await this.router.complete({
         purpose: 'decompose',
         tier: 'deep',
-        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback, listsItems: Boolean(project.acceptance?.itemCount) }), project.guidance),
+        messages: withGuidance(decomposePrompt({ question: project.question, template, constraints: project.constraints, dataSummary: project.data?.text, expected: project.acceptance?.expected, brief: this.briefOf(project).text, feedback, listsItems: Boolean(project.acceptance?.itemCount), purpose, requirements, domainCard }), project.guidance),
       });
       const tree = normalizeTree(reply.data, project.question);
+      const validRequirementIds = new Set(requirements.map((r) => r.id));
+      let unknownServes = 0;
+      for (const node of tree.nodes) {
+        if (node.serves && Array.isArray(node.serves)) {
+          const filtered = node.serves.filter((id) => validRequirementIds.has(id));
+          unknownServes += node.serves.length - filtered.length;
+          node.serves = filtered;
+        }
+      }
+      if (unknownServes) this.emit(project, 'tree', `${unknownServes} unknown requirement id(s) in 'serves' dropped`);
       const fixes = repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
       return { reply, tree, issues: auditTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) })), fixes };
     };
@@ -505,7 +555,6 @@ export class ResearchEngine {
         if (marked.covered.length) this.emit(project, 'tree', `pieces covered by code on the candidate table, not researched: ${marked.covered.join(', ')}`);
       } else this.emit(project, 'tree', `no listing portal is known for "${brief.kind?.label ?? 'this item'}": the pieces that find the items are researched, and ${brief.regions.join(', ') || 'the asked place'} is where the result is used, not a filter on sources`);
     }
-    const model = project.decisionModel;
     if (model) {
       this.emit(project, 'decision', `purpose: ${model.purpose || 'not stated clearly — pieces must not be researched until it is'}`);
       if (model.value) this.emit(project, 'decision', `value: ${model.value}`);
@@ -523,7 +572,13 @@ export class ResearchEngine {
     this.running.add(id);
     try {
       const project = await this.load(id);
-      if (!project.nodes.length) await this.decompose(project, 'building-tree');
+      if (!project.nodes.length) {
+        if (!(await this.ensurePurpose(project))) {
+          await this.store.save(project, { reason: 'build paused: the purpose is not stated' });
+          return project;
+        }
+        await this.decompose(project, 'building-tree');
+      }
       this.setPhase(project, 'tree-ready');
       this.emit(project, 'phase', 'tree ready — review it, then press Run or start the self-improving loop');
       return await this.store.save(project, { reason: 'tree built' });
@@ -1964,12 +2019,12 @@ export class ResearchEngine {
         this.setPhase(project, 'created');
       }
       await this.searchHubs(project);
-      if (!project.nodes.length) await this.decompose(project);
       this.reground(project);
       if (!await this.ensurePurpose(project)) {
         await this.store.save(project, { reason: 'run paused: the purpose is not stated' });
         return project;
       }
+      if (!project.nodes.length) await this.decompose(project);
       if (!await this.validateConcept(project)) {
         await this.store.save(project, { reason: 'run paused: the concept did not validate' });
         return project;
