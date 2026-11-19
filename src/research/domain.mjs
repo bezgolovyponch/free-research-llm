@@ -332,7 +332,7 @@ export function supportedMembers(members = [], sources = []) {
   return named;
 }
 
-export function domainUnderstanding(findings, { hint = '', sources = [], members = [] } = {}) {
+export function domainUnderstanding(findings, { hint = '', sources = [], members = [], listsItems = true } = {}) {
   const list = Array.isArray(findings) ? findings.filter(Boolean) : [];
   const byAspect = (aspect) => list.filter((finding) => String(finding?.aspect ?? '') === aspect);
   const statements = (aspect) => byAspect(aspect).map((finding) => keyPhrase(finding.statement)).filter(Boolean).slice(0, MAX_STATEMENTS);
@@ -354,6 +354,7 @@ export function domainUnderstanding(findings, { hint = '', sources = [], members
       understanding.basis = `kinds of the category named on ${SUPPORT_HOSTS}+ sites: ${named.map((member) => member.label).join(', ')}`;
     }
   }
-  understanding.ready = understanding.object.length > 0 && understanding.terms.length > 0;
+  const namesNothing = byAspect('terms').length === 0;
+  understanding.ready = understanding.object.length > 0 && (understanding.terms.length > 0 || (!listsItems && namesNothing));
   return understanding;
 }

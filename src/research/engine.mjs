@@ -497,7 +497,9 @@ export class ResearchEngine {
     await this.ensureDecisionModel(project);
     const model = project.decisionModel;
     const purpose = model?.purpose ?? '';
-    const requirementIds = deriveRequirementIds(model);
+    const derivedIds = deriveRequirementIds(model);
+    const askerIds = [project.acceptance?.expected && { id: 'E1', label: String(project.acceptance.expected) }, { id: 'Q1', label: String(project.question ?? '') }].filter((r) => r && r.label.trim());
+    const requirementIds = derivedIds.length ? derivedIds : askerIds;
     const requirements = requirementIds.map((r) => ({ id: r.id, clause: r.label, measure: r.id, op: '', value: null, quote: '' }));
     const domainCard = project.domain ? {
       terms: project.domain.terms,
@@ -854,7 +856,7 @@ export class ResearchEngine {
       replies.push(answer);
     }
     const findings = mergeFindings(replies, sources);
-    const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [] });
+    const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [], listsItems: Boolean(project.acceptance?.itemCount || kind?.label) });
     const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
     const matchedTitles = Number(project.decisionModel?.kind?.verified?.matched ?? 0);
     const sweptListings = (project.sweep?.pages ?? []).reduce((n, page) => n + (page.listings?.length ?? 0), 0);
