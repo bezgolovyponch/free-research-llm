@@ -237,6 +237,17 @@ describe('agreeAcrossSamples', () => {
     expect(joined.map((entry: { samples: number }) => entry.samples)).toEqual([3]);
     expect(same.calls).toHaveLength(2);
   });
+
+  it('marks, and on request keeps, an item whose match no two families could decide, apart from one the families placed nowhere', async () => {
+    const samples = [['minimum order size'], ['smallest order']];
+    const textOf = (text: string) => text;
+    const alone = fakeRouter({ match: { pick: 'A' } }, { providers: ['p1'] });
+    expect(await agreeAcrossSamples({ samples, textOf, router: alone, prompt: matchPrompt('attribute'), task: 'match' })).toEqual([]);
+    const kept = await agreeAcrossSamples({ samples, textOf, router: fakeRouter({ match: { pick: 'A' } }, { providers: ['p1'] }), prompt: matchPrompt('attribute'), task: 'match', keepUndecided: true });
+    expect(kept).toEqual([{ item: 'smallest order', items: ['smallest order'], samples: 1, undecided: true }]);
+    const placed = await agreeAcrossSamples({ samples, textOf, router: fakeRouter({ match: { pick: 'N' } }), prompt: matchPrompt('attribute'), task: 'match', keepUndecided: true });
+    expect(placed).toEqual([]);
+  });
 });
 
 describe('vote with a family that must not count', () => {

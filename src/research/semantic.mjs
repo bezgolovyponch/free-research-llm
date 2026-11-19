@@ -230,24 +230,27 @@ export function matchPrompt(what) {
   ];
 }
 
-export async function agreeAcrossSamples({ samples, textOf, sameKey = null, minSamples = 2, embedder = null, router, prompt, task, budget = null, stage = null }) {
+export async function agreeAcrossSamples({ samples, textOf, sameKey = null, minSamples = 2, embedder = null, router, prompt, task, budget = null, stage = null, keepUndecided = false }) {
   const clusters = [];
   for (const [sample, items] of samples.entries()) {
     for (const item of items) {
       const open = clusters.filter((cluster) => !cluster.samples.has(sample) && (!sameKey || sameKey(cluster.items[0]) === sameKey(item)));
       const exact = open.find((cluster) => cluster.items.some((other) => textOf(other).trim().toLowerCase() === textOf(item).trim().toLowerCase()));
       let home = exact ?? null;
+      let undecided = false;
       if (!home && open.length) {
         const match = await retrieveThenVerify({ query: textOf(item), candidates: open.map((cluster, id) => ({ id, text: textOf(cluster.items[0]) })), embedder, router, prompt, task, budget, stage });
         home = match.picked ? open[match.picked.id] : null;
+        undecided = !home && !match.none;
       }
       if (home) {
         home.items.push(item);
         home.samples.add(sample);
-      } else clusters.push({ items: [item], samples: new Set([sample]) });
+      } else clusters.push({ items: [item], samples: new Set([sample]), undecided });
     }
   }
-  return clusters.filter((cluster) => cluster.samples.size >= minSamples).map((cluster) => ({ item: cluster.items[0], items: cluster.items, samples: cluster.samples.size }));
+  const short = (cluster) => cluster.samples.size < minSamples;
+  return clusters.filter((cluster) => !short(cluster) || (keepUndecided && cluster.undecided)).map((cluster) => ({ item: cluster.items[0], items: cluster.items, samples: cluster.samples.size, ...(short(cluster) ? { undecided: true } : {}) }));
 }
 
 export const PROPOSAL_WAVES = 3;

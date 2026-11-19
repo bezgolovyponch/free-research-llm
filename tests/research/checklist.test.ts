@@ -81,7 +81,20 @@ describe('clusterChecklist', () => {
     ];
     expect(await clusterChecklist(samples, { router: sameAs([]) })).toEqual([]);
     const alone = fakeRouter({ [CHECKLIST_MATCH_TASK]: (request: { messages: Array<{ content: string }> }) => ({ pick: pickLetter(request as never, (option) => option.includes('engine')) }) }, { providers: ['p1'] });
-    expect(await clusterChecklist(samples, { router: alone })).toEqual([]);
+    expect((await clusterChecklist(samples, { router: alone })).filter((c: { single?: boolean }) => !c.single)).toEqual([]);
+  });
+
+  it('keeps a question whose match no two provider families could decide as a soft check marked single, never drops it and never makes it hard', async () => {
+    const samples = [
+      { items: [{ clause: 'delivery', question: 'Does it ship to the Czech Republic?', hard: true }, { clause: 'bulk', question: 'Does it sell by the bale?', hard: true }] },
+      { items: [{ clause: 'shipping', question: 'Can buyers in Prague receive deliveries?', hard: true }, { clause: 'bulk', question: 'Does it sell by the bale?', hard: true }] },
+    ];
+    const alone = fakeRouter({ [CHECKLIST_MATCH_TASK]: (request: { messages: Array<{ content: string }> }) => ({ pick: pickLetter(request as never, (option) => option.startsWith('Does it ship')) }) }, { providers: ['p1'] });
+    const clusters = await clusterChecklist(samples, { router: alone });
+    expect(clusters.map((c: { clause: string; single?: boolean; items: Array<{ question: string; hard: boolean }> }) => [c.clause, c.items[0].question, c.items[0].hard, Boolean(c.single)])).toEqual([
+      ['bulk', 'Does it sell by the bale?', true, false],
+      ['shipping', 'Can buyers in Prague receive deliveries?', false, true],
+    ]);
   });
 
   it('keeps only groups with majority across samples', async () => {
