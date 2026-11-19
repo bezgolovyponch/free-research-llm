@@ -5,7 +5,6 @@ import { ROOT_ID, childrenOf } from './research/tree.mjs';
 import { actionPlan, resultStatus } from './research/gaps.mjs';
 import { preconditions, effect } from './research/nodevalidity.mjs';
 import { ACTION_LABEL, itemRows, piecesRows, plotRows } from './workbook.mjs';
-import { verdictReport } from './research/verdict.mjs';
 
 function bullets(items) {
   return items?.length ? items.map((i) => `- ${i}`).join('\n') : '- none';
@@ -103,7 +102,7 @@ export function resultsJson(project) {
     verdict: project.report?.verdict ?? null,
     bestEstimate: project.report?.bestEstimate ?? null,
     confidence: { model: project.report?.confidence ?? null, byChecks: status.confidence, coverage: status.coverage, provisional: status.provisional },
-    expectedResult: project.acceptanceResult ? { score: project.acceptanceResult.score, checks: project.acceptanceResult.checks, verdict: verdictReport(project) } : null,
+    expectedResult: project.acceptanceResult ? { score: project.acceptanceResult.score, checks: project.acceptanceResult.checks } : null,
     actions: status.plan,
     brokenNodes: broken.map((b) => ({ nodeId: b.node.id, title: b.node.title, reason: b.reason, nextStep: 'Fix the failed precondition or effect: ' + b.reason + '. Press Re-research on this row.' })),
     pieces: project.nodes.map((n) => ({ id: n.id, parentId: n.parentId, title: n.title, question: n.question, grade: n.status, answer: n.finding?.answer ?? null, claims: n.finding?.claims ?? [], gaps: n.finding?.gaps ?? [], sources: (n.sources ?? []).filter((x) => x.url).map((x) => ({ id: x.id, title: x.title, url: x.url })) })),
@@ -113,37 +112,10 @@ export function resultsJson(project) {
   };
 }
 
-const OPEN_ANSWERS = new Set(['no', 'unknown', 'not judged']);
-
-function reasonText(reason) {
-  const proof = reason.quote ? ` — "${reason.quote}"` : reason.reason ? ` — ${reason.reason}` : '';
-  return `${reason.requirement}: ${reason.answer}${proof}`;
-}
-
-function verdictSection(report) {
-  if (!report) return [];
-  const out = ['## Result', '', `**${report.headline}**`, ''];
-  if (report.upTo) out.push(`_${report.upTo}_`, '');
-  if (report.requirements.length) {
-    out.push('### Requirements', '', '| Requirement | Met | Not met | Unknown | Share |', '|---|---|---|---|---|');
-    for (const row of report.requirements) out.push(`| ${cell(row.label)} | ${row.yes ?? '—'} | ${row.no ?? '—'} | ${row.unknown ?? '—'} | ${Math.round(row.share * 100)}% |`);
-    out.push('');
-  }
-  if (report.preconditions.length) out.push('### Preconditions', '', ...report.preconditions.map((c) => `- ${c.passed ? '✓' : '✗'} ${c.label}: ${c.detail}`), '');
-  const unsettled = report.items.filter((item) => item.tier !== 'confirmed');
-  if (unsettled.length) {
-    out.push('### Excluded or open items, with the reason', '', '| Item | Status | Reason |', '|---|---|---|');
-    for (const item of unsettled) out.push(`| ${cell(item.title || item.url)} | ${item.tier} | ${cell(item.reasons.filter((reason) => OPEN_ANSWERS.has(reason.answer)).map(reasonText).join('; '))} |`);
-    out.push('');
-  }
-  return out;
-}
-
 export function toMarkdown(project) {
   const r = project.report;
   const out = [`# ${project.question}`, '', `_Template: ${templateById(project.templateId).label} · phase: ${project.phase} · updated ${project.updatedAt ?? ''}_${project.demo ? ' · **DEMO MODE — scripted model, not real research**' : ''}`, ''];
   if (project.decision) out.push(`**Decision:** ${project.decision}`, '', `**Success criteria:** ${project.successCriteria || '—'}`, '');
-  out.push(...verdictSection(verdictReport(project)));
   if (r) {
     out.push('## Verdict', '', `**${r.verdict}** (confidence: ${r.confidence})`, '', r.summary, '');
     if (r.keyNumbers.length) {

@@ -102,33 +102,6 @@ describe('embedder: ranks only, one model per comparison', () => {
     expect(embedder.failures[0].error).toContain('allowance of 3');
   });
 
-  it('ranks a call that is not capped after the allowance is used up, and leaves the allowance of the other callers untouched', async () => {
-    const one = route('one');
-    const embedder = new Embedder({ env, routes: [one], fetchImpl: fetchFor([one]) as never, maxTexts: 3 });
-    expect(await embedder.rank('red', ['green', 'blue'])).not.toBeNull();
-    expect(await embedder.rank('red', ['lime', 'crimson'], 1, { capped: false })).toEqual({ model: 'one-model', order: [1] });
-    expect([embedder.embedded, embedder.exempt]).toEqual([3, 2]);
-    expect(await embedder.rank('red', ['crimson', 'blue', 'green'])).not.toBeNull();
-    expect(await embedder.rank('red', ['lime', 'green', 'yellow'])).toBeNull();
-  });
-
-  it('waits and asks once more when every key answered 429, honouring Retry-After, and gives up after that one retry', async () => {
-    const statuses = [429, 200];
-    const waited: number[] = [];
-    const entry = { id: 'one', model: 'one-model', keys: ['ONE_KEY'], request: (_env: unknown, texts: string[]) => ({ url: 'https://embed.test/one', init: { body: JSON.stringify(texts) } }), vectors: (body: { vectors: number[][] }) => body.vectors };
-    const fetchImpl = async (_url: string, init: { body: string }) => {
-      const status = statuses.shift() ?? 429;
-      if (status !== 200) return { ok: false, status, headers: { get: (name: string) => (name === 'retry-after' ? '3' : null) }, json: async () => ({}) };
-      return { ok: true, status, json: async () => ({ vectors: (JSON.parse(init.body) as string[]).map((text) => vectorOf(text)) }) };
-    };
-    const embedder = new Embedder({ env: { ONE_KEY: 'k' }, fetchImpl: fetchImpl as never, routes: [entry] as never, wait: async (ms: number) => { waited.push(ms); } });
-    expect(await embedder.rank('red', ['crimson', 'blue'])).toEqual({ model: 'one-model', order: [0, 1] });
-    expect(waited).toEqual([3000]);
-    expect(await embedder.rank('green', ['lime'])).toBeNull();
-    expect(waited).toEqual([3000, 3000]);
-    expect(embedder.failures.at(-1)).toEqual({ route: 'one', error: 'one embeddings answered 429' });
-  });
-
   it('round-trips the disk cache per model', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-embed-'));
     const one = route('one');

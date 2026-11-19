@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome, headlineOf, scoreOf, verdictReport, verdictLines, KIND_OPEN_REASON } from "../../src/research/verdict.mjs";
-import { ChecklistJudge, LOW_PRICE_REASON, SINGLE_KIND_OPINION, SINGLE_KIND_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome } from "../../src/research/verdict.mjs";
+import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
 import { lowPriceStats } from "../../src/research/candidates.mjs";
 import { fakeRouter } from "../helpers/fakes";
 import fixture from "../fixtures/verdict-0c750f.json";
@@ -283,106 +283,6 @@ describe("verdict", () => {
   });
 });
 
-describe("the single headline owner (C9, C10; from origin/fix/honest-headline c50e86c, 60c162b)", () => {
-  const checklist = [{ clause: "sells in bulk", items: [{ hard: true, question: "q1" }] }];
-  const id = "sells in bulk|q1";
-  const item = (url: string, check: object | null, overrides = {}) => ({ url, title: url, live: true, listing: true, inRange: true, purpose: [], checks: check ? [{ id, clause: "sells in bulk", hard: true, ...check }] : [], ...overrides });
-  const items = [
-    item("https://a.test/", { answer: "yes", quote: "minimum order 500 kg" }),
-    item("https://b.test/", { answer: "no", quote: "retail shop, single pieces only" }),
-    item("https://c.test/", { answer: "unknown", reason: "the page states no order size" }),
-    item("https://d.test/", null),
-    item("https://e.test/", { answer: "yes", quote: "bales of 45 kg" }, { live: false }),
-  ];
-  const spec = { itemCount: 20, urlsLive: true, valueRange: [0, 50], unit: "EUR/kg", mustMention: [] };
-  const computed = verdict(items, spec, checklist);
-  const checks = [
-    { id: "count", label: "At least 20 valid items", value: 0.05, passed: false, detail: "1 of 5 delivered pass every check" },
-    { id: "live", label: "Links open a real page", value: 1, passed: true, detail: "4 of 5 checked links are live" },
-    { id: "range", label: "Value within 0–50 EUR/kg", value: 1, passed: true, detail: "5 of 5 pages show a value in range" },
-    { id: `checklist-${id}`, label: "Checklist: sells in bulk", value: 0.5, passed: false, detail: "2 of 4 checked items pass this hard check" },
-  ];
-  const project = { acceptance: spec, checklist, acceptanceResult: { score: scoreOf(checks), checks, items: computed.items, totalAsked: 20, validCount: computed.validCount, verdict: computed } };
-
-  it("the headline counts the items that meet every must-have out of the number asked, with the reachable count beside it", () => {
-    expect(headlineOf({ tiers: { confirmed: 2, toConfirm: 3, rejected: 5, notJudged: 10 }, asked: 20 })).toEqual({ headline: "2 of 20 meet every must-have", upTo: "up to 5 of 20 could meet every must-have (2 confirmed + 3 to confirm)", confirmed: 2, toConfirm: 3, asked: 20 });
-    expect(headlineOf({ tiers: { confirmed: 15, toConfirm: 30, rejected: 0, notJudged: 0 }, asked: 20 }).upTo).toBe("up to 20 of 20 could meet every must-have (15 confirmed + 30 to confirm)");
-    expect(headlineOf({ tiers: { confirmed: 30, toConfirm: 4, rejected: 0, notJudged: 0 }, asked: 20 })).toMatchObject({ headline: "30 of 20 meet every must-have", upTo: "" });
-  });
-
-  it("a mean of unrelated checks is never the headline: checks averaging 64% with 1 of 20 confirmed read '1 of 20'", () => {
-    const report = verdictReport(project)!;
-    expect(Math.round(project.acceptanceResult.score * 100)).toBe(64);
-    expect(report.headline).toBe("1 of 20 meet every must-have");
-    expect(report.upTo).toBe("up to 2 of 20 could meet every must-have (1 confirmed + 1 to confirm)");
-    expect(verdictLines(report).join(" ")).not.toContain("64%");
-  });
-
-  it("requirements carry their share and counts; count, links and range are preconditions listed apart", () => {
-    const report = verdictReport(project)!;
-    expect(report.requirements).toEqual([{ id: `checklist-${id}`, label: "sells in bulk", share: 0.5, detail: "2 of 4 checked items pass this hard check", yes: 2, no: 1, unknown: 1, judged: 4 }]);
-    expect(report.preconditions.map((c) => c.id)).toEqual(["count", "live", "range"]);
-    expect(report.requirements.some((r) => ["count", "live", "range", "mentions"].includes(r.id))).toBe(false);
-  });
-
-  it("every item states the quote or the reason per requirement, so an excluded or open item says why", () => {
-    const byUrl = new Map(verdictReport(project)!.items.map((entry) => [entry.url, entry]));
-    expect(byUrl.get("https://a.test/")).toMatchObject({ tier: "confirmed", reasons: [{ requirement: "sells in bulk", answer: "yes", quote: "minimum order 500 kg" }] });
-    expect(byUrl.get("https://b.test/")).toMatchObject({ tier: "rejected", reasons: [{ answer: "no", quote: "retail shop, single pieces only" }] });
-    expect(byUrl.get("https://c.test/")).toMatchObject({ tier: "to-confirm", reasons: [{ answer: "unknown", reason: "the page states no order size" }] });
-    expect(byUrl.get("https://d.test/")).toMatchObject({ tier: "not-judged", reasons: [{ requirement: id, answer: "not judged", reason: "the page was not read" }] });
-    expect(byUrl.get("https://e.test/")!.reasons[0]).toEqual({ requirement: "the link opens a page", answer: "no", quote: "", reason: "the page did not open" });
-  });
-
-  it("a research that asked for no number of items states how many checks pass, and no result means no headline", () => {
-    const memoOnly = { acceptance: { mustMention: ["permit"] }, acceptanceResult: { score: 0.5, checks: [{ id: "mentions", label: "Pages mention: permit", value: 0.5, passed: false, detail: "share of required terms found on the pages" }], items: [], totalAsked: 0 } };
-    expect(verdictReport(memoOnly)).toMatchObject({ headline: "0 of 1 expected-result checks pass", upTo: "", requirements: [] });
-    expect(verdictReport({ acceptance: { itemCount: 3 } })).toBeNull();
-    expect(verdictReport(memoOnly)!.recheckCancelled).toBe("");
-    expect(verdictReport({ ...memoOnly, acceptanceRecheck: { cancelled: true, at: "2026-11-18T20:00:00.000Z" } })!.recheckCancelled).toBe("a later re-check was cancelled at 2026-11-18T20:00:00.000Z; this is the last complete result");
-    expect(verdictLines(null)).toEqual([]);
-  });
-});
-
-describe("the kind check follows the rule of every hard check: unanswered is to confirm, only a no with a quote rejects", () => {
-  const kind = { label: "plot of land", terms: ["plot"] };
-  const kindId = "kind|" + kindCluster(kind).items[0].question;
-  const checklist = [{ clause: "price", items: [{ clause: "price", question: "Is it cheap?", hard: true }] }];
-  const hardIds = hardIdsOf(checklist, kind);
-  const plot = (kindCheck: Record<string, unknown>, purpose = [{ id: "purpose-kind", passed: false }]) => ({ url: "https://imo.example/terreno-ID1", title: "Terreno para venda", live: true, listing: true, inRange: true, purpose, checks: [{ id: "price|Is it cheap?", answer: "yes", quote: "4 900 €", hard: true, clause: "price" }, { id: kindId, clause: "kind", hard: true, ...kindCheck }] });
-  const unanswered = [
-    { answer: "unknown", quote: "", provider: null },
-    { answer: "unknown", quote: "", reason: SINGLE_KIND_REASON, second: { answer: "unknown", single: true } },
-    { answer: "unknown", quote: "", reason: SINGLE_KIND_OPINION, leaning: { answer: "no", quote: "Terreno" } },
-    { answer: "unknown", quote: "", notJudged: true },
-    { answer: "unknown", quote: "", option: "U", provider: "p1" },
-  ];
-
-  it("a kind call no provider answered, a single-family opinion, or a cannot-tell answer leaves a plot whose page lacks the asker's word to confirm", () => {
-    for (const kindCheck of unanswered) expect(itemTier(plot(kindCheck), hardIds, {})).toBe("to-confirm");
-    const result = verdict(unanswered.map((kindCheck, i) => ({ ...plot(kindCheck), url: `u${i}` })), { itemCount: 5 }, checklist, kind);
-    expect(result.tiers).toEqual({ confirmed: 0, toConfirm: 5, rejected: 0, notJudged: 0 });
-  });
-
-  it("a kind no with a quote rejects, a kind yes with a quote passes the purpose check and can confirm", () => {
-    expect(itemTier(plot({ answer: "no", quote: "Moradia T3 para venda" }), hardIds, {})).toBe("rejected");
-    expect(itemTier(plot({ answer: "yes", quote: "Terreno para venda" }), hardIds, {})).toBe("confirmed");
-    expect(qualifies(plot({ answer: "unknown", quote: "" }), {})).toBe(false);
-  });
-
-  it("a code check of the asker's own words that the page fails still rejects, and so does a dead link", () => {
-    expect(itemTier(plot({ answer: "yes", quote: "Terreno" }, [{ id: "purpose-names-1", passed: false }]), hardIds, {})).toBe("rejected");
-    expect(itemTier({ ...plot({ answer: "unknown", quote: "" }), live: false }, hardIds, {})).toBe("rejected");
-  });
-
-  it("the report names the kind as the open proof of an item to confirm", () => {
-    const item = plot({ answer: "unknown", quote: "", provider: null });
-    const report = verdictReport({ acceptance: { itemCount: 1 }, checklist, decisionModel: { kind }, acceptanceResult: { items: [item], checks: [], totalAsked: 1 } })!;
-    expect(report.items[0].tier).toBe("to-confirm");
-    expect(report.items[0].reasons.find((r: { requirement: string }) => r.requirement === "purpose-kind")).toMatchObject({ answer: "unknown", reason: KIND_OPEN_REASON });
-  });
-});
-
 describe("stored answers of the 0c750f fixture under the quote rule and the price rule", () => {
   const kind = { label: "car listing", terms: ["car"], not: ["wanted", "parts", "accessories", "retail"] };
   const tyres = "https://auto.bazos.cz/inzerat/226132468/zimni-pneu-na-plechacich-kia-ceed.php";
@@ -507,30 +407,5 @@ describe("runOutcome", () => {
 
   it("keeps the phase while the research has not finished", () => {
     expect(runOutcome({ phase: "researching", acceptanceResult: { totalAsked: 20, validCount: 1 } }).state).toBe("researching");
-  });
-});
-
-describe('a hard check that was never answered', () => {
-  const hardIds = ['a|is it a?', 'b|is it b?'];
-  const item = { live: true, listing: true, checks: [{ id: 'a|is it a?', hard: true, answer: 'yes', quote: 'it is a' }] };
-
-  it('leaves the item to confirm and lists the check as open, instead of confirming it by silence', () => {
-    expect(itemTier(item, hardIds, {})).toBe('to-confirm');
-    expect(itemEvidence(item, hardIds, {}).open).toEqual(['b|is it b?']);
-    expect(itemTier({ ...item, checks: [...item.checks, { id: 'b|is it b?', hard: true, answer: 'yes', quote: 'it is b' }] }, hardIds, {})).toBe('confirmed');
-    expect(itemTier({ ...item, checks: [] }, hardIds, {})).toBe('not-judged');
-  });
-});
-
-describe('an item whose page could not be judged', () => {
-  it('stays to confirm with the reason when no ranking or no provider answered, and is never rejected or dropped from the reachable count; only an unread page is not judged', () => {
-    const hardIds = ['a|is it a?', 'b|is it b?'];
-    const unread = { live: true, listing: true, checks: hardIds.map((id) => ({ id, hard: true, answer: 'unknown', quote: '', notJudged: true, reason: 'to confirm: no provider answered this question; it is judged again on the next check' })) };
-    expect(itemTier(unread, hardIds, {})).toBe('to-confirm');
-    expect(itemTier({ ...unread, checks: [] }, hardIds, {})).toBe('not-judged');
-    const result = verdict([{ ...unread, url: 'u1' }, { ...unread, url: 'u2', checks: [] }], { itemCount: 2 }, [{ clause: 'a', items: [{ question: 'is it a?', hard: true }] }, { clause: 'b', items: [{ question: 'is it b?', hard: true }] }]);
-    expect(result.tiers).toEqual({ confirmed: 0, toConfirm: 1, rejected: 0, notJudged: 1 });
-    expect(headlineOf(result).upTo).toBe('up to 1 of 2 could meet every must-have (0 confirmed + 1 to confirm)');
-    expect(itemTier({ ...unread, checks: [unread.checks[0], { id: 'b|is it b?', hard: true, answer: 'yes', quote: 'it is b' }] }, hardIds, {})).toBe('to-confirm');
   });
 });

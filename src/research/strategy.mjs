@@ -3,7 +3,7 @@ import { SEA_WORDS } from './brief.mjs';
 import { PERCEIVED_MAX_C } from './cci.mjs';
 import { COASTLINE_PRECISION_KM } from './coastline.mjs';
 import { CADASTRAL_GATES, cadastralPlan } from './cadastral.mjs';
-import { commonTrend, areaM2, zoningOf, explorePoints, haversineKm, EU_AGGREGATE } from './site.mjs';
+import { areaM2, zoningOf, explorePoints, haversineKm, EU_AGGREGATE } from './site.mjs';
 import { cadastreNotes } from './parcels.mjs';
 import { withConfirmRisk } from './blockers.mjs';
 import { quoteFound } from './quote.mjs';
@@ -240,18 +240,14 @@ function keepCheck(id, asked) {
   return ['units', 'legal', 'location'].includes(id);
 }
 
-export const TREND_LABEL = 'strong price increase trend: real price trend above the EU average (the limit for "strong" is derived from your purpose, not stated by you; source Eurostat)';
-
 export function planFor(row, strategy, { convert = null, euHpi = null, trends = null, asked = null } = {}) {
   const rules = strategy.rules;
   const trend = trends?.[row.countryCode] ?? null;
   const euTrend = trends?.[EU_AGGREGATE] ?? trends?.EU27_2020 ?? null;
   const localReal = trend?.real ?? row.fit?.hpi ?? null;
-  const common = commonTrend(trend, euTrend);
-  const multiYear = Boolean(common);
-  const windowed = trend?.baseFactors !== undefined || euTrend?.baseFactors !== undefined;
-  const baseReal = multiYear ? common.own : windowed ? null : trend?.realInBase ?? localReal;
-  const euBaseReal = multiYear ? common.other : windowed ? null : euTrend?.realInBase ?? euTrend?.real ?? euHpi ?? null;
+  const multiYear = trend?.realInBaseCagr !== undefined && euTrend?.realInBaseCagr !== undefined;
+  const baseReal = multiYear ? trend.realInBaseCagr : trend?.realInBase ?? localReal;
+  const euBaseReal = multiYear ? euTrend.realInBaseCagr : euTrend?.realInBase ?? euTrend?.real ?? euHpi ?? null;
   const hpi = baseReal;
   const country = strategy.countries[row.countryCode] ?? null;
   const site = row.site;
@@ -263,13 +259,13 @@ export function planFor(row, strategy, { convert = null, euHpi = null, trends = 
   const zoning = zoningOf(row);
   const ebike = rules.ebikeKm.value;
   const density = row.countryCode && row.countryCode !== DENSITY_COUNTRY ? ` (assumption: ${DENSITY_COUNTRY_NAME} density, no national rule found for ${row.country || row.countryCode})` : '';
-  const trendDetail = hpi === null ? `no official price series for ${row.country || 'this country'} in the model` : multiYear ? `${row.country} ${signed(hpi)}% a year in EUR after euro-area inflation ${common.since}–${common.year}, the years both series have (last year ${signed(trend.realInBase)}% in EUR, ${signed(localReal)}% in local terms) vs EU ${signed(euBaseReal)}% (Eurostat, housing)` : `${row.country} ${signed(hpi)}% a year after inflation vs EU ${euBaseReal === null ? 'not known' : `${signed(euBaseReal)}%`} (Eurostat, housing)`;
+  const trendDetail = hpi === null ? `no official price series for ${row.country || 'this country'} in the model` : multiYear ? `${row.country} ${signed(hpi)}% a year in EUR after euro-area inflation ${trend.realInBaseSince}–${trend.year} (last year ${signed(trend.realInBase)}% in EUR, ${signed(localReal)}% in local terms) vs EU ${signed(euBaseReal)}% (Eurostat, housing)` : `${row.country} ${signed(hpi)}% a year after inflation vs EU ${euBaseReal === null ? 'not known' : `${signed(euBaseReal)}%`} (Eurostat, housing)`;
   const allChecks = [
     seaCheck(site, ebike),
     check('season', `${rules.minWorkableMonths.value}+ camping months (Camping Climate Index above 3: acceptable or better, Ma 2021 Table 4)`, climate?.cci ? climate.workable >= rules.minWorkableMonths.value : null, climate?.cci ? `${climate.workable} camping months (index above 3), ${climate.good ?? '?'} good (≥ 5), ${climate.comfortable} optimal (≥ 7), ${climate.cci.optimalDays} optimal days a year` : 'climate not measured with the Camping Climate Index yet'),
     check('noAc', 'no air conditioning needed', climate?.cci ? climate.hottest <= rules.maxHottest.value : null, climate?.cci ? `hottest month average high ${climate.hottest} °C (limit ${rules.maxHottest.value} °C); ${climate.cci.hotDays} day(s) a year above 34 °C` : 'climate not measured with the Camping Climate Index yet'),
     check('units', `room for ${rules.minUnits.value}+ units`, units === null ? null : units >= rules.minUnits.value, m2 ? `${Math.round(m2).toLocaleString('en-US')} m² → ${units} units at ${rules.pitchM2.value} m² each on ${rules.campingShare.value * 100}% of the land${density}` : 'area not shown'),
-    check('trend', TREND_LABEL, hpi === null || euBaseReal === null ? null : hpi > euBaseReal, trendDetail),
+    check('trend', 'real price trend above the EU average', hpi === null || euBaseReal === null ? null : hpi > euBaseReal, trendDetail),
     check('location', 'the listing location is consistent', row.placeConflict ? null : true, row.placeConflict ?? 'map point and title agree'),
     check('legal', 'a legal path for a buyer', country ? !country.blocker && !INDUSTRIAL.test(words) : null, country?.blocker ?? (INDUSTRIAL.test(words) ? 'industrial site: camping parks must be 1,000 m from insalubrious industry (Portaria 1320/2008)' : country?.path ?? 'no path researched for this country')),
   ];

@@ -53,13 +53,3 @@ describe('pickSpans', () => {
     expect(embedder.calls).toEqual([]);
   });
 });
-
-describe('pickRanked', () => {
-  it('keeps the ranked sentences in page order and nothing without a ranking', async () => {
-    const { pickRanked } = await import('../../src/research/spans.mjs');
-    const spans = [{ id: 'S1', text: 'a' }, { id: 'S2', text: 'b' }, { id: 'S3', text: 'c' }];
-    expect(pickRanked(spans, { order: [2, 0] }).map((span: { id: string }) => span.id)).toEqual(['S1', 'S3']);
-    expect(pickRanked(spans, null)).toEqual([]);
-    expect(pickRanked(null, { order: [0] })).toEqual([]);
-  });
-});

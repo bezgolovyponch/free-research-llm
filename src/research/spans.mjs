@@ -32,11 +32,6 @@ export function quoteFromSpans(ids, spans) {
   return picked.map((id) => byId.get(id)).join(' ');
 }
 
-export function pickRanked(spans, ranked) {
-  const chosen = new Set(ranked?.order ?? []);
-  return (spans ?? []).filter((_, index) => chosen.has(index));
-}
-
 export async function pickSpans(spans, query, embedder, k = 8) {
   const list = spans ?? [];
   if (list.length <= k) return list;

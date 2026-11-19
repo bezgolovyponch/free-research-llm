@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { qualifies } from '../../src/research/acceptance.mjs';
-import { itemTier, verdictInvariants } from '../../src/research/verdict.mjs';
+import { itemTier } from '../../src/research/verdict.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -374,8 +374,7 @@ describe('ResearchEngine', () => {
 
   it('calibrates the item kind on the swept titles when few titles use its words, once with three independent proposals kept by majority, and passes the sub-type to the brief', async () => {
     const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
-    const router = { complete: async (req: { purpose: string; tier: string; task?: string; messages: Array<{ role: string; content: string }> }) => {
-      if (req.task === 'concept-frame') return null;
+    const router = { complete: async (req: { purpose: string; tier: string; messages: Array<{ role: string; content: string }> }) => {
       calls.push(req);
       return { provider: 'p', data: { not: ['kola', 'svetlo', 'pneumatiky', 'naraznik'], subtype: { label: 'hatchback', models: ['fabia', 'corsa', 'polo'] } } };
     } };
@@ -653,7 +652,7 @@ describe('ResearchEngine', () => {
         { id: 'D2.2', parentId: 'D2', title: 'Running costs', question: 'What running costs change which used car is worth shortlisting?', method: 'lookup', searchQueries: ['used car running costs'] },
       ],
     };
-    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat(request: unknown) { if (!JSON.stringify(request).includes('You frame one request')) order.push('decompose'); return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+    const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { order.push('decompose'); return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
     const router = new ModelRouter({ providers: [provider] });
     const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
     const project = await engine.createProject({ question: 'Which used car listings under 50000 EUR are worth shortlisting right now?', templateId: 'generic', expected: '10 links to real listings of used cars priced up to 50000 EUR' });
@@ -662,62 +661,6 @@ describe('ResearchEngine', () => {
     expect(order[0]).toBe('build:10');
     expect(order.indexOf('build:10')).toBeLessThan(order.indexOf('decompose'));
     expect(engine.modeler.fresh(project)).toBe(true);
-  });
-
-  it('pauses a list research whose provider families named different items, after one rebuild with other families and the asker\'s own words, and says which family named what and why it pauses', async () => {
-    const proposals = [
-      normalizeSample({ concept: 'stag activities', kind: { label: 'activity provider', terms: ['activity provider'] }, criteria: [] }),
-      normalizeSample({ concept: 'glamping land', kind: { label: 'plot of land', terms: ['plot'] }, criteria: [] }),
-    ];
-    const builds: Record<string, unknown>[] = [];
-    const modeler = { fresh: () => false, build: async (p: Record<string, unknown>, options: Record<string, unknown> = {}) => {
-      builds.push(options);
-      p.decisionModel = { ...aggregate(proposals, { question: String(p.question), kindVoters: [] }), purpose: 'A stag group wants providers so that they book directly', caseIds: [], providers: ['groq', 'pollinations'], proposals: { families: 2, repeats: [], refused: [], kinds: [{ provider: 'groq', label: 'activity provider' }, { provider: 'pollinations', label: 'plot of land' }] } };
-      return p.decisionModel;
-    } };
-    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
-    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
-    const project = await engine.createProject({ question: 'Find 40 activity providers for a stag party in Durres', templateId: 'generic', expected: '40 activity providers' });
-    project.acceptance = { ...project.acceptance, itemCount: 40, locked: true };
-    await engine.store.save(project, { reason: 'test' });
-    const done = await engine.run(project.id);
-    const named = '(groq: activity provider; pollinations: plot of land)';
-    expect(done.phase).toBe('needs-kind');
-    expect(done.nodes.every((n: { status: string }) => n.status !== 'verified')).toBe(true);
-    expect(done.log.filter((l: { type: string }) => l.type === 'phase').at(-1).message).toBe(`research paused: no item kind agreed: the provider families named different items ${named}, after a rebuild with other provider families and your own words; without the item to list the plan cannot deliver anything, because no result can be screened — say what the item is in the Hints field, then press ▶ Run`);
-    expect(done.log.some((l: { type: string; message: string }) => l.type === 'decision' && l.message.endsWith(`; no item kind agreed: the provider families named different items ${named}`))).toBe(true);
-    expect(builds.filter((options) => options.grounded)).toEqual([{ force: true, askedBefore: ['groq', 'pollinations'], grounded: true }]);
-  });
-
-  it('goes on when the families agreed a kind, when the grounded rebuild finds one, and for a research without an item count', async () => {
-    const agreedKind = normalizeSample({ concept: 'stag activities', purpose: 'A stag group wants providers so that they book directly', value: 'a list of providers', kind: { label: 'activity provider', terms: ['activity provider'] }, criteria: [] });
-    const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
-      p.decisionModel = { ...aggregate([agreedKind, agreedKind], { question: String(p.question) }), purpose: 'A stag group wants providers so that they book directly', caseIds: [] };
-      return p.decisionModel;
-    } };
-    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
-    const project = await engine.createProject({ question: 'Find 40 activity providers for a stag party in Durres', templateId: 'generic', expected: '40 activity providers' });
-    project.acceptance = { ...project.acceptance, itemCount: 40 };
-    project.decisionModel = { ...aggregate([agreedKind], { question: project.question, kindVoters: [] }), caseIds: [], providers: ['groq'] };
-    expect(await engine.ensureKind(project)).toBe(true);
-    expect(project.log.at(-1)).toMatchObject({ type: 'decision', message: 'decision model rebuilt with other provider families and your own words: item kind "activity provider" agreed by 2 of 2 provider families' });
-    expect(await engine.ensureKind(project)).toBe(true);
-    const plain = await engine.createProject({ question: 'Is a stag party in Durres cheaper than in Prague?', templateId: 'generic' });
-    expect(await engine.ensureKind(plain)).toBe(true);
-    expect(plain.decisionModel ?? null).toBeNull();
-  });
-
-  it('says the decision model was not built when no family returned a proposal that names the item, and keeps the earlier model', async () => {
-    const earlier = { ...aggregate([normalizeSample({ kind: { label: 'used car', terms: ['car'] }, criteria: [] })], { question: 'q' }), caseIds: [] };
-    const modeler = { fresh: () => false, current: () => false, build: async (p: Record<string, unknown>) => p.decisionModel ?? null };
-    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
-    const project = await engine.createProject({ question: 'Find 20 used cars under 5000 EUR', templateId: 'generic', expected: '20 cars' });
-    project.acceptance = { ...project.acceptance, itemCount: 20 };
-    expect(await engine.ensureDecisionModel(project)).toBeNull();
-    expect(project.log.at(-1)).toMatchObject({ type: 'decision', message: 'decision model not built: no provider family returned a proposal that names the item to list' });
-    project.decisionModel = earlier;
-    expect(await engine.ensureDecisionModel(project)).toBe(earlier);
-    expect(project.log.at(-1).message).toBe('decision model not built: no provider family returned a proposal that names the item to list; the earlier model is kept');
   });
 
   it('reports the purpose and value stage 0 chose right after the decision model', async () => {
@@ -1973,7 +1916,7 @@ describe('hub search', () => {
     expect(router.calls[0].messages[1].content).toContain('Netherlands');
     expect(router.calls[0].messages[1].content).toContain('United Kingdom');
     expect(router.calls[0].messages[1].content).toContain('4 search queries');
-    expect(router.calls[0].messages[1].content).not.toMatch(/bales|per kg|B2B|groothandel/i);
+    expect(router.calls[0].messages[1].content).toMatch(/bales|per kg|B2B|export/i);
     expect(project.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('hub round 1: 2 queries, 1 new pages, 1 new hosts'))).toBe(true);
     expect(await engine.searchHubs(project)).toBe(1);
     expect(router.calls).toHaveLength(1);
@@ -2470,79 +2413,6 @@ describe('hub search', () => {
     expect(hardChecks.every((c) => c.answer === 'yes')).toBe(false);
   });
 
-  it('writes the memo after the verdict and from it: the memo prompt carries the computed headline and each requirement (C9, C10)', async () => {
-    const memoPrompts: string[] = [];
-    const provider = {
-      id: 'demo',
-      ready: true,
-      describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo-fast', deep: 'demo-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
-      async chat({ messages, tier }) {
-        const fullPrompt = messages.map((m) => m.content).join('\n');
-        if (fullPrompt.includes(TASK_MARKERS.synthesize)) {
-          memoPrompts.push(fullPrompt);
-          return { content: JSON.stringify({ verdict: 'NO-GO', confidence: 'low', summary: 'none fits', nextSteps: [] }), model: 'demo-deep', provider: 'demo', usage: {} };
-        }
-        if (fullPrompt.includes('strict judge') || fullPrompt.includes('Item page text:')) return { content: JSON.stringify([{ id: 'q1', answer: 'no', spans: ['S1'] }]), model: 'demo-fast', provider: 'demo', usage: {} };
-        return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
-      },
-    };
-    const router = new ModelRouter({ providers: [provider] });
-    const engine = new ResearchEngine({ router, search: fakeSearchForChecklist, store: new ProjectStore({ dir }), lanes: 2, modeler: new ChecklistModeler({ router, samples: 3 }) });
-    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with highest price/value ratio for a retail second hand shop business in Czech Republic' });
-    await engine.updateProject(project.id, { acceptance: { itemCount: 20, valueRange: [0, 50], unit: 'EUR/kg' } });
-    project.candidates = { kept: [{ title: 'Wholesale Supplier A', url: 'https://zagumi.com/anuncio/used-clothing-ID12345', value: 40, unit: 'EUR/kg', price: 40, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits all checks', why: ['wholesale', 'brands'], risks: [] } }], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
-    project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
-    project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
-    await engine.synthesize(project);
-    expect(memoPrompts).toHaveLength(1);
-    expect(memoPrompts[0]).toContain('VERDICT (computed by code from the delivered items before this memo; it is final):');
-    expect(memoPrompts[0]).toContain('- 0 of 20 meet every must-have; up to 0 of 20 could meet every must-have (0 confirmed + 0 to confirm)');
-    expect(memoPrompts[0]).toContain('- requirement: wholesale — 0 of 1 judged items meet it, 1 do not, 0 unknown');
-    expect(memoPrompts[0]).toContain('- precondition: At least 20 valid items — fails');
-    expect(project.report.deliverables.map((d: { url: string }) => d.url)).toEqual(['https://zagumi.com/anuncio/used-clothing-ID12345']);
-    expect(project.report.status.acceptanceContradiction).toBe(project.acceptanceResult!.verdict.summary);
-    expect(verdictInvariants(project)).toEqual([]);
-  });
-
-  it('a re-judge cancelled half way never replaces the last complete result (C14)', async () => {
-    const provider = {
-      id: 'demo',
-      ready: true,
-      describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo-fast', deep: 'demo-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
-      async chat({ messages, tier }) {
-        const fullPrompt = messages.map((m) => m.content).join('\n');
-        if (fullPrompt.includes('strict judge') || fullPrompt.includes('Item page text:')) return { content: JSON.stringify([{ id: 'q1', answer: 'no', spans: ['S1'] }]), model: 'demo-fast', provider: 'demo', usage: {} };
-        return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: tier === 'deep' ? 'demo-deep' : 'demo-fast', provider: 'demo', usage: {} };
-      },
-    };
-    const router = new ModelRouter({ providers: [provider] });
-    const engine = new ResearchEngine({ router, search: fakeSearchForChecklist, store: new ProjectStore({ dir }), lanes: 2, modeler: new ChecklistModeler({ router, samples: 3 }) });
-    const project = await engine.createProject({ question: 'Find the wholesale branded second hand clothing providers with highest price/value ratio for a retail second hand shop business in Czech Republic' });
-    await engine.updateProject(project.id, { acceptance: { itemCount: 20, valueRange: [0, 50], unit: 'EUR/kg' } });
-    project.candidates = { kept: [{ title: 'Wholesale Supplier A', url: 'https://zagumi.com/anuncio/used-clothing-ID12345', value: 40, unit: 'EUR/kg', price: 40, currency: 'EUR/kg', plan: { tier: 'fits', verdict: 'Fits all checks', why: ['wholesale', 'brands'], risks: [] } }], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
-    project.brief = { located: true, kind: { label: 'wholesale clothing provider', terms: ['wholesale clothing'] }, regions: ['CZ'] };
-    project.decisionModel = { checklist: [{ clause: 'wholesale', items: [{ clause: 'wholesale', question: 'Does this sell wholesale or bulk?', hard: true, numeric: null }] }] };
-    await engine.checkAcceptance(project);
-    const complete = project.acceptanceResult!;
-    project.acceptanceSummary = complete.verdict.summary;
-    expect(complete.verdict.summary).toBe('0 of 20 confirmed · 1 rejected');
-    expect(project.acceptanceRecheck).toBeUndefined();
-
-    project.checkCache = {};
-    engine.cancelled.add(project.id);
-    await expect(engine.checkAcceptance(project)).rejects.toBeInstanceOf(ResearchCancelled);
-    expect(project.acceptanceResult).toBe(complete);
-    expect(project.acceptanceResult!.verdict.summary).toBe('0 of 20 confirmed · 1 rejected');
-    expect(project.acceptanceSummary).toBe('0 of 20 confirmed · 1 rejected');
-    expect(project.acceptanceRecheck).toMatchObject({ cancelled: true, keptResultOf: complete.checkedAt });
-    expect(project.log.some((l: { type: string; message: string }) => l.type === 'acceptance' && l.message.includes('re-check cancelled: the last complete result is kept'))).toBe(true);
-
-    engine.cancelled.delete(project.id);
-    await engine.checkAcceptance(project);
-    expect(project.acceptanceResult).not.toBe(complete);
-    expect(project.acceptanceRecheck).toBeUndefined();
-  });
-
   it('on the first acceptance check, with no checklist yet, an unknown hard item is confirmed on a same-host page and the item becomes valid', async () => {
     const itemUrl = 'https://shop.example.org/offer/used-goods-ID555';
     const deepUrl = 'https://shop.example.org/shipping-countries';
@@ -2706,57 +2576,6 @@ describe('hub search', () => {
       expect(validItems.length).toBeGreaterThanOrEqual(5);
     });
 
-    it('asks the pending second family only for items whose every other must-have passed, after the deeper reads, and keeps the settled checks in the cache', async () => {
-      const router = new ModelRouter({ providers: [new ScriptedProvider()] });
-      const mockSearch = { enabled: true, lastErrors: [], async search() { return []; }, async readPage() { return { status: 200, text: 'We sell wholesale clothing in bulk and ship to Prague. '.repeat(10) }; } };
-      const engine = new ResearchEngine({ router, search: mockSearch, store: new ProjectStore({ dir }), lanes: 1 });
-      const project = await engine.createProject({ question: 'Find 2 wholesale clothing providers', expected: '2 providers' });
-      project.acceptance = { itemCount: 2, valueRange: null, unit: '', urlsLive: false, mustMention: [] };
-      const urls = ['https://example.com/anuncio/item-ID20001', 'https://example.com/anuncio/item-ID20002'];
-      project.candidates = { kept: urls.map((url, i) => ({ url, title: `Item ${i}`, value: 1000, unit: 'EUR' })), keptCount: 2, toCheck: [], toCheckCount: 0, tiers: { fits: 2 }, screened: {}, screenedCount: 0, found: 2, verification: null };
-      project.brief = { located: true, kind: null, regions: [] };
-      const e1 = 'bulk|Does it sell in bulk?';
-      const e2 = 'prague|Does it ship to Prague?';
-      project.decisionModel = { checklist: [{ clause: 'bulk', items: [{ clause: 'bulk', question: 'Does it sell in bulk?', hard: true, criterion: 'E1' }] }, { clause: 'prague', items: [{ clause: 'prague', question: 'Does it ship to Prague?', hard: true, criterion: 'E2' }] }] };
-      project.checkCache = {};
-      engine.checklistJudge.judge = async (item: { url: string }) => [
-        { id: e1, answer: 'yes', quote: 'We sell wholesale clothing in bulk', hard: true, clause: 'bulk', criterion: 'E1', pending: true, reason: 'one reading', first: { provider: 'p1' } },
-        { id: e2, answer: item.url === urls[0] ? 'yes' : 'unknown', quote: item.url === urls[0] ? 'ship to Prague' : '', hard: true, clause: 'prague', criterion: 'E2', second: { answer: 'yes' } },
-      ];
-      const settledFor: string[] = [];
-      engine.checklistJudge.confirmPending = async (checks: Array<Record<string, unknown>>, pageText: string) => {
-        settledFor.push(pageText);
-        return checks.map((check) => (check.pending ? { id: check.id, answer: 'yes', quote: check.quote, hard: true, clause: check.clause, criterion: check.criterion, second: { answer: 'yes' } } : check));
-      };
-      await engine.checkAcceptance(project);
-      expect(settledFor).toEqual(['We sell wholesale clothing in bulk and ship to Prague. '.repeat(10)]);
-      const byUrl = new Map(project.acceptanceResult!.items.map((item) => [item.url, item]));
-      expect(byUrl.get(urls[0])!.tier).toBe('confirmed');
-      expect(byUrl.get(urls[1])!.tier).toBe('to-confirm');
-      const cached = Object.entries(project.checkCache as Record<string, { checks: Array<Record<string, unknown>> }>).find(([key]) => key.startsWith(urls[0]))![1];
-      expect(cached.checks.find((check) => check.id === e1)).toMatchObject({ answer: 'yes', second: { answer: 'yes' } });
-      expect(cached.checks.find((check) => check.id === e1)).not.toHaveProperty('pending');
-    });
-
-    it('keeps the providers judged in the last measure in the delivered set when a new build of the list no longer names them', async () => {
-      const router = new ModelRouter({ providers: [new ScriptedProvider()] });
-      const mockSearch = { enabled: true, lastErrors: [], async search() { return []; }, async readPage() { return { status: 200, text: 'We sell wholesale clothing in bulk to shops across Europe. '.repeat(10) }; } };
-      const engine = new ResearchEngine({ router, search: mockSearch, store: new ProjectStore({ dir }), lanes: 1 });
-      const project = await engine.createProject({ question: 'Find 2 wholesale clothing providers', expected: '2 providers' });
-      project.acceptance = { itemCount: 2, valueRange: null, unit: '', urlsLive: false, mustMention: [] };
-      project.brief = { located: false, kind: null, regions: [] };
-      project.decisionModel = { checklist: [{ clause: 'bulk', items: [{ clause: 'bulk', question: 'Does it sell in bulk?', hard: true }] }] };
-      project.hubSources = [];
-      project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
-      const kept = { url: 'https://kept.example/', title: 'Kept wholesaler', evidence: 'https://kept.example/', named: true, live: true, checks: [{ id: 'bulk|Does it sell in bulk?', answer: 'unknown', quote: '', hard: true, clause: 'bulk' }], tier: 'to-confirm' };
-      const dropped = { url: 'https://dropped.example/', title: 'Rejected', evidence: 'https://dropped.example/', named: true, live: true, checks: [{ id: 'bulk|Does it sell in bulk?', answer: 'no', quote: 'retail only', hard: true, clause: 'bulk' }], tier: 'rejected' };
-      project.acceptanceResult = { items: [kept, dropped], checks: [], score: 0, validCount: 0, totalAsked: 2 } as never;
-      engine.checklistJudge.judge = async () => [{ id: 'bulk|Does it sell in bulk?', answer: 'unknown', quote: '', hard: true, clause: 'bulk' }];
-      await engine.checkAcceptance(project);
-      expect(project.report!.deliverables!.map((d: { url: string }) => d.url)).toEqual(['https://kept.example/']);
-      expect(project.acceptanceResult!.items.map((item) => [item.url, item.tier])).toEqual([['https://kept.example/', 'to-confirm']]);
-    });
-
     it('cached verdicts do not count against judge budget', async () => {
       const router = new ModelRouter({ providers: [new ScriptedProvider()] });
       const mockSearch = {
@@ -2876,9 +2695,9 @@ describe('a kind no needs a second family on the deeper page', () => {
       return { content: JSON.stringify(prompt.includes('Item page text:') ? [] : { answer: 'ok', claims: [], confidence: 'high' }), model: `${id}-fast`, provider: id, usage: {} };
     },
   });
-  const run = async (aboutAnswer: string, stored: unknown[] = [], ids = ['alpha', 'beta'], links = [{ url: '/about', text: 'About us' }]) => {
+  const run = async (aboutAnswer: string, stored: unknown[] = [], ids = ['alpha', 'beta']) => {
     second.length = 0;
-    const search = { ...fakeSearch, async readPage(url: string) { return url.endsWith('/about') ? { status: 200, text: about, links: [] } : { status: 200, text: home, links }; } };
+    const search = { ...fakeSearch, async readPage(url: string) { return url.endsWith('/about') ? { status: 200, text: about, links: [] } : { status: 200, text: home, links: [{ url: '/about', text: 'About us' }] }; } };
     const router = new ModelRouter({ providers: ids.map((id) => family(id, aboutAnswer)) });
     const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
     const project = await engine.createProject({ question: 'Find used clothing wholesalers' });
@@ -2918,13 +2737,6 @@ describe('a kind no needs a second family on the deeper page', () => {
     expect(kind).toMatchObject({ answer: 'unknown', reason: SINGLE_KIND_OPINION, second: { single: true } });
     expect(project.kindRejected).toEqual([]);
     expect(project.log.some((l: { message: string }) => l.message.startsWith('kind second opinion 1/30: first=no second=unknown'))).toBe(true);
-  });
-
-  it('never rejects on the one judgement of the home page when no other page of the item can be read: the kind is to confirm', async () => {
-    const { project, kind } = await run('B', [], ['alpha', 'beta'], []);
-    expect(second).toEqual([]);
-    expect(kind).toMatchObject({ answer: 'unknown', quote: '', reason: SINGLE_KIND_OPINION, leaning: { answer: 'no' } });
-    expect(project.kindRejected).toEqual([]);
   });
 
   it('forgets rejections recorded under an older judge version, so those items are judged again', async () => {

@@ -39,12 +39,6 @@ describe('App composition', () => {
     expect(JSON.stringify(app.status())).not.toContain('session-key');
   });
 
-  it('gives the decision model the embedder the research engine ranks with', () => {
-    const app = new App({ env: { FRL_PROVIDER_ORDER: 'gemini', FRL_WIKIPEDIA: '0' }, fetchImpl: fakeFetch([]), dataDir: '/tmp/frl-unused' });
-    expect(app.engine.embedder).toBeTruthy();
-    expect(app.engine.modeler.embedder).toBe(app.engine.embedder);
-  });
-
   it('uses a llama.cpp server on another PC when its address is saved, and leaves it off otherwise', async () => {
     const fetchImpl = fakeFetch([[/192\.168\.5\.26:8090\/v1\/models$/, () => jsonResponse({ data: [{ id: 'qwen3-14b' }] })]]);
     const on = new ProviderFactory({ env: { FRL_PROVIDER_ORDER: 'llamacpp-lan', LLAMACPP_LAN_URL: 'http://192.168.5.26:8090/v1' }, fetchImpl });
