@@ -225,6 +225,29 @@ describe('eligibility criteria fed into the decision model checklist', () => {
   });
 });
 
+describe('framings of different provider families', () => {
+  const question = 'Find 40 activity providers in Durres (Albania) and within about 60 km that a stag party of 8 to 15 men from the UK or Germany could book directly: boat trips, jet ski, karting and group transfers.';
+  const said = { question, expected: '' };
+  const first = 'Find 40 activity providers in Durres (Albania) and within about 60 km that a stag party of 8 to 15 men from the UK or Germany could book directly';
+  const list = { quote: 'boat trips, jet ski, karting and group transfers', text: 'offers one of the listed activities', examples: ['boat trips', 'jet ski', 'karting', 'group transfers'] };
+  const frames = [
+    { population: { quote: 'activity providers', label: 'activity provider' }, concept: [{ quote: 'in Durres (Albania) and within about 60 km', text: 'located in Durres or within 60 km' }, { quote: 'a stag party of 8 to 15 men from the UK or Germany', text: 'suits a stag party' }, { quote: 'could book directly', text: 'bookable directly' }, list], limits: [{ quote: '40 activity providers' }, { quote: 'within about 60 km' }], context: [{ quote: first, text: 'who the list is for' }] },
+    { population: { quote: first, label: 'activity provider' }, concept: [{ quote: 'jet ski', text: 'offers jet ski' }, { quote: 'karting', text: 'offers karting' }], limits: [{ quote: '40 activity providers' }] },
+    { population: { quote: 'activity providers', label: 'activity provider' }, concept: [{ quote: 'that a stag party of 8 to 15 men from the UK or Germany could book directly', text: 'bookable directly by a stag party' }, list], limits: [{ quote: '40 activity providers' }, { quote: 'within about 60 km' }], context: [{ quote: 'in Durres (Albania)', text: 'where' }] },
+  ];
+
+  it('never lets a span that encloses parts of another role glue them together: each condition of the first sentence stays a condition, and a listed class keeps its members', () => {
+    const concept = agreeFrames(frames.map((data) => frameSample(data, said).value), said);
+    expect(concept.criteria.map((c: { quote: string; uncertain?: boolean }) => [c.quote, Boolean(c.uncertain)])).toEqual([
+      ['in Durres (Albania) and within about 60 km', false],
+      ['that a stag party of 8 to 15 men from the UK or Germany could book directly', true],
+      ['boat trips, jet ski, karting and group transfers', false],
+    ]);
+    expect(concept.criteria[2].examples).toEqual(['boat trips', 'jet ski', 'karting', 'group transfers']);
+    expect(concept.limits.map((c: { quote: string }) => c.quote)).toEqual(['40 activity providers', 'within about 60 km']);
+  });
+});
+
 describe('a part of the request that no single result page can show is never a page check', () => {
   const question = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
   const expected = '20 direct links to the providers with proof';

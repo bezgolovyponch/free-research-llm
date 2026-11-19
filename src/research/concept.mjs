@@ -276,11 +276,19 @@ function overlaps(a, b) {
   return shared > 0 && shared * 2 >= Math.min(a.end - a.at, b.end - b.at);
 }
 
+function quotedAlike(a, b) {
+  if (a.source !== b.source) return false;
+  const shared = Math.min(a.end, b.end) - Math.max(a.at, b.at);
+  return shared > 0 && shared * 2 >= Math.max(a.end - a.at, b.end - b.at);
+}
+
+const joins = (member, element) => quotedAlike(member, element) || (member.role === element.role && overlaps(member, element));
+
 function clustersOf(samples, wanted) {
   const clusters = [];
   samples.forEach((elements, sample) => {
     for (const element of elements.filter(wanted)) {
-      const touching = clusters.filter((cluster) => cluster.some((member) => overlaps(member, element)));
+      const touching = clusters.filter((cluster) => cluster.some((member) => joins(member, element)));
       const merged = [...touching.flat(), { ...element, sample }];
       for (const cluster of touching) clusters.splice(clusters.indexOf(cluster), 1);
       clusters.push(merged);
