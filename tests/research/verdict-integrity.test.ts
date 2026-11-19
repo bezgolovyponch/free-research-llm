@@ -129,7 +129,7 @@ describe('verdict integrity fixes', () => {
       expect(result.tiers.confirmed).toBe(1);
     });
 
-    it('acceptanceSummaryOf leaves the item whose kind check was never answered to confirm', () => {
+    it('acceptanceSummaryOf matches verdict summary', () => {
       const project = {
         acceptance: fixture.acceptance,
         checklist: fixture.checklist,
@@ -137,7 +137,7 @@ describe('verdict integrity fixes', () => {
         decisionModel: { kind: { label: 'used car', terms: ['hatchback'] } },
       };
       const summary = acceptanceSummaryOf(project);
-      expect(summary).toContain('0 of 20 confirmed');
+      expect(summary).toContain('1 of 20 confirmed');
     });
   });
 

@@ -184,7 +184,7 @@ export function purposeChecks(project) {
   const question = String(project?.question ?? '');
   if (!question) return [];
   const words = plain(question);
-  const checks = (project?.decisionModel?.requirements?.length ? [] : nameLists(question)).map((names, i) => ({ id: `purpose-names-${i + 1}`, type: 'any', names, label: `Page mentions one of: ${names.map((n) => `"${n}"`).join(', ')} (your words)` }));
+  const checks = nameLists(question).map((names, i) => ({ id: `purpose-names-${i + 1}`, type: 'any', names, label: `Page mentions one of: ${names.map((n) => `"${n}"`).join(', ')} (your words)` }));
   const kind = project?.decisionModel?.kind ?? project?.brief?.kind ?? null;
   if (isUmbrella(kind)) {
     const any = [...new Set([...(kind.terms ?? []), ...kind.members.flatMap(memberTerms)].map((term) => plain(String(term ?? '')).trim()).filter(Boolean))];
@@ -534,11 +534,11 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
       }
     }
     const kindHit = matched.length >= 2 && matched.some((term) => kindSet.has(term));
-    const named = ((ok && anchoredTerm(matched, anchors)) || kindHit) && !wordMatch(String(page.source.title ?? ''), banned);
+    if (!(ok && anchoredTerm(matched, anchors)) && !kindHit) continue;
+    if (wordMatch(String(page.source.title ?? ''), banned)) continue;
     if (isDirectory) {
       const region = regions.length ? regionVerdict({ text: page.pageText }, regions) : null;
       const add = (key, deliverable) => {
-        deliverable.named = named;
         if (region) deliverable.region = region.text;
         const existing = entityMap.get(key);
         if (existing) {
@@ -576,32 +576,17 @@ export async function entityDeliverables(nodes, { terms = [], not = [], kindLabe
     } else {
       const hits = matched.length;
       const current = hostsMap.get(page.host);
-      if (current && (Number(current.deliverable.named) > Number(named) || (current.deliverable.named === named && current.hits >= hits))) continue;
-      hostsMap.set(page.host, { hits, deliverable: { ...entityDeliverable(page, regions), named } });
+      if (current && current.hits >= hits) continue;
+      hostsMap.set(page.host, { hits, deliverable: entityDeliverable(page, regions) });
     }
   }
   const entityDeliverablesArr = [...entityMap.values()].map((d) => ({ hits: 0, deliverable: d }));
   const withoutWebsite = (entry) => (entry.deliverable.entity?.website === false ? 1 : 0);
-  const unnamed = (entry) => (entry.deliverable.named ? 0 : 1);
-  const allDeliverables = [...hostsMap.values(), ...entityDeliverablesArr].sort((a, b) => unnamed(a) - unnamed(b) || withoutWebsite(a) - withoutWebsite(b) || (b.hits ?? 0) - (a.hits ?? 0));
+  const allDeliverables = [...hostsMap.values(), ...entityDeliverablesArr].sort((a, b) => withoutWebsite(a) - withoutWebsite(b) || (b.hits ?? 0) - (a.hits ?? 0));
   return allDeliverables.map((entry) => entry.deliverable);
 }
 
 const identity = (value) => value;
-
-const INSPECTED = ['live', 'pageUrl', 'pageText', 'links', 'listing', 'inRange', 'mentions', 'purpose', 'checks', 'checklist', 'tier', 'support', 'valid', 'softYes'];
-
-export function keepJudged(deliverables, previous = [], { carry = false } = {}) {
-  const fresh = deliverables ?? [];
-  const byUrl = new Map(fresh.map((deliverable) => [deliverable.url, deliverable]));
-  const judged = (previous ?? []).filter((item) => item?.url && (item.checks ?? []).length && item.tier !== 'rejected');
-  const kept = judged.flatMap((item) => {
-    if (byUrl.has(item.url)) return [byUrl.get(item.url)];
-    return carry ? [Object.fromEntries(Object.entries(item).filter(([key]) => !INSPECTED.includes(key)))] : [];
-  });
-  const first = new Set(kept.map((deliverable) => deliverable.url));
-  return [...kept, ...fresh.filter((deliverable) => !first.has(deliverable.url))];
-}
 
 export function inRange(amounts, spec, itemValue, convert = identity, itemUnit = '') {
   const [min, max] = spec.valueRange;

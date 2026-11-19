@@ -14,7 +14,6 @@ export const OBJECTIVES = [
   { id: 'sea', label: 'distance to the sea', better: 'min', read: (r) => finite(r.site?.coastKm), best: 'closest to the sea' },
   { id: 'months', label: 'camping months', better: 'max', read: (r) => finite(r.site?.climate?.workable), best: 'longest camping season' },
   { id: 'optimalDays', label: 'optimal climate days', better: 'max', read: (r) => finite(r.site?.climate?.cci?.optimalDays), best: 'most optimal climate days' },
-  { id: 'trend', label: 'price trend', better: 'max', read: (r) => finite(r.plan?.trend), best: 'strongest price trend' },
   { id: 'explore', label: 'things to explore', better: 'max', read: (r) => (r.site ? explorePoints(r.site) : null), best: 'most to explore nearby' },
 ];
 

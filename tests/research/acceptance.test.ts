@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { AcceptanceChecker, keepJudged, MAX_ITEM_CHECKS, INSPECT_PER_ASKED, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, entityProfile, ownWebsite, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
+import { AcceptanceChecker, MAX_ITEM_CHECKS, INSPECT_PER_ASKED, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, entityProfile, ownWebsite, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -200,7 +200,7 @@ describe('listing price on the page', () => {
     const deliverables = await entityDeliverables(nodes as never, { terms: ['branded vintage clothing wholesale', 'graded A'], not: ['spare parts'] });
     expect(deliverables).toHaveLength(2);
     expect(deliverables.map((d: { url: string }) => d.url)).toEqual(['https://supplier-one.com/', 'https://supplier-two.com/']);
-    expect(deliverables[0]).toEqual({ title: 'Vintage clothing wholesale', url: 'https://supplier-one.com/', value: null, unit: '', nodeId: 'A', evidence: 'https://www.supplier-one.com/about-us', named: true });
+    expect(deliverables[0]).toEqual({ title: 'Vintage clothing wholesale', url: 'https://supplier-one.com/', value: null, unit: '', nodeId: 'A', evidence: 'https://www.supplier-one.com/about-us' });
     expect(deliverables[1]).toMatchObject({ title: 'Graded A vintage stock', nodeId: 'A', evidence: 'https://supplier-two.com/contact' });
   });
 
@@ -213,9 +213,7 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    const oneWord = await entityDeliverables(dairy as never, { terms: ['branded vintage clothing wholesale', 'cream'] });
-    expect(oneWord.filter((d: { named: boolean }) => d.named)).toEqual([]);
-    expect(oneWord.map((d: { named: boolean; evidence: string }) => [d.named, d.evidence])).toEqual([[false, 'https://www.fda.gov/food/food-ingredients/cream']]);
+    expect(await entityDeliverables(dairy as never, { terms: ['branded vintage clothing wholesale', 'cream'] })).toEqual([]);
     const grader = [{ id: 'A', sources: [{ url: 'https://msgroup-secondhandclothes.com/how-sorting-grading/', title: 'How Sorting & Grading Define the Quality of Second-Hand Clothes', text: 'High-quality second-hand clothes, graded and sorted by professionals. Wholesale second-hand clothing by the container.' }] }];
     expect((await entityDeliverables(grader as never, { terms: ['second hand clothes'], kindLabel: 'wholesale clothing provider' })).map((d) => d.url)).toEqual(['https://msgroup-secondhandclothes.com/']);
     const twoWords = [
@@ -238,7 +236,7 @@ describe('listing price on the page', () => {
         ],
       },
     ];
-    expect((await entityDeliverables(dairy as never, { terms: ['graded A', 'cream'], kindLabel: 'wholesale clothing provider' })).filter((d: { named: boolean }) => d.named)).toEqual([]);
+    expect(await entityDeliverables(dairy as never, { terms: ['graded A', 'cream'], kindLabel: 'wholesale clothing provider' })).toEqual([]);
     const clothing = [
       {
         id: 'A',
@@ -305,7 +303,7 @@ describe('listing price on the page', () => {
       }],
     }];
     expect(await entityDeliverables(brasco as never, { terms, not, kindLabel })).toEqual([
-      { title: 'Brasco Wholesale Vintage Clothing | Footwear | Accessories', url: 'https://brasco.nl/', value: null, unit: '', nodeId: 'hubs', evidence: 'https://brasco.nl/', named: true },
+      { title: 'Brasco Wholesale Vintage Clothing | Footwear | Accessories', url: 'https://brasco.nl/', value: null, unit: '', nodeId: 'hubs', evidence: 'https://brasco.nl/' },
     ]);
     const dustFactory = [{
       id: 'hubs',
@@ -414,11 +412,6 @@ describe('purpose checks from the user\'s words', () => {
     expect(checks).toHaveLength(1);
     expect(checks[0]).toMatchObject({ id: 'purpose-names-1', type: 'any', names: ['Ralph Lauren', 'Monclair', 'North face', 'Barbour'] });
     expect(checks[0].label).toBe('Page mentions one of: "Ralph Lauren", "Monclair", "North face", "Barbour" (your words)');
-  });
-
-  it('asks for no named word on the page once the decision model holds the class those names stand for', () => {
-    expect(purposeChecks({ ...WHOLESALE, decisionModel: { requirements: [{ id: 'E1', text: 'brands of the class the examples stand for', examples: ['Ralph Lauren'] }] } }).filter((check: { id: string }) => check.id.startsWith('purpose-names-'))).toEqual([]);
-    expect(purposeChecks({ ...WHOLESALE, decisionModel: { requirements: [] } })).toHaveLength(1);
   });
 
   it('invents nothing from descriptions, counts, distances or prices the question also states', () => {
@@ -768,7 +761,7 @@ describe('checklist-based acceptance', () => {
     const spec = normalizeAcceptance({ itemCount: 1, urlsLive: true });
     const items = [{ url: 'https://example.com/supplier', checks: [
       { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
-      { id: 'wholesale|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+      { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
       { id: 'quality|Is quality proven?', hard: false, answer: 'yes', clause: 'quality' },
     ] }];
     const result = await checker.evaluate(spec, items, { located: false, checklist, readPage });
@@ -797,12 +790,12 @@ describe('checklist-based acceptance', () => {
     const items = [
       { url: 'https://example.com/supplier1', checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
-        { id: 'wholesale|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+        { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
         { id: 'quality|Is quality proven?', hard: false, answer: 'yes', clause: 'quality' },
       ] },
       { url: 'https://example.com/supplier2', checks: [
         { id: 'wholesale|Does this sell wholesale?', hard: true, answer: 'yes', clause: 'wholesale' },
-        { id: 'wholesale|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
+        { id: 'brands|Does this carry Ralph Lauren?', hard: true, answer: 'yes', clause: 'brands' },
         { id: 'quality|Is quality proven?', hard: false, answer: 'no', clause: 'quality' },
       ] },
     ];
@@ -949,46 +942,5 @@ describe('supplier websites from directory profiles', () => {
     expect(lynch.map((d: { url: string }) => d.url)).toEqual(['https://lynchvintagewholesale.co.uk/']);
     const retail = await entityDeliverables(page('https://dust.example/', 'Dust Vintage', 'Wholesale bales for retail shops.') as never, { terms: ['wholesale', 'bales'], kindTerms: ['wholesale', 'bales'], not: ['retail'], kindLabel: 'wholesale clothing supplier' });
     expect(retail).toHaveLength(1);
-  });
-});
-
-describe('a page is a candidate whatever words it holds; the kind judge decides', () => {
-  const page = (url: string, title: string, text: string) => ({ url, title, text });
-  const nodes = [{ id: 'A', sources: [
-    page('https://quiet-seller.example/', 'Our house', 'We sell sorted garments by weight to shops across the region since 1998.'),
-    page('https://loud-seller.example/', 'Vintage clothing wholesale', 'Vintage clothing wholesale, graded A stock for shops.'),
-  ] }];
-
-  it('delivers a page that uses none of the counted words, after the pages that do, so the judge can read it', async () => {
-    const deliverables = await entityDeliverables(nodes as never, { terms: ['vintage clothing wholesale', 'graded A'] });
-    expect(deliverables.map((d: { url: string; named: boolean }) => [d.url, d.named])).toEqual([['https://loud-seller.example/', true], ['https://quiet-seller.example/', false]]);
-  });
-
-  it('keeps a page whose title holds an excluded word as a candidate, ordered last', async () => {
-    const deliverables = await entityDeliverables(nodes as never, { terms: ['vintage clothing wholesale', 'graded A'], not: ['vintage'] });
-    expect(deliverables.map((d: { named: boolean }) => d.named)).toEqual([false, false]);
-  });
-});
-
-describe('a judged item is never displaced by a new admission', () => {
-  const judged = (url: string, tier: string, extra: Record<string, unknown> = {}) => ({ url, title: url, named: true, evidence: url, live: true, pageText: 'text', links: [], purpose: [], checks: [{ id: 'k', answer: 'unknown' }], checklist: {}, support: {}, tier, valid: false, softYes: 0, ...extra });
-
-  it('puts the items judged in the last measure first, then the new named ones, the unnamed last', () => {
-    const fresh = [{ url: 'n1', named: true }, { url: 'u1', named: false }, { url: 'j1', named: true, title: 'new title' }];
-    const out = keepJudged(fresh, [judged('j1', 'to-confirm')]);
-    expect(out.map((d: { url: string }) => d.url)).toEqual(['j1', 'n1', 'u1']);
-    expect(out[0]).toEqual({ url: 'j1', named: true, title: 'new title' });
-    expect(keepJudged(fresh, [])).toEqual(fresh);
-  });
-
-  it('carries a judged item the new build no longer produced, without what the last inspection added, only where asked', () => {
-    const out = keepJudged([{ url: 'u1', named: false }], [judged('j2', 'to-confirm', { value: 5 }), judged('j3', 'confirmed')], { carry: true });
-    expect(out.map((d: { url: string }) => d.url)).toEqual(['j2', 'j3', 'u1']);
-    expect(out[0]).toEqual({ url: 'j2', title: 'j2', named: true, evidence: 'j2', value: 5 });
-    expect(keepJudged([{ url: 'u1' }], [judged('j2', 'to-confirm')]).map((d: { url: string }) => d.url)).toEqual(['u1']);
-  });
-
-  it('lets a rejected or an unread item go', () => {
-    expect(keepJudged([{ url: 'u1' }], [judged('r1', 'rejected'), { url: 'x', checks: [] }, null as never], { carry: true }).map((d: { url: string }) => d.url)).toEqual(['u1']);
   });
 });

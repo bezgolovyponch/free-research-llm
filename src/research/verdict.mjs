@@ -2,30 +2,17 @@ import { kindCluster } from './checklist.mjs';
 
 const KIND_PURPOSE_ID = 'purpose-kind';
 
-const isKindCheck = (check) => check?.clause === 'kind' && String(check.id ?? '').startsWith('kind|');
-
-export const KIND_OPEN_REASON = 'the page does not use the asked words and the kind judge has not answered with a quote: to confirm';
-
-function purposeState(item, criterion) {
-  if (criterion.passed) return 'yes';
-  if (criterion.id !== KIND_PURPOSE_ID) return 'no';
-  const judged = (item.checks ?? []).filter(isKindCheck);
-  if (judged.some((c) => c.answer === 'yes' && c.quote)) return 'yes';
-  if (judged.some((c) => c.answer === 'no' && c.quote)) return 'no';
-  return judged.length ? 'unknown' : 'no';
+function judgedAsAskedKind(item) {
+  return (item.checks ?? []).some((c) => c.clause === 'kind' && String(c.id ?? '').startsWith('kind|') && c.answer === 'yes' && Boolean(c.quote));
 }
 
-function opens(item, spec) {
-  const entity = Boolean(item.evidence);
-  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange));
+function purposeMet(item, criterion) {
+  return criterion.passed || (criterion.id === KIND_PURPOSE_ID && judgedAsAskedKind(item));
 }
 
 export function qualifies(item, spec) {
-  return opens(item, spec) && (item.purpose ?? []).every((c) => purposeState(item, c) === 'yes');
-}
-
-export function refused(item, spec) {
-  return !opens(item, spec) || (item.purpose ?? []).some((c) => purposeState(item, c) === 'no');
+  const entity = Boolean(item.evidence);
+  return Boolean(item.live && (entity || item.listing) && (!spec?.valueRange || item.inRange) && (item.purpose ?? []).every((c) => purposeMet(item, c)));
 }
 
 export function itemTier(item, hardIds, spec) {
@@ -41,21 +28,16 @@ export function itemTier(item, hardIds, spec) {
     return "not-judged";
   }
 
-  if (refused(item, spec) || hardChecks.some((c) => c.answer === "no")) {
+  if (!qualified || hardChecks.some((c) => c.answer === "no")) {
     return "rejected";
   }
 
-  const hasHardUnknown = new Set(hardChecks.map((c) => c.id)).size < hardIds.length || hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "" || c.pending);
-  if (!qualified || hasHardUnknown) {
+  const hasHardUnknown = hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "");
+  if (hasHardUnknown) {
     return "to-confirm";
   }
 
   return "confirmed";
-}
-
-export function awaitsSecondFamily(item, hardIds) {
-  const checks = item.checks ?? [];
-  return hardIds.length > 0 && hardIds.every((id) => checks.some((c) => c.id === id && c.answer === 'yes')) && checks.some((c) => hardIds.includes(c.id) && c.pending);
 }
 
 export function hardIdsOf(checklist, kind = null) {
@@ -82,14 +64,12 @@ export function itemEvidence(item, hardIds, spec) {
   
   const yesCount = hardChecks.filter((c) => c.answer === "yes").length;
   const noCount = hardChecks.filter((c) => c.answer === "no").length;
-  const unknownIds = hardChecks.filter((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "" || c.pending).map((c) => c.id);
+  const unknownIds = hardChecks.filter((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "").map((c) => c.id);
   
   const belief = yesCount / hardIds.length;
   const plausibility = 1 - noCount / hardIds.length;
   
-  const missing = hardIds.filter((id) => !hardChecks.some((c) => c.id === id));
-
-  return { belief, plausibility, open: [...unknownIds, ...missing] };
+  return { belief, plausibility, open: unknownIds };
 }
 
 export function verdict(items, spec, checklist, kind = null) {
@@ -177,76 +157,6 @@ export function acceptanceSummaryOf(project) {
 
 export function scoreOf(checks) {
   return checks.length ? checks.reduce((s, c) => s + Math.min(1, c.value), 0) / checks.length : 0;
-}
-
-const PRECONDITION_IDS = new Set(['count', 'live', 'range', 'mentions']);
-const CHECKLIST_PREFIX = 'checklist-';
-const NOT_READ = 'the page was not read';
-
-export function headlineOf(verdictResult) {
-  const { asked } = verdictResult;
-  const confirmed = verdictResult.tiers.confirmed;
-  const toConfirm = verdictResult.tiers.toConfirm;
-  const reachable = Math.min(asked, confirmed + toConfirm);
-  const upTo = confirmed >= asked ? '' : `up to ${reachable} of ${asked} could meet every must-have (${confirmed} confirmed + ${toConfirm} to confirm)`;
-  return { headline: `${confirmed} of ${asked} meet every must-have`, upTo, confirmed, toConfirm, asked };
-}
-
-function checksHeadline(checks) {
-  const passed = checks.filter((c) => c.passed).length;
-  return { headline: `${passed} of ${checks.length} expected-result checks pass`, upTo: '', confirmed: 0, toConfirm: 0, asked: 0 };
-}
-
-function requirementRows(checks, perCheck) {
-  return checks.filter((c) => !PRECONDITION_IDS.has(c.id)).map((c) => {
-    const counted = perCheck.find((pc) => `${CHECKLIST_PREFIX}${pc.id}` === c.id);
-    const row = { id: c.id, label: counted?.clause ?? c.label, share: c.value, detail: c.detail ?? '' };
-    return counted ? { ...row, yes: counted.yes, no: counted.no, unknown: counted.unknown, judged: counted.yes + counted.no + counted.unknown } : row;
-  });
-}
-
-function itemReasons(item, hardIds, spec) {
-  const reasons = [];
-  if (!item.live) reasons.push({ requirement: 'the link opens a page', answer: 'no', quote: '', reason: 'the page did not open' });
-  if (spec?.valueRange && item.live && !item.inRange) reasons.push({ requirement: `value within ${spec.valueRange.join('–')} ${spec.unit ?? ''}`.trim(), answer: 'no', quote: '', reason: item.value === undefined || item.value === null ? 'no value read on the page' : `the page shows ${item.value} ${item.unit ?? ''}`.trim() });
-  for (const criterion of item.purpose ?? []) {
-    const state = purposeState(item, criterion);
-    if (state !== 'yes') reasons.push({ requirement: criterion.label ?? criterion.id, answer: state, quote: '', reason: state === 'unknown' ? KIND_OPEN_REASON : criterion.detail ?? '' });
-  }
-  for (const id of hardIds) {
-    const check = (item.checks ?? []).find((c) => c.id === id);
-    const requirement = check?.clause ?? id;
-    if (!check || check.notJudged) reasons.push({ requirement, answer: 'not judged', quote: '', reason: check?.reason ?? NOT_READ });
-    else reasons.push({ requirement, answer: check.answer || 'unknown', quote: check.quote ?? '', reason: check.reason ?? '' });
-  }
-  return reasons;
-}
-
-export function verdictReport(project) {
-  const result = project?.acceptanceResult;
-  if (!result) return null;
-  const kind = project.decisionModel?.kind ?? null;
-  const spec = project.acceptance ?? {};
-  const computed = result.verdict ?? verdict(result.items ?? [], { ...spec, ...(result.totalAsked ? { itemCount: result.totalAsked } : {}) }, project.checklist, kind);
-  const checks = result.checks ?? [];
-  const hardIds = hardIdsOf(project.checklist, kind);
-  const listAsked = Boolean(result.totalAsked || spec.itemCount);
-  return {
-    ...(listAsked ? headlineOf(computed) : checksHeadline(checks)),
-    summary: computed.summary,
-    recheckCancelled: project.acceptanceRecheck?.cancelled ? `a later re-check was cancelled at ${project.acceptanceRecheck.at}; this is the last complete result` : '',
-    requirements: requirementRows(checks, computed.perCheck ?? []),
-    preconditions: checks.filter((c) => PRECONDITION_IDS.has(c.id)).map((c) => ({ id: c.id, label: c.label, value: c.value, passed: Boolean(c.passed), detail: c.detail ?? '' })),
-    items: (computed.items ?? result.items ?? []).map((item) => ({ url: item.url, title: item.title ?? '', tier: item.tier ?? itemTier(item, hardIds, spec), reasons: itemReasons(item, hardIds, spec) })),
-  };
-}
-
-export function verdictLines(report) {
-  if (!report) return [];
-  const lines = [report.upTo ? `${report.headline}; ${report.upTo}` : report.headline];
-  for (const r of report.requirements) lines.push(`requirement: ${r.label} — ${r.judged === undefined ? `${Math.round(r.share * 100)}% of items` : `${r.yes} of ${r.judged} judged items meet it, ${r.no} do not, ${r.unknown} unknown`}`);
-  for (const c of report.preconditions) lines.push(`precondition: ${c.label} — ${c.passed ? 'passes' : 'fails'} (${c.detail})`);
-  return lines;
 }
 
 export function verdictInvariants(project, { memo = true } = {}) {

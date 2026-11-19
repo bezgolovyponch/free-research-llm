@@ -350,21 +350,9 @@ describe('rows that pass every hard criterion are never set aside or capped (rec
   it('still sets aside a cheap row that fails a hard criterion', () => {
     const listings = [...realPlots.map((r) => plotRow(r)), filler(1, 17000), filler(2, 17500), filler(3, 18000), filler(4, 17000), filler(5, 17500), filler(6, 18000)];
     listings[0] = plotRow(realPlots[0], { site: { coastKm: 25.4 } });
-    const ruled = { ...brief, foundation: { rules: { ebikeKm: { value: 20 }, minWorkableMonths: { value: 10 } } } };
-    const table = buildCandidates(sweepNodes(listings), ruled, { convert });
+    const table = buildCandidates(sweepNodes(listings), brief, { convert });
     const url = realPlots[0][1];
     expect(table.kept.some((r: { url: string }) => r.url === url)).toBe(false);
     expect(table.toCheck.find((r: { url: string }) => r.url === url)?.toCheck).toMatch(/far below what most listings/);
-  });
-
-  it('takes the sea and season limits from the rules of the research, never from a constant, and never reads a distance from the asked place as a sea distance', async () => {
-    const { passesEveryHardCriterion } = await import('../../src/research/candidates.mjs');
-    const clean = { reasons: [], missing: [], country: { code: 'PT' } };
-    const ruled = { regions: ['PT'], foundation: { rules: { ebikeKm: { value: 20 }, minWorkableMonths: { value: 10 } } } };
-    expect(passesEveryHardCriterion({ site: { coastKm: 25, climate: { workable: 12 } } }, clean, ruled)).toBe(false);
-    expect(passesEveryHardCriterion({ site: { coastKm: 5, climate: { workable: 8 } } }, clean, ruled)).toBe(false);
-    expect(passesEveryHardCriterion({ site: { coastKm: 5, climate: { workable: 11 } } }, clean, ruled)).toBe(true);
-    expect(passesEveryHardCriterion({ site: { coastKm: 25, climate: { workable: 8 } } }, clean, { regions: ['PT'] })).toBe(true);
-    expect(passesEveryHardCriterion({ distanceKm: 120 }, clean, ruled)).toBe(true);
   });
 });

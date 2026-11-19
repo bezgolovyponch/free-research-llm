@@ -2,7 +2,6 @@ import { collectDeliverables } from './acceptance.mjs';
 import { countryByCode, describeBrief } from './brief.mjs';
 import { MAX_NODES, METHODS } from './tree.mjs';
 import { resultModel } from './result.mjs';
-import { verdictLines, verdictReport } from './verdict.mjs';
 
 const REGION_LANGUAGE = { PT: 'Portuguese', ES: 'Spanish', TR: 'Turkish', VN: 'Vietnamese', GR: 'Greek', IT: 'Italian', FR: 'French', DE: 'German', BG: 'Bulgarian', HR: 'Croatian', RO: 'Romanian', PL: 'Polish', CZ: 'Czech', NL: 'Dutch', SE: 'Swedish', DK: 'Danish', NO: 'Norwegian', FI: 'Finnish', HU: 'Hungarian', SK: 'Slovak', SI: 'Slovenian', EE: 'Estonian', LV: 'Latvian', LT: 'Lithuanian', GB: 'English', US: 'English', IE: 'English', CH: 'German', AT: 'German', BE: 'Dutch' };
 
@@ -251,7 +250,7 @@ function itemsBlock(nodes) {
   return `\nCANDIDATE ITEMS FOUND (${items.length}; from passing pieces):\n${items.map((i) => `- [${i.nodeId}] ${String(i.title ?? i.name ?? '').slice(0, 80)} · ${i.value ?? '?'} ${i.unit ?? ''} · ${i.url}`).join('\n')}\nSCREEN them like a systematic review (identify → screen → include): check each item against the screening findings above (price incl. preparation, climate, distance, permits, demand), and state in the verdict the counts: identified, screened out (main reasons), included. An item with unknown facts is "to check", not included.\n`;
 }
 
-export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision', shortlist = '', verdict = [] }) {
+export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision', shortlist = '' }) {
   const drivers = nodes.filter((n) => n.parentId === 'Q');
   const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}`);
   return [
@@ -271,7 +270,7 @@ RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported)
 ${lines.join('\n')}
 ${itemsBlock(nodes)}
 ${shortlist ? `\nCANDIDATE TABLE (screened by code against the hard limits; cite counts from it, never invent items):\n${shortlist}\nThe table counts are final and computed by code. Use the kept count as the number of results; never state a different count of results or say the target is not met when kept >= the expected item count.\n` : ''}
-${verdict.length ? `\nVERDICT (computed by code from the delivered items before this memo; it is final):\n${verdict.map((line) => `- ${line}`).join('\n')}\nWrite the verdict, the summary and the next steps from it: state its count as it is, never another count of results, and make each next step address a requirement that items fail or leave open.\n` : ''}${KIND_RULE[kind] ?? KIND_RULE.decision}
+${KIND_RULE[kind] ?? KIND_RULE.decision}
 Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a result of the type asked above and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:
 {"verdict":"one line; never copy angle brackets or placeholders","confidence":"low|medium|high","actions":[{"action":"","why":"","nodeIds":["D1.1"],"impact":3,"horizon":""}],"options":[{"option":"GO","support":["D1"],"against":["D2"]}],"bestEstimate":{"value":"the computed answer","unit":"","low":"","high":"","basis":"node ids it rests on"},"summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
@@ -413,7 +412,7 @@ JSON shape: {"reply":"short answer to the user","actions":[],"spec":{}}${feedbac
 
 function computedText(m) {
   const pct = (p) => `${Math.round(p * 100)}%`;
-  const lines = [`- type: ${m.kind} · overall research support ${pct(m.probability)} (how well the pieces are sourced, not the chance the answer is right) · drivers: ${m.drivers.map((d) => `${d.id} ${pct(d.probability)}`).join(', ')}`];
+  const lines = [`- type: ${m.kind} · overall evidence probability ${pct(m.probability)} · drivers: ${m.drivers.map((d) => `${d.id} ${pct(d.probability)}`).join(', ')}`];
   if (m.changedSince.length) lines.push(`- changed since the memo was written: ${m.changedSince.join(', ')}`);
   if (m.regraded.length) lines.push(`- graded lower because the answer says the evidence does not settle it: ${m.regraded.join(', ')}`);
   for (const a of m.actions ?? []) lines.push(`- action (${pct(a.probability)}, impact ${a.impact}/5): ${a.action} [${a.nodeIds.join(', ') || 'no piece cited'}]`);
@@ -429,7 +428,7 @@ export function resultsSummary(project) {
   const r = project.report;
   return `ROOT QUESTION: ${project.question}
 EXPECTED RESULT: ${project.acceptance?.expected || 'a decision memo'}
-EXPECTED-RESULT VERDICT (computed by code): ${ar ? verdictLines(verdictReport(project)).join(' · ') : 'not run'}
+EXPECTED-RESULT CHECKS: ${ar ? `${Math.round(ar.score * 100)}% met — ${ar.checks.map((c) => `${c.label} ${Math.round(c.value * 100)}%`).join(' · ')}` : 'not run'}
 DELIVERED ITEMS (links seen on fetched pages):
 ${ar?.items?.length ? ar.items.slice(0, 15).map((i) => `- ${i.title || i.url} ${i.value ?? ''} ${i.unit ?? ''} <${i.url}>${i.live ? ' live' : ' not live'}${i.inRange ? ' in range' : ''}`).join('\n') : 'none'}
 MEMO VERDICT: ${r?.verdict ?? 'no memo yet'}${r ? ` (${r.confidence} confidence, written ${String(r.generatedAt ?? '').slice(0, 16)}) — ${r.summary}` : ''}

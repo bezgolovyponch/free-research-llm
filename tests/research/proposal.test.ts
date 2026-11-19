@@ -87,15 +87,3 @@ describe('proposals after the external verifier ran (audit 2026-11-12, row A1)',
     expect(by).toEqual({ [confirmed.url]: 'primary', [waiting.url]: 'secondary' });
   });
 });
-
-describe('the size of the price trend orders the plots that fit', () => {
-  it('ranks a plot with a stronger trend above an equal plot with a weaker one', async () => {
-    const { OBJECTIVES, paretoLayers } = await import('../../src/research/proposal.mjs');
-    const trend = OBJECTIVES.find((objective: { id: string }) => objective.id === 'trend');
-    expect(trend).toMatchObject({ better: 'max', label: 'price trend' });
-    const strong = { plan: { share: 1, trend: 6.5 } };
-    const weak = { plan: { share: 1, trend: 1.9 } };
-    const layers = paretoLayers([weak, strong]);
-    expect([layers.get(strong), layers.get(weak)]).toEqual([1, 2]);
-  });
-});

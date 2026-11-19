@@ -10,7 +10,6 @@ import { ModelRouter } from './llm/router.mjs';
 import { OutcomeBook } from './llm/outcomes.mjs';
 import { ScriptedProvider } from './llm/scripted-provider.mjs';
 import { ResearchEngine } from './research/engine.mjs';
-import { Embedder } from './llm/embedder.mjs';
 import { KEYED_SEARCH_BACKENDS, SearchService, SearxngBackend, WikipediaBackend } from './search/search.mjs';
 import { SiteRecipes } from './search/recipes.mjs';
 import { SiteAssessor } from './research/site.mjs';
@@ -191,8 +190,7 @@ export class App {
     } };
     this.cases = new CaseBank({ file: path.join(this.dataDir, 'cases.json') });
     this.arms = new ArmBook({ file: path.join(this.dataDir, 'arms.json') });
-    const embedder = this.demo ? null : new Embedder({ env: process.env });
-    this.engine = new ResearchEngine({ embedder, arms: this.arms, modeler: this.demo ? null : new DecisionModeler({ router: this.router, cases: this.cases, embedder }), cases: this.cases, verifier, router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, parcels: new ParcelRegistry({ file: path.join(this.dataDir, 'parcels.json') }), onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
+    this.engine = new ResearchEngine({ arms: this.arms, modeler: this.demo ? null : new DecisionModeler({ router: this.router, cases: this.cases }), cases: this.cases, verifier, router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, parcels: new ParcelRegistry({ file: path.join(this.dataDir, 'parcels.json') }), onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
     this.lessons = new LessonBook({ file: path.join(this.dataDir, 'lessons.json') });
     this.improver = new ProjectImprover({ engine: this.engine, lessons: this.lessons, checkpoint: async (id, resume) => this.handoffs.write(await this.engine.load(id), { reason: 'loop running (checkpoint for a crash or power cut)', resume }) });
     this.suggester = new SubIssueSuggester({ engine: this.engine });
@@ -412,7 +410,7 @@ export class App {
 
   async saveHandoff(project, { reason, resume = {} } = {}) {
     const record = await this.handoffs.write(project, { reason, resume });
-    appendAppMessage(project, `Progress saved (${reason}). ${record.progress.passing}/${record.progress.total} pieces pass${record.expectedResult ? `, expected result: ${record.expectedResult.headline}` : ''}. Next: ${record.nextSteps[0] ?? 'nothing pending'}. Full handoff: More → Handoff notes.`);
+    appendAppMessage(project, `Progress saved (${reason}). ${record.progress.passing}/${record.progress.total} pieces pass${record.expectedResult ? `, expected result ${Math.round(record.expectedResult.score * 100)}% met` : ''}. Next: ${record.nextSteps[0] ?? 'nothing pending'}. Full handoff: More → Handoff notes.`);
     void this.logs.append('history', { projectId: project.id, type: 'handoff', message: `${reason} · ${record.progress.passing}/${record.progress.total} passing${record.resume.loopHoursLeft ? ` · loop resumes with ${record.resume.loopHoursLeft.toFixed(1)} h` : record.resume.wasRunning ? ' · run resumes on start' : ''}` });
     return record;
   }

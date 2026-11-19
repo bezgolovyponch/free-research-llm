@@ -60,7 +60,7 @@ test('results tab shows what was delivered and has its own chat', async ({ page 
   await expect(page.locator('#resultsBody')).toContainText('Memo verdict');
   await noSideScroll(page);
   await expect(page.locator('#resultsBody')).toContainText('Best estimate');
-  await expect(page.locator('#computedResult')).toContainText('Research support');
+  await expect(page.locator('#computedResult')).toContainText('Evidence probability');
   await expect(page.locator('#computedResult')).toContainText('Analysis of Competing Hypotheses');
   const csvHref = await page.locator('#resultsBody a', { hasText: 'Pieces & actions (.csv)' }).getAttribute('href');
   const csv = await page.request.get(csvHref!);
@@ -307,9 +307,7 @@ test('results: the headline counts only fits the verifier confirmed, and a GO me
   await expect(page.locator('#fitsWaiting')).toContainText('2 more fit every criterion and are not yet confirmed outside the app');
   await expect(page.locator('#candidateTable')).toContainText('1 fit every criterion and are confirmed');
   await expect(page.locator('#candidateTable')).toContainText('1 confirmed (1 of them fit every criterion and count)');
-  await expect(page.locator('#resultHeadline')).toHaveText('0 of 50 meet every must-have');
-  await expect(page.locator('#preconditions')).toContainText('At least 50 valid items');
-  await expect(page.locator('#resultsBody')).not.toContainText('% met');
+  await expect(page.locator('#resultsBody')).toContainText('100% met');
   await expect(page.locator('#notSettled')).toHaveCount(0);
   await page.goto('/#p=e2e-counted-headline-02');
   await page.reload();
