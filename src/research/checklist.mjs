@@ -397,14 +397,44 @@ export class ChecklistJudge {
   async confirm(question, shown, first) {
     const block = spansBlock(shown, JUDGE_BLOCK_CHARS);
     const extra = (data, hit) => ({ value: { quote: hit ? quoteFromSpans(data?.spans ?? data?.span, shown) : '' } });
-    const result = await closedVote({ router: this.router, task: SECOND_TASK, tier: 'fast', options: SECOND_OPTIONS, field: 'answer', none: KIND_NONE, seed: `${question}|${block}`, prompt: (options) => confirmPrompt({ question, options, block }), extra, n: KIND_SECOND_VOTES, quorum: 1, keyOf: (id, more) => (id && more.quote ? id : 'unknown'), avoid: first.provider ? [first.provider] : undefined, exclude: [{ provider: first.provider, model: first.model }] });
+    const ask = (avoid) => closedVote({ router: this.router, task: SECOND_TASK, tier: 'fast', options: SECOND_OPTIONS, field: 'answer', none: KIND_NONE, seed: `${question}|${block}`, prompt: (options) => confirmPrompt({ question, options, block }), extra, n: 1, quorum: 1, keyOf: (id, more) => (id && more.quote ? id : 'unknown'), avoid: avoid.length ? avoid : undefined, exclude: [{ provider: first.provider, model: first.model }] });
+    const avoided = first.provider ? [first.provider] : [];
+    let result = await ask(avoided);
+    if (result.single) result = await ask([...new Set([...avoided, ...(result.repeats ?? []).map((reply) => reply.provider).filter(Boolean)])]);
     const voted = agreed(result);
     if (!voted) return { answer: null, quote: '' };
     return voted.id && voted.extra.quote ? { answer: voted.id, quote: voted.extra.quote } : { answer: 'unknown', quote: '' };
   }
 
+  async settle(check, asked, shown, first) {
+    const second = await this.confirm(asked, shown, first);
+    if (second.answer === check.answer) return { ...check, second: { answer: second.answer, quote: second.quote } };
+    if (second.answer === null) return { ...check, answer: 'unknown', quote: '', reason: SECOND_FAMILY_REASON, leaning: { answer: check.answer, quote: check.quote } };
+    return { ...check, answer: 'unknown', quote: '', reason: SPLIT_REASON, split: { first: { answer: check.answer, quote: check.quote }, second: { answer: second.answer, quote: second.quote } } };
+  }
+
+  async confirmPending(checks, pageText, checklist, context = {}) {
+    if (!(checks ?? []).some((check) => check.pending)) return checks;
+    const facts = rowSentences(context.row);
+    const pageSpans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
+    const items = new Map(checklist.flatMap((cluster) => cluster.items.map((ci) => [cluster.clause + '|' + ci.question, ci])));
+    const settled = [];
+    for (const check of checks) {
+      const ci = check.pending ? items.get(check.id) : null;
+      const picked = ci && pageSpans.length ? await shownSpans(pageSpans, criterionAsked(ci, context), this.embedder, facts) : null;
+      if (!picked) {
+        settled.push(check);
+        continue;
+      }
+      const rest = Object.fromEntries(Object.entries(check).filter(([key]) => !PENDING_KEYS.has(key)));
+      settled.push(await this.settle(rest, criterionAsked(ci, context), [...facts, ...picked], check.first ?? {}));
+    }
+    return settled;
+  }
+
   async judge(item, pageText, checklist, kind = null, context = {}) {
     const checks = [];
+    const toSettle = [];
     const numericItems = [];
     const qualitativeItems = [];
 
@@ -464,14 +494,17 @@ export class ChecklistJudge {
           checks.push(q.criterion ? { ...check, criterion: q.criterion } : check);
           continue;
         }
-        const second = await this.confirm(q.asked, shown, { provider: found.provider, model: found.model });
-        if (second.answer === check.answer) checks.push({ ...check, criterion: q.criterion, second: { answer: second.answer, quote: second.quote } });
-        else if (second.answer === null) checks.push({ ...check, criterion: q.criterion, answer: 'unknown', quote: '', reason: SECOND_FAMILY_REASON, leaning: { answer: check.answer, quote: check.quote } });
-        else checks.push({ ...check, criterion: q.criterion, answer: 'unknown', quote: '', reason: SPLIT_REASON, split: { first: { answer: check.answer, quote: check.quote }, second: { answer: second.answer, quote: second.quote } } });
+        toSettle.push({ at: checks.push({ ...check, criterion: q.criterion }) - 1, asked: q.asked, shown, first: { provider: found.provider, model: found.model } });
       }
     }
 
     if (kindCheck) checks.push(kindCheck);
+
+    for (const { at, asked, shown, first } of toSettle) {
+      const check = checks[at];
+      const decisive = check.answer === 'no' || checks.every((other, index) => index === at || !other.hard || other.answer === 'yes');
+      checks[at] = decisive ? await this.settle(check, asked, shown, first) : { ...check, pending: true, reason: SECOND_PENDING_REASON, first };
+    }
 
     return checks;
   }
@@ -489,6 +522,8 @@ export const SECOND_TASK = 'criterion-second';
 export const SECOND_OPTIONS = [{ id: 'yes', text: 'the sentences show that the result meets the requirement' }, { id: 'no', text: 'the sentences show that the result does not meet it' }];
 export const SECOND_FAMILY_REASON = 'one independent judgement only: to confirm';
 export const SPLIT_REASON = 'two provider families read the page differently: to confirm';
+export const SECOND_PENDING_REASON = 'one reading so far: a second provider family is asked once every other must-have of the item passes';
+const PENDING_KEYS = new Set(['pending', 'reason', 'first']);
 export const NOT_KIND_REASON = 'not asked: the page is not the asked kind';
 export const ROW_SPAN = 'F';
 export const ANCHORS_SHOWN = 12;

@@ -8,7 +8,7 @@ import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { currencyOf } from './acceptance.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
-import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf, verdictReport, verdictLines } from './verdict.mjs';
+import { verdict, itemTier, verdictInvariants, hardIdsOf, awaitsSecondFamily, acceptanceSummaryOf, scoreOf, verdictReport, verdictLines } from './verdict.mjs';
 import { notJudged } from './checklist.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
 import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
@@ -1763,6 +1763,7 @@ export class ResearchEngine {
 
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
 
+    let judgeContext = null;
     if (project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
       const newChecklist = filterCountItems(project.decisionModel.checklist, askedCounts(project.acceptance));
       if (newChecklist) {
@@ -1779,6 +1780,7 @@ export class ResearchEngine {
           if (!from || !to || !convert) return undefined;
           return convert(Number(priced.value), from, to) ?? undefined;
         };
+        judgeContext = { fingerprint, of: (item) => ({ row: rows.get(item.url) ?? null, price, members, evidence: project.domain?.evidence ?? {}, labels, criteria: project.decisionModel?.criteria ?? [], measures: { trends: project.candidates?.sites?.trends ?? null, euHpi: project.candidates?.sites?.euHpi ?? null } }) };
         const targetCount = project.acceptance?.itemCount ?? project.acceptanceResult.items.length;
         let judgedCount = 0;
         let confirmedCount = 0;
@@ -1805,7 +1807,7 @@ export class ResearchEngine {
               item.checks = [];
               continue;
             }
-            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null, { row: rows.get(item.url) ?? null, price, members, evidence: project.domain?.evidence ?? {}, labels, criteria: project.decisionModel?.criteria ?? [], measures: { trends: project.candidates?.sites?.trends ?? null, euHpi: project.candidates?.sites?.euHpi ?? null } });
+            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null, judgeContext.of(item));
             item.checklist = checklistSummary([item])[0];
             if (!notJudged(checks)) checkCache[cacheKey] = { checks, summary: item.checklist };
             const keys = Object.keys(checkCache);
@@ -1905,6 +1907,8 @@ export class ResearchEngine {
       }
     }
 
+    if (judgeContext) await this.settlePending(project, readPage, judgeContext);
+
     const kind = project.decisionModel?.kind ?? null;
     if (project.acceptanceResult) {
       this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, project.checklist, kind);
@@ -1925,6 +1929,19 @@ export class ResearchEngine {
     if (project.acceptanceResult && project.decisionModel) await this.cases?.reward([...(project.decisionModel.caseIds ?? []), project.id], project.acceptanceResult.score);
     if (project.acceptanceResult) this.emit(project, 'acceptance', `expected result: ${verdictLines(verdictReport(project)).join(' · ')}`);
     return deliverables;
+  }
+
+  async settlePending(project, readPage, judgeContext) {
+    const hardIds = hardIdsOf(project.checklist, project.decisionModel?.kind ?? null);
+    for (const item of project.acceptanceResult?.items ?? []) {
+      if (!awaitsSecondFamily(item, hardIds)) continue;
+      this.throwIfCancelled(project);
+      const page = await readPage(item.pageUrl ?? item.url).catch(() => null);
+      if (!page?.text) continue;
+      item.checks = await this.checklistJudge.confirmPending(item.checks, page.text, project.checklist, judgeContext.of(item));
+      const entry = project.checkCache?.[`${item.pageUrl ?? item.url}::${judgeContext.fingerprint}`];
+      if (entry) entry.checks = entry.checks.map((cached) => (cached.pending ? item.checks.find((check) => check.id === cached.id) ?? cached : cached));
+    }
   }
 
   async findDeeperPageForKind(item, readPage, kind) {

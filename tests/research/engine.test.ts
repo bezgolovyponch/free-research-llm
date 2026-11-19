@@ -2650,6 +2650,38 @@ describe('hub search', () => {
       expect(validItems.length).toBeGreaterThanOrEqual(5);
     });
 
+    it('asks the pending second family only for items whose every other must-have passed, after the deeper reads, and keeps the settled checks in the cache', async () => {
+      const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+      const mockSearch = { enabled: true, lastErrors: [], async search() { return []; }, async readPage() { return { status: 200, text: 'We sell wholesale clothing in bulk and ship to Prague. '.repeat(10) }; } };
+      const engine = new ResearchEngine({ router, search: mockSearch, store: new ProjectStore({ dir }), lanes: 1 });
+      const project = await engine.createProject({ question: 'Find 2 wholesale clothing providers', expected: '2 providers' });
+      project.acceptance = { itemCount: 2, valueRange: null, unit: '', urlsLive: false, mustMention: [] };
+      const urls = ['https://example.com/anuncio/item-ID20001', 'https://example.com/anuncio/item-ID20002'];
+      project.candidates = { kept: urls.map((url, i) => ({ url, title: `Item ${i}`, value: 1000, unit: 'EUR' })), keptCount: 2, toCheck: [], toCheckCount: 0, tiers: { fits: 2 }, screened: {}, screenedCount: 0, found: 2, verification: null };
+      project.brief = { located: true, kind: null, regions: [] };
+      const e1 = 'bulk|Does it sell in bulk?';
+      const e2 = 'prague|Does it ship to Prague?';
+      project.decisionModel = { checklist: [{ clause: 'bulk', items: [{ clause: 'bulk', question: 'Does it sell in bulk?', hard: true, criterion: 'E1' }] }, { clause: 'prague', items: [{ clause: 'prague', question: 'Does it ship to Prague?', hard: true, criterion: 'E2' }] }] };
+      project.checkCache = {};
+      engine.checklistJudge.judge = async (item: { url: string }) => [
+        { id: e1, answer: 'yes', quote: 'We sell wholesale clothing in bulk', hard: true, clause: 'bulk', criterion: 'E1', pending: true, reason: 'one reading', first: { provider: 'p1' } },
+        { id: e2, answer: item.url === urls[0] ? 'yes' : 'unknown', quote: item.url === urls[0] ? 'ship to Prague' : '', hard: true, clause: 'prague', criterion: 'E2', second: { answer: 'yes' } },
+      ];
+      const settledFor: string[] = [];
+      engine.checklistJudge.confirmPending = async (checks: Array<Record<string, unknown>>, pageText: string) => {
+        settledFor.push(pageText);
+        return checks.map((check) => (check.pending ? { id: check.id, answer: 'yes', quote: check.quote, hard: true, clause: check.clause, criterion: check.criterion, second: { answer: 'yes' } } : check));
+      };
+      await engine.checkAcceptance(project);
+      expect(settledFor).toEqual(['We sell wholesale clothing in bulk and ship to Prague. '.repeat(10)]);
+      const byUrl = new Map(project.acceptanceResult!.items.map((item) => [item.url, item]));
+      expect(byUrl.get(urls[0])!.tier).toBe('confirmed');
+      expect(byUrl.get(urls[1])!.tier).toBe('to-confirm');
+      const cached = Object.entries(project.checkCache as Record<string, { checks: Array<Record<string, unknown>> }>).find(([key]) => key.startsWith(urls[0]))![1];
+      expect(cached.checks.find((check) => check.id === e1)).toMatchObject({ answer: 'yes', second: { answer: 'yes' } });
+      expect(cached.checks.find((check) => check.id === e1)).not.toHaveProperty('pending');
+    });
+
     it('cached verdicts do not count against judge budget', async () => {
       const router = new ModelRouter({ providers: [new ScriptedProvider()] });
       const mockSearch = {

@@ -45,12 +45,17 @@ export function itemTier(item, hardIds, spec) {
     return "rejected";
   }
 
-  const hasHardUnknown = new Set(hardChecks.map((c) => c.id)).size < hardIds.length || hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "");
+  const hasHardUnknown = new Set(hardChecks.map((c) => c.id)).size < hardIds.length || hardChecks.some((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "" || c.pending);
   if (!qualified || hasHardUnknown) {
     return "to-confirm";
   }
 
   return "confirmed";
+}
+
+export function awaitsSecondFamily(item, hardIds) {
+  const checks = item.checks ?? [];
+  return hardIds.length > 0 && hardIds.every((id) => checks.some((c) => c.id === id && c.answer === 'yes')) && checks.some((c) => hardIds.includes(c.id) && c.pending);
 }
 
 export function hardIdsOf(checklist, kind = null) {
@@ -77,7 +82,7 @@ export function itemEvidence(item, hardIds, spec) {
   
   const yesCount = hardChecks.filter((c) => c.answer === "yes").length;
   const noCount = hardChecks.filter((c) => c.answer === "no").length;
-  const unknownIds = hardChecks.filter((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "").map((c) => c.id);
+  const unknownIds = hardChecks.filter((c) => c.answer === "unknown" || c.answer === undefined || c.answer === "" || c.pending).map((c) => c.id);
   
   const belief = yesCount / hardIds.length;
   const plausibility = 1 - noCount / hardIds.length;

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged, NO_ANSWER_REASON } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged, NO_ANSWER_REASON, SECOND_PENDING_REASON } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq, fakeEmbedder } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
+import { hardIdsOf, itemTier, awaitsSecondFamily } from '../../src/research/verdict.mjs';
 
 const supplierQuestion = 'Find the wholesale branded second hand clothing providers with certain similar to Ralph Lauren, Monclair, North face, Barbour with highest price/value ratio, proven good quality, assortiment for the appropriate retail second hand shop business in Czech Republic';
 const carQuestion = 'Find accurate and verified car listings on available marketplaces for at least 20 cars as fit and up to 80 as a trade off to purchase within 300km from prague, hatchback, with highest price/value ratio, considering the engines informations, usage trends and empirical data and all important details of the particular car, considering the professional and car enthusiast trustful sources and communities, with all the crucial metrics considered, price up to 65000CZK or equivalent';
@@ -1089,5 +1090,71 @@ describe('the kind question names the validated kind, with the description of th
     expect(first).toContain('A) one plot of land, offered as asked');
     await judge.judgeKindAgain('Terreno para venda, 600 m2, Palmela.', kind, { value: 600, unit: 'EUR', median: 9000 });
     expect(router.userText('kind-second')).toContain('for context only');
+  });
+});
+
+describe('a second provider family is asked only when its vote can change the tier', () => {
+  const page = 'We are a seller of coats. We stock Cedar Wear and Betula coats in bulk. We ship to Prague. Our shop opens at nine.';
+  const ask = (text: string) => `Does this page show that the result meets this requirement of the request: "${text}"?`;
+  const checklist = [
+    { clause: 'coats of the class', role: 'eligibility', criterion: 'E1', items: [{ clause: 'coats of the class', question: ask('coats of the class'), hard: true, criterion: 'E1', examples: [] }] },
+    { clause: 'ships to prague', role: 'eligibility', criterion: 'E2', items: [{ clause: 'ships to prague', question: ask('ships to prague'), hard: true, criterion: 'E2', examples: [] }] },
+  ];
+  const kind = { label: 'seller', terms: ['seller'] };
+  const reading = (e1: string, e2: string, kindLetter = 'A') => (request: { messages: Array<{ content: string }> }) => {
+    if (request.messages[1].content.includes('This page offers:')) return { kind: kindLetter, span: 'S1' };
+    return { answers: [{ id: 'q1', answer: e1, spans: e1 === 'unknown' ? [] : ['S2'] }, { id: 'q2', answer: e2, spans: e2 === 'unknown' ? [] : ['S3'] }] };
+  };
+  const byClause = (checks: Array<{ clause: string }>, clause: string) => checks.find((check) => check.clause === clause) as Record<string, any>;
+  const hardIds = hardIdsOf(checklist, kind);
+  const listed = (checks: unknown[]) => ({ live: true, listing: true, inRange: true, purpose: [], checks });
+
+  it('keeps a yes as one reading, pending, when another must-have of the item is still open, and asks no second family', async () => {
+    const router = fakeRouter({ '': reading('yes', 'unknown'), [SECOND_TASK]: { answer: 'yes', spans: ['S2'] } });
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'u' }, page, checklist, kind);
+    expect(router.count(SECOND_TASK)).toBe(0);
+    expect(byClause(checks, 'coats of the class')).toMatchObject({ answer: 'yes', quote: 'We stock Cedar Wear and Betula coats in bulk.', pending: true, reason: SECOND_PENDING_REASON, first: { provider: 'p1' } });
+    expect(itemTier(listed(checks), hardIds, {})).toBe('to-confirm');
+    expect(awaitsSecondFamily(listed(checks), hardIds)).toBe(false);
+    const unsure = fakeRouter({ '': reading('yes', 'yes', 'U'), [SECOND_TASK]: { answer: 'yes', spans: ['S2'] } });
+    await new ChecklistJudge({ router: unsure }).judge({ url: 'u' }, page, checklist, kind);
+    expect(unsure.count(SECOND_TASK)).toBe(0);
+  });
+
+  it('asks one second family per requirement once every other must-have passes, and for a no that would reject', async () => {
+    const router = fakeRouter({ '': reading('yes', 'yes'), [SECOND_TASK]: (request: { messages: Array<{ content: string }> }) => ({ answer: 'yes', spans: [request.messages[1].content.includes('ships to prague') ? 'S3' : 'S2'] }) });
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'u' }, page, checklist, kind);
+    expect(router.count(SECOND_TASK)).toBe(2);
+    expect(checks.filter((check: { pending?: boolean }) => check.pending)).toEqual([]);
+    expect(itemTier(listed(checks), hardIds, {})).toBe('confirmed');
+    const refusing = fakeRouter({ '': reading('no', 'unknown'), [SECOND_TASK]: { answer: 'no', spans: ['S2'] } });
+    const refused = await new ChecklistJudge({ router: refusing }).judge({ url: 'u' }, page, checklist, kind);
+    expect(refusing.count(SECOND_TASK)).toBe(1);
+    expect(byClause(refused, 'coats of the class')).toMatchObject({ answer: 'no', second: { answer: 'no' } });
+  });
+
+  it('asks a second time only when the first vote came from the family that already answered, and once a requirement stays open the others wait', async () => {
+    const router = fakeRouter({ '': reading('yes', 'yes'), [SECOND_TASK]: (request: { messages: Array<{ content: string }> }) => ({ answer: 'yes', spans: [request.messages[1].content.includes('ships to prague') ? 'S3' : 'S2'] }) }, { providers: ['p1', 'p1b'] });
+    const judge = new ChecklistJudge({ router: { ...router, complete: router.complete, familyOf: (provider: string) => ({ stack: '', vendor: provider.startsWith('p1') ? 'one' : provider }) } as never });
+    const checks = await judge.judge({ url: 'u' }, page, checklist, kind);
+    expect(router.calls.filter((call) => call.task === SECOND_TASK).map((call) => call.avoid)).toEqual([['p1'], ['p1', 'p1b']]);
+    expect(byClause(checks, 'coats of the class')).toMatchObject({ answer: 'unknown', reason: SECOND_FAMILY_REASON, leaning: { answer: 'yes' } });
+    expect(byClause(checks, 'ships to prague')).toMatchObject({ answer: 'yes', pending: true });
+  });
+
+  it('settles the pending readings later, on the page, when every other must-have has come to pass', async () => {
+    const router = fakeRouter({ '': reading('yes', 'unknown'), [SECOND_TASK]: { answer: 'yes', spans: ['S2'] } });
+    const judge = new ChecklistJudge({ router });
+    const checks = await judge.judge({ url: 'u' }, page, checklist, kind);
+    const later = checks.map((check: Record<string, any>) => (check.clause === 'ships to prague' ? { ...check, answer: 'yes', quote: 'We ship to Prague.', second: { answer: 'yes' } } : check));
+    expect(awaitsSecondFamily(listed(later), hardIds)).toBe(true);
+    const settled = await judge.confirmPending(later, page, checklist, {});
+    expect(router.count(SECOND_TASK)).toBe(1);
+    expect(router.calls.find((call) => call.task === SECOND_TASK)!.avoid).toEqual(['p1']);
+    expect(byClause(settled, 'coats of the class')).toMatchObject({ answer: 'yes', second: { answer: 'yes' } });
+    expect(byClause(settled, 'coats of the class')).not.toHaveProperty('pending');
+    expect(byClause(settled, 'coats of the class')).not.toHaveProperty('first');
+    expect(itemTier(listed(settled), hardIds, {})).toBe('confirmed');
+    expect(await judge.confirmPending(settled, page, checklist, {})).toBe(settled);
   });
 });
