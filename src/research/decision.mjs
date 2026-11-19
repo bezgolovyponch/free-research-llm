@@ -5,7 +5,7 @@ import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
 import { quoteFound } from './quote.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
-import { MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
+import { ELIGIBILITY, MAX_MEMBERS, MIN_MEMBERS, conceptChecklist, conceptDescribed, conceptExamples, conceptKindLabel, conceptOf, conceptText, frameConcept, memberTerms, sameMember } from './concept.mjs';
 import { MEASURES, compare } from './measures.mjs';
 
 export { CHECKLIST_VERSION };
@@ -414,6 +414,15 @@ function carried(before, model) {
   return { ...model, ...defined(before, MODEL_STATE), kind: { ...model.kind, terms, ...(not.length ? { not } : {}), ...members, ...defined(was, KIND_STATE) } };
 }
 
+function withFraming(model, framed, checklist) {
+  const requirements = framed?.criteria ?? [];
+  const covered = (text) => requirements.some((requirement) => quoteFound(text, requirement.quote) || quoteFound(requirement.quote, text));
+  const framing = framed ? { population: framed.population, limits: framed.limits, ranks: framed.ranks, context: framed.context, method: framed.method, open: framed.open ?? [], samples: framed.samples } : null;
+  const asked = conceptKindLabel(framed);
+  const kind = asked && model.kind ? { ...model.kind, asked, described: conceptDescribed(framed), examples: conceptExamples(framed) } : model.kind;
+  return { ...model, kind, missing: (model.missing ?? []).filter((text) => !covered(text)), checklist: conceptChecklist(framed, checklist, { criteria: model.criteria ?? [] }), requirements, framing };
+}
+
 export class DecisionModeler {
   constructor({ router, cases = null, samples = SAMPLES } = {}) {
     this.router = router;
@@ -423,12 +432,16 @@ export class DecisionModeler {
   }
 
   fresh(project) {
+    return this.current(project) && Boolean(project.decisionModel.framing);
+  }
+
+  current(project) {
     const m = project.decisionModel;
     return Boolean(m && m.version === DECISION_MODEL_VERSION && m.checklistVersion === CHECKLIST_VERSION && m.question === project.question && m.guidance === String(project.guidance ?? '') && (m.expected ?? '') === String(project.acceptance?.expected ?? '') && m.agreement?.samples >= 2 && !isDegenerate(m));
   }
 
   async build(project, { force = false } = {}) {
-    if (this.fresh(project) && !force) return project.decisionModel;
+    if (!force && this.current(project)) return project.decisionModel.framing ? project.decisionModel : this.reframe(project);
     const question = project.question;
     const guidance = String(project.guidance ?? '');
     const examples = this.cases ? await this.cases.retrieve(question, CASES_RETRIEVED, project.id) : [];
@@ -460,15 +473,17 @@ export class DecisionModeler {
     }
     const expected = String(project.acceptance?.expected ?? '');
     const framed = await frameConcept({ router: this.router }, { question, expected }).catch(() => null);
-    const checklist = conceptChecklist(framed, await this.checklistModeler.build(question, guidance), { criteria: finalModel.criteria ?? [] });
-    const requirements = framed?.criteria ?? [];
-    const framing = framed ? { population: framed.population, limits: framed.limits, ranks: framed.ranks, context: framed.context, method: framed.method, open: framed.open ?? [], samples: framed.samples } : null;
-    const covered = (text) => requirements.some((requirement) => quoteFound(text, requirement.quote) || quoteFound(requirement.quote, text));
-    finalModel = { ...finalModel, missing: (finalModel.missing ?? []).filter((text) => !covered(text)) };
-    const asked = conceptKindLabel(framed);
-    if (asked && finalModel.kind) finalModel = { ...finalModel, kind: { ...finalModel.kind, asked, described: conceptDescribed(framed), examples: conceptExamples(framed) } };
-    project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, expected, requirements, framing, rebuildWeaker };
+    const { checklist, requirements, framing, ...withConcept } = withFraming(finalModel, framed, await this.checklistModeler.build(question, guidance));
+    project.decisionModel = { ...carried(stored, withConcept), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, expected, requirements, framing, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
+    return project.decisionModel;
+  }
+
+  async reframe(project) {
+    const model = project.decisionModel;
+    const framed = await frameConcept({ router: this.router }, { question: project.question, expected: String(project.acceptance?.expected ?? '') }).catch(() => null);
+    if (!framed) return model;
+    project.decisionModel = withFraming(model, framed, (model.checklist ?? []).filter((cluster) => cluster.role !== ELIGIBILITY));
     return project.decisionModel;
   }
 }

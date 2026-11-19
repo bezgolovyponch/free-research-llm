@@ -860,6 +860,10 @@ export class ResearchEngine {
       this.emit(project, 'decision', `the purpose is not stated; your request already names ${requirements.length} requirement(s) a result must meet, so a stated purpose would not change the plan and the research goes on`);
       return true;
     }
+    if (!project.decisionModel?.framing && String(project.guidance ?? '').trim()) {
+      this.emit(project, 'decision', 'the request could not be framed this time, which does not mean it names no requirement: the purpose is not asked while your Hints stand, and the framing is tried again at the next step');
+      return true;
+    }
     this.setPhase(project, 'needs-purpose');
     this.emit(project, 'phase', 'research paused: the purpose is not clear — state why you ask and what result is worth having (Hints field)');
     return false;

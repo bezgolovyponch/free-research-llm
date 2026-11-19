@@ -336,10 +336,20 @@ describe('the engine with a category', () => {
       expect(p.log.some((l) => l.type === 'decision' && l.message.includes('your request already names 1 requirement(s) a result must meet, so a stated purpose would not change the plan'))).toBe(true);
     });
 
-    it('pauses when neither a purpose nor a requirement is known, even with Hints', async () => {
-      const { ok, p } = await run({ guidance: 'prefer the cheapest ones' }, { purpose: '', requirements: [] });
+    it('pauses when the request was framed and names neither a purpose nor a requirement, even with Hints', async () => {
+      const { ok, p } = await run({ guidance: 'prefer the cheapest ones' }, { purpose: '', requirements: [], framing: { samples: 3 } });
       expect(ok).toBe(false);
       expect(p.phase).toBe('needs-purpose');
+    });
+
+    it('a failed framing is not "no requirement": with Hints the research goes on and is framed again at the next step, without Hints it pauses', async () => {
+      const hinted = await run({ guidance: 'prefer the cheapest ones' }, { purpose: '', requirements: [], framing: null });
+      expect(hinted.ok).toBe(true);
+      expect(hinted.p.phase).toBeUndefined();
+      expect(hinted.p.log.some((l) => l.type === 'decision' && l.message.includes('could not be framed this time, which does not mean it names no requirement'))).toBe(true);
+      const bare = await run({ guidance: '' }, { purpose: '', requirements: [], framing: null });
+      expect(bare.ok).toBe(false);
+      expect(bare.p.phase).toBe('needs-purpose');
     });
 
     it('a stated purpose never pauses', async () => {

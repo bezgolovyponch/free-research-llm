@@ -331,7 +331,7 @@ describe('decision model version', () => {
   it('treats a model built under an older logic version as stale so it is rebuilt', async () => {
     const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
-    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] }, version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION - 1 } };
+    const project = { question: 'q', guidance: '', decisionModel: { question: 'q', guidance: '', agreement: { samples: 3 }, kind: { label: 'thing', terms: ['thing'] }, version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION - 1, framing: { samples: 3 } } };
     expect(modeler.fresh(project)).toBe(false);
     expect(modeler.fresh({ ...project, decisionModel: { ...project.decisionModel, checklistVersion: CHECKLIST_VERSION } })).toBe(true);
   });
@@ -339,7 +339,7 @@ describe('decision model version', () => {
   it('treats a current model with no kind and no criteria as stale so the next run tries again', async () => {
     const { DecisionModeler, DECISION_MODEL_VERSION, CHECKLIST_VERSION } = await import('../../src/research/decision.mjs');
     const modeler = new DecisionModeler({ router: { complete: async () => null } } as never);
-    const empty = { question: 'q', guidance: '', version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION, agreement: { samples: 3 }, kind: { label: '', terms: [] }, criteria: [], noLimit: [] };
+    const empty = { question: 'q', guidance: '', version: DECISION_MODEL_VERSION, checklistVersion: CHECKLIST_VERSION, agreement: { samples: 3 }, kind: { label: '', terms: [] }, criteria: [], noLimit: [], framing: { samples: 3 } };
     expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: empty })).toBe(false);
     expect(modeler.fresh({ question: 'q', guidance: '', decisionModel: { ...empty, criteria: [{ measure: 'priceEur', op: '<=', value: 1 }] } })).toBe(true);
   });
@@ -352,6 +352,33 @@ describe('the concept feeds the decision model', () => {
   const routerWith = (framed: unknown) => ({ complete: async (req: { purpose: string; task?: string }) => ({ provider: 'test', model: 'm', data: req.task === 'concept-frame' ? framed : req.purpose === 'checklist' ? written : proposal }) });
   const router = routerWith(frame);
   const question = 'Find sellers of coats, proven quality';
+
+  it('frames again, and only frames, a current model whose framing failed, and keeps that model while the framing keeps failing', async () => {
+    const { DecisionModeler } = await import('../../src/research/decision.mjs');
+    const calls: string[] = [];
+    let framed: unknown = { concept: [{ quote: 'not in the request', text: 'x' }] };
+    const counting = { complete: async (req: { purpose: string; task?: string }) => { calls.push(req.task ?? req.purpose); return { provider: 'test', model: 'm', data: req.task === 'concept-frame' ? framed : req.purpose === 'checklist' ? written : proposal }; } };
+    const modeler = new DecisionModeler({ router: counting } as never);
+    const project: Record<string, any> = { id: 'p', question, guidance: '', acceptance: { itemCount: 20, expected: '20 links' } };
+    await modeler.build(project);
+    expect(project.decisionModel.framing).toBeNull();
+    expect(project.decisionModel.checklist.map((c: { clause: string }) => c.clause)).toEqual(['graded a']);
+    expect(modeler.fresh(project)).toBe(false);
+    calls.length = 0;
+    const kept = project.decisionModel;
+    expect(await modeler.build(project)).toBe(kept);
+    expect([...new Set(calls)]).toEqual(['concept-frame']);
+    framed = frame;
+    calls.length = 0;
+    const model = await modeler.build(project);
+    expect(calls).not.toContain('decision-model');
+    expect(calls).not.toContain('checklist');
+    expect(model.requirements.map((r: { quote: string }) => r.quote)).toEqual(['proven quality']);
+    expect(model.checklist.map((c: { role: string; clause: string; items: Array<{ hard: boolean }> }) => [c.role, c.clause, c.items[0].hard])).toEqual([['eligibility', 'quality is proven', true], ['appraisal', 'graded a', false]]);
+    expect(model.kind).toMatchObject({ label: 'seller', asked: 'sellers of coats' });
+    expect(model.version).toBe(kept.version);
+    expect(modeler.fresh(project)).toBe(true);
+  });
 
   it('builds the hard checks from the requirements of the asker, asks the asker about a part no family placed, and keeps the model-written question as appraisal', async () => {
     const { DecisionModeler } = await import('../../src/research/decision.mjs');
