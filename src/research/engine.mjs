@@ -19,7 +19,7 @@ import { claimsToCheck, contextOf, needsRecheck, normalizeVote, resolveFromSourc
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
-import { NO_ITEMS_DETAIL, asksForItems } from './deliverable.mjs';
+import { NO_ITEMS_DETAIL, asksForItems, contractClass } from './deliverable.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
@@ -838,6 +838,7 @@ export class ResearchEngine {
     if (project.domain?.ready) return true;
     this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
+    const isAnalysis = contractClass(project) === 'analysis';
     const purpose = project.decisionModel?.purpose ?? '';
     const kind = project.decisionModel?.kind ?? null;
     const object = kind ? [kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
@@ -874,6 +875,10 @@ export class ResearchEngine {
           ? `portal listings: ${sweptListings}`
           : `listed kind: ${kind?.label ?? 'the item'}`;
     }
+    if (isAnalysis) {
+      understanding.ready = true;
+      understanding.basis = understanding.basis || 'analysis project — item understanding not required';
+    }
     project.domain = { ...understanding, at: new Date().toISOString() };
     const summary = [
       `object ${kind?.label || understanding.object[0] || 'not named yet'}`,
@@ -882,7 +887,7 @@ export class ResearchEngine {
       ...(understanding.basis ? [`basis ${understanding.basis}`] : []),
     ].join(' · ');
     this.emit(project, 'decision', `understood before searching: ${summary}`);
-    if (!understanding.ready) {
+    if (!isAnalysis && !understanding.ready) {
       this.setPhase(project, 'needs-understanding');
       this.emit(project, 'phase', 'research paused: not enough sources explain what the item is and what it is called — add a hint');
       return false;

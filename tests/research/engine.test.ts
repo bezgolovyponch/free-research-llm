@@ -1726,13 +1726,12 @@ describe('domain learned before the tree is planned', () => {
     expect(done.nodes.length).toBeGreaterThan(0);
   });
 
-  it('pauses before the tree when only one host explains the item', async () => {
+  it('does not pause an analysis question when only one host explains the item; it keeps the domain and researches', async () => {
     const { engine } = engineWith(domainProvider(), domainSearch(1));
     const project = await engine.createProject({ question: 'Is buying fermented bean paste for resale in Poland profitable?' });
     const done = await engine.run(project.id);
-    expect(done.phase).toBe('needs-understanding');
-    expect(done.nodes).toHaveLength(0);
-    expect(done.log.some((l: { type: string; message: string }) => l.type === 'phase' && l.message.includes('not enough sources explain what the item is'))).toBe(true);
+    expect(done.phase).not.toBe('needs-understanding');
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'phase' && l.message.includes('not enough sources explain what the item is'))).toBe(false);
   });
 
   it('does not pause for a listed kind validated on real listing titles, and takes its terms from the kind', async () => {
@@ -1819,6 +1818,31 @@ describe('domain learned before the tree is planned', () => {
     expect(project.domain.ready).toBe(true);
     expect(project.domain.terms).toContain('used car');
     expect(project.domain.basis).toBe('portal listings: 1');
+  });
+
+  it('does not pause an analysis project without item terms', async () => {
+    const emptySearch = {
+      enabled: true,
+      lastErrors: [],
+      async search() {
+        return [];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const { engine } = engineWith(domainProvider(), emptySearch);
+    const project = {
+      id: 'p',
+      question: 'Is buying fermented bean paste for resale in Poland profitable?',
+      acceptance: {},
+      decisionModel: null,
+      log: [],
+    };
+    const ok = await engine.studyDomain(project as never);
+    expect(ok).toBe(true);
+    expect(project.phase).not.toBe('needs-understanding');
+    expect(project.domain.ready).toBe(true);
+    expect(project.domain.basis).toBe('analysis project — item understanding not required');
+    expect(project.domain.at).toBeDefined();
   });
 
   it('clears the stale pause phase and continues researching when a re-run passes the domain study', async () => {
