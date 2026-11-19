@@ -7,6 +7,7 @@ import { SECRET_PATTERNS } from '../src/secrets.mjs';
 import { acquireQualityLock, releaseQualityLock, LOCK_WAIT_MS } from './quality-lock.mjs';
 import { binEntry, startedDirectly } from './tool-entry.mjs';
 import { computeWasteStats } from './waste.mjs';
+import { recordSnapshot, checkSnapshot } from './zero-loss.mjs';
 
 import { parse as parseYaml } from 'yaml';
 
@@ -178,11 +179,25 @@ const gates = {
     const dataDir = process.env.FRL_DATA_DIR || path.join(ROOT, 'data');
     return checkWaste(dataDir);
   },
+
+  async zeroLoss() {
+    const snapshotDir = process.env.FRL_REFERENCE_SNAPSHOT || path.join(ROOT, '..', 'lead', 'snapshot-2026-11-19');
+    const baselineFile = path.join(ROOT, 'tests', 'fixtures', 'reference', 'baseline.json');
+    if (!fs.existsSync(snapshotDir) || !fs.existsSync(baselineFile)) {
+      return { passed: true, detail: 'skipped: baseline or snapshot not found' };
+    }
+    const failed = await checkSnapshot(snapshotDir, baselineFile);
+    return { passed: !failed, detail: failed ? 'zero-loss check failed' : 'zero-loss check passed' };
+  },
 };
 
-function runQualityGate() {
+async function runQualityGate() {
   const files = repoFiles();
-  const results = Object.entries(gates).map(([name, gate]) => ({ gate: name, ...gate(files) }));
+  const results = [];
+  for (const [name, gate] of Object.entries(gates)) {
+    const result = gate(files);
+    results.push({ gate: name, ...(result instanceof Promise ? await result : result) });
+  }
   const verdict = { at: new Date().toISOString(), passed: results.every((r) => r.passed), results };
   fs.mkdirSync(path.join(ROOT, 'data/logs'), { recursive: true });
   fs.appendFileSync(path.join(ROOT, 'data/logs/quality.jsonl'), `${JSON.stringify(verdict)}\n`);
