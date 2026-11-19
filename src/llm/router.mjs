@@ -51,6 +51,11 @@ export const MODEL_GONE_REST_MS = 24 * 3600 * 1000;
 export const TRIAL_POLL_MS = 1000;
 const MODEL_NOT_FOUND = /no longer available|not found|does not exist|unknown model/i;
 const MODEL_RETIRED = /model\b[^\n]{0,120}\b(?:deprecated|decommissioned|retired)\b|\b(?:deprecated|decommissioned|retired)\b[^\n]{0,40}\bmodel\b/i;
+const PLAN_GATED = /\bmodel\b[^\n]{0,160}?\bnot (?:available|supported|included|enabled|allowed)\b[^\n]{0,60}?\b(?:plan|tier|subscription|account)\b/i;
+
+export function planGated(error) {
+  return PLAN_GATED.test(String(error?.message ?? ''));
+}
 
 export function paymentRequired(error) {
   const message = String(error?.message ?? '');
@@ -114,6 +119,7 @@ export class ModelRouter {
     this.onWait = onWait;
     this.scopes = new AsyncLocalStorage();
     this.paymentUntil = new Map();
+    this.unusable = new Map();
     this.cooldownUntil = new Map();
     this.inflight = new Map();
     this.timeoutStreak = new Map();
@@ -159,6 +165,18 @@ export class ModelRouter {
 
   setProviders(providers) {
     this.providers = providers;
+    for (const provider of providers) for (const model of this.unusable.get(provider.id) ?? []) provider.markUnusable?.(model);
+  }
+
+  gate(provider, model) {
+    this.unusable.set(provider.id, new Set([...(this.unusable.get(provider.id) ?? []), model]));
+    return Boolean(provider.markUnusable?.(model));
+  }
+
+  gateModel(provider, model, error) {
+    if (!model || !this.gate(provider, model)) return false;
+    this.record({ purpose: 'router', tier: '', provider: provider.id, model, ok: false, ms: 0, error: `model ${model} is not available on this account's plan (HTTP ${error.status}); switched to ${provider.selected.fast} / ${provider.selected.deep}` });
+    return true;
   }
 
   ordered(tier, purpose) {
@@ -308,9 +326,10 @@ export class ModelRouter {
     const vars = (tiers.length ? tiers : ['fast']).map((t) => `FRL_${String(provider.id).toUpperCase()}_${t.toUpperCase()}_MODEL`).join(' / ');
     const resets = [...(provider.retired?.values?.() ?? [])].filter((until) => Number.isFinite(until) && until > this.now());
     const until = resets.length ? Math.min(...resets) : this.now() + MODEL_GONE_REST_MS;
-    const gone = `${model ?? 'the model'} is gone (${error.status ? `HTTP ${error.status}` : 'deprecated'}) and cannot be switched`;
+    const gated = planGated(error);
+    const gone = gated ? `${model ?? 'the model'} is not available on this account's plan (HTTP ${error.status}) and no other model is` : `${model ?? 'the model'} is gone (${error.status ? `HTTP ${error.status}` : 'deprecated'}) and cannot be switched`;
     const rest = resets.length ? `every other model of this provider rests for its quota, so it rests until the first of them resets (${Math.ceil((until - this.now()) / 60000)} min)` : 'rests 24 h';
-    const reason = `${gone}; ${rest}, set ${vars} to a model this provider still serves`;
+    const reason = `${gone}; ${rest}, set ${vars} to a model ${gated ? 'the plan allows' : 'this provider still serves'}`;
     this.cooldownUntil.set(provider.id, Math.max(this.cooldownUntil.get(provider.id) ?? 0, until));
     this.cooldownReason.set(provider.id, reason);
     this.record({ purpose: 'router', tier: '', provider: provider.id, ...(model ? { model } : {}), ok: false, ms: 0, error: reason });
@@ -400,6 +419,7 @@ export class ModelRouter {
   }
 
   switchModel(provider, model, error) {
+    if (planGated(error)) return this.gateModel(provider, model, error);
     if (!provider.retireModel || !model) return false;
     const gone = modelGone(error);
     const usedUp = PER_MODEL_DAY.test(error.message);
@@ -413,14 +433,29 @@ export class ModelRouter {
   }
 
   rotateKey(provider, error) {
-    if (!provider.rotateKey || overloaded(error)) return false;
+    if (!provider.rotateKey || overloaded(error) || planGated(error)) return false;
     if (!(error.status === 429 || error.quotaLimited || [401, 402, 403].includes(error.status))) return false;
     const rotated = provider.rotateKey(this.cooldownFor(provider, error).until);
     if (rotated) this.record({ purpose: 'router', tier: '', provider: provider.id, ok: false, ms: 0, error: `key ${provider.keyIndex + 1} of ${provider.keyCount} in use; the previous key rests (${this.cooldownFor(provider, error).reason})` });
     return rotated;
   }
 
+  restoreGates(rows) {
+    const gates = new Map();
+    for (const row of rows) {
+      if (!row?.provider || !row.model) continue;
+      const key = JSON.stringify([row.provider, row.model]);
+      if (row.ok) gates.delete(key);
+      else if (planGated({ message: row.error })) gates.set(key, row);
+    }
+    for (const row of gates.values()) {
+      const provider = this.providers.find((p) => p.id === row.provider);
+      if (provider) this.gate(provider, row.model);
+    }
+  }
+
   restoreCooldowns(rows) {
+    this.restoreGates(rows);
     const latest = new Map();
     const byProvider = new Map();
     for (const row of rows) {
@@ -433,7 +468,7 @@ export class ModelRouter {
     }
     const restored = [];
     for (const [id, row] of latest) {
-      if (row.ok || !this.providers.some((p) => p.id === id)) continue;
+      if (row.ok || !this.providers.some((p) => p.id === id) || planGated({ message: row.error })) continue;
       const provider = this.providers.find((p) => p.id === id);
       if (provider?.keyCount !== undefined && row.keys !== undefined && provider.keyCount > row.keys) continue;
       const status = Number(/HTTP (\d{3})/.exec(String(row.error ?? ''))?.[1] ?? 0);
@@ -465,7 +500,7 @@ export class ModelRouter {
     for (const [id, list] of byProvider) {
       if (!this.providers.some((p) => p.id === id)) continue;
       const provider = this.providers.find((p) => p.id === id);
-      const calls = list.filter((row) => row.purpose !== 'router');
+      const calls = list.filter((row) => row.purpose !== 'router' && !planGated({ message: row.error }));
       const benchRows = list.filter((row) => row.purpose === 'router');
       const recent = calls.filter((row) => {
         const at = Date.parse(row.ts);
@@ -579,6 +614,7 @@ export class ModelRouter {
     this.cooldownUntil.delete(providerId);
     this.cooldownReason.delete(providerId);
     this.paymentUntil.delete(providerId);
+    this.unusable.delete(providerId);
   }
 
   restoreProviderState(snapshot) {
@@ -684,7 +720,7 @@ export class ModelRouter {
                 retry = true;
                 stop = false;
               }
-            } else if (modelGone(error)) {
+            } else if (modelGone(error) || planGated(error)) {
               this.benchGoneModel(provider, model, error);
             } else if (!this.benchSlow(provider, error) && !this.benchComputeError(provider, error) && (error.retryable || [401, 402, 403].includes(error.status))) {
               this.coolDown(provider, error);

@@ -3,7 +3,7 @@ import { OutcomeBook } from '../../src/llm/outcomes.mjs';
 import { ProviderError } from '../../src/llm/provider.mjs';
 import { PROVIDER_PRESETS } from '../../src/llm/presets.mjs';
 import { PURPOSE_CLASS } from '../../src/llm/ranking.mjs';
-import { EXPECTED_OUTPUT_TOKENS, COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, WAIT_NOTICE_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, nextUtcMonth, overloaded, paymentRequired, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
+import { EXPECTED_OUTPUT_TOKENS, COMPUTE_ERROR_COOLDOWN_MS, DEAD_WINDOW_MS, MODEL_GONE_REST_MS, ModelRouter, NoModelAvailableError, OfflineError, OFFLINE_WAIT_MS, OVERLOAD_REST_MS, PAYMENT_REST_MS, TIMEOUT_BENCH_MS, TRIAL_POLL_MS, WAIT_NOTICE_MS, estimateTokens, modelGone, nextMidnightIn, nextUtcMidnight, nextUtcMonth, overloaded, paymentRequired, planGated, quotaResetAt, tierTimeoutMs } from '../../src/llm/router.mjs';
 
 function provider(id: string, replies: Array<string | Error>) {
   const calls: string[] = [];
@@ -818,6 +818,89 @@ describe('ModelRouter deprecated models', () => {
     expect(asked).toEqual([dead]);
     expect(pinned.selected.fast).toBe(dead);
     expect(benching.cooldownReason.get('cloudflare')).toMatch(/infire-llama-3\.1-8b-instruct is gone \(HTTP 410\).*rests 24 h, set FRL_CLOUDFLARE_FAST_MODEL /);
+  });
+});
+
+const CLOUDFLARE_PLAN_BODY = '{"errors":[{"message":"AiError: Model @cf/zai-org/glm-5.3 is not available on the Workers Free plan: Model @cf/zai-org/glm-5.3 is not available on the Workers Free plan. Upgrade t';
+const CLOUDFLARE_PLAN = `cloudflare HTTP 403: ${CLOUDFLARE_PLAN_BODY}`;
+const CEREBRAS_PAYMENT = 'cerebras HTTP 402: {"message":"Payment required to access this resource. Visit your billing tab.","type":"payment_required_error","param":"quota","code":"payment_required"}';
+
+describe('ModelRouter models the account plan does not allow', () => {
+  const glm = '@cf/zai-org/glm-5.3';
+  const oss = '@cf/openai/gpt-oss-120b';
+  const qwen = '@cf/qwen/qwen3.8-27b';
+  const preset = { id: 'cloudflare', label: 'c', baseURL: 'https://c.example/v1', keyEnv: 'K', prefer: { fast: ['@cf/meta/llama-3.1-8b-instruct'], deep: [oss, '@cf/meta/llama-3.3-70b-instruct-fp8-fast'] }, fallbackModels: { fast: '@cf/meta/llama-3.1-8b-instruct', deep: '@cf/meta/llama-3.3-70b-instruct-fp8-fast' } };
+  const account = (asked: string[], models = [glm, oss, qwen]) => async (url: string, init: { body?: string }) => {
+    if (url.endsWith('/models')) return new Response(JSON.stringify({ data: models.map((id) => ({ id })) }));
+    const model = JSON.parse(init.body ?? '{}').model;
+    asked.push(model);
+    if (model === glm) return new Response(CLOUDFLARE_PLAN_BODY, { status: 403 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }], model }));
+  };
+  const deep = (router: ModelRouter) => router.complete({ purpose: 'decision-model', tier: 'deep', messages: [{ role: 'user', content: 'x' }] });
+
+  it('reads the raw cloudflare 403 as a model the plan does not allow, and no rejected key, payment, quota or gone model as one', () => {
+    expect(planGated(new ProviderError(CLOUDFLARE_PLAN, { status: 403 }))).toBe(true);
+    expect(planGated(new ProviderError(CEREBRAS_PAYMENT, { status: 402 }))).toBe(false);
+    expect(planGated(new ProviderError(COHERE_MONTH, { status: 429 }))).toBe(false);
+    expect(planGated(new ProviderError(CLOUDFLARE_410, { status: 410 }))).toBe(false);
+    expect(planGated(new ProviderError('cerebras HTTP 401: invalid key', { status: 401 }))).toBe(false);
+    expect(planGated(new ProviderError(GROQ_429, { status: 429 }))).toBe(false);
+  });
+
+  it('marks the model unusable for that provider and answers with its next model in the same call, without resting the provider', async () => {
+    const asked: string[] = [];
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const cloudflare = await new OpenAICompatibleProvider({ preset, apiKey: 'k', modelOverrides: { fast: qwen, deep: glm }, fetchImpl: account(asked) as never }).discover();
+    expect(cloudflare.selected).toMatchObject({ fast: qwen, deep: glm });
+    const router = new ModelRouter({ providers: [cloudflare], sleep: async () => {}, maxWaitMs: 0 });
+    await expect(deep(router)).resolves.toMatchObject({ provider: 'cloudflare', model: oss });
+    await expect(deep(router)).resolves.toMatchObject({ provider: 'cloudflare', model: oss });
+    expect(asked).toEqual([glm, oss, oss]);
+    expect(cloudflare.selected).toMatchObject({ fast: qwen, deep: oss });
+    expect(router.cooldownUntil.has('cloudflare')).toBe(false);
+    expect(router.ledger.filter((row: { purpose: string }) => row.purpose === 'router')).toEqual([expect.objectContaining({ provider: 'cloudflare', model: glm, ok: false, error: `model ${glm} is not available on this account's plan (HTTP 403); switched to ${qwen} / ${oss}` })]);
+    const rebuilt = await new OpenAICompatibleProvider({ preset, apiKey: 'k', modelOverrides: { fast: qwen, deep: glm }, fetchImpl: account(asked) as never }).discover();
+    expect(rebuilt.selected.deep).toBe(glm);
+    router.setProviders([rebuilt]);
+    expect(rebuilt.selected).toMatchObject({ fast: qwen, deep: oss });
+    expect(rebuilt.describe().detail).toBe(`fast=${qwen} deep=${oss} · ${glm} is not available on this account's plan`);
+    router.forgetBench('cloudflare');
+    const newKey = await new OpenAICompatibleProvider({ preset, apiKey: 'k2', modelOverrides: { fast: qwen, deep: glm }, fetchImpl: account(asked) as never }).discover();
+    router.setProviders([newKey]);
+    expect(newKey.selected.deep).toBe(glm);
+  });
+
+  it('takes the mark from the raw call log after a restart and neither rests the provider nor counts the row as a failure', async () => {
+    const now = Date.parse('2026-11-19T11:16:07Z');
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const cloudflare = await new OpenAICompatibleProvider({ preset, apiKey: 'k', modelOverrides: { fast: qwen, deep: glm }, fetchImpl: account([]) as never, now: () => now }).discover();
+    const router = new ModelRouter({ providers: [cloudflare], now: () => now });
+    const row = (ts: string, purpose: string) => ({ ts, purpose, tier: 'deep', provider: 'cloudflare', ok: false, ms: 356, error: CLOUDFLARE_PLAN, project: 'find-40-activity-providers-in-gr-fbadb7', keys: 1, model: glm });
+    const restored = router.restoreCooldowns([...Array.from({ length: 12 }, (_, i) => row(new Date(now - (20 - i) * 60000).toISOString(), 'checklist')), row('2026-11-19T08:10:14.145Z', 'decision-model')].sort((a, b) => a.ts.localeCompare(b.ts)));
+    expect(restored).toEqual([]);
+    expect(router.cooldownUntil.has('cloudflare')).toBe(false);
+    expect(cloudflare.selected).toMatchObject({ fast: qwen, deep: oss });
+    expect(router.available({ tier: 'deep' }).map((p: { id: string }) => p.id)).toEqual(['cloudflare']);
+    const upgraded = new ModelRouter({ providers: [cloudflare], now: () => now });
+    const fresh = await new OpenAICompatibleProvider({ preset, apiKey: 'k', modelOverrides: { fast: qwen, deep: glm }, fetchImpl: account([]) as never, now: () => now }).discover();
+    upgraded.setProviders([fresh]);
+    upgraded.restoreCooldowns([row('2026-11-19T08:10:14.145Z', 'decision-model'), { ts: '2026-11-19T09:00:00Z', purpose: 'research', tier: 'deep', provider: 'cloudflare', model: glm, ok: true, ms: 900 }]);
+    expect(fresh.selected.deep).toBe(glm);
+  });
+
+  it('rests the provider with the plan as the reason when no other model is left, never as a rejected key', async () => {
+    const now = Date.parse('2026-11-19T08:10:14Z');
+    const asked: string[] = [];
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const only = { ...preset, prefer: { fast: [glm], deep: [glm] }, fallbackModels: undefined };
+    const cloudflare = await new OpenAICompatibleProvider({ preset: only, apiKey: 'k', fetchImpl: account(asked, [glm]) as never, now: () => now }).discover();
+    const b = provider('b', []);
+    const router = new ModelRouter({ providers: [cloudflare, b], now: () => now, sleep: async () => {} });
+    await expect(deep(router)).resolves.toMatchObject({ provider: 'b' });
+    expect(asked).toEqual([glm]);
+    expect(router.cooldownUntil.get('cloudflare')).toBe(now + MODEL_GONE_REST_MS);
+    expect(router.cooldownReason.get('cloudflare')).toBe(`${glm} is not available on this account's plan (HTTP 403) and no other model is; rests 24 h, set FRL_CLOUDFLARE_FAST_MODEL / FRL_CLOUDFLARE_DEEP_MODEL to a model the plan allows`);
   });
 });
 

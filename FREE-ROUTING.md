@@ -6,7 +6,7 @@
 
 1. **Order.** It tries the providers in `FRL_PROVIDER_ORDER` (or the built-in order) and skips any provider that is resting.
 2. **A busy model** (HTTP 503, or a 429 that says "overloaded" / "high traffic" / "Provider returned error") rests for 10 minutes. The same call goes on with the provider's next model. One busy Gemini model no longer benches all of Gemini.
-3. **A model that used its own daily quota, or was withdrawn,** is set aside until the quota resets (or for good). The same call goes on with the next model.
+3. **A model that used its own daily quota, was withdrawn, or is not on your account's plan** is set aside until the quota resets (or for good). The same call goes on with the next model; the provider is not rested.
 4. **A key that hit a limit** (429, 402, 401/403) rests. The same call goes on with the provider's next key. The provider rests only when every key rests, and it comes back when the first key is free again.
 5. **Daily resets** are taken from each provider. Gemini resets at midnight Pacific time ([Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)); the others reset at midnight UTC.
 6. One call makes at most 3 model or key switches inside one provider. Then the call moves on to the next provider.

@@ -84,6 +84,7 @@ export class OpenAICompatibleProvider {
     this.models = [];
     this.selected = { fast: modelOverrides.fast ?? null, deep: modelOverrides.deep ?? null, vision: null };
     this.retired = new Map();
+    this.unusable = new Set();
     this.state = 'unknown';
     this.detail = '';
     this.minIntervalMs = preset.minIntervalMs ?? 0;
@@ -230,12 +231,24 @@ export class OpenAICompatibleProvider {
   retireModel(model, until) {
     if (!model || !this.models?.length || this.modelOverrides.any || this.modelOverrides[Object.keys(this.selected).find((t) => this.selected[t] === model)]) return false;
     this.retired.set(model, until);
-    const live = this.models.filter((m) => !((this.retired.get(m) ?? 0) > this.now()));
-    const pick = (tier) => (this.preset.prefer[tier] ? pickModel(live, this.preset.prefer[tier], this.preset.freeOnly, { strict: true }) : null);
+    return this.replaceModel(model, `switched from ${model}`);
+  }
+
+  markUnusable(model) {
+    if (!model) return false;
+    this.unusable.add(model);
+    if (!Object.values(this.selected).includes(model)) return true;
+    return this.replaceModel(model, `${model} is not available on this account's plan`);
+  }
+
+  replaceModel(model, note) {
+    const live = this.models.filter((m) => !this.unusable.has(m) && !((this.retired.get(m) ?? 0) > this.now()));
+    const spare = this.models.length ? {} : this.preset.fallbackModels ?? {};
+    const pick = (tier) => [this.preset.prefer[tier] ? pickModel(live, this.preset.prefer[tier], this.preset.freeOnly, { strict: true }) : null, spare[tier]].find((m) => m && !this.unusable.has(m)) ?? null;
     const next = { fast: pick('fast'), deep: pick('deep'), vision: pick('vision') };
     if (!next.fast && !next.deep) return false;
     for (const tier of Object.keys(this.selected)) if (this.selected[tier] === model) this.selected[tier] = next[tier] ?? (tier === 'vision' ? null : next.fast ?? next.deep);
-    this.detail = `fast=${this.selected.fast} deep=${this.selected.deep} · switched from ${model}`;
+    this.detail = `fast=${this.selected.fast} deep=${this.selected.deep} · ${note}`;
     return true;
   }
 

@@ -278,6 +278,24 @@ describe('quotaWindow', () => {
   });
 });
 
+describe('models the account plan does not allow', () => {
+  it('replaces an unusable model by the preset fallback when the model list is unavailable, and never switches onto an unusable model', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const preset = { id: 'cloudflare', label: 'c', baseURL: 'https://c.example/v1', keyEnv: 'K', prefer: { fast: ['a'], deep: ['b', 'c'] }, fallbackModels: { fast: 'a', deep: 'c' } };
+    const unlisted = await new OpenAICompatibleProvider({ preset, apiKey: 'k', modelOverrides: { fast: 'q', deep: 'g' }, fetchImpl: (async () => new Response('busy', { status: 500 })) as never }).discover();
+    expect(unlisted.selected).toMatchObject({ fast: 'q', deep: 'g' });
+    expect(unlisted.markUnusable('g')).toBe(true);
+    expect(unlisted.selected).toMatchObject({ fast: 'q', deep: 'c' });
+    expect(unlisted.markUnusable('elsewhere')).toBe(true);
+    expect(unlisted.selected).toMatchObject({ fast: 'q', deep: 'c' });
+    const listed = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: (async () => new Response(JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }))) as never }).discover();
+    expect(listed.selected).toMatchObject({ fast: 'a', deep: 'b' });
+    expect(listed.markUnusable('c')).toBe(true);
+    expect(listed.retireModel('b', Infinity)).toBe(true);
+    expect(listed.selected).toMatchObject({ fast: 'a', deep: 'a' });
+  });
+});
+
 describe('Ollama with no model', () => {
   it('says which command pulls a model', async () => {
     const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
