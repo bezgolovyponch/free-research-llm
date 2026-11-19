@@ -1,6 +1,7 @@
 import { NON_CHAT_MODEL } from './presets.mjs';
 
 const MAX_TOKEN_BUDGET = 16000;
+const SAMPLING_REJECTED = /temperature[^a-z]*(?:is |are )?(?:deprecated|not supported|unsupported|not allowed|not permitted)/i;
 
 export function splitKeys(value) {
   return [...new Set(String(value ?? '').split(',').map((k) => k.trim()).filter(Boolean))];
@@ -251,11 +252,16 @@ export class OpenAICompatibleProvider {
     let waitMs = 0;
     for (let attempt = 0; attempt < 4; attempt++) {
       waitMs += await this.throttle();
-      const payload = { model, messages, temperature, max_tokens: budget, ...(this.preset.extraBody ?? {}), ...(jsonMode ? { response_format: { type: 'json_object' } } : {}) };
+      const sampling = this.fixedSampling?.has(model) ? {} : { temperature };
+      const payload = { model, messages, ...sampling, max_tokens: budget, ...(this.preset.extraBody ?? {}), ...(jsonMode ? { response_format: { type: 'json_object' } } : {}) };
       let body;
       try {
         body = await this.request('/chat/completions', { method: 'POST', body: JSON.stringify(payload), ...(timeoutMs ? { timeoutMs } : {}) });
       } catch (error) {
+        if (error.status === 400 && 'temperature' in sampling && SAMPLING_REJECTED.test(String(error.message ?? ''))) {
+          this.fixedSampling = new Set([...(this.fixedSampling ?? []), model]);
+          continue;
+        }
         if (jsonMode && error.status === 400) {
           jsonMode = false;
           continue;
