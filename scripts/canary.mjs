@@ -8,8 +8,20 @@ import { computeWasteStats } from './waste.mjs';
 import { startedDirectly } from './tool-entry.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DATA_DIR = path.join(ROOT, 'data', 'projects');
-const LOGS_DIR = path.join(ROOT, 'data', 'logs');
+const DEFAULT_DATA_DIR = path.join(ROOT, 'data');
+const DEFAULT_PROJECTS_DIR = path.join(DEFAULT_DATA_DIR, 'projects');
+const LOGS_DIR = path.join(DEFAULT_DATA_DIR, 'logs');
+const API_URL = 'http://127.0.0.1:4600/api/projects';
+
+function getDataDir() {
+  const envDir = process.env.FRL_DATA_DIR;
+  if (envDir) return path.resolve(envDir);
+  return DEFAULT_DATA_DIR;
+}
+
+function getProjectsDir(dataDir) {
+  return path.join(dataDir, 'projects');
+}
 
 function hardIdsOf(checklist, kind = null) {
   const ids = [...new Set(checklist?.flatMap?.((cluster) => cluster.items?.filter((ci) => ci.hard).map((ci) => cluster.clause + "|" + ci.question) ?? []) ?? [])];
@@ -180,6 +192,49 @@ function hardChecklistItemsCount(project) {
   return clusters.flatMap((c) => c.items ?? []).filter((i) => i.hard).length;
 }
 
+function extractHardChecklistClauses(project) {
+  const clusters = project?.decisionModel?.checklist ?? project?.checklist ?? [];
+  const clauses = [];
+  for (const cluster of clusters) {
+    for (const item of cluster.items ?? []) {
+      if (item.hard) {
+        clauses.push({
+          clause: cluster.clause,
+          question: item.question,
+          numeric: item.numeric ? {
+            measure: item.numeric.measure,
+            op: item.numeric.op,
+            value: item.numeric.value,
+            unit: item.numeric.unit,
+          } : null,
+        });
+      }
+    }
+  }
+  return clauses;
+}
+
+function extractDecisionCriteria(project) {
+  const criteria = project?.decisionModel?.criteria ?? [];
+  return criteria.map((c) => ({
+    id: c.id,
+    measure: c.measure,
+    op: c.op,
+    value: c.value,
+    clause: c.clause,
+    source: c.source,
+    quote: c.quote,
+  }));
+}
+
+function getDecisionModelVersion(project) {
+  return project?.decisionModel?.version ?? null;
+}
+
+function getChecklistVersion(project) {
+  return project?.decisionModel?.checklistVersion ?? null;
+}
+
 function extractJudgedItems(project) {
   const items = project?.acceptanceResult?.items ?? [];
   if (!items.length) return [];
@@ -261,17 +316,37 @@ function countsTowardResult(row, candidates) {
   return !row.plan || (row.plan.tier === 'fits' && (row.verified?.verdict === 'confirmed' || !candidates?.verification));
 }
 
-async function loadProject(id) {
-  const file = path.join(DATA_DIR, id + '.json');
+async function loadProject(projectsDir, id) {
+  const file = path.join(projectsDir, id + '.json');
   if (!fsSync.existsSync(file)) return null;
   const content = await fs.readFile(file, 'utf8');
   return JSON.parse(content);
 }
 
-async function getProjectIds() {
-  if (!fsSync.existsSync(DATA_DIR)) return [];
-  const files = await fs.readdir(DATA_DIR);
+async function getProjectIdsFromDir(projectsDir) {
+  if (!fsSync.existsSync(projectsDir)) return [];
+  const files = await fs.readdir(projectsDir);
   return files.filter(f => f.endsWith('.json')).map(f => f.slice(0, -5));
+}
+
+async function getProjectIdsFromApi() {
+  try {
+    const res = await fetch(API_URL);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.map((p) => p.id).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function getProjectIds(dataDir, useApi) {
+  const projectsDir = getProjectsDir(dataDir);
+  if (useApi) {
+    const apiIds = await getProjectIdsFromApi();
+    if (apiIds.length > 0) return apiIds;
+  }
+  return getProjectIdsFromDir(projectsDir);
 }
 
 function getLoopState(project) {
@@ -300,7 +375,7 @@ async function computeFailedCallShare() {
   return stats.failPct;
 }
 
-async function snapOne(project) {
+async function snapOne(projectsDir, project) {
   const tierResult = computeTiers(project);
   const loopState = getLoopState(project);
   const dmFits = getDecisionModelFits(project);
@@ -312,7 +387,11 @@ async function snapOne(project) {
     id: project.id,
     question: project.question,
     decisionCriteria: decisionCriteriaCount(project),
+    decisionCriteriaList: extractDecisionCriteria(project),
     hardChecklistItems: hardChecklistItemsCount(project),
+    hardChecklistClauses: extractHardChecklistClauses(project),
+    decisionModelVersion: getDecisionModelVersion(project),
+    checklistVersion: getChecklistVersion(project),
     verdictTiers: tierResult.tiers,
     verdictSummary: summary,
     decisionModelFits: dmFits.fits,
@@ -322,16 +401,17 @@ async function snapOne(project) {
   };
 }
 
-async function snapAll() {
-  const ids = await getProjectIds();
+async function snapAll(dataDir, useApi) {
+  const projectsDir = getProjectsDir(dataDir);
+  const ids = await getProjectIds(dataDir, useApi);
   const projects = [];
   for (const id of ids) {
-    const project = await loadProject(id);
+    const project = await loadProject(projectsDir, id);
     if (project) projects.push(project);
   }
   const results = [];
   for (const project of projects) {
-    results.push(await snapOne(project));
+    results.push(await snapOne(projectsDir, project));
   }
   const failedCallShare = await computeFailedCallShare();
   return {
@@ -339,6 +419,60 @@ async function snapAll() {
     projects: results,
     failedCallShare,
   };
+}
+
+function compareClauses(beforeClauses, afterClauses) {
+  const removed = [];
+  const added = [];
+
+  for (const b of beforeClauses) {
+    const found = afterClauses.some(a =>
+      a.clause === b.clause &&
+      a.question === b.question &&
+      ((b.numeric && a.numeric && a.numeric.measure === b.numeric.measure && a.numeric.op === b.numeric.op && a.numeric.value === b.numeric.value && a.numeric.unit === b.numeric.unit) ||
+       (!b.numeric && !a.numeric))
+    );
+    if (!found) removed.push(b);
+  }
+
+  for (const a of afterClauses) {
+    const found = beforeClauses.some(b =>
+      b.clause === a.clause &&
+      b.question === a.question &&
+      ((a.numeric && b.numeric && b.numeric.measure === a.numeric.measure && b.numeric.op === a.numeric.op && b.numeric.value === a.numeric.value && b.numeric.unit === a.numeric.unit) ||
+       (!a.numeric && !b.numeric))
+    );
+    if (!found) added.push(a);
+  }
+
+  return { removed, added };
+}
+
+function compareCriteria(beforeCriteria, afterCriteria) {
+  const removed = [];
+  const added = [];
+
+  for (const b of beforeCriteria) {
+    const found = afterCriteria.some(a =>
+      a.id === b.id &&
+      a.measure === b.measure &&
+      a.op === b.op &&
+      a.value === b.value
+    );
+    if (!found) removed.push(b);
+  }
+
+  for (const a of afterCriteria) {
+    const found = beforeCriteria.some(b =>
+      b.id === a.id &&
+      b.measure === a.measure &&
+      b.op === a.op &&
+      b.value === a.value
+    );
+    if (!found) added.push(a);
+  }
+
+  return { removed, added };
 }
 
 function printTable(projects, before, after) {
@@ -425,6 +559,10 @@ function checkFlags(before, after) {
     const b = before.projects.find(p => p.id === proj.id);
     if (!b) continue;
 
+    if (proj.decisionModelVersion !== b.decisionModelVersion || proj.checklistVersion !== b.checklistVersion) {
+      flags.push(proj.id + ': model rebuilt (decisionModel.version ' + (b.decisionModelVersion ?? 'none') + ' → ' + (proj.decisionModelVersion ?? 'none') + ', checklistVersion ' + (b.checklistVersion ?? 'none') + ' → ' + (proj.checklistVersion ?? 'none') + ')');
+    }
+
     if (proj.decisionCriteria < b.decisionCriteria) {
       flags.push(proj.id + ': decision criteria dropped (' + b.decisionCriteria + ' → ' + proj.decisionCriteria + ')');
     }
@@ -450,6 +588,32 @@ function checkFlags(before, after) {
       }
     } else if (rejectedAfter > 0 && confirmedAfter <= confirmedBefore) {
       flags.push(proj.id + ': rejected rose from 0 to ' + rejectedAfter + ' while confirmed did not rise (' + confirmedBefore + ' → ' + confirmedAfter + ')');
+    }
+
+    const clauseDiff = compareClauses(b.hardChecklistClauses ?? [], proj.hardChecklistClauses ?? []);
+    if (clauseDiff.removed.length > 0) {
+      for (const c of clauseDiff.removed) {
+        const numeric = c.numeric ? ` ${c.numeric.measure} ${c.numeric.op} ${c.numeric.value} ${c.numeric.unit}` : '';
+        flags.push(proj.id + ': hard checklist clause removed: ' + c.clause + ' — ' + c.question + numeric);
+      }
+    }
+    if (clauseDiff.added.length > 0) {
+      for (const c of clauseDiff.added) {
+        const numeric = c.numeric ? ` ${c.numeric.measure} ${c.numeric.op} ${c.numeric.value} ${c.numeric.unit}` : '';
+        flags.push(proj.id + ': hard checklist clause added: ' + c.clause + ' — ' + c.question + numeric);
+      }
+    }
+
+    const criteriaDiff = compareCriteria(b.decisionCriteriaList ?? [], proj.decisionCriteriaList ?? []);
+    if (criteriaDiff.removed.length > 0) {
+      for (const c of criteriaDiff.removed) {
+        flags.push(proj.id + ': decision criterion removed: ' + (c.clause ?? c.id) + ' — ' + c.measure + ' ' + c.op + ' ' + c.value + (c.quote ? ' [' + c.quote + ']' : ''));
+      }
+    }
+    if (criteriaDiff.added.length > 0) {
+      for (const c of criteriaDiff.added) {
+        flags.push(proj.id + ': decision criterion added: ' + (c.clause ?? c.id) + ' — ' + c.measure + ' ' + c.op + ' ' + c.value + (c.quote ? ' [' + c.quote + ']' : ''));
+      }
     }
   }
 
@@ -481,19 +645,27 @@ async function main() {
     options: {
       out: { type: 'string', short: 'o' },
       after: { type: 'string', short: 'a' },
+      data: { type: 'string', short: 'd' },
+      api: { type: 'boolean' },
     },
     allowPositionals: true,
   });
 
   const command = positionals[0];
+  const dataDir = values.data ? path.resolve(values.data) : getDataDir();
+  const useApi = values.api === true;
 
   if (command === 'snap') {
     const out = values.out;
     if (!out) {
-      console.error('Usage: canary.mjs snap --out <file>');
+      console.error('Usage: canary.mjs snap --out <file> [--data <dir>] [--api]');
       process.exit(1);
     }
-    const snapshot = await snapAll();
+    const snapshot = await snapAll(dataDir, useApi);
+    if (snapshot.projects.length === 0) {
+      console.error('NOT MEASURED: no researches found at ' + dataDir);
+      process.exit(2);
+    }
     await fs.mkdir(path.dirname(path.resolve(out)), { recursive: true });
     await fs.writeFile(path.resolve(out), JSON.stringify(snapshot, null, 1));
     console.log('Snapshot written to ' + out);
@@ -504,7 +676,7 @@ async function main() {
   if (command === 'compare') {
     const beforeFile = positionals[1];
     if (!beforeFile) {
-      console.error('Usage: canary.mjs compare <before> [--after <file>]');
+      console.error('Usage: canary.mjs compare <before> [--after <file>] [--data <dir>] [--api]');
       process.exit(1);
     }
     const before = JSON.parse(await fs.readFile(path.resolve(beforeFile), 'utf8'));
@@ -513,7 +685,11 @@ async function main() {
     if (values.after) {
       after = JSON.parse(await fs.readFile(path.resolve(values.after), 'utf8'));
     } else {
-      after = await snapAll();
+      after = await snapAll(dataDir, useApi);
+      if (after.projects.length === 0) {
+        console.error('NOT MEASURED: no researches found at ' + dataDir);
+        process.exit(2);
+      }
     }
 
     printTable(after.projects, before, after);
@@ -533,7 +709,7 @@ async function main() {
     }
   }
 
-  console.error('Usage: canary.mjs snap --out <file> | compare <before> [--after <file>]');
+  console.error('Usage: canary.mjs snap --out <file> [--data <dir>] [--api] | compare <before> [--after <file>] [--data <dir>] [--api]');
   process.exit(1);
 }
 
@@ -542,4 +718,4 @@ if (startedDirectly(import.meta.url)) main().catch(err => {
   process.exit(1);
 });
 
-export { snapAll, snapOne, computeTiers, checkFlags, hardIdsOf, kindCluster, itemTier, qualifies, refused, opens, purposeState, verdict, itemEvidence, acceptanceSummaryOf, decisionCriteriaCount, hardChecklistItemsCount, extractJudgedItems, candidateDeliverables, countsTowardResult, getLoopState, getDecisionModelFits, computeFailedCallShare, printTable, getMergeSha };
+export { snapAll, snapOne, computeTiers, checkFlags, hardIdsOf, kindCluster, itemTier, qualifies, refused, opens, purposeState, verdict, itemEvidence, acceptanceSummaryOf, decisionCriteriaCount, hardChecklistItemsCount, extractJudgedItems, candidateDeliverables, countsTowardResult, getLoopState, getDecisionModelFits, computeFailedCallShare, printTable, getMergeSha, extractHardChecklistClauses, extractDecisionCriteria, getDecisionModelVersion, getChecklistVersion, compareClauses, compareCriteria };

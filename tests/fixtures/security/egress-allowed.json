@@ -21,6 +21,7 @@
   "scripts/construct/browser-lab.mjs": "WebSocket to localhost for browser automation; spawn for Playwright browser processes",
   "scripts/construct/browser-witness.mjs": "imports node:http, node:net for local server readiness checks on 127.0.0.1; spawn for browser processes",
   "scripts/dryrun.mjs": "fetchImpl default = fetch for ExchangeRates and SearchService",
+  "scripts/canary.mjs": "fetch to localhost (127.0.0.1:4600) for /api/projects endpoint to list research IDs",
   "verifier/coast.mjs": "fetchImpl default = fetch for Natural Earth coastline GeoJSON (raw.githubusercontent.com)",
   "verifier/verify.mjs": "fetch to Nominatim (nominatim.openstreetmap.org) for reverse geocoding; Open-Meteo (archive-api.open-meteo.com) for climate archive; ECB (ecb.europa.eu) for exchange rates; listing URLs provided by research for verification"
 }
