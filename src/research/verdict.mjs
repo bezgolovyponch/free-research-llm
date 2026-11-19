@@ -37,7 +37,7 @@ export function itemTier(item, hardIds, spec) {
     return qualified ? "confirmed" : "rejected";
   }
 
-  if (hardChecks.length === 0 || hardChecks.every((c) => c.notJudged)) {
+  if (hardChecks.length === 0) {
     return "not-judged";
   }
 

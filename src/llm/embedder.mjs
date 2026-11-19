@@ -7,6 +7,9 @@ export const EMBED_BATCH = 50;
 export const EMBED_TEXT_CHARS = 2000;
 export const EMBED_CACHE_SIZE = 20000;
 export const EMBED_TEXTS_PER_RUN = 2000;
+export const EMBED_RETRIES_ON_LIMIT = 1;
+export const EMBED_RETRY_MS = 2000;
+export const EMBED_RETRY_MAX_MS = 10000;
 
 export const KEY_REFUSALS = [401, 403, 429];
 export const EMBED_ROUTES = [
@@ -51,6 +54,11 @@ function nearest(query, vectors) {
     .map((hit) => hit.index);
 }
 
+function retryDelay(response) {
+  const seconds = Number(response?.headers?.get?.('retry-after'));
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(EMBED_RETRY_MAX_MS, seconds * 1000) : EMBED_RETRY_MS;
+}
+
 const clean = (text) => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, EMBED_TEXT_CHARS);
 const keyOf = (text) => createHash('sha256').update(text).digest('hex');
 const slugOf = (model) => String(model).replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
@@ -62,13 +70,15 @@ function decode(text) {
 }
 
 export class Embedder {
-  constructor({ env = process.env, fetchImpl = fetch, routes = EMBED_ROUTES, dir = null, maxTexts = EMBED_TEXTS_PER_RUN } = {}) {
+  constructor({ env = process.env, fetchImpl = fetch, routes = EMBED_ROUTES, dir = null, maxTexts = EMBED_TEXTS_PER_RUN, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
     this.env = env;
+    this.wait = wait;
     this.fetchImpl = fetchImpl;
     this.routes = routes;
     this.dir = dir;
     this.maxTexts = maxTexts;
     this.embedded = 0;
+    this.exempt = 0;
     this.caches = new Map();
     this.failures = [];
     this.reported = 0;
@@ -105,13 +115,19 @@ export class Embedder {
   async answerFrom(route, batch) {
     const variants = Math.max(1, ...route.keys.map((key) => splitKeys(this.env[key]).length));
     let status = 0;
-    for (let index = 0; index < variants; index++) {
-      const env = { ...this.env, ...Object.fromEntries(route.keys.map((key) => { const values = splitKeys(this.env[key]); return [key, values[index % values.length] ?? '']; })) };
-      const { url, init } = route.request(env, batch);
-      const response = await this.fetchImpl(url, init);
-      if (response.ok) return response;
-      status = response.status;
-      if (!KEY_REFUSALS.includes(status)) break;
+    for (let attempt = 0; attempt <= EMBED_RETRIES_ON_LIMIT; attempt++) {
+      let limited = null;
+      for (let index = 0; index < variants; index++) {
+        const env = { ...this.env, ...Object.fromEntries(route.keys.map((key) => { const values = splitKeys(this.env[key]); return [key, values[index % values.length] ?? '']; })) };
+        const { url, init } = route.request(env, batch);
+        const response = await this.fetchImpl(url, init);
+        if (response.ok) return response;
+        status = response.status;
+        if (status === 429) limited = response;
+        if (!KEY_REFUSALS.includes(status)) break;
+      }
+      if (status !== 429 || attempt === EMBED_RETRIES_ON_LIMIT) break;
+      await this.wait(retryDelay(limited));
     }
     throw new Error(`${route.id} embeddings answered ${status}`);
   }
@@ -128,14 +144,14 @@ export class Embedder {
     return out;
   }
 
-  async embedAll(texts) {
+  async embedAll(texts, { capped = true } = {}) {
     const list = (texts ?? []).map(clean);
     const usable = this.routes.filter((route) => route.keys.every((key) => this.env[key]));
     if (!usable.length && !this.failures.some((failure) => failure.route === 'none')) this.failures.push({ route: 'none', error: 'no embedding route has keys' });
     for (const route of usable) {
       const cache = await this.cacheOf(route.model);
       const missing = [...new Set(list.filter((text) => !cache.has(keyOf(text))))];
-      if (this.embedded + missing.length > this.maxTexts) {
+      if (capped && this.embedded + missing.length > this.maxTexts) {
         this.failures.push({ route: route.id, error: `the run's allowance of ${this.maxTexts} embedded texts is used up` });
         return null;
       }
@@ -143,7 +159,8 @@ export class Embedder {
         if (missing.length) {
           const vectors = await this.fetchVectors(route, missing);
           missing.forEach((text, i) => cache.set(keyOf(text), vectors[i]));
-          this.embedded += missing.length;
+          if (capped) this.embedded += missing.length;
+          else this.exempt += missing.length;
           await this.persist(route.model, cache);
         }
         this.lastModel = route.model;
@@ -155,10 +172,10 @@ export class Embedder {
     return null;
   }
 
-  async rank(query, candidates, k = (candidates ?? []).length) {
+  async rank(query, candidates, k = (candidates ?? []).length, { capped = true } = {}) {
     const list = candidates ?? [];
     if (!list.length) return null;
-    const embedded = await this.embedAll([query, ...list]);
+    const embedded = await this.embedAll([query, ...list], { capped });
     if (!embedded) return null;
     const [first, ...rest] = embedded.vectors;
     return { model: embedded.model, order: nearest(first, rest).slice(0, k) };

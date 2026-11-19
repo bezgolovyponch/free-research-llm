@@ -320,7 +320,7 @@ async function shownSpans(spans, query, embedder, always = []) {
   const room = (list) => Math.max(0, lineCount(list) - always.length);
   const opening = room(spans);
   if (opening >= spans.length) return spans;
-  const ranked = embedder ? await embedder.rank(query, spans.map((span) => span.text), opening) : null;
+  const ranked = embedder ? await embedder.rank(query, spans.map((span) => span.text), opening, { capped: false }) : null;
   if (!ranked) return null;
   const picked = pickRanked(spans, ranked);
   return picked.slice(0, room(picked));
@@ -349,14 +349,15 @@ export class ChecklistJudge {
   }
 
   async answersFromPage(asked, shown) {
-    if (!shown.length) return new Map();
+    if (!shown.length) return { answers: new Map(), replied: true };
     const reply = await this.complete(judgePrompt({ questions: asked.map((q) => ({ short: q.short, question: q.asked ?? q.question })), block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
     const validated = applyQuoteCheck(replyList(reply?.data), shown);
     const by = { provider: reply?.provider ?? null, model: reply?.model ?? null };
-    return new Map(asked.flatMap((q) => {
+    const answers = new Map(asked.flatMap((q) => {
       const found = validated.find((r) => shortIdOf(r) === q.short);
       return found ? [[q.short, { ...found, ...by }]] : [];
     }));
+    return { answers, replied: Boolean(reply) };
   }
 
   async judgeKind(spans, cluster) {
@@ -366,6 +367,7 @@ export class ChecklistJudge {
     if (!shown) return { ...check, provider: null, notJudged: true, reason: NOT_RANKED_REASON };
     if (!shown.length) return { ...check, provider: null };
     const reply = await this.completeFull(kindPrompt({ options: cluster.options, block: spansBlock(shown, JUDGE_BLOCK_CHARS), context: cluster.context }));
+    if (!reply) return { ...check, provider: null, notJudged: true, reason: NO_ANSWER_REASON };
     const letter = String(reply?.data?.kind ?? '').trim().toUpperCase();
     const answer = KIND_ANSWERS[letter] ?? 'unknown';
     const quote = answer === 'unknown' ? '' : quoteFromSpans(reply?.data?.span ?? reply?.data?.spans, shown);
@@ -442,13 +444,21 @@ export class ChecklistJudge {
         continue;
       }
       const shown = [...facts, ...picked];
-      const answers = await this.answersFromPage(asked, shown);
+      const first = await this.answersFromPage(asked, shown);
+      const answers = first.answers;
+      let replied = first.replied;
       const missing = asked.filter((q) => !answers.has(q.short));
       if (missing.length) {
-        for (const [short, found] of await this.answersFromPage(missing, shown)) answers.set(short, found);
+        const again = await this.answersFromPage(missing, shown);
+        replied = replied || again.replied;
+        for (const [short, found] of again.answers) answers.set(short, found);
       }
       for (const q of asked) {
         const found = answers.get(q.short);
+        if (!found && !replied) {
+          checks.push({ id: q.id, answer: 'unknown', quote: '', hard: q.hard, clause: q.clause, notJudged: true, reason: NO_ANSWER_REASON, ...(q.criterion ? { criterion: q.criterion } : {}) });
+          continue;
+        }
         const check = { id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause };
         if (!q.criterion || check.answer === 'unknown') {
           checks.push(q.criterion ? { ...check, criterion: q.criterion } : check);
@@ -467,7 +477,8 @@ export class ChecklistJudge {
   }
 }
 
-export const NOT_RANKED_REASON = 'not judged: the page is longer than one reading and no sentence ranking answered';
+export const NOT_RANKED_REASON = 'to confirm: the page is longer than one reading and no sentence ranking answered; it is judged again on the next check';
+export const NO_ANSWER_REASON = 'to confirm: no provider answered this question; it is judged again on the next check';
 
 export function notJudged(checks) {
   return (checks ?? []).some((check) => check.notJudged);

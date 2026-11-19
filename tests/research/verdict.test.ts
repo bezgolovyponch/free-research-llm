@@ -523,10 +523,14 @@ describe('a hard check that was never answered', () => {
 });
 
 describe('an item whose page could not be judged', () => {
-  it('is not judged, never to confirm or rejected, while every hard check is marked not judged', () => {
+  it('stays to confirm with the reason when no ranking or no provider answered, and is never rejected or dropped from the reachable count; only an unread page is not judged', () => {
     const hardIds = ['a|is it a?', 'b|is it b?'];
-    const unread = { live: true, listing: true, checks: hardIds.map((id) => ({ id, hard: true, answer: 'unknown', quote: '', notJudged: true })) };
-    expect(itemTier(unread, hardIds, {})).toBe('not-judged');
+    const unread = { live: true, listing: true, checks: hardIds.map((id) => ({ id, hard: true, answer: 'unknown', quote: '', notJudged: true, reason: 'to confirm: no provider answered this question; it is judged again on the next check' })) };
+    expect(itemTier(unread, hardIds, {})).toBe('to-confirm');
+    expect(itemTier({ ...unread, checks: [] }, hardIds, {})).toBe('not-judged');
+    const result = verdict([{ ...unread, url: 'u1' }, { ...unread, url: 'u2', checks: [] }], { itemCount: 2 }, [{ clause: 'a', items: [{ question: 'is it a?', hard: true }] }, { clause: 'b', items: [{ question: 'is it b?', hard: true }] }]);
+    expect(result.tiers).toEqual({ confirmed: 0, toConfirm: 1, rejected: 0, notJudged: 1 });
+    expect(headlineOf(result).upTo).toBe('up to 1 of 2 could meet every must-have (0 confirmed + 1 to confirm)');
     expect(itemTier({ ...unread, checks: [unread.checks[0], { id: 'b|is it b?', hard: true, answer: 'yes', quote: 'it is b' }] }, hardIds, {})).toBe('to-confirm');
   });
 });

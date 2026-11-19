@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged } from '../../src/research/checklist.mjs';
+import { clusterChecklist, checklistSummary, proposeChecklist, normalizeSample, ChecklistModeler, ChecklistJudge, applyQuoteCheck, checklistFingerprint, kindCluster, askedCounts, filterCountItems, hardenKind, migrateChecks, needsSecondKind, replyList, judgePrompt, measuredValue, measuredReading, JUDGE_VERSION, CHECKLIST_VERSION, LOW_PRICE_REASON, SINGLE_KIND_REASON, NOT_KIND_REASON, SECOND_FAMILY_REASON, SECOND_TASK, SPLIT_REASON, criterionAsked, rowSentences, NOT_RANKED_REASON, notJudged, NO_ANSWER_REASON } from '../../src/research/checklist.mjs';
 import { FAIL, fakeRouter, seq, fakeEmbedder } from '../helpers/fakes';
 import { sentenceSpans } from '../../src/research/spans.mjs';
 
@@ -1020,6 +1020,26 @@ describe('a page longer than one reading', () => {
     expect(seen.every((text) => text.includes(fact))).toBe(true);
     expect(embedder.calls.length).toBe(2);
     expect(notJudged(checks)).toBe(false);
+  });
+
+  it('ranks the sentences of a long page outside the per-run allowance of the embedder', async () => {
+    const options: unknown[] = [];
+    const embedder = { rank: async (_q: string, texts: string[], k: number, more?: unknown) => { options.push(more); return { model: 'fake', order: [last, ...texts.map((_, i) => i).filter((i) => i !== last)].slice(0, k) }; } };
+    const router = fakeRouter({ '': (request: { messages: Array<{ content: string }> }) => (request.messages[1].content.includes('This page offers:') ? { kind: 'A', span: spans[last].id } : { answers: [{ id: 'q1', answer: 'yes', spans: [spans[last].id] }] }) });
+    const checks = await new ChecklistJudge({ router, embedder }).judge({ url: 'u' }, page, checklist, kind);
+    expect(options).toEqual([{ capped: false }, { capped: false }]);
+    expect(checks.map((check: { answer: string }) => check.answer)).toEqual(['yes', 'yes']);
+  });
+
+  it('marks a question and a kind call that no provider answered as not judged with the reason, so the item stays to confirm and is judged again, and a reply that left a question out is no such case', async () => {
+    const silent = fakeRouter({ '': FAIL });
+    const checks = await new ChecklistJudge({ router: silent }).judge({ url: 'u' }, fact, checklist, kind);
+    expect(silent.calls).toHaveLength(3);
+    expect(checks.map((check: { answer: string; notJudged?: boolean; reason?: string }) => [check.answer, check.notJudged, check.reason])).toEqual([['unknown', true, NO_ANSWER_REASON], ['unknown', true, NO_ANSWER_REASON]]);
+    expect(notJudged(checks)).toBe(true);
+    const terse = fakeRouter({ '': (request: { messages: Array<{ content: string }> }) => (request.messages[1].content.includes('This page offers:') ? { kind: 'U' } : { answers: [] }) });
+    const answered = await new ChecklistJudge({ router: terse }).judge({ url: 'u' }, fact, checklist, kind);
+    expect(answered.map((check: { answer: string; notJudged?: boolean }) => [check.answer, Boolean(check.notJudged)])).toEqual([['unknown', false], ['unknown', false]]);
   });
 
   it('is not judged at all when no sentence ranking answers: no model reads the opening', async () => {
