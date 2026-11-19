@@ -111,12 +111,21 @@ function textForTrace(node) {
   return (node.title + ' ' + node.question).trim();
 }
 
+function getParentForTrace(project, parentId) {
+  const parent = project.nodes?.find((n) => n.id === parentId);
+  if (parent) return parent;
+  if (parentId === 'Q' || parentId === 'ROOT') {
+    return { title: '', question: project.question ?? '' };
+  }
+  return null;
+}
+
 export async function traceOk(node, before, project, embedder) {
   if (!before || !before.question) return { ok: true, reason: null };
   if (before.question === node.question) return { ok: true, reason: null };
   const parentId = node.parentId;
-  const parent = project.nodes?.find((n) => n.id === parentId);
-  if (!parent) return { ok: true, reason: null };
+  const parent = getParentForTrace(project, parentId);
+  if (!parent || !parent.question) return { ok: true, reason: null };
   const oldText = textForTrace({ ...node, question: before.question });
   const newText = textForTrace(node);
   const parentText = textForTrace(parent);

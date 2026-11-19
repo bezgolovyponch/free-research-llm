@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { WAIT_LINE_MS, callSummary, routerLine } from './routerlog.mjs';
+import { traceOk } from './nodevalidity.mjs';
 import { withProposals } from './proposal.mjs';
 import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
@@ -297,7 +298,7 @@ export const FACT_PAGES = 400;
 export const FACT_READS_AT_ONCE = 6;
 
 export class ResearchEngine {
-  constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null, now = () => Date.now() }) {
+  constructor({ router, search, store, demo = false, rates = null, sites = null, parcels = null, lanes = DEFAULT_LANES, onEvent = () => {}, onStop = async () => {}, verifier = null, modeler = null, cases = null, arms = null, now = () => Date.now(), embedder = null }) {
     this.now = now;
     this.phaseCalls = new Map();
     this.waitLines = new Map();
@@ -323,6 +324,7 @@ export class ResearchEngine {
     this.running = new Set();
     this.cancelled = new Set();
     this.checklistJudge = new ChecklistJudge({ router });
+    this.embedder = embedder;
   }
 
   subscribe(projectId, listener) {
@@ -2284,6 +2286,17 @@ export class ResearchEngine {
     const project = await this.load(id);
     const node = project.nodes.find((n) => n.id === nodeId);
     if (!node) throw new NotFoundError(`node ${nodeId} not found`);
+    const newQuestion = typeof changes.question === 'string' ? changes.question.slice(0, 400) : node.question;
+    if (newQuestion !== node.question) {
+      const newNode = { ...node, question: newQuestion };
+      const trace = await traceOk(newNode, { question: node.question, finding: node.finding }, project, this.embedder);
+      if (!trace.ok) {
+        const purpose = node.title ? ` (${node.title})` : '';
+        throw new Error(`Question change rejected: ${trace.reason}. This piece is for${purpose}: ${node.question}`);
+      }
+      node.history = node.history ?? [];
+      node.history.push({ question: node.question, finding: node.finding, at: new Date().toISOString() });
+    }
     for (const key of ['title', 'question', 'hypothesis', 'metric', 'unit']) if (typeof changes[key] === 'string') node[key] = changes[key].slice(0, 400);
     if (Array.isArray(changes.searchQueries)) node.searchQueries = strings(changes.searchQueries, 3);
     if (Array.isArray(changes.sourceUrls)) node.sourceUrls = urlList(changes.sourceUrls);
