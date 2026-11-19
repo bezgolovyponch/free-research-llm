@@ -79,7 +79,7 @@ export function modelOrder(env) {
 
 function stateOf(status, saved) {
   if (!status) return saved ? { state: 'failed', detail: 'saved, but the provider did not load' } : { state: 'empty', detail: 'no key yet' };
-  if (status.coolingDownMs > 0) return { state: 'cooling', detail: `cooling down ${Math.ceil(status.coolingDownMs / 1000)} s after a rate limit` };
+  if (status.coolingDownMs > 0) return { state: 'cooling', detail: `cooling down ${Math.ceil(status.coolingDownMs / 1000)} s: ${status.coolingReason ?? 'rate limit'}` };
   if (status.state === 'ready') return { state: 'ready', detail: `${status.modelCount} models · fast ${status.fast ?? '–'} · deep ${status.deep ?? '–'}` };
   return { state: saved ? 'failed' : 'empty', detail: status.detail || (saved ? 'not working' : 'no key yet') };
 }
