@@ -224,7 +224,8 @@ function diffAgainstBaseDir(baseDir, currentDir = ROOT) {
 
 const gates = {
   testIntegrity(files) {
-    const headCommit = run('git', ['log', '-1', '--pretty=%B']).stdout.trim();
+    const base = mergeBase();
+    const headCommit = run('git', ['log', '--pretty=%B', base ? `${base}..HEAD` : '-1']).stdout.trim();
     const commitMessages = headCommit.split('\n').filter(Boolean);
     const integrityBase = process.env.FRL_INTEGRITY_BASE;
     let diff = '';
