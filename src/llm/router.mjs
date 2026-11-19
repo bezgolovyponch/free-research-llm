@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { PURPOSE_CLASS } from './ranking.mjs';
 import { extractJson } from '../research/json.mjs';
-import { ProviderError } from './provider.mjs';
+import { ProviderError, quotaWindowOf } from './provider.mjs';
 import { CHOICE_LETTERS, MAX_PROMPT_TOKENS, familyOf, independentFamilies, letterBias, letterTallies, replyFamily } from './ranking.mjs';
 import { paidDailyTokens, paidProviderIds } from './presets.mjs';
 
@@ -34,7 +34,7 @@ const BAD_KEY_MS = 6 * 3600 * 1000;
 export const PAYMENT_REST_MS = 24 * 3600 * 1000;
 export const WAIT_NOTICE_MS = 60000;
 const PAYMENT_REQUIRED = /payment required|needs payment|subscription (?:is )?required|requires? a (?:paid|subscription)|upgrade your plan/i;
-const CREDIT_EXHAUSTED = /balance_units|billing_portal|insufficient (?:credit|funds|balance)|out of credits?/i;
+const CREDIT_EXHAUSTED = /balance_units|billing_portal|insufficient (?:credit|funds|balance)|out of credits?|credits?[_ ](?:exhausted|depleted|used up)/i;
 const SHORT_LIMIT = /^(?![\s\S]*quota window: per day)[\s\S]*(?:retry after \d+\s*(?:s|sec|seconds)\b|every \d+ seconds|per (?:second|minute)|requests per minute|tokens per minute)/i;
 const DAILY = /per day|daily|\bRPD\b|\bTPD\b|tokens per day|requests per day|quota exceeded|exceeded your current quota|balance|credit|insufficient|billing/i;
 const PER_MODEL_DAY = /quota window: per day, per model/;
@@ -51,10 +51,17 @@ export const MODEL_GONE_REST_MS = 24 * 3600 * 1000;
 export const TRIAL_POLL_MS = 1000;
 const MODEL_NOT_FOUND = /no longer available|not found|does not exist|unknown model/i;
 const MODEL_RETIRED = /model\b[^\n]{0,120}\b(?:deprecated|decommissioned|retired)\b|\b(?:deprecated|decommissioned|retired)\b[^\n]{0,40}\bmodel\b/i;
+const PLAN_GATED = /\bmodel\b[^\n]{0,160}?\bnot (?:available|supported|included|enabled|allowed)\b[^\n]{0,60}?\b(?:plan|tier|subscription|account)\b/i;
+
+export function planGated(error) {
+  return PLAN_GATED.test(String(error?.message ?? ''));
+}
 
 export function paymentRequired(error) {
   const message = String(error?.message ?? '');
-  return PAYMENT_REQUIRED.test(message) || (error?.status === 402 && !SHORT_LIMIT.test(message) && !CREDIT_EXHAUSTED.test(message));
+  if (PAYMENT_REQUIRED.test(message)) return true;
+  if (SHORT_LIMIT.test(message) || quotaWindowOf(message)) return false;
+  return error?.status === 402 || CREDIT_EXHAUSTED.test(message);
 }
 
 export function modelGone(error) {
@@ -65,6 +72,11 @@ export function modelGone(error) {
 export function nextUtcMidnight(now) {
   const d = new Date(now);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) + 60000;
+}
+
+export function nextUtcMonth(now) {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) + 60000;
 }
 
 function utcOffsetMs(timeZone, at) {
@@ -109,6 +121,7 @@ export class ModelRouter {
     this.onWait = onWait;
     this.scopes = new AsyncLocalStorage();
     this.paymentUntil = new Map();
+    this.unusable = new Map();
     this.cooldownUntil = new Map();
     this.inflight = new Map();
     this.timeoutStreak = new Map();
@@ -154,6 +167,18 @@ export class ModelRouter {
 
   setProviders(providers) {
     this.providers = providers;
+    for (const provider of providers) for (const model of this.unusable.get(provider.id) ?? []) provider.markUnusable?.(model);
+  }
+
+  gate(provider, model) {
+    this.unusable.set(provider.id, new Set([...(this.unusable.get(provider.id) ?? []), model]));
+    return Boolean(provider.markUnusable?.(model));
+  }
+
+  gateModel(provider, model, error) {
+    if (!model || !this.gate(provider, model)) return false;
+    this.record({ purpose: 'router', tier: '', provider: provider.id, model, ok: false, ms: 0, error: `model ${model} is not available on this account's plan (HTTP ${error.status}); switched to ${provider.selected.fast} / ${provider.selected.deep}` });
+    return true;
   }
 
   ordered(tier, purpose) {
@@ -303,9 +328,10 @@ export class ModelRouter {
     const vars = (tiers.length ? tiers : ['fast']).map((t) => `FRL_${String(provider.id).toUpperCase()}_${t.toUpperCase()}_MODEL`).join(' / ');
     const resets = [...(provider.retired?.values?.() ?? [])].filter((until) => Number.isFinite(until) && until > this.now());
     const until = resets.length ? Math.min(...resets) : this.now() + MODEL_GONE_REST_MS;
-    const gone = `${model ?? 'the model'} is gone (${error.status ? `HTTP ${error.status}` : 'deprecated'}) and cannot be switched`;
+    const gated = planGated(error);
+    const gone = gated ? `${model ?? 'the model'} is not available on this account's plan (HTTP ${error.status}) and no other model is` : `${model ?? 'the model'} is gone (${error.status ? `HTTP ${error.status}` : 'deprecated'}) and cannot be switched`;
     const rest = resets.length ? `every other model of this provider rests for its quota, so it rests until the first of them resets (${Math.ceil((until - this.now()) / 60000)} min)` : 'rests 24 h';
-    const reason = `${gone}; ${rest}, set ${vars} to a model this provider still serves`;
+    const reason = `${gone}; ${rest}, set ${vars} to a model ${gated ? 'the plan allows' : 'this provider still serves'}`;
     this.cooldownUntil.set(provider.id, Math.max(this.cooldownUntil.get(provider.id) ?? 0, until));
     this.cooldownReason.set(provider.id, reason);
     this.record({ purpose: 'router', tier: '', provider: provider.id, ...(model ? { model } : {}), ok: false, ms: 0, error: reason });
@@ -395,6 +421,7 @@ export class ModelRouter {
   }
 
   switchModel(provider, model, error) {
+    if (planGated(error)) return this.gateModel(provider, model, error);
     if (!provider.retireModel || !model) return false;
     const gone = modelGone(error);
     const usedUp = PER_MODEL_DAY.test(error.message);
@@ -408,14 +435,29 @@ export class ModelRouter {
   }
 
   rotateKey(provider, error) {
-    if (!provider.rotateKey || overloaded(error)) return false;
+    if (!provider.rotateKey || overloaded(error) || planGated(error)) return false;
     if (!(error.status === 429 || error.quotaLimited || [401, 402, 403].includes(error.status))) return false;
     const rotated = provider.rotateKey(this.cooldownFor(provider, error).until);
     if (rotated) this.record({ purpose: 'router', tier: '', provider: provider.id, ok: false, ms: 0, error: `key ${provider.keyIndex + 1} of ${provider.keyCount} in use; the previous key rests (${this.cooldownFor(provider, error).reason})` });
     return rotated;
   }
 
+  restoreGates(rows) {
+    const gates = new Map();
+    for (const row of rows) {
+      if (!row?.provider || !row.model) continue;
+      const key = JSON.stringify([row.provider, row.model]);
+      if (row.ok) gates.delete(key);
+      else if (planGated({ message: row.error })) gates.set(key, row);
+    }
+    for (const row of gates.values()) {
+      const provider = this.providers.find((p) => p.id === row.provider);
+      if (provider) this.gate(provider, row.model);
+    }
+  }
+
   restoreCooldowns(rows) {
+    this.restoreGates(rows);
     const latest = new Map();
     const byProvider = new Map();
     for (const row of rows) {
@@ -428,7 +470,7 @@ export class ModelRouter {
     }
     const restored = [];
     for (const [id, row] of latest) {
-      if (row.ok || !this.providers.some((p) => p.id === id)) continue;
+      if (row.ok || !this.providers.some((p) => p.id === id) || planGated({ message: row.error })) continue;
       const provider = this.providers.find((p) => p.id === id);
       if (provider?.keyCount !== undefined && row.keys !== undefined && provider.keyCount > row.keys) continue;
       const status = Number(/HTTP (\d{3})/.exec(String(row.error ?? ''))?.[1] ?? 0);
@@ -444,6 +486,7 @@ export class ModelRouter {
       }
       const noCredit = !SHORT_LIMIT.test(text) && (status === 402 || CREDIT_EXHAUSTED.test(text)) && !/exceeded your current quota|per day/i.test(text);
       const daily = noCredit && nextUtcMidnight(at) > this.now();
+      const monthly = quotaWindowOf(text) === 'month' && Number.isFinite(at) && nextUtcMonth(at) > this.now();
       const modelGoneError = modelGone({ status, message: text });
       if (modelGoneError) {
         if (row.model && !this.isModelCurrent(provider, row.model)) continue;
@@ -451,7 +494,7 @@ export class ModelRouter {
         restored.push(id);
         continue;
       }
-      if (!badKey && !daily) continue;
+      if (!badKey && !daily && !monthly) continue;
       this.coolDown({ id }, { status, message: String(row.error ?? '') });
       restored.push(id);
     }
@@ -459,7 +502,7 @@ export class ModelRouter {
     for (const [id, list] of byProvider) {
       if (!this.providers.some((p) => p.id === id)) continue;
       const provider = this.providers.find((p) => p.id === id);
-      const calls = list.filter((row) => row.purpose !== 'router');
+      const calls = list.filter((row) => row.purpose !== 'router' && !planGated({ message: row.error }));
       const benchRows = list.filter((row) => row.purpose === 'router');
       const recent = calls.filter((row) => {
         const at = Date.parse(row.ts);
@@ -475,8 +518,10 @@ export class ModelRouter {
       const rest = Math.min(STREAK_BENCH_MS * 2 ** benches, STREAK_BENCH_MAX_MS);
       const until = at + rest;
       if (until <= now) continue;
-      this.cooldownUntil.set(id, Math.max(this.cooldownUntil.get(id) ?? 0, until));
-      this.cooldownReason.set(id, `${streak} failed calls in a row before the restart; rests ${Math.round(rest / 60000)} min`);
+      if ((this.cooldownUntil.get(id) ?? 0) < until) {
+        this.cooldownUntil.set(id, until);
+        this.cooldownReason.set(id, `${streak} failed calls in a row before the restart; rests ${Math.round(rest / 60000)} min`);
+      }
       if (!restored.includes(id)) restored.push(id);
     }
     return restored;
@@ -491,8 +536,12 @@ export class ModelRouter {
     const now = this.now();
     if (error.status === 401 || error.status === 403) return { until: now + BAD_KEY_MS, reason: 'key rejected; check it on Models & router' };
     const message = String(error.message ?? '');
-    if (paymentRequired(error)) return { until: now + PAYMENT_REST_MS, reason: 'needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key' };
+    if (paymentRequired(error)) return { until: now + PAYMENT_REST_MS, reason: CREDIT_EXHAUSTED.test(message) ? 'credits used up (needs payment); rests 24 h, add credit or remove the key' : 'needs a paid plan (no free tier for this key); rests 24 h, add credit or remove the key' };
     const until = now + (error.retryAfterMs || this.cooldownMs);
+    if (quotaWindowOf(message) === 'month') {
+      const reset = Math.max(until, nextUtcMonth(now));
+      return { until: reset, reason: `monthly quota used up; waits for the monthly reset (${new Date(reset).toISOString().slice(0, 10)} UTC)` };
+    }
     if (!SHORT_LIMIT.test(message) && (error.status === 402 || DAILY.test(message))) return { until: Math.max(until, quotaResetAt(provider, now)), reason: 'daily quota or credit used up; waits for the daily reset' };
     return { until, reason: 'rate limit' };
   }
@@ -567,6 +616,7 @@ export class ModelRouter {
     this.cooldownUntil.delete(providerId);
     this.cooldownReason.delete(providerId);
     this.paymentUntil.delete(providerId);
+    this.unusable.delete(providerId);
   }
 
   restoreProviderState(snapshot) {
@@ -672,7 +722,7 @@ export class ModelRouter {
                 retry = true;
                 stop = false;
               }
-            } else if (modelGone(error)) {
+            } else if (modelGone(error) || planGated(error)) {
               this.benchGoneModel(provider, model, error);
             } else if (!this.benchSlow(provider, error) && !this.benchComputeError(provider, error) && (error.retryable || [401, 402, 403].includes(error.status))) {
               this.coolDown(provider, error);

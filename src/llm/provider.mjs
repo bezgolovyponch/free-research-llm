@@ -36,11 +36,21 @@ const LOCAL_OUTPUT_RESERVE = 3000;
 export const LOCAL_TIMEOUT_MIN_MS = 60000;
 export const LOCAL_TIMEOUT_MAX_MS = 480000;
 
+const WINDOW_LABELS = { 'day-model': 'per day, per model', day: 'per day', month: 'per month', minute: 'per minute' };
+
+export function quotaWindowOf(body) {
+  const text = String(body ?? '');
+  if (/PerDay[A-Za-z]*PerModel/.test(text) || /limit reached for model[\s\S]*(?:per day|\bTPD\b|\bRPD\b)/i.test(text) || /(?:tokens|requests) per day limit exceeded/i.test(text)) return 'day-model';
+  if (/PerDay|per day|daily/i.test(text)) return 'day';
+  if (/PerMonth|per month|monthly|\/\s*month\b/i.test(text)) return 'month';
+  if (/PerMinute|per minute/i.test(text)) return 'minute';
+  return null;
+}
+
 export function quotaWindow(body) {
   const text = String(body);
-  if (/PerDay[A-Za-z]*PerModel/.test(text) || /limit reached for model[\s\S]*(?:per day|\bTPD\b|\bRPD\b)/i.test(text) || /(?:tokens|requests) per day limit exceeded/i.test(text)) return ' [quota window: per day, per model]';
-  if (/PerDay|per day|daily/i.test(text)) return ' [quota window: per day]';
-  if (/PerMinute|per minute/i.test(text)) return ' [quota window: per minute]';
+  const window = quotaWindowOf(text);
+  if (window) return ` [quota window: ${WINDOW_LABELS[window]}]`;
   const delay = text.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
   return delay ? ` [retry after ${Math.ceil(Number(delay[1]))}s]` : '';
 }
@@ -74,6 +84,7 @@ export class OpenAICompatibleProvider {
     this.models = [];
     this.selected = { fast: modelOverrides.fast ?? null, deep: modelOverrides.deep ?? null, vision: null };
     this.retired = new Map();
+    this.unusable = new Set();
     this.state = 'unknown';
     this.detail = '';
     this.minIntervalMs = preset.minIntervalMs ?? 0;
@@ -220,12 +231,24 @@ export class OpenAICompatibleProvider {
   retireModel(model, until) {
     if (!model || !this.models?.length || this.modelOverrides.any || this.modelOverrides[Object.keys(this.selected).find((t) => this.selected[t] === model)]) return false;
     this.retired.set(model, until);
-    const live = this.models.filter((m) => !((this.retired.get(m) ?? 0) > this.now()));
-    const pick = (tier) => (this.preset.prefer[tier] ? pickModel(live, this.preset.prefer[tier], this.preset.freeOnly, { strict: true }) : null);
+    return this.replaceModel(model, `switched from ${model}`);
+  }
+
+  markUnusable(model) {
+    if (!model) return false;
+    this.unusable.add(model);
+    if (!Object.values(this.selected).includes(model)) return true;
+    return this.replaceModel(model, `${model} is not available on this account's plan`);
+  }
+
+  replaceModel(model, note) {
+    const live = this.models.filter((m) => !this.unusable.has(m) && !((this.retired.get(m) ?? 0) > this.now()));
+    const spare = this.models.length ? {} : this.preset.fallbackModels ?? {};
+    const pick = (tier) => [this.preset.prefer[tier] ? pickModel(live, this.preset.prefer[tier], this.preset.freeOnly, { strict: true }) : null, spare[tier]].find((m) => m && !this.unusable.has(m)) ?? null;
     const next = { fast: pick('fast'), deep: pick('deep'), vision: pick('vision') };
     if (!next.fast && !next.deep) return false;
     for (const tier of Object.keys(this.selected)) if (this.selected[tier] === model) this.selected[tier] = next[tier] ?? (tier === 'vision' ? null : next.fast ?? next.deep);
-    this.detail = `fast=${this.selected.fast} deep=${this.selected.deep} · switched from ${model}`;
+    this.detail = `fast=${this.selected.fast} deep=${this.selected.deep} · ${note}`;
     return true;
   }
 

@@ -264,6 +264,36 @@ describe('quotaWindow', () => {
     expect(quotaWindow('{"error":{"message":"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_x` service tier `on_demand` on tokens per day (TPD): Limit 200000"}}')).toBe(' [quota window: per day, per model]');
     expect(retryAfterFromText(minute)).toBe(37000);
   });
+
+  it('reads the monthly window of a trial key from the raw cohere 429, and names every window it marks', async () => {
+    const { quotaWindow, quotaWindowOf } = await import('../../src/llm/provider.mjs');
+    const cohere = '{"error":{"message":"You are using a Trial key, which is limited to 1000 API calls / month. You can continue to use the Trial key for free or upgrade to a Production key with higher r';
+    expect(quotaWindow(cohere)).toBe(' [quota window: per month]');
+    expect(quotaWindowOf(cohere)).toBe('month');
+    expect(quotaWindowOf(`cohere HTTP 429 [quota window: per month]: ${cohere}`)).toBe('month');
+    expect(quotaWindowOf('{"quotaId":"GenerateRequestsPerDayPerProject-FreeTier"}')).toBe('day');
+    expect(quotaWindowOf('{"message":"Tokens per day limit exceeded - too many tokens processed."}')).toBe('day-model');
+    expect(quotaWindowOf('{"message":"Requests per minute limit exceeded - too many requests sent."}')).toBe('minute');
+    expect(quotaWindowOf('plain error')).toBeNull();
+  });
+});
+
+describe('models the account plan does not allow', () => {
+  it('replaces an unusable model by the preset fallback when the model list is unavailable, and never switches onto an unusable model', async () => {
+    const { OpenAICompatibleProvider } = await import('../../src/llm/provider.mjs');
+    const preset = { id: 'cloudflare', label: 'c', baseURL: 'https://c.example/v1', keyEnv: 'K', prefer: { fast: ['a'], deep: ['b', 'c'] }, fallbackModels: { fast: 'a', deep: 'c' } };
+    const unlisted = await new OpenAICompatibleProvider({ preset, apiKey: 'k', modelOverrides: { fast: 'q', deep: 'g' }, fetchImpl: (async () => new Response('busy', { status: 500 })) as never }).discover();
+    expect(unlisted.selected).toMatchObject({ fast: 'q', deep: 'g' });
+    expect(unlisted.markUnusable('g')).toBe(true);
+    expect(unlisted.selected).toMatchObject({ fast: 'q', deep: 'c' });
+    expect(unlisted.markUnusable('elsewhere')).toBe(true);
+    expect(unlisted.selected).toMatchObject({ fast: 'q', deep: 'c' });
+    const listed = await new OpenAICompatibleProvider({ preset, apiKey: 'k', fetchImpl: (async () => new Response(JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }))) as never }).discover();
+    expect(listed.selected).toMatchObject({ fast: 'a', deep: 'b' });
+    expect(listed.markUnusable('c')).toBe(true);
+    expect(listed.retireModel('b', Infinity)).toBe(true);
+    expect(listed.selected).toMatchObject({ fast: 'a', deep: 'a' });
+  });
 });
 
 describe('Ollama with no model', () => {

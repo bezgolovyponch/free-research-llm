@@ -1760,7 +1760,12 @@ export class ResearchEngine {
               item.checks = [];
               continue;
             }
-            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null);
+            const ctx = {
+              trends: project.candidates?.sites?.trends ?? null,
+              euHpi: project.candidates?.sites?.euHpi ?? null,
+            };
+            const decisionCriteria = project.decisionModel?.criteria ?? [];
+            checks = await this.checklistJudge.judge(item, pageText, newChecklist, project.decisionModel?.kind ?? null, decisionCriteria, ctx);
             item.checklist = checklistSummary([item])[0];
             checkCache[cacheKey] = { checks, summary: item.checklist };
             const keys = Object.keys(checkCache);
