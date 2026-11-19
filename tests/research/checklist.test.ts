@@ -744,3 +744,28 @@ describe('kind options for a research that looks for businesses', () => {
     expect(cluster.items[0].question).toBe('Is this page one hatchback offered as asked (not a part, accessory, wanted ad or list)?');
   });
 });
+
+describe('numeric checklist items answer from the measured plot row', () => {
+  const router = { complete: async () => ({ provider: 'test', data: [] }) };
+  const sea = [{ clause: 'sea within e-bike distance (~20 km)', items: [{ question: 'Is the sea within e-bike distance?', hard: true, numeric: { measure: 'distanceKm', op: '<=', value: 20, unit: 'km' } }] }];
+  const price = [{ clause: 'purchase price <= 20000 eur', items: [{ question: 'Is the price at most 20000 EUR?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 20000, unit: 'EUR' } }] }];
+  const climate = [{ clause: 'suitable climate for at least 10 months', items: [{ question: 'Is the climate suitable 10 months?', hard: true, numeric: { measure: 'workableMonths', op: '>=', value: 10, unit: 'months' } }] }];
+  const row = { title: 'Plot', url: 'http://example.com/plot', price: 120000, currency: 'TRY', value: 2166, unit: 'EUR', site: { coastKm: 3.3, climate: { workable: 12, cci: {} } } };
+  const coastCriterion = [{ measure: 'coastKm', op: '<=', value: 20 }];
+
+  it('judges the sea item with the decision criterion measure it states when its own measure reads nothing', async () => {
+    const checks = await new ChecklistJudge({ router }).judge(row, '', sea, null, coastCriterion, {});
+    expect(checks[0].answer).toBe('yes');
+    expect(checks[0].quote).toContain('coastKm: 3.3');
+  });
+
+  it('compares the price converted to EUR, not the listing currency amount', async () => {
+    const checks = await new ChecklistJudge({ router }).judge(row, '', price, null, [], {});
+    expect(checks[0].answer).toBe('yes');
+  });
+
+  it('reads the camping months from the plot site climate', async () => {
+    const checks = await new ChecklistJudge({ router }).judge(row, '', climate, null, [], {});
+    expect(checks[0].answer).toBe('yes');
+  });
+});

@@ -339,7 +339,7 @@ export function countsTowardResult(row, candidates) {
 }
 
 export function candidateDeliverables(candidates) {
-  return (candidates?.kept ?? []).filter((row) => countsTowardResult(row, candidates)).map((row) => ({ title: row.title, url: row.url, value: row.price, unit: row.currency, ...(Number.isFinite(row.distanceKm) ? { distanceKm: row.distanceKm } : {}), nodeId: row.nodeId, harvested: true, candidate: true }));
+  return (candidates?.kept ?? []).filter((row) => countsTowardResult(row, candidates)).map((row) => ({ title: row.title, url: row.url, value: row.value, unit: row.unit, rawPrice: row.price, rawCurrency: row.currency, ...(Number.isFinite(row.distanceKm) ? { distanceKm: row.distanceKm } : {}), ...(row.site ? { site: row.site } : {}), ...(row.plan ? { plan: row.plan } : {}), nodeId: row.nodeId, harvested: true, candidate: true }));
 }
 
 function siteText(row, sea) {
