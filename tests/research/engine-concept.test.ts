@@ -84,7 +84,7 @@ describe('the decision model holds every requirement of the request', () => {
     const p: Record<string, any> = project();
     await engine.ensureDecisionModel(p);
     expect(p.decisionModel.requirements).toEqual([]);
-    expect(p.decisionModel.checklist.map((c: { clause: string; items: Array<{ hard: boolean }> }) => [c.clause, c.items[0].hard])).toEqual([['bulk', true]]);
+    expect(p.decisionModel.checklist.map((c: { clause: string; single?: boolean; items: Array<{ hard: boolean }> }) => [c.clause, c.items[0].hard, c.single])).toEqual([['bulk', false, true]]);
     expect(p.log.some((e: { type: string; message: string }) => e.type === 'warn' && e.message.startsWith('no model framed the request in your own words'))).toBe(true);
   });
 });

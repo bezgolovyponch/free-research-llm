@@ -571,7 +571,7 @@ describe('the concept feeds the decision model', () => {
     const model = await new DecisionModeler({ router: routerWith({ concept: [{ quote: 'not in the request', text: 'x' }] }) } as never).build(plain);
     expect(model.requirements).toEqual([]);
     expect(model.framing).toBeNull();
-    expect(model.checklist.map((c: { clause: string; items: Array<{ hard: boolean }> }) => [c.clause, c.items[0].hard])).toEqual([['graded a', true]]);
+    expect(model.checklist.map((c: { clause: string; single?: boolean; items: Array<{ hard: boolean }> }) => [c.clause, c.items[0].hard, c.single])).toEqual([['graded a', false, true]]);
   });
 });
 

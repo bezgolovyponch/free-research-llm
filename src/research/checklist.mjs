@@ -273,8 +273,15 @@ export class ChecklistModeler {
   async build(question, guidance = '') {
     const samples = await proposeChecklist({ router: this.router, question, guidance, samples: this.samples });
     if (!samples.length) return null;
-    return clusterChecklist(samples);
+    return samples.length === 1 ? singleChecklist(samples[0]) : clusterChecklist(samples);
   }
+}
+
+export function singleChecklist(sample) {
+  return (sample?.items ?? []).map((item) => {
+    const clause = item.clause.toLowerCase().trim();
+    return { clause, single: true, items: [{ clause, question: item.question, hard: false, numeric: item.numeric }] };
+  });
 }
 
 export function askedKind(kind) {

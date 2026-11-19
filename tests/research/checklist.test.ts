@@ -215,6 +215,19 @@ describe('ChecklistModeler with fake router', () => {
     expect(callCount).toBe(2);
   });
 
+  it('keeps the checklist of the only provider family that answered, marked single, with no item hard: one family never vetoes', async () => {
+    const router = { complete: async () => ({ provider: 'test', data: supplierProposal }) };
+    const checklist = await new ChecklistModeler({ router, samples: 3 }).build(supplierQuestion, '');
+    expect(checklist).not.toBeNull();
+    expect(checklist!.map((c: { clause: string }) => c.clause)).toEqual(['wholesale', 'brands', 'quality', 'assortment', 'delivery', 'price/value']);
+    expect(checklist!.every((c: { single?: boolean }) => c.single === true)).toBe(true);
+    expect(checklist!.flatMap((c: { items: Array<{ hard: boolean }> }) => c.items).filter((item) => item.hard)).toEqual([]);
+    expect(checklist!.find((c: { clause: string }) => c.clause === 'price/value')!.items[0]).toMatchObject({ question: 'Is the price per kg or piece published?', numeric: { measure: 'priceEur', op: '<=', value: null, unit: 'EUR/kg' } });
+    const both = await new ChecklistModeler({ router: byFamily(supplierProposal), samples: 3 }).build(supplierQuestion, '');
+    expect(both!.some((c: { single?: boolean }) => c.single)).toBe(false);
+    expect(both!.flatMap((c: { items: Array<{ hard: boolean }> }) => c.items).filter((item) => item.hard).length).toBe(4);
+  });
+
   it('builds no checklist when no reply holds an item, and asks once more with the reason before giving a provider up', async () => {
     const asked: string[] = [];
     const router = {
