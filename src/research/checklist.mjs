@@ -1,7 +1,7 @@
 import { plain } from './itemgate.mjs';
 import { isUmbrella } from './concept.mjs';
 import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
-import { agreed, closedVote } from './semantic.mjs';
+import { agreed, closedVote, matchPrompt, retrieveThenVerify } from './semantic.mjs';
 import { MEASURES as DecisionMeasures, compare, adaptForChecklist } from './measures.mjs';
 
 const isAnswer = (entry) => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry) && 'id' in entry && 'answer' in entry;
@@ -37,6 +37,8 @@ export const KIND_ANSWERS = { A: 'yes', B: 'no', C: 'no', D: 'no', E: 'no', U: '
 export const KIND_NONE = 'U';
 export const SINGLE_KIND_OPINION = 'second opinion from one provider family only: not rejected, to confirm';
 export const SINGLE_KIND_REASON ='priced far below comparable items, and only one independent judgement was available: confirm it is the item itself';
+
+export { matchPrompt } from './semantic.mjs';
 
 export const KIND_SECOND_VOTES = 3;
 export const KIND_SECOND_OPINION_BUDGET = 30;
@@ -230,6 +232,90 @@ export function checklistFingerprint(checklist) {
   return [...parts.sort(), `judge:${JUDGE_VERSION}`].join('::');
 }
 
+const clauseMatchCache = new Map();
+
+function buildClauseCandidates(criteria, planChecks) {
+  const candidates = [];
+  for (const criterion of criteria ?? []) {
+    const measure = DecisionMeasures[criterion.measure];
+    const label = measure?.label ?? criterion.measure;
+    candidates.push({
+      id: `criterion:${criterion.measure}`,
+      type: 'criterion',
+      text: `${criterion.clause || ''} ${label} ${criterion.measure}`.trim(),
+      criterion,
+      measure: criterion.measure,
+      op: criterion.op,
+      value: criterion.value,
+    });
+  }
+  for (const check of planChecks ?? []) {
+    candidates.push({
+      id: `planCheck:${check.id}`,
+      type: 'planCheck',
+      text: `${check.label || ''} ${check.id}`.trim(),
+      check,
+    });
+  }
+  return candidates;
+}
+
+async function matchClausesToCandidates(checklist, context, embedder, router) {
+  const fingerprint = context.fingerprint;
+  if (!fingerprint) return new Map();
+  if (clauseMatchCache.has(fingerprint)) return clauseMatchCache.get(fingerprint);
+
+  const criteria = context.criteria ?? [];
+  const row = context.row ?? null;
+  const planChecks = row?.plan?.checks ?? [];
+
+  const candidates = buildClauseCandidates(criteria, planChecks);
+  if (!candidates.length) return new Map();
+
+  const matchMap = new Map();
+  const clauses = [...new Set(checklist.map((cluster) => cluster.clause))];
+
+  for (const clause of clauses) {
+    const query = clause;
+    const result = await retrieveThenVerify({
+      query,
+      candidates: candidates.map((c) => ({ id: c.id, text: c.text })),
+      embedder,
+      router,
+      prompt: matchPrompt('requirement clause'),
+      task: 'checklist-clause-match',
+      tier: 'fast',
+    });
+    if (result.picked) {
+      const matched = candidates.find((c) => c.id === result.picked.id);
+      if (matched) matchMap.set(clause, matched);
+    }
+  }
+
+  clauseMatchCache.set(fingerprint, matchMap);
+  return matchMap;
+}
+
+function answerFromMatch(match, row, context) {
+  if (!match) return null;
+  if (match.type === 'criterion') {
+    const measure = DecisionMeasures[match.measure];
+    const value = measure?.read(row, context.measures ?? {});
+    if (value === undefined || value === null || !Number.isFinite(value)) return null;
+    if (match.value === null || match.value === undefined) {
+      return { answer: 'unknown', quote: `${match.measure}: to confirm`, derived: true };
+    }
+    const answer = compare(value, match.op, match.value) ? 'yes' : 'no';
+    return { answer, quote: `${match.measure}: ${value} ${measure?.unit ?? ''}`, derived: true };
+  }
+  if (match.type === 'planCheck') {
+    const ok = match.check.ok;
+    if (ok === null || ok === undefined) return { answer: 'unknown', quote: `${match.check.id}: to confirm`, derived: true };
+    return { answer: ok ? 'yes' : 'no', quote: `${match.check.id}: ${ok ? 'yes' : 'no'}`, derived: true };
+  }
+  return null;
+}
+
 function checklistPrompt({ question, guidance = '' }) {
   const sys = 'You turn a research question into a checklist of yes/no questions about ONE delivered item. Each clause of the question produces items that test that single item. Answer with JSON only: {"items": [{"clause": "short phrase from the question naming the property", "question": "Does this <kind> ...?", "hard": true/false, "numeric": {"measure": "distanceKm|areaM2|coastKm|...", "op": "<=|>=|<|>", "value": 123, "unit": "km|m2|..."} | null}]}.\n\n- "clause" is a short phrase naming the property tested (e.g. "<property> is <value>", "within <distance> of <place>"), NOT the whole sentence.\n- "question" is a yes/no question about ONE item: "Does this <kind> ...?".\n- "hard" = true when the user stated it as a requirement (must have, required, up to, at least, within). Soft = preference (highest, best, prefer, ratio).\n- "numeric" is present only when the question asks for a measurable quantity that code can verify. Use only these measures: distanceKm (distance from the asked place), priceEur, coastKm, beachKm, lakeKm, workableMonths, comfortableMonths, optimalDays, hotDays, hottestC, coldestC, explorePoints, staysNearby, areaM2, realTrendVsEu. When the question gives no number, set value to null. Never invent a number.\n- DROP price limits (checked by the acceptance value range in any currency) and collection/count clauses ("at least N items", "up to M as trade-off", "list of X") — they are checked at acceptance level, not per item.\n- Each clause must yield at least one item. If a clause has no numeric measure, numeric is null and the question is qualitative.\n- The guidance field may add constraints; treat them as additional clauses.';
   return [
@@ -371,10 +457,13 @@ export class ChecklistJudge {
     return { answer: voted?.answer ?? 'unknown', quote: voted?.quote ?? '', tally: result.tally, ...(result.single ? { single: true } : {}) };
   }
 
-  async judge(item, pageText, checklist, kind = null, decisionCriteria = [], ctx = {}) {
+  async judge(item, pageText, checklist, kind = null, context = {}) {
     const checks = [];
     const numericItems = [];
     const qualitativeItems = [];
+
+    const decisionCriteria = Array.isArray(context) ? context : (context.criteria ?? []);
+    const ctx = Array.isArray(context) ? {} : (context.measures ?? context.ctx ?? {});
 
     const measures = getMeasures();
     for (const cluster of checklist) {
@@ -393,7 +482,25 @@ export class ChecklistJudge {
       checks.push({ id: cluster.clause + '|' + ci.question, answer, quote: `${measure}: ${value} ${ci.numeric.unit}`, hard: ci.hard, clause: cluster.clause });
     }
 
-    const questions = qualitativeItems.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, hard: ci.hard, clause: cluster.clause }));
+    const matchContext = {
+      criteria: decisionCriteria,
+      measures: ctx,
+      row: item,
+      fingerprint: Array.isArray(context) ? checklistFingerprint(checklist) : (context.fingerprint ?? checklistFingerprint(checklist)),
+    };
+    const matchMap = await matchClausesToCandidates(checklist, matchContext, this.embedder, this.router);
+    const remainingQualitative = [];
+    for (const { cluster, item: ci } of qualitativeItems) {
+      const match = matchMap.get(cluster.clause);
+      const answer = answerFromMatch(match, context.row, context);
+      if (answer) {
+        checks.push({ id: cluster.clause + '|' + ci.question, answer: answer.answer, quote: answer.quote, hard: ci.hard, clause: cluster.clause, derived: answer.derived });
+      } else {
+        remainingQualitative.push({ cluster, item: ci });
+      }
+    }
+
+    const questions = remainingQualitative.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, hard: ci.hard, clause: cluster.clause }));
     const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
 
     for (let at = 0; at < questions.length; at += JUDGE_QUESTIONS_PER_CALL) {
