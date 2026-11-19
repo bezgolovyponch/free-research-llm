@@ -222,26 +222,29 @@ function diffAgainstBaseDir(baseDir, currentDir = ROOT) {
   return diff;
 }
 
+export function integrityResult({ messageFile } = {}) {
+  const base = mergeBase();
+  const logged = run('git', ['log', '--pretty=%B', base ? `${base}..HEAD` : '-1']).stdout.trim();
+  const pending = messageFile && fs.existsSync(messageFile) ? fs.readFileSync(messageFile, 'utf8') : '';
+  const commitMessages = `${logged}\n${pending}`.split('\n').filter(Boolean);
+  const integrityBase = process.env.FRL_INTEGRITY_BASE;
+  let diff = '';
+  if (integrityBase) {
+    diff = diffAgainstBaseDir(integrityBase);
+  } else if (base) {
+    diff = run('git', ['diff', base, '--', ...protectedPaths()]).stdout;
+  } else if (process.env.CI) {
+    diff = run('git', ['diff', 'HEAD~1', '--', ...protectedPaths()]).stdout;
+  } else {
+    return { passed: true, detail: 'skipped: no git history for testIntegrity gate' };
+  }
+  return checkTestIntegrity(diff, commitMessages);
+}
+
 const gates = {
-  testIntegrity(files) {
-    const base = mergeBase();
-    const headCommit = run('git', ['log', '--pretty=%B', base ? `${base}..HEAD` : '-1']).stdout.trim();
-    const commitMessages = headCommit.split('\n').filter(Boolean);
-    const integrityBase = process.env.FRL_INTEGRITY_BASE;
-    let diff = '';
-    if (integrityBase) {
-      diff = diffAgainstBaseDir(integrityBase);
-    } else {
-      const base = mergeBase();
-      if (base) {
-        diff = run('git', ['diff', base, '--', ...protectedPaths()]).stdout;
-      } else if (process.env.CI) {
-        diff = run('git', ['diff', 'HEAD~1', '--', ...protectedPaths()]).stdout;
-      } else {
-        return { passed: true, detail: 'skipped: no git history for testIntegrity gate' };
-      }
-    }
-    return checkTestIntegrity(diff, commitMessages);
+  testIntegrity() {
+    if (process.env.FRL_INTEGRITY_DEFER === '1') return { passed: true, detail: 'checked by the commit-msg hook, which sees the message being written' };
+    return integrityResult({ messageFile: process.env.FRL_COMMIT_MSG_FILE });
   },
 
   methods(files) {
@@ -330,12 +333,12 @@ const gates = {
     return { passed: hits.length === 0, detail: hits.length ? hits.join('; ') : `${files.length} files scanned${leaksRan ? ' + gitleaks' : ' (gitleaks not installed: built-in patterns only)'}` };
   },
 
-  dependencies(files) {
-    const allowedPath = path.join(ROOT, 'tests', 'fixtures', 'security', 'allowed-dependencies.json');
+  dependencies(files, root = ROOT) {
+    const allowedPath = path.join(root, 'tests', 'fixtures', 'security', 'allowed-dependencies.json');
     if (!fs.existsSync(allowedPath)) return { passed: false, detail: 'missing tests/fixtures/security/allowed-dependencies.json' };
     const allowed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
-    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-    const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
     const failures = [];
 
     for (const [section, deps] of Object.entries({ dependencies: pkg.dependencies, devDependencies: pkg.devDependencies, optionalDependencies: pkg.optionalDependencies })) {
@@ -375,15 +378,15 @@ const gates = {
     return { passed: failures.length === 0, detail: failures.length ? failures.join('; ') : 'package.json and lockfile match allowed-dependencies.json; no unauthorized install scripts' };
   },
 
-  egress(files) {
-    const allowedPath = path.join(ROOT, 'tests', 'fixtures', 'security', 'egress-allowed.json');
+  egress(files, root = ROOT) {
+    const allowedPath = path.join(root, 'tests', 'fixtures', 'security', 'egress-allowed.json');
     if (!fs.existsSync(allowedPath)) return { passed: false, detail: 'missing tests/fixtures/security/egress-allowed.json' };
     const allowed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
     const sourceFiles = sourceModules(files);
     const failures = [];
 
     for (const file of sourceFiles) {
-      const filePath = path.join(ROOT, file);
+      const filePath = path.join(root, file);
       if (!fs.existsSync(filePath)) continue;
       const content = fs.readFileSync(filePath, 'utf8');
       let hasEgress = false;
@@ -485,12 +488,12 @@ const gates = {
   },
 };
 
-export function dependencies(files) {
-  return gates.dependencies(files);
+export function dependencies(files, root = ROOT) {
+  return gates.dependencies(files, root);
 }
 
-export function egress(files) {
-  return gates.egress(files);
+export function egress(files, root = ROOT) {
+  return gates.egress(files, root);
 }
 
 export { checkTestIntegrity, diffAgainstBaseDir };
