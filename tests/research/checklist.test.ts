@@ -943,6 +943,24 @@ describe('screening a requirement of the asker by meaning', () => {
     expect(router.calls[1].messages[1].content).toContain('[F8] Measured: sea 3 km');
   });
 
+  it('asks a requirement the first reply left out once more on the same sentences, the row facts included, and the second family excludes the one that answered it', async () => {
+    const row = { title: 'Coat Depot', plan: { why: ['sea 3 km'] } };
+    const questionCalls: string[] = [];
+    const router = fakeRouter({ '': (request: { messages: Array<{ content: string }> }) => {
+      const text = request.messages[1].content;
+      if (text.includes('This page offers:')) return { kind: 'A', span: 'S1' };
+      questionCalls.push(text);
+      return questionCalls.length === 1 ? { id: 'q2', answer: 'unknown', spans: [] } : { answers: [{ id: 'q1', answer: 'yes', spans: ['S2'] }] };
+    }, [SECOND_TASK]: { answer: 'yes', spans: ['S2'] } }, { providers: ['p1', 'p2'] });
+    const checks = await new ChecklistJudge({ router }).judge({ url: 'u' }, page, checklist, kind, { row });
+    expect(questionCalls).toHaveLength(2);
+    expect([...questionCalls[1].matchAll(/^(q\d+):/gm)].map((m) => m[1])).toEqual(['q1']);
+    expect(questionCalls[1]).toContain('[F1] Listing title: Coat Depot');
+    expect(questionCalls[1]).toContain('[S2] We stock Cedar Wear and Betula coats in bulk.');
+    expect(criterionCheck(checks)).toMatchObject({ answer: 'yes', quote: 'We stock Cedar Wear and Betula coats in bulk.', second: { answer: 'yes' } });
+    expect(router.calls.find((call) => call.task === SECOND_TASK)!.avoid).toEqual(['p1']);
+  });
+
   it('compares a price limit in one currency, and reads a measured value from the table row', async () => {
     const limits = [
       { clause: 'price', items: [{ clause: 'price', question: 'Is the price at most 20000 EUR?', hard: true, numeric: { measure: 'priceEur', op: '<=', value: 20000, unit: 'EUR' } }] },
