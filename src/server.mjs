@@ -38,6 +38,7 @@ import { horizonFromText, leaseOptions } from './research/lease.mjs';
 import { leaseCountries, strategyById } from './research/strategy.mjs';
 import { countryByCode } from './research/brief.mjs';
 import { kindOf } from './research/lessons.mjs';
+import { actionQueue } from './actionqueue.mjs';
 
 const MAX_BODY = 32 * 1024 * 1024;
 const VENDOR = {
@@ -205,10 +206,16 @@ export function createServer(app, gate = new AccessGate()) {
       return project;
     }],
     ['GET', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
-      return { ...withResults(await app.engine.load(id)), ...app.engine.teamOf(id) };
+      const result = { ...withResults(await app.engine.load(id)), ...app.engine.teamOf(id) };
+      const summary = actionQueue.summary(id);
+      if (summary) result.queuedActions = summary;
+      return result;
     }],
     ['DELETE', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => {
-      if (app.engine.running.has(id) || app.improver.isActive(id)) throw new ProjectBusyError('stop it first: the research is running');
+      if (app.engine.running.has(id) || app.improver.isActive(id)) {
+        if (app.env.FRL_ACTION_QUEUE === '1') return actionQueue.enqueue(id, { type: 'delete', body: {} });
+        throw new ProjectBusyError('stop it first: the research is running');
+      }
       const project = await app.store.get(id);
       await app.store.remove(id);
       if (project) app.noteApp(`Research deleted: ${String(project.question).slice(0, 110)}`);
@@ -233,7 +240,10 @@ export function createServer(app, gate = new AccessGate()) {
       return { ok: true };
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/reset$/, async (req, [id]) => {
-      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      if (app.improver.isActive(id)) {
+        if (app.env.FRL_ACTION_QUEUE === '1') return actionQueue.enqueue(id, { type: 'reset', body: await readJson(req) });
+        throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      }
       return app.engine.resetResearch(id, await readJson(req));
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/tree$/, async (req, [id]) => app.engine.buildTree(id)],
@@ -242,11 +252,17 @@ export function createServer(app, gate = new AccessGate()) {
       return app.store.restorable(id);
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/restore$/, async (req, [id]) => {
-      if (app.engine.running.has(id) || app.improver.isActive(id)) throw new ProjectBusyError('stop it first: the research is running');
+      if (app.engine.running.has(id) || app.improver.isActive(id)) {
+        if (app.env.FRL_ACTION_QUEUE === '1') return actionQueue.enqueue(id, { type: 'restore', body: await readJson(req) });
+        throw new ProjectBusyError('stop it first: the research is running');
+      }
       return app.restoreProject(id, await readJson(req));
     }],
     ['POST', /^\/api\/projects\/([\w-]+)\/recheck-support$/, async (req, [id]) => {
-      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      if (app.improver.isActive(id)) {
+        if (app.env.FRL_ACTION_QUEUE === '1') return actionQueue.enqueue(id, { type: 'recheck-support', body: await readJson(req) });
+        throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      }
       return app.engine.recheckSupport(id);
     }],
     ['PATCH', /^\/api\/projects\/([\w-]+)$/, async (req, [id]) => app.engine.updateProject(id, await readJson(req))],
@@ -304,7 +320,10 @@ export function createServer(app, gate = new AccessGate()) {
     }],
     ['GET', /^\/api\/projects\/([\w-]+)\/handoff$/, async (req, [id]) => (await app.handoffs.read(id)) ?? { projectId: id, note: 'no handoff yet: one is written every time a run or loop stops' }],
     ['POST', /^\/api\/projects\/([\w-]+)\/synthesize$/, async (req, [id]) => {
-      if (app.improver.isActive(id)) throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      if (app.improver.isActive(id)) {
+        if (app.env.FRL_ACTION_QUEUE === '1') return actionQueue.enqueue(id, { type: 'synthesize', body: await readJson(req) });
+        throw new ProjectBusyError('the self-improving loop is running; stop it first');
+      }
       return app.engine.resynthesize(id);
     }],
     ['GET', /^\/api\/projects\/([\w-]+)\/knowledge$/, async (req, [id]) => knowledgeRecord(await app.engine.load(id))],

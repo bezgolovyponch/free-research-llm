@@ -73,6 +73,7 @@ export class ProjectStore {
     this.snapshotDir = snapshotDir;
     this.keepSnapshots = keepSnapshots;
     this.onEvent = onEvent;
+    this.removed = new Set();
   }
 
   remember(project) {
@@ -116,6 +117,7 @@ export class ProjectStore {
 
   async save(project, { reason = DEFAULT_REASON, userAction = null } = {}) {
     if (userAction !== null && !USER_ACTIONS.includes(userAction)) throw new Error(`unknown user action "${userAction}" (one of: ${USER_ACTIONS.join(', ')})`);
+    if (this.removed.has(project.id)) return null;
     project.updatedAt = new Date().toISOString();
     this.remember(project);
     const target = this.file(project.id);
@@ -220,6 +222,7 @@ export class ProjectStore {
   }
 
   async get(id) {
+    if (this.removed.has(id)) return null;
     if (this.cache.has(id)) return this.remember(this.cache.get(id));
     const project = await this.readFile(id);
     if (!project) return null;
@@ -248,9 +251,14 @@ export class ProjectStore {
   }
 
   async remove(id) {
+    this.removed.add(id);
     await this.writes.get(id)?.catch(() => {});
     this.cache.delete(id);
     this.shadows.delete(id);
     await fs.rm(this.file(id), { force: true });
+  }
+
+  revive(id) {
+    this.removed.delete(id);
   }
 }

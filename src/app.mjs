@@ -48,6 +48,7 @@ import { KEY_GUIDES, guidesText } from './llm/guides.mjs';
 import { accessLinks, lanAddresses } from './service.mjs';
 import { CaseBank, DecisionModeler } from './research/decision.mjs';
 import { ArmBook } from './research/arms.mjs';
+import { actionQueue } from './actionqueue.mjs';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -412,7 +413,43 @@ export class App {
     const record = await this.handoffs.write(project, { reason, resume });
     appendAppMessage(project, `Progress saved (${reason}). ${record.progress.passing}/${record.progress.total} pieces pass${record.expectedResult ? `, expected result ${Math.round(record.expectedResult.score * 100)}% met` : ''}. Next: ${record.nextSteps[0] ?? 'nothing pending'}. Full handoff: More → Handoff notes.`);
     void this.logs.append('history', { projectId: project.id, type: 'handoff', message: `${reason} · ${record.progress.passing}/${record.progress.total} passing${record.resume.loopHoursLeft ? ` · loop resumes with ${record.resume.loopHoursLeft.toFixed(1)} h` : record.resume.wasRunning ? ' · run resumes on start' : ''}` });
+    await this.drainQueue(project.id);
     return record;
+  }
+
+  async drainQueue(projectId) {
+    const enabled = this.env.FRL_ACTION_QUEUE === '1';
+    if (!enabled) return;
+    const queued = actionQueue.all()[projectId] ?? [];
+    if (queued.some((a) => a.type === 'delete')) {
+      actionQueue.clear(projectId);
+      const project = await this.store.get(projectId);
+      await this.store.remove(projectId);
+      if (project) this.noteApp(`Research deleted: ${String(project.question).slice(0, 110)}`);
+      await this.logs.append(`project-${projectId}`, { type: 'delete', message: 'queued delete applied; earlier queued actions dropped' });
+      return;
+    }
+    while (actionQueue.has(projectId)) {
+      const action = actionQueue.dequeue(projectId);
+      if (!action) break;
+      try {
+        if (action.type === 'reset') {
+          await this.engine.resetResearch(projectId, action.body);
+          await this.logs.append(`project-${projectId}`, { type: 'reset', message: 'queued reset applied' });
+        } else if (action.type === 'restore') {
+          await this.restoreProject(projectId, action.body);
+          await this.logs.append(`project-${projectId}`, { type: 'restore', message: 'queued restore applied' });
+        } else if (action.type === 'recheck-support') {
+          await this.engine.recheckSupport(projectId);
+          await this.logs.append(`project-${projectId}`, { type: 'recheck-support', message: 'queued recheck-support applied' });
+        } else if (action.type === 'synthesize') {
+          await this.engine.resynthesize(projectId);
+          await this.logs.append(`project-${projectId}`, { type: 'synthesize', message: 'queued synthesize applied' });
+        }
+      } catch (error) {
+        await this.logs.append(`project-${projectId}`, { type: 'queue-error', message: `queued ${action.type} failed: ${error.message}` });
+      }
+    }
   }
 
   async shutdown() {
