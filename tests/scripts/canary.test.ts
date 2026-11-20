@@ -499,16 +499,18 @@ describe('canary: evaluationKind helper', () => {
 
   it('local acceptanceSummaryOf uses evaluationKind for brief-kind check id matching', async () => {
     const mod = await import('../../scripts/canary.mjs');
+    const { kindCluster } = await import('../../src/research/checklist.mjs');
     const kindLabel = 'wholesale clothing provider';
-    const kindId = `kind|${kindLabel}`;
+    const kind = { label: kindLabel, terms: ['wholesale', 'second-hand'] };
+    const kindId = `kind|${kindCluster(kind).items[0].question}`;
     const project = {
       id: 'test-project',
       acceptance: { itemCount: 3, mustMention: [] },
-      brief: { kind: { label: kindLabel, terms: ['wholesale', 'second-hand'] } },
+      brief: { kind },
       decisionModel: { checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }], kind: { label: 'different-kind', terms: ['different'] } },
       checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }],
       acceptanceResult: {
-        kind: { label: kindLabel, terms: ['wholesale', 'second-hand'] },
+        kind,
         items: [
           { url: 'https://a.example.org/1', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
           { url: 'https://a.example.org/2', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
@@ -522,16 +524,18 @@ describe('canary: evaluationKind helper', () => {
 
   it('computeTiers uses evaluationKind for kind-based check id matching', async () => {
     const mod = await import('../../scripts/canary.mjs');
+    const { kindCluster } = await import('../../src/research/checklist.mjs');
     const kindLabel = 'brief-kind';
-    const kindId = `kind|${kindLabel}`;
+    const kind = { label: kindLabel, terms: ['brief'] };
+    const kindId = `kind|${kindCluster(kind).items[0].question}`;
     const project = {
       id: 'test-project',
       acceptance: { itemCount: 3, mustMention: [] },
-      brief: { kind: { label: kindLabel, terms: ['brief'] } },
+      brief: { kind },
       decisionModel: { checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }], kind: { label: 'decision-kind', terms: ['decision'] } },
       checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }],
       acceptanceResult: {
-        kind: { label: kindLabel, terms: ['brief'] },
+        kind,
         items: [
           { url: 'https://a.example.org/1', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
           { url: 'https://a.example.org/2', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
@@ -543,6 +547,34 @@ describe('canary: evaluationKind helper', () => {
     expect(tiers.tiers.confirmed).toBe(2);
     expect(tiers.tiers.rejected).toBe(1);
     expect(tiers.tiers['to-confirm']).toBe(0);
+  });
+
+  it('computeTiers joins items carrying the real src kind-check id from kindCluster', async () => {
+    const mod = await import('../../scripts/canary.mjs');
+    const { kindCluster } = await import('../../src/research/checklist.mjs');
+    const kindLabel = 'plot of land';
+    const kind = { label: kindLabel, terms: ['plot', 'land'] };
+    const kindId = `kind|${kindCluster(kind).items[0].question}`;
+    const project = {
+      id: 'test-project-real-kind-id',
+      acceptance: { itemCount: 2, mustMention: [] },
+      brief: { kind },
+      decisionModel: { checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }], kind: { label: 'different-kind', terms: ['different'] } },
+      checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }],
+      acceptanceResult: {
+        kind,
+        items: [
+          { url: 'https://a.example.org/1', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+          { url: 'https://a.example.org/2', checks: [{ id: kindId, answer: 'no', quote: '', clause: 'kind' }], qualifies: false, live: true, listing: true, inRange: true },
+        ],
+      },
+    };
+    const tiers = mod.computeTiers(project);
+    expect(tiers.tiers.confirmed).toBe(1);
+    expect(tiers.tiers.rejected).toBe(1);
+    expect(tiers.tiers['to-confirm']).toBe(0);
+    expect(tiers.items.find(i => i.url === 'https://a.example.org/1')?.tier).toBe('confirmed');
+    expect(tiers.items.find(i => i.url === 'https://a.example.org/2')?.tier).toBe('rejected');
   });
 });
 
