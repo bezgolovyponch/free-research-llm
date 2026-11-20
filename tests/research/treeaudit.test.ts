@@ -399,3 +399,30 @@ describe('auditFeedback renders unknown codes', () => {
   });
 });
 
+
+import { leaflessDrivers, leaflessIssues } from '../../src/research/treeaudit.mjs';
+
+describe('leaflessDrivers', () => {
+  const nodes = [
+    { id: 'D1', parentId: 'Q', title: 'a' },
+    { id: 'D1.1', parentId: 'D1', title: 'b' },
+    { id: 'D1.2', parentId: 'D1', title: 'c' },
+    { id: 'D2', parentId: 'Q', title: 'd' },
+    { id: 'D3', parentId: 'Q', title: 'e' },
+  ];
+  it('names drivers that have no sub-questions', () => {
+    expect(leaflessDrivers(nodes)).toEqual(['D2', 'D3']);
+  });
+  it('is empty for a tree where every driver has leaves, and for no nodes', () => {
+    expect(leaflessDrivers(nodes.slice(0, 3))).toEqual([]);
+    expect(leaflessDrivers([])).toEqual([]);
+    expect(leaflessDrivers(undefined)).toEqual([]);
+  });
+  it('turns each leafless driver into a no-leaves issue whose detail restates the rule', () => {
+    const issues = leaflessIssues(nodes);
+    expect(issues.map((i) => i.code)).toEqual(['no-leaves', 'no-leaves']);
+    expect(issues[0].nodeId).toBe('D2');
+    expect(issues[0].detail).toContain('D2 has no sub-questions');
+    expect(issues[0].detail).toContain('one leaf per source');
+  });
+});

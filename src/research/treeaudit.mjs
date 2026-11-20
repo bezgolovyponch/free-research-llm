@@ -353,6 +353,15 @@ export function auditTree(nodes, question = '', model = {}) {
   return issues;
 }
 
+export function leaflessDrivers(nodes) {
+  const all = nodes ?? [];
+  return all.filter((n) => n.parentId === ROOT_ID && !all.some((m) => m.parentId === n.id)).map((n) => n.id);
+}
+
+export function leaflessIssues(nodes) {
+  return leaflessDrivers(nodes).map((id) => ({ code: 'no-leaves', nodeId: id, detail: `${id} has no sub-questions; every driver needs ${MIN_CHILDREN} to 4 leaf sub-questions, each answerable by one lookup, calculation or comparison, and a driver that identifies items gets one leaf per source` }));
+}
+
 export const BLOCKING = new Set(['duplicate', 'restates-question', 'too-many-drivers', 'outside-regions', 'off-model']);
 
 export function auditFeedback(issues) {

@@ -3779,3 +3779,69 @@ describe('FRL_REQUEST_MODEL_ENFORCE', () => {
     }
   });
 });
+
+describe('FRL_TREE_LEAVES', () => {
+  const leafless = {
+    decision: 'd', successCriteria: 's', assumptionsToConfirm: [],
+    acceptance: { itemCount: 2, valueRange: [0, 10000], unit: 'EUR' },
+    nodes: [
+      { id: 'D1', parentId: null, title: 'Identify candidates', question: 'Which items exist?', serves: ['E1'] },
+      { id: 'D2', parentId: null, title: 'Screen prices', question: 'Which items cost under the limit?', serves: ['E1'] },
+    ],
+  };
+  const withLeaves = {
+    decision: 'd', successCriteria: 's', assumptionsToConfirm: [],
+    acceptance: { itemCount: 2, valueRange: [0, 10000], unit: 'EUR' },
+    nodes: [
+      { id: 'D1', parentId: null, title: 'Identify candidates', question: 'Which items exist?', serves: ['E1'] },
+      { id: 'D2', parentId: null, title: 'Screen prices', question: 'Which items cost under the limit?', serves: ['E1'] },
+      { id: 'D1.1', parentId: 'D1', title: 'Source one listings', question: 'Which items does source one list?', serves: ['E1'] },
+      { id: 'D1.2', parentId: 'D1', title: 'Source two listings', question: 'Which items does source two list?', serves: ['E1'] },
+      { id: 'D2.1', parentId: 'D2', title: 'Price rule', question: 'What price counts as under the limit?', serves: ['E1'] },
+      { id: 'D2.2', parentId: 'D2', title: 'Price unit', question: 'Which unit is each price in?', serves: ['E1'] },
+    ],
+  };
+  const scripted = (replies: object[], calls: Array<{ messages: Array<{ content: string }> }>) => ({
+    id: 'demo',
+    ready: true,
+    describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo', deep: 'demo', local: false, keyEnv: null, signup: '', modelCount: 1 }),
+    async chat({ messages }: { messages: Array<{ content: string }> }) {
+      calls.push({ messages });
+      return { content: JSON.stringify(replies.shift()), model: 'm', provider: 'demo', usage: {} };
+    },
+  });
+
+  it('flag on: a leafless tree triggers the corrective re-ask and the tree with leaves is kept', async () => {
+    const original = process.env.FRL_TREE_LEAVES;
+    process.env.FRL_TREE_LEAVES = '1';
+    try {
+      const calls: Array<{ messages: Array<{ content: string }> }> = [];
+      const { engine } = engineWith(scripted([leafless, withLeaves], calls));
+      const project = await engine.createProject({ question: 'Find items under 10000 EUR', expected: '2 items under 10000 EUR' });
+      await engine.decompose(project);
+      expect(calls).toHaveLength(2);
+      const feedback = calls[1].messages[1].content;
+      expect(feedback).toContain('no-leaves');
+      expect(feedback).toContain('D1 has no sub-questions');
+      expect(project.nodes.length).toBe(6);
+    } finally {
+      if (original === undefined) delete process.env.FRL_TREE_LEAVES;
+      else process.env.FRL_TREE_LEAVES = original;
+    }
+  });
+
+  it('flag off: the same leafless tree is accepted without a re-ask', async () => {
+    const original = process.env.FRL_TREE_LEAVES;
+    delete process.env.FRL_TREE_LEAVES;
+    try {
+      const calls: Array<{ messages: Array<{ content: string }> }> = [];
+      const { engine } = engineWith(scripted([leafless, withLeaves], calls));
+      const project = await engine.createProject({ question: 'Find items under 10000 EUR', expected: '2 items under 10000 EUR' });
+      await engine.decompose(project);
+      expect(calls).toHaveLength(1);
+      expect(project.nodes.length).toBe(2);
+    } finally {
+      if (original !== undefined) process.env.FRL_TREE_LEAVES = original;
+    }
+  });
+});
