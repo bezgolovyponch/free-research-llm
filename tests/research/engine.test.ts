@@ -4044,3 +4044,71 @@ describe('FRL_KIND_TERMS grounds the object', () => {
     }
   });
 });
+
+describe('FRL_NO_PAUSE', () => {
+  const provider = () => {
+    const scripted = new ScriptedProvider();
+    return {
+      id: 'demo', ready: true, describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        if (prompt.includes('TASK=DOMAIN_QUERIES')) return { content: JSON.stringify({ queries: ['what is a widget hall'] }), model: 'm', provider: 'demo', usage: {} };
+        if (prompt.includes('TASK=DOMAIN_FINDINGS')) return { content: JSON.stringify({ findings: [] }), model: 'm', provider: 'demo', usage: {} };
+        return scripted.chat(args as never);
+      },
+    };
+  };
+  const search = { enabled: true, lastErrors: [], async search() { return [{ kind: 'web', title: 'unrelated', url: 'https://one.example/', domain: 'one.example', snippet: 's', text: 'nothing about it here' }]; }, describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }) };
+  const project = () => ({ id: 'p', question: 'Find 5 widget halls in Brno', acceptance: { itemCount: 5 }, brief: { regions: ['CZ'] }, decisionModel: { kind: { label: 'widget hall', terms: [] } }, nodes: [{ id: 'D1', parentId: 'Q' }], log: [] });
+
+  it('flag on: an understanding gap does not pause; it becomes knowledge pieces after decomposition', async () => {
+    const original = process.env.FRL_NO_PAUSE;
+    process.env.FRL_NO_PAUSE = '1';
+    try {
+      const { engine } = engineWith(provider(), search);
+      const p = project();
+      const ok = await engine.studyDomain(p as never);
+      expect(ok).toBe(true);
+      expect((p as unknown as { phase?: string }).phase).not.toBe('needs-understanding');
+      const added = engine.addKnowledgePieces(p as never);
+      expect(added.map((x: { id: string }) => x.id)).toEqual(['D2', 'D3']);
+      expect(p.nodes.length).toBe(3);
+      expect((p as unknown as { knowledgeGaps?: unknown }).knowledgeGaps).toBeUndefined();
+      expect(p.log.some((l: { message: string }) => l.message.includes('knowledge pieces added'))).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.FRL_NO_PAUSE;
+      else process.env.FRL_NO_PAUSE = original;
+    }
+  });
+
+  it('flag off: the same gap still pauses as before', async () => {
+    const original = process.env.FRL_NO_PAUSE;
+    delete process.env.FRL_NO_PAUSE;
+    try {
+      const { engine } = engineWith(provider(), search);
+      const p = project();
+      const ok = await engine.studyDomain(p as never);
+      expect(ok).toBe(false);
+      expect((p as unknown as { phase: string }).phase).toBe('needs-understanding');
+    } finally {
+      if (original !== undefined) process.env.FRL_NO_PAUSE = original;
+    }
+  });
+
+  it('flag on: a missing purpose does not pause; it is listed to confirm', async () => {
+    const original = process.env.FRL_NO_PAUSE;
+    process.env.FRL_NO_PAUSE = '1';
+    try {
+      const { engine } = engineWith(provider(), search);
+      const p = { id: 'p', question: 'q', decisionModel: { purpose: '' }, log: [] } as never;
+      (engine as unknown as { ensureDecisionModel: () => Promise<void>; rebuildDecisionModel: () => Promise<void> }).ensureDecisionModel = async () => {};
+      (engine as unknown as { rebuildDecisionModel: () => Promise<void> }).rebuildDecisionModel = async () => {};
+      const ok = await engine.ensurePurpose(p);
+      expect(ok).toBe(true);
+      expect((p as unknown as { assumptionsToConfirm: string[] }).assumptionsToConfirm.some((a) => a.startsWith('the purpose of this research'))).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.FRL_NO_PAUSE;
+      else process.env.FRL_NO_PAUSE = original;
+    }
+  });
+});
