@@ -32,3 +32,30 @@ export function domainOf(url) {
     return '';
   }
 }
+
+const NAMED_ENTITIES = new Map([
+  ['amp', '&'],
+  ['lt', '<'],
+  ['gt', '>'],
+  ['quot', '"'],
+  ['apos', "'"],
+  ['nbsp', ' '],
+]);
+
+const ESCAPE_PATTERN = /\\u([0-9a-fA-F]{4})|\\(["/])|&#(?:[xX]([0-9a-fA-F]+)|([0-9]+));|&([a-zA-Z]+);/g;
+
+const MAX_CODE_POINT = 0x10ffff;
+
+function decodeEscape(match, unicodeHex, escaped, hexCode, decimalCode, name) {
+  if (unicodeHex) return String.fromCharCode(parseInt(unicodeHex, 16));
+  if (escaped) return escaped;
+  const code = hexCode ? parseInt(hexCode, 16) : Number(decimalCode);
+  if (decimalCode !== undefined || hexCode !== undefined) {
+    return code <= MAX_CODE_POINT ? String.fromCodePoint(code) : match;
+  }
+  return NAMED_ENTITIES.get(name) ?? match;
+}
+
+export function decodeText(text) {
+  return String(text ?? '').replace(ESCAPE_PATTERN, decodeEscape);
+}
