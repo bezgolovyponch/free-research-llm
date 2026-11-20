@@ -4016,3 +4016,31 @@ describe('FRL_KIND_TERMS', () => {
     }
   });
 });
+
+describe('FRL_KIND_TERMS grounds the object', () => {
+  it('flag on: a domain study whose findings named no object still becomes ready when the asked kind is on pages', async () => {
+    const original = process.env.FRL_KIND_TERMS;
+    process.env.FRL_KIND_TERMS = '1';
+    try {
+      const scripted = new ScriptedProvider();
+      const provider = {
+        id: 'demo', ready: true, describe: () => scripted.describe(),
+        async chat(args: { messages: Array<{ role: string; content: string }> }) {
+          const prompt = args.messages.at(-1)!.content;
+          if (prompt.includes('TASK=DOMAIN_QUERIES')) return { content: JSON.stringify({ queries: ['boulderhalle leipzig'] }), model: 'm', provider: 'demo', usage: {} };
+          if (prompt.includes('TASK=DOMAIN_FINDINGS')) return { content: JSON.stringify({ findings: [] }), model: 'm', provider: 'demo', usage: {} };
+          return scripted.chat(args as never);
+        },
+      };
+      const search = { enabled: true, lastErrors: [], async search() { return [1, 2, 3].map((i) => ({ kind: 'web', title: 'Boulderhalle', url: `https://hall${i}.example/`, domain: `hall${i}.example`, snippet: 's', text: 'Die Boulderhalle liegt im Westen.' })); }, describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }) };
+      const { engine } = engineWith(provider, search);
+      const p = { id: 'p', question: 'Find 5 bouldering gyms in Leipzig', acceptance: { itemCount: 5 }, decisionModel: { kind: { label: 'bouldering gym', terms: ['boulderhalle'] } }, log: [] };
+      const ok = await engine.studyDomain(p as never);
+      expect(ok).toBe(true);
+      expect((p as unknown as { domain: { object: string[]; ready: boolean } }).domain.object).toEqual(['bouldering gym']);
+    } finally {
+      if (original === undefined) delete process.env.FRL_KIND_TERMS;
+      else process.env.FRL_KIND_TERMS = original;
+    }
+  });
+});

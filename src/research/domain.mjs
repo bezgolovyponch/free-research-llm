@@ -354,11 +354,12 @@ export function domainUnderstanding(findings, { hint = '', sources = [], members
       understanding.basis = `kinds of the category named on ${SUPPORT_HOSTS}+ sites: ${named.map((member) => member.label).join(', ')}`;
     }
   }
-  if (!understanding.terms.length && kind?.label) {
+  if ((!understanding.terms.length || !understanding.object.length) && kind?.label) {
     const named = supportedMembers([kind], sources);
     if (named.length) {
-      understanding.terms = [named[0].term];
-      understanding.basis = `the asked kind is named on ${SUPPORT_HOSTS}+ sites: ${named[0].term}`;
+      if (!understanding.terms.length) understanding.terms = [named[0].term];
+      if (!understanding.object.length) understanding.object = [String(kind.label)];
+      understanding.basis = understanding.basis ?? `the asked kind is named on ${SUPPORT_HOSTS}+ sites: ${named[0].term}`;
     }
   }
   const namesNothing = byAspect('terms').length === 0;

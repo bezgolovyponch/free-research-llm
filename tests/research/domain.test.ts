@@ -260,3 +260,32 @@ describe('domainUnderstanding with the asked kind named on pages', () => {
     expect(understanding.ready).toBe(false);
   });
 });
+
+describe('domainUnderstanding: the asked kind named on pages grounds the object too', () => {
+  const pages = (texts: string[]) => texts.map((text, i) => ({ url: `https://hall${i + 1}.example/p`, title: `t${i + 1}`, snippet: '', text }));
+  const kind = { label: 'bouldering gym', terms: ['boulderhalle'] };
+  const termsOnly = (url: string) => ({ aspect: 'where', statement: 'in the west of the city', url, host: new URL(url).host, sources: [url] });
+
+  it('fills an empty object with the asked kind when the kind is named on enough hosts', () => {
+    const sources = pages(['Die Boulderhalle im Westen', 'Unsere Boulderhalle', 'Boulderhalle Preise']);
+    const understanding = domainUnderstanding([termsOnly('https://hall1.example/p')], { sources, listsItems: true, kind });
+    expect(understanding.object).toEqual(['bouldering gym']);
+    expect(understanding.terms).toEqual(['boulderhalle']);
+    expect(understanding.ready).toBe(true);
+  });
+
+  it('keeps model-found object statements when there are some', () => {
+    const sources = pages(['Die Boulderhalle im Westen', 'Unsere Boulderhalle', 'Boulderhalle Preise']);
+    const object = { aspect: 'object', statement: 'a hall for climbing low walls without ropes', url: 'https://hall1.example/p', host: 'hall1.example', sources: ['https://hall1.example/p'] };
+    const understanding = domainUnderstanding([object], { sources, listsItems: true, kind });
+    expect(understanding.object[0]).not.toBe('bouldering gym');
+    expect(understanding.ready).toBe(true);
+  });
+
+  it('does not invent an object when the kind is not named on enough hosts', () => {
+    const sources = pages(['Die Boulderhalle im Westen', 'unrelated', 'unrelated too']);
+    const understanding = domainUnderstanding([termsOnly('https://hall1.example/p')], { sources, listsItems: true, kind });
+    expect(understanding.object).toEqual([]);
+    expect(understanding.ready).toBe(false);
+  });
+});
