@@ -3950,3 +3950,69 @@ describe('FRL_TREE_LEAVES', () => {
     }
   });
 });
+
+describe('FRL_KIND_TERMS', () => {
+  const pageText = 'Die Boulderhalle liegt im Westen der Stadt. Klettern ohne Seil an niedrigen Wänden.';
+  const provider = () => {
+    const scripted = new ScriptedProvider();
+    return {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        const prompt = args.messages.at(-1)!.content;
+        if (prompt.includes('TASK=DOMAIN_QUERIES')) return { content: JSON.stringify({ queries: ['bouldering gym what it is', 'boulderhalle'] }), model: 'm', provider: 'demo', usage: {} };
+        if (prompt.includes('TASK=DOMAIN_FINDINGS')) {
+          const ids = [...prompt.matchAll(/PAGE (D\d+)\n/g)].map((m) => m[1]);
+          return { content: JSON.stringify({ findings: ids.map((id) => ({ aspect: 'object', statement: 'a hall for climbing low walls without ropes', quote: 'Klettern ohne Seil an niedrigen Wänden.', sourceId: id })) }), model: 'm', provider: 'demo', usage: {} };
+        }
+        return scripted.chat(args as never);
+      },
+    };
+  };
+  const search = {
+    enabled: true,
+    lastErrors: [],
+    async search() {
+      return [1, 2, 3].map((i) => ({ kind: 'web', title: 'Boulderhalle', url: `https://hall${i}.example/`, domain: `hall${i}.example`, snippet: 's', text: pageText }));
+    },
+    describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+  };
+  const project = () => ({
+    id: 'p',
+    question: 'Find 5 bouldering gyms in Leipzig with their website and monthly price',
+    acceptance: { itemCount: 5 },
+    decisionModel: { kind: { label: 'bouldering gym', terms: ['boulderhalle'] } },
+    log: [],
+  });
+
+  it('flag on: the asked kind named on enough hosts makes the domain ready instead of pausing', async () => {
+    const original = process.env.FRL_KIND_TERMS;
+    process.env.FRL_KIND_TERMS = '1';
+    try {
+      const { engine } = engineWith(provider(), search);
+      const p = project();
+      const ok = await engine.studyDomain(p as never);
+      expect(ok).toBe(true);
+      expect((p as unknown as { domain: { ready: boolean; terms: string[] } }).domain.ready).toBe(true);
+      expect((p as unknown as { domain: { terms: string[] } }).domain.terms).toEqual(['boulderhalle']);
+    } finally {
+      if (original === undefined) delete process.env.FRL_KIND_TERMS;
+      else process.env.FRL_KIND_TERMS = original;
+    }
+  });
+
+  it('flag off: the same research pauses for understanding as before', async () => {
+    const original = process.env.FRL_KIND_TERMS;
+    delete process.env.FRL_KIND_TERMS;
+    try {
+      const { engine } = engineWith(provider(), search);
+      const p = project();
+      const ok = await engine.studyDomain(p as never);
+      expect(ok).toBe(false);
+      expect((p as unknown as { phase: string }).phase).toBe('needs-understanding');
+    } finally {
+      if (original !== undefined) process.env.FRL_KIND_TERMS = original;
+    }
+  });
+});
