@@ -1536,6 +1536,27 @@ export class ResearchEngine {
     this.emit(project, 'node', `${node.id}: ${grade} (rolled up)`, { nodeId: node.id });
   }
 
+  async buildResultTable(project, pages = null) {
+    const readPage = this.cachedPageReader(pages);
+    let spec;
+    try {
+      spec = await tableSpec(project, this.router);
+    } catch (error) {
+      this.emit(project, 'results', `result table skipped: no model answered the table proposal (${String(error?.message ?? error).slice(0, 120)})`);
+      return project.results ?? null;
+    }
+    project.results = { ...(project.results ?? {}), spec };
+    const extracted = await extract(project, this.router, readPage);
+    project.results = { ...project.results, ...extracted };
+    const aggregated = aggregateObservations(extracted.observations, spec);
+    const lastTime = aggregated.map((a) => String(a.time ?? '')).filter((t) => /^\d{4}-\d{2}$/.test(t)).sort().pop();
+    const horizon = askedHorizon(`${project.question ?? ''} ${project.acceptance?.expected ?? ''}`, lastTime);
+    const forecastRows = aggregated.length >= 2 && horizon > 0 ? forecast(aggregated, spec, horizon) : [];
+    project.results.table = buildResultsTable(spec, aggregated, forecastRows);
+    this.emit(project, 'results', `result table: ${extracted.observations.length} rows from ${new Set(extracted.observations.map((o) => o.source)).size} sources (${extracted.rejected?.quote ?? 0} rejected: quote not on page; ${extracted.rejected?.number ?? 0}: number not in quote; ${extracted.rejected?.failed ?? 0} sources skipped: no model answered); ${forecastRows.length} forecast rows`);
+    return project.results;
+  }
+
   async synthesize(project, pages = null) {
     this.setPhase(project, 'synthesizing');
     this.emit(project, 'phase', 'writing the decision memo');
@@ -2130,19 +2151,7 @@ export class ResearchEngine {
 
       const brief = project.brief ?? this.briefOf(project);
       const noCandidateTable = brief.located === false || isAnalysis;
-      if (noCandidateTable && project.nodes.some((n) => n.sources?.length)) {
-        const readPage = this.cachedPageReader(pages);
-        const spec = await tableSpec(project, this.router);
-        project.results = { ...(project.results ?? {}), spec };
-        const extracted = await extract(project, this.router, readPage);
-        project.results = { ...project.results, ...extracted };
-        const aggregated = aggregateObservations(extracted.observations, spec);
-        const lastTime = aggregated.map((a) => String(a.time ?? '')).filter((t) => /^\d{4}-\d{2}$/.test(t)).sort().pop();
-        const horizon = askedHorizon(`${project.question ?? ''} ${project.acceptance?.expected ?? ''}`, lastTime);
-        const forecastRows = aggregated.length >= 2 && horizon > 0 ? forecast(aggregated, spec, horizon) : [];
-        project.results.table = buildResultsTable(spec, aggregated, forecastRows);
-        this.emit(project, 'results', `result table: ${extracted.observations.length} rows from ${new Set(extracted.observations.map((o) => o.source)).size} sources (${extracted.rejected?.quote ?? 0} rejected: quote not on page; ${extracted.rejected?.number ?? 0}: number not in quote)`);
-      }
+      if (noCandidateTable && project.nodes.some((n) => n.sources?.length)) await this.buildResultTable(project, pages);
 
       if (isAnalysis) {
         project.candidates = null;

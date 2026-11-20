@@ -57,7 +57,7 @@ export async function extract(project, router, readPage) {
   
   const allObservations = [];
   const seenKeys = new Set();
-  const rejected = { quote: 0, number: 0 };
+  const rejected = { quote: 0, number: 0, failed: 0 };
   
   for (const node of project.nodes ?? []) {
     if (!node.sources?.length) continue;
@@ -77,7 +77,13 @@ export async function extract(project, router, readPage) {
         { role: 'user', content: 'TASK=EXTRACT_OBSERVATIONS\nSource: ' + source.url + '\nTable spec: ' + JSON.stringify(spec) + '\nText: ' + text.slice(0, 15000) + '\n\nWrite the time of each row as YYYY-MM when the source states a month, YYYY-Qn for a quarter, YYYY for a year only; leave time empty when the source states no period. Extract rows matching the spec. Each row: { time, entity, value, unit, quote }.\n- time: the period in that form\n- entity: the grouping value (as the source states it)\n- value: the numeric value\n- unit: the unit from the spec\'s value column\n- quote: the exact sentence from the text containing the value\n\nOnly extract rows where the value appears in the quote. Return { rows: [...] }.' }
       ];
 
-      const reply = await router.complete({ purpose: 'extract-observations', tier: 'fast', messages: prompt });
+      let reply;
+      try {
+        reply = await router.complete({ purpose: 'extract-observations', tier: 'fast', messages: prompt });
+      } catch {
+        rejected.failed = (rejected.failed ?? 0) + 1;
+        continue;
+      }
       const proposed = reply.data ?? {};
       const rows = proposed.rows ?? [];
       
