@@ -852,6 +852,7 @@ export class ResearchEngine {
     if (!queries.length) return true;
     const found = await this.search.search(queries, { maxSources: DOMAIN_SOURCES }).catch(() => []);
     const sources = (Array.isArray(found) ? found : []).map((source, index) => ({ ...source, id: `D${index + 1}` }));
+    project.domainSources = sources;
     const replies = [];
     for (let index = 0; index < sources.length; index += DOMAIN_PAGES_PER_CALL) {
       const batch = sources.slice(index, index + DOMAIN_PAGES_PER_CALL);
@@ -1788,7 +1789,7 @@ export class ResearchEngine {
     });
     const kindRejectedSet = new Set(project.kindRejected.map((e) => (typeof e === 'object' ? e.url : e)));
     const deliverables = (brief.located === false
-      ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage, kindTerms: project.decisionModel?.kind?.terms ?? [], findWebsite: this.search?.search ? (name) => this.search.search([`"${name}"`], { maxSources: 5 }) : null })
+      ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }, { id: 'domain', sources: project.domainSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage, kindTerms: project.decisionModel?.kind?.terms ?? [], findWebsite: this.search?.search ? (name) => this.search.search([`"${name}"`], { maxSources: 5 }) : null })
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
       .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
     project.report.deliverables = deliverables;

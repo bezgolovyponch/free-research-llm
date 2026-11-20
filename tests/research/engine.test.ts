@@ -1886,6 +1886,60 @@ describe('domain learned before the tree is planned', () => {
     expect(project.domain.at).toBeDefined();
   });
 
+  it('stores the searched sources as project.domainSources after studyDomain runs', async () => {
+    const testDomainProvider = () => {
+      const calls: Array<{ purpose: string; tier: string; messages: Array<{ role: string; content: string }> }> = [];
+      return {
+        calls,
+        id: 'test',
+        ready: true,
+        describe: () => ({ id: 'test', label: 'Test', state: 'ready', detail: 'test', configured: true, fast: 'test', deep: 'test', local: true, keyEnv: null, signup: '', modelCount: 1 }),
+        async chat(args: { messages: Array<{ role: string; content: string }>; tier: string }) {
+          const prompt = args.messages.at(-1)!.content;
+          calls.push({ purpose: 'decision-model', tier: args.tier, messages: args.messages });
+          if (prompt.includes('TASK=DOMAIN_QUERIES')) {
+            return { content: JSON.stringify({ queries: ['wholesale clothing supplier', 'vintage wholesale'] }), model: 'm', provider: 'p', usage: {} };
+          }
+          if (prompt.includes('TASK=DOMAIN_FINDINGS')) {
+            return { content: JSON.stringify({ findings: [{ aspect: 'actors', statement: 'found supplier', quote: 'supplier', sourceId: 'D1' }] }), model: 'm', provider: 'p', usage: {} };
+          }
+          return { content: JSON.stringify({ answer: 'ok' }), model: 'm', provider: 'p', usage: {} };
+        },
+      };
+    };
+    const searchWithSources = {
+      enabled: true,
+      lastErrors: [],
+      async search(queries: string[]) {
+        return [
+          { kind: 'web', title: 'Supplier One', url: 'https://supplier-one.example/', domain: 'supplier-one.example', snippet: 's', text: 'wholesale vintage clothing graded A' },
+          { kind: 'web', title: 'Supplier Two', url: 'https://supplier-two.example/', domain: 'supplier-two.example', snippet: 's', text: 'second hand clothing wholesale bales' },
+        ];
+      },
+      describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+    };
+    const router = new ModelRouter({ providers: [testDomainProvider()] });
+    const engine = new ResearchEngine({ router, search: searchWithSources, store: new ProjectStore({ dir }) } as never);
+    const project = {
+      id: 'p',
+      question: 'Find wholesale vintage clothing suppliers in Europe',
+      brief: { located: false, regions: ['DE', 'NL'] },
+      decisionModel: {
+        kind: { label: 'wholesale clothing provider', terms: ['wholesale vintage clothing'], verified: null },
+        purpose: 'find suppliers',
+      },
+      sweep: { pages: [{ url: 'https://example.com/listings', listings: [{ title: 'Supplier listing', url: 'https://example.com/1' }] }] },
+      log: [],
+    };
+    const ok = await engine.studyDomain(project as never);
+    expect(ok).toBe(true);
+    expect(project.domainSources).toBeDefined();
+    expect(project.domainSources).toHaveLength(2);
+    expect(project.domainSources.map((s: { url: string }) => s.url)).toEqual(['https://supplier-one.example/', 'https://supplier-two.example/']);
+    expect(project.domainSources[0].id).toBe('D1');
+    expect(project.domainSources[1].id).toBe('D2');
+  });
+
   it('clears the stale pause phase and continues researching when a re-run passes the domain study', async () => {
     const emptySearch = {
       enabled: true,

@@ -317,6 +317,32 @@ describe('listing price on the page', () => {
     expect((await entityDeliverables(dustFactory as never, { terms, not, kindLabel })).map((d: { url: string }) => d.url)).toEqual(['https://dustfactoryvintage.com/']);
   });
 
+  it('delivers suppliers from domain study sources the same way as hub sources', async () => {
+    const kindTerms = ['wholesale vintage clothing', 'wholesale second hand clothing', 'second hand clothes'];
+    const terms = [...kindTerms, 'graded A', 'cream', 'wholesale used clothing', 'branded vintage clothing wholesale'];
+    const kindLabel = 'wholesale clothing provider';
+    const nodes = [
+      {
+        id: 'hubs',
+        sources: [
+          { url: 'https://hub-supplier.example/', title: 'Hub Supplier', text: 'Wholesale vintage clothing graded A, cream bales.' },
+        ],
+      },
+      {
+        id: 'domain',
+        sources: [
+          { url: 'https://domain-supplier.example/', title: 'Domain Supplier', text: 'Wholesale second hand clothing bales graded A.' },
+        ],
+      },
+    ];
+    const deliverables = await entityDeliverables(nodes as never, { terms, kindTerms, kindLabel });
+    expect(deliverables).toHaveLength(2);
+    const urls = deliverables.map((d: { url: string }) => d.url).sort();
+    expect(urls).toEqual(['https://domain-supplier.example/', 'https://hub-supplier.example/']);
+    expect(deliverables.find((d: { url: string }) => d.url === 'https://domain-supplier.example/')).toMatchObject({ nodeId: 'domain', evidence: 'https://domain-supplier.example/' });
+    expect(deliverables.find((d: { url: string }) => d.url === 'https://hub-supplier.example/')).toMatchObject({ nodeId: 'hubs', evidence: 'https://hub-supplier.example/' });
+  });
+
   it('marks each delivered supplier with its region verdict for an entity list and delivers the same rows', async () => {
     const nodes = [
       {
