@@ -94,7 +94,8 @@ export function mentionedNames(node, names) {
 
 export function scopedQueries(node, names) {
   const named = mentionedNames(node, names);
-  const plain = [node.title, ...(node.searchQueries ?? []), node.question].filter(Boolean);
+  const sq = (node.searchQueries ?? []).filter(Boolean);
+  const plain = sq.length ? sq : [node.title, node.question].filter(Boolean);
   if (!named.length) return plain;
   return plain.map((q) => (named.some((n) => q.toLowerCase().includes(n.toLowerCase())) ? q : `${q} ${named.join(' ')}`));
 }

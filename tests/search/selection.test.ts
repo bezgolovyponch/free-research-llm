@@ -52,10 +52,31 @@ describe('diverse, primary-first source selection', () => {
 
   it('adds the company names to queries that leave them out, and ranks pages that never mention them lower', () => {
     const node = { title: 'Pricing gap', question: 'Price difference DeepMedChem vs Boltz (EUR/month)', searchQueries: ['DeepMedChem pricing'] };
-    expect(scopedQueries(node, ['deepmedchem', 'isomorphiclabs', 'boltz'])).toEqual(['Pricing gap deepmedchem boltz', 'DeepMedChem pricing', 'Price difference DeepMedChem vs Boltz (EUR/month)']);
+    expect(scopedQueries(node, ['deepmedchem', 'isomorphiclabs', 'boltz'])).toEqual(['DeepMedChem pricing']);
     expect(scopedQueries({ title: 'Golf price', question: 'Golf price in DE' }, [])).toEqual(['Golf price', 'Golf price in DE']);
     const c = (url: string, title: string) => ({ url, title, snippet: '', text: '', query: 'q' });
     const picked = selectDiverse([c('https://finance.yahoo.com/gap', 'Is Gap (GPS) pricing right'), c('https://www.chemistryworld.com/x', 'Boltz pricing for academic labs')], { max: 1, wanted: terms('pricing gap boltz'), names: ['boltz'] });
     expect(picked[0].url).toBe('https://www.chemistryworld.com/x');
+  });
+
+  it('uses only searchQueries when present, with name scoping when names appear in title/question', () => {
+    const node = { title: 'CompanyA analysis', question: 'What about CompanyB?', searchQueries: ['query one', 'query two'] };
+    expect(scopedQueries(node, ['companyA', 'companyB'])).toEqual(['query one companyA companyB', 'query two companyA companyB']);
+  });
+
+  it('uses only searchQueries when present, no scoping when names not in title/question', () => {
+    const node = { title: 'Title ignored', question: 'Question ignored', searchQueries: ['query one', 'query two'] };
+    expect(scopedQueries(node, ['companyA', 'companyB'])).toEqual(['query one', 'query two']);
+  });
+
+  it('falls back to title and question when searchQueries is empty or absent', () => {
+    expect(scopedQueries({ title: 'My title', question: 'My question', searchQueries: [] }, [])).toEqual(['My title', 'My question']);
+    expect(scopedQueries({ title: 'My title', question: 'My question' }, [])).toEqual(['My title', 'My question']);
+    expect(scopedQueries({ title: 'Only title', searchQueries: [] }, [])).toEqual(['Only title']);
+    expect(scopedQueries({ question: 'Only question', searchQueries: [] }, [])).toEqual(['Only question']);
+  });
+
+  it('falls back to title and question, no scoping when names not in title/question', () => {
+    expect(scopedQueries({ title: 'Generic title', question: 'Generic question', searchQueries: [] }, ['companyA', 'companyB'])).toEqual(['Generic title', 'Generic question']);
   });
 });
