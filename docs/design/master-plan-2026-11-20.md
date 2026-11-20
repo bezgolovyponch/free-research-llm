@@ -44,15 +44,16 @@ Pending, nothing built until read by the lead and the owner: **S1** (prediction-
 | **4 Learning** | loop target = requirement outcomes + zero-loss; itemised lessons (verified only); plan reuse per contract | loop keeps changes on all three classes |
 | **5 Composition & fields** | fields from the request's own frame (P1 returns here), composed results from confirmed fields only | no knowledge in code (5-question check) |
 
-## 4. Who does what (revision 1: Fable designs the logic; both fcc lanes implement)
+## 4. Who does what (revision 3, 2026-11-20: Fable decides and leads; PC workers execute)
 
 | Role | Owns | Does |
 |---|---|---|
-| **Owner** | priorities, labels, cost ratio, approvals | approves each design before its code starts, and every phase exit |
-| **Fable 5.2 (PC) — logic designer** | the engine's reasoning design | writes the designs below, each with the 5-question check, a walk-through on three unrelated stored researches (plots b7772e list, freight 3c9f1f analysis, action plan fc04bd decision), the verified method behind each rule, and the smallest first PR with its zero-loss proof; validates P-packages; runs S1/S2 |
-| **Mac lead (Claude)** | the plan, dispatch, review, merges, canary | turns an approved design into one-step fcc specs, reads every diff and real output, merges with the canary; harness and infrastructure |
-| **Mac fcc** (NVIDIA keys 2, 3) | engine.mjs routing, deliverable.mjs, server/action queue, router, proposal/index.html, harness scripts | implements specs |
-| **PC fcc** | quote.mjs, acceptance.mjs, listings.mjs, cci.mjs | implements specs |
+| **Owner** | priorities, labels, cost ratio, approvals | approves each design and every phase exit |
+| **Fable 5.2 (PC) — lead** | the whole plan from here: designs D1–D5, the order of work, specs, reviews, merge decisions, the canary and zero-loss gates | decides every step; dispatches PC fcc and workers; reads every diff and real output before merging; reports to the owner |
+| **PC fcc and workers** | all code: engine.mjs, deliverable.mjs, server/action queue, router, proposal/index.html, harness scripts, quote, acceptance, listings, cci | execute Fable's one-step specs |
+| **Mac (Claude)** | audits only | audits the researches the owner runs (read only: logs, data, results against the asker's words and the plan's human line), reports defects with evidence to Fable and the owner; no engine code, no dispatch, no merges |
+
+Hand-over from the Mac (state on 2026-11-20): E-A merged (#242); E-B (analysis skips item-only stages) merging as feat/contract-stages; E-C answered (pauses keep nodes; the freight tree was cleared by re-decompose); E-Q action queue in progress on branch feat/action-queue (the PC finishes or takes it over); open for the PC: 0.2 rebuild-safe check, a machine-wide quality lock (parallel gates collide on the e2e port 4610), router-waste tests (branch fix/router-waste), side report for unrequested places (fix/outside-side-report); specs for these are in the Mac's lead folder and can be re-sent on request.
 
 **Fable's prior work is the starting point, not a blank page.** Fable has already reviewed and combined the methods: the engine methods design v1, v1.1 dispositions on the external audit and the lead's review (28 rows: keep / accept / replace / reject, with a constants register), the engine design v2 decision (order: memo baseline, meter, quote-on-page tiers, case retrieval, fields later), and the wave-1 measurements on stored data (W1-A admission, W1-B case retrieval, W1-C fields, W1-D coverage, W1-F labels, W1-H harness). Each design below continues that work: it reuses what v1.1/v2 settled, states what changes and why, and keeps the dispositions' rules (no hand cuts — weights instead; pages name alternatives, never the model; verified vs admitted tiers; parity per valid result). Those documents are copied to docs/design/ on main so both machines read the same text.
 
