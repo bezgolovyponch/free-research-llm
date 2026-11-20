@@ -489,3 +489,299 @@ describe('rebuild-check: CLI integration', () => {
     expect(result3.stdout).toContain('0c750f-xyz');
   });
 });
+
+describe('rebuild-check: ledger accept and run', () => {
+  let testDir;
+  let projectsDir;
+  let ledgerFile;
+
+  beforeEach(async () => {
+    testDir = await mkdir(join(tmpdir(), 'frl-rebuild-ledger-' + Date.now()), { recursive: true });
+    projectsDir = join(testDir, 'projects');
+    await mkdir(projectsDir, { recursive: true });
+    ledgerFile = join(testDir, 'ledger.json');
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  async function writeProject(id, project) {
+    await writeFile(join(projectsDir, `${id}.json`), JSON.stringify(project, null, 2));
+  }
+
+  function runAccept(only = '') {
+    const args = ['scripts/rebuild-check.mjs', 'accept', testDir, '--ledger', ledgerFile, '--reason', 'test reason'];
+    if (only) args.push('--only', only);
+    return spawnSync(process.execPath, args, { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+  }
+
+  function runRebuildCheckWithLedger(only = '') {
+    const args = ['scripts/rebuild-check.mjs', 'run', testDir, '--ledger', ledgerFile];
+    if (only) args.push('--only', only);
+    return spawnSync(process.execPath, args, { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+  }
+
+  function runRebuildCheckNoLedger(only = '') {
+    const args = ['scripts/rebuild-check.mjs', 'run', testDir];
+    if (only) args.push('--only', only);
+    return spawnSync(process.execPath, args, { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+  }
+
+  const baseItem = (url, answer, tier) => ({
+    url,
+    checks: [{ id: 'quality|Good?', answer, hard: true, clause: 'quality' }],
+    tier,
+    live: true,
+    listing: true,
+    inRange: answer === 'yes',
+    purpose: []
+  });
+
+  const baseProject = {
+    question: 'Test project',
+    phase: 'done',
+    acceptance: { itemCount: 2 },
+    checklist: [{ clause: 'quality', items: [{ question: 'Good?', hard: true }] }],
+    decisionModel: { kind: { label: 'item', terms: ['item'], members: [] } },
+    acceptanceResult: {
+      items: [
+        baseItem('https://a.example.org/1', 'yes', 'confirmed'),
+        baseItem('https://a.example.org/2', 'no', 'rejected')
+      ],
+      validCount: 1,
+      totalAsked: 2,
+      verdict: { tiers: { confirmed: 1, toConfirm: 0, rejected: 1, notJudged: 0 } },
+      checks: [
+        { id: 'count', value: 0.5, passed: false },
+        { id: 'checklist-quality|Good?', value: 0.5, passed: false }
+      ],
+      score: 0.5
+    },
+    report: {
+      verdict: 'VERDICT: PROVISIONAL (acceptance: 1 of 2 confirmed · 0 to confirm · 1 rejected · 0 not read)',
+      options: [{ id: 'O1', option: 'Buy it' }],
+      chosenOption: 'O1',
+      chosenOptionNote: null
+    },
+    runOutcome: { state: 'short', confirmed: 1, asked: 2 }
+  };
+
+  it('accept command writes drifts to ledger', async () => {
+    const project = {
+      ...baseProject,
+      id: 'accept-drift',
+      acceptanceResult: {
+        ...baseProject.acceptanceResult,
+        items: [
+          baseItem('https://a.example.org/1', 'yes', 'confirmed'),
+          baseItem('https://a.example.org/2', 'yes', 'confirmed')
+        ],
+        validCount: 2,
+        verdict: { tiers: { confirmed: 1, toConfirm: 0, rejected: 1, notJudged: 0 } },
+        checks: [
+          { id: 'count', value: 0.5, passed: false },
+          { id: 'checklist-quality|Good?', value: 0.5, passed: false }
+        ],
+        score: 0.5
+      },
+      report: {
+        ...baseProject.report,
+        verdict: 'VERDICT: PROVISIONAL (acceptance: 1 of 2 confirmed · 0 to confirm · 1 rejected · 0 not read)'
+      },
+      runOutcome: { state: 'short', confirmed: 1, asked: 2 }
+    };
+    await writeProject('accept-drift', project);
+
+    const result = runAccept();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Accepted');
+    expect(result.stdout).toContain('drift(s) into ledger');
+  });
+
+  it('run with ledger turns matching drift into ACCEPTED and exits 0', async () => {
+    const project = {
+      ...baseProject,
+      id: 'ledger-match',
+      acceptanceResult: {
+        ...baseProject.acceptanceResult,
+        items: [
+          baseItem('https://a.example.org/1', 'yes', 'confirmed'),
+          baseItem('https://a.example.org/2', 'yes', 'confirmed')
+        ],
+        validCount: 2,
+        verdict: { tiers: { confirmed: 1, toConfirm: 0, rejected: 1, notJudged: 0 } },
+        checks: [
+          { id: 'count', value: 0.5, passed: false },
+          { id: 'checklist-quality|Good?', value: 0.5, passed: false }
+        ],
+        score: 0.5
+      },
+      report: {
+        ...baseProject.report,
+        verdict: 'VERDICT: PROVISIONAL (acceptance: 1 of 2 confirmed · 0 to confirm · 1 rejected · 0 not read)'
+      },
+      runOutcome: { state: 'short', confirmed: 1, asked: 2 }
+    };
+    await writeProject('ledger-match', project);
+
+    const acceptResult = runAccept();
+    expect(acceptResult.status).toBe(0);
+
+    const runResult = runRebuildCheckWithLedger();
+    expect(runResult.status).toBe(0);
+    expect(runResult.stdout).toContain('ACCEPTED acceptance.confirmed: stored 1 rebuilt 2');
+    expect(runResult.stdout).toContain('ACCEPTED acceptance.rejected: stored 1 rebuilt 0');
+    expect(runResult.stdout).toContain('ACCEPTED verdict.confirmed: stored 1 rebuilt 2');
+    expect(runResult.stdout).toContain('ACCEPTED verdict.rejected: stored 1 rebuilt 0');
+    expect(runResult.stdout).toContain('rebuild-check: PASS');
+  });
+
+  it('run with ledger still FAILs when rebuilt value changed since acceptance', async () => {
+    const project = {
+      ...baseProject,
+      id: 'ledger-changed',
+      acceptanceResult: {
+        ...baseProject.acceptanceResult,
+        items: [
+          baseItem('https://a.example.org/1', 'yes', 'confirmed'),
+          baseItem('https://a.example.org/2', 'yes', 'confirmed')
+        ],
+        validCount: 2,
+        verdict: { tiers: { confirmed: 1, toConfirm: 0, rejected: 1, notJudged: 0 } },
+        checks: [
+          { id: 'count', value: 0.5, passed: false },
+          { id: 'checklist-quality|Good?', value: 0.5, passed: false }
+        ],
+        score: 0.5
+      },
+      report: {
+        ...baseProject.report,
+        verdict: 'VERDICT: PROVISIONAL (acceptance: 1 of 2 confirmed · 0 to confirm · 1 rejected · 0 not read)'
+      },
+      runOutcome: { state: 'short', confirmed: 1, asked: 2 }
+    };
+    await writeProject('ledger-changed', project);
+
+    const acceptResult = runAccept();
+    expect(acceptResult.status).toBe(0);
+
+    const projectChanged = {
+      ...project,
+      acceptanceResult: {
+        ...project.acceptanceResult,
+        items: [
+          baseItem('https://a.example.org/1', 'yes', 'confirmed'),
+          baseItem('https://a.example.org/2', 'yes', 'confirmed'),
+          baseItem('https://a.example.org/3', 'yes', 'confirmed')
+        ],
+        validCount: 3,
+        verdict: { tiers: { confirmed: 1, toConfirm: 0, rejected: 1, notJudged: 0 } },
+        checks: [
+          { id: 'count', value: 0.5, passed: false },
+          { id: 'checklist-quality|Good?', value: 0.5, passed: false }
+        ],
+        score: 0.5
+      }
+    };
+    await writeProject('ledger-changed', projectChanged);
+
+    const runResult = runRebuildCheckWithLedger();
+    expect(runResult.status).toBe(1);
+    expect(runResult.stdout).toContain('DRIFT acceptance.confirmed');
+    expect(runResult.stdout).toContain('rebuild-check: FAIL');
+  });
+
+  it('run with ledger reports stale entries', async () => {
+    const project1 = {
+      ...baseProject,
+      id: 'stale-project-1',
+      acceptanceResult: {
+        ...baseProject.acceptanceResult,
+        items: [
+          baseItem('https://a.example.org/1', 'yes', 'confirmed'),
+          baseItem('https://a.example.org/2', 'yes', 'confirmed')
+        ],
+        validCount: 2,
+        verdict: { tiers: { confirmed: 1, toConfirm: 0, rejected: 1, notJudged: 0 } },
+        checks: [
+          { id: 'count', value: 0.5, passed: false },
+          { id: 'checklist-quality|Good?', value: 0.5, passed: false }
+        ],
+        score: 0.5
+      },
+      report: {
+        ...baseProject.report,
+        verdict: 'VERDICT: PROVISIONAL (acceptance: 1 of 2 confirmed · 0 to confirm · 1 rejected · 0 not read)'
+      },
+      runOutcome: { state: 'short', confirmed: 1, asked: 2 }
+    };
+    const project2 = {
+      ...baseProject,
+      id: 'stale-project-2',
+      acceptanceResult: {
+        ...baseProject.acceptanceResult,
+        items: [
+          baseItem('https://a.example.org/3', 'yes', 'confirmed'),
+          baseItem('https://a.example.org/4', 'yes', 'confirmed')
+        ],
+        validCount: 2,
+        verdict: { tiers: { confirmed: 1, toConfirm: 0, rejected: 1, notJudged: 0 } },
+        checks: [
+          { id: 'count', value: 0.5, passed: false },
+          { id: 'checklist-quality|Good?', value: 0.5, passed: false }
+        ],
+        score: 0.5
+      },
+      report: {
+        ...baseProject.report,
+        verdict: 'VERDICT: PROVISIONAL (acceptance: 1 of 2 confirmed · 0 to confirm · 1 rejected · 0 not read)'
+      },
+      runOutcome: { state: 'short', confirmed: 1, asked: 2 }
+    };
+    await writeProject('stale-project-1', project1);
+    await writeProject('stale-project-2', project2);
+
+    const acceptResult = runAccept();
+    expect(acceptResult.status).toBe(0);
+
+    await rm(join(projectsDir, 'stale-project-2.json'), { force: true });
+
+    const runResult = runRebuildCheckWithLedger();
+    expect(runResult.status).toBe(0);
+    expect(runResult.stdout).toContain('stale ledger entries: 5');
+  });
+
+  it('no --ledger flag = unchanged behaviour (still FAILs on drift)', async () => {
+    const project = {
+      ...baseProject,
+      id: 'no-ledger-drift',
+      acceptanceResult: {
+        ...baseProject.acceptanceResult,
+        items: [
+          baseItem('https://a.example.org/1', 'yes', 'confirmed'),
+          baseItem('https://a.example.org/2', 'yes', 'confirmed')
+        ],
+        validCount: 2,
+        verdict: { tiers: { confirmed: 1, toConfirm: 0, rejected: 1, notJudged: 0 } },
+        checks: [
+          { id: 'count', value: 0.5, passed: false },
+          { id: 'checklist-quality|Good?', value: 0.5, passed: false }
+        ],
+        score: 0.5
+      },
+      report: {
+        ...baseProject.report,
+        verdict: 'VERDICT: PROVISIONAL (acceptance: 1 of 2 confirmed · 0 to confirm · 1 rejected · 0 not read)'
+      },
+      runOutcome: { state: 'short', confirmed: 1, asked: 2 }
+    };
+    await writeProject('no-ledger-drift', project);
+
+    const runResult = runRebuildCheckNoLedger();
+    expect(runResult.status).toBe(1);
+    expect(runResult.stdout).toContain('DRIFT acceptance.confirmed: stored 1 rebuilt 2');
+    expect(runResult.stdout).not.toContain('ACCEPTED');
+    expect(runResult.stdout).toContain('rebuild-check: FAIL');
+  });
+});

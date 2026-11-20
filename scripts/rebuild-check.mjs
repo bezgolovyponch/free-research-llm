@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { readdir, readFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { basename, join, resolve, dirname } from 'node:path';
 import { verdict, runOutcome, verdictInvariants } from '../src/research/verdict.mjs';
 import { purposeChecks } from '../src/research/acceptance.mjs';
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  if (args[0] !== 'run') {
-    console.error('Usage: node scripts/rebuild-check.mjs run <snapshotDir> [--only id1,id2]');
+  const command = args[0];
+  if (!command || !['run', 'accept'].includes(command)) {
+    console.error('Usage: node scripts/rebuild-check.mjs run <snapshotDir> [--only id1,id2] [--ledger <file>]');
+    console.error('       node scripts/rebuild-check.mjs accept <snapshotDir> --ledger <file> --reason "<text>" [--only id1,id2]');
     process.exit(1);
   }
   const snapshotDir = args[1];
@@ -20,7 +22,17 @@ function parseArgs() {
   if (onlyIdx >= 0 && args[onlyIdx + 1]) {
     onlyPrefixes = args[onlyIdx + 1].split(',').map(s => s.trim()).filter(Boolean);
   }
-  return { snapshotDir: resolve(snapshotDir), onlyPrefixes };
+  let ledgerFile = null;
+  const ledgerIdx = args.indexOf('--ledger');
+  if (ledgerIdx >= 0 && args[ledgerIdx + 1]) {
+    ledgerFile = resolve(args[ledgerIdx + 1]);
+  }
+  let reason = null;
+  const reasonIdx = args.indexOf('--reason');
+  if (reasonIdx >= 0 && args[reasonIdx + 1]) {
+    reason = args[reasonIdx + 1];
+  }
+  return { command, snapshotDir: resolve(snapshotDir), onlyPrefixes, ledgerFile, reason };
 }
 
 function matchesOnly(id, prefixes) {
@@ -30,6 +42,29 @@ function matchesOnly(id, prefixes) {
     const parts = id.split('-');
     return parts[parts.length - 1] === p;
   });
+}
+
+async function loadLedger(ledgerFile) {
+  try {
+    const content = await readFile(ledgerFile, 'utf8');
+    return JSON.parse(content);
+  } catch {
+    return { entries: [] };
+  }
+}
+
+async function saveLedger(ledgerFile, ledger) {
+  await mkdir(dirname(ledgerFile), { recursive: true });
+  await writeFile(ledgerFile, JSON.stringify(ledger, null, 1));
+}
+
+function ledgerKey(project, unit, stored, rebuilt) {
+  return `${project}|${unit}|${stored}|${rebuilt}`;
+}
+
+function findLedgerEntry(ledger, project, unit, stored, rebuilt) {
+  const key = ledgerKey(project, unit, stored, rebuilt);
+  return ledger.entries.find(e => e.key === key);
 }
 
 function parseAcceptanceClause(verdictText) {
@@ -86,12 +121,13 @@ function comparePurposeCriteria(storedProject, rebuiltChecks) {
   return drifts;
 }
 
-async function checkProject(project, projectPath) {
+async function checkProject(project, projectPath, ledger, useLedger) {
   const id = project.id ?? basename(projectPath, '.json');
   const kind = project.decisionModel?.kind?.label ?? project.brief?.kind?.label ?? 'unknown';
   const lines = [];
   let hasDrift = false;
   let skipCount = 0;
+  const drifts = [];
 
   const acceptance = project.acceptance ?? {};
   const checklist = project.checklist ?? null;
@@ -111,7 +147,7 @@ async function checkProject(project, projectPath) {
       notJudged: acceptanceResult.tiers?.notJudged ?? 0
     };
 
-    const drifts = compareCounts('acceptance', {
+    const acceptanceDrifts = compareCounts('acceptance', {
       confirmed: storedCounts.confirmed,
       toConfirm: storedCounts.toConfirm,
       rejected: storedCounts.rejected,
@@ -122,9 +158,8 @@ async function checkProject(project, projectPath) {
       rejected: rebuiltCounts.rejected,
       notRead: rebuiltCounts.notJudged
     });
-    for (const d of drifts) {
-      lines.push(`${id} | ${kind} | DRIFT ${d.unit}: stored ${d.stored} rebuilt ${d.rebuilt}`);
-      hasDrift = true;
+    for (const d of acceptanceDrifts) {
+      drifts.push({ project: id, kind, unit: d.unit, stored: d.stored, rebuilt: d.rebuilt });
     }
 
     if (drifts.length === 0) {
@@ -133,7 +168,7 @@ async function checkProject(project, projectPath) {
 
     if (report?.verdict) {
       const parsed = parseAcceptanceClause(report.verdict);
-      const drifts2 = compareCounts('verdict', {
+      const verdictDrifts = compareCounts('verdict', {
         confirmed: parsed.confirmed,
         toConfirm: parsed.toConfirm,
         rejected: parsed.rejected,
@@ -144,11 +179,10 @@ async function checkProject(project, projectPath) {
         rejected: rebuiltCounts.rejected,
         notRead: rebuiltCounts.notJudged
       });
-      for (const d of drifts2) {
-        lines.push(`${id} | ${kind} | DRIFT ${d.unit}: stored ${d.stored} rebuilt ${d.rebuilt}`);
-        hasDrift = true;
+      for (const d of verdictDrifts) {
+        drifts.push({ project: id, kind, unit: d.unit, stored: d.stored, rebuilt: d.rebuilt });
       }
-      if (drifts2.length === 0) {
+      if (verdictDrifts.length === 0) {
         lines.push(`${id} | ${kind} | OK verdict`);
       }
     } else {
@@ -164,8 +198,7 @@ async function checkProject(project, projectPath) {
     const rebuiltOutcome = runOutcome(project);
     const stored = project.runOutcome;
     if (stored.state !== rebuiltOutcome.state || stored.confirmed !== rebuiltOutcome.confirmed || stored.asked !== rebuiltOutcome.asked) {
-      lines.push(`${id} | ${kind} | DRIFT runOutcome: stored ${JSON.stringify(stored)} rebuilt ${JSON.stringify(rebuiltOutcome)}`);
-      hasDrift = true;
+      drifts.push({ project: id, kind, unit: 'runOutcome', stored: JSON.stringify(stored), rebuilt: JSON.stringify(rebuiltOutcome) });
     } else {
       lines.push(`${id} | ${kind} | OK runOutcome`);
     }
@@ -180,11 +213,9 @@ async function checkProject(project, projectPath) {
   if (chosen !== null && chosen !== undefined && chosen !== '') {
     const optionIds = options.map(o => o?.id);
     if (!optionIds.includes(chosen)) {
-      lines.push(`${id} | ${kind} | DRIFT chosenOption: id ${chosen} not among the option ids`);
-      hasDrift = true;
+      drifts.push({ project: id, kind, unit: 'chosenOption', stored: `id ${chosen} not among the option ids`, rebuilt: `id ${chosen} not among the option ids`, legacyFormat: `id ${chosen} not among the option ids` });
     } else if (chosenNote) {
-      lines.push(`${id} | ${kind} | DRIFT chosenOption: id ${chosen} stored with note ${chosenNote}`);
-      hasDrift = true;
+      drifts.push({ project: id, kind, unit: 'chosenOption', stored: `id ${chosen} stored with note ${chosenNote}`, rebuilt: `id ${chosen} stored with note ${chosenNote}`, legacyFormat: `id ${chosen} stored with note ${chosenNote}` });
     } else {
       lines.push(`${id} | ${kind} | OK chosenOption`);
     }
@@ -202,8 +233,7 @@ async function checkProject(project, projectPath) {
     skipCount++;
   } else {
     for (const d of purposeDrifts) {
-      lines.push(`${id} | ${kind} | DRIFT ${d.unit}: stored ${d.stored} rebuilt ${d.rebuilt}`);
-      hasDrift = true;
+      drifts.push({ project: id, kind, unit: d.unit, stored: d.stored, rebuilt: d.rebuilt });
     }
     if (purposeDrifts.length === 0) {
       lines.push(`${id} | ${kind} | OK purposeChecks`);
@@ -215,11 +245,92 @@ async function checkProject(project, projectPath) {
     lines.push(`${id} | ${kind} | INVARIANT ${reason}`);
   }
 
-  return { lines, hasDrift, skipCount };
+  if (useLedger && ledger) {
+    const matchedKeys = new Set();
+    for (const d of drifts) {
+      const entry = findLedgerEntry(ledger, d.project, d.unit, d.stored, d.rebuilt);
+      if (entry) {
+        matchedKeys.add(ledgerKey(d.project, d.unit, d.stored, d.rebuilt));
+        const display = d.legacyFormat ? `${d.project} | ${d.kind} | ACCEPTED ${d.unit}: ${d.legacyFormat} (${entry.reason})` : `${d.project} | ${d.kind} | ACCEPTED ${d.unit}: stored ${d.stored} rebuilt ${d.rebuilt} (${entry.reason})`;
+        lines.push(display);
+      } else {
+        const display = d.legacyFormat ? `${d.project} | ${d.kind} | DRIFT ${d.unit}: ${d.legacyFormat}` : `${d.project} | ${d.kind} | DRIFT ${d.unit}: stored ${d.stored} rebuilt ${d.rebuilt}`;
+        lines.push(display);
+        hasDrift = true;
+      }
+    }
+    return { lines, hasDrift, skipCount, drifts, matchedKeys };
+  } else {
+    for (const d of drifts) {
+      const display = d.legacyFormat ? `${d.project} | ${d.kind} | DRIFT ${d.unit}: ${d.legacyFormat}` : `${d.project} | ${d.kind} | DRIFT ${d.unit}: stored ${d.stored} rebuilt ${d.rebuilt}`;
+      lines.push(display);
+      hasDrift = true;
+    }
+    return { lines, hasDrift, skipCount, drifts, matchedKeys: new Set() };
+  }
 }
 
-async function main() {
-  const { snapshotDir, onlyPrefixes } = parseArgs();
+async function acceptCommand(snapshotDir, onlyPrefixes, ledgerFile, reason) {
+  if (!ledgerFile) {
+    console.error('accept command requires --ledger <file>');
+    process.exit(1);
+  }
+  if (!reason) {
+    console.error('accept command requires --reason "<text>"');
+    process.exit(1);
+  }
+
+  const ledger = await loadLedger(ledgerFile);
+  const projectsDir = join(snapshotDir, 'projects');
+  let entries;
+  try {
+    entries = await readdir(projectsDir);
+  } catch {
+    console.error(`No projects directory at ${projectsDir}`);
+    process.exit(1);
+  }
+
+  const projectFiles = entries.filter(f => f.endsWith('.json')).sort();
+  let acceptedCount = 0;
+
+  for (const file of projectFiles) {
+    const projectPath = join(projectsDir, file);
+    let project;
+    try {
+      const content = await readFile(projectPath, 'utf8');
+      project = JSON.parse(content);
+    } catch (e) {
+      console.error(`Failed to load ${file}: ${e.message}`);
+      continue;
+    }
+
+    if (!matchesOnly(project.id ?? file, onlyPrefixes)) continue;
+
+    const { drifts } = await checkProject(project, projectPath, null, false);
+    for (const d of drifts) {
+      const key = ledgerKey(d.project, d.unit, d.stored, d.rebuilt);
+      const existing = ledger.entries.find(e => e.key === key);
+      if (!existing) {
+        ledger.entries.push({
+          key,
+          project: d.project,
+          unit: d.unit,
+          stored: d.stored,
+          rebuilt: d.rebuilt,
+          reason,
+          acceptedAt: new Date().toISOString()
+        });
+        acceptedCount++;
+      }
+    }
+  }
+
+  await saveLedger(ledgerFile, ledger);
+  console.log(`Accepted ${acceptedCount} drift(s) into ledger at ${ledgerFile}`);
+}
+
+async function runCommand(snapshotDir, onlyPrefixes, ledgerFile) {
+  const ledger = ledgerFile ? await loadLedger(ledgerFile) : null;
   const projectsDir = join(snapshotDir, 'projects');
   let entries;
   try {
@@ -233,6 +344,7 @@ async function main() {
   let totalProjects = 0;
   let totalSkips = 0;
   let totalDrifts = 0;
+  const allMatchedKeys = new Set();
 
   for (const file of projectFiles) {
     const projectPath = join(projectsDir, file);
@@ -248,12 +360,22 @@ async function main() {
     if (!matchesOnly(project.id ?? file, onlyPrefixes)) continue;
     totalProjects++;
 
-    const { lines, hasDrift, skipCount } = await checkProject(project, projectPath);
+    const { lines, hasDrift, skipCount, matchedKeys } = await checkProject(project, projectPath, ledger, !!ledgerFile);
     for (const line of lines) {
       console.log(line);
     }
     totalSkips += skipCount;
     if (hasDrift) totalDrifts++;
+    for (const key of matchedKeys) {
+      allMatchedKeys.add(key);
+    }
+  }
+
+  if (ledgerFile && ledger) {
+    const staleCount = ledger.entries.filter(e => !allMatchedKeys.has(e.key)).length;
+    if (staleCount > 0) {
+      console.log(`stale ledger entries: ${staleCount}`);
+    }
   }
 
   const status = totalDrifts === 0
@@ -261,6 +383,15 @@ async function main() {
     : `FAIL (${totalDrifts} drifts; ${totalProjects} projects, ${totalSkips} skips)`;
   console.log(`rebuild-check: ${status}`);
   process.exit(totalDrifts > 0 ? 1 : 0);
+}
+
+async function main() {
+  const { command, snapshotDir, onlyPrefixes, ledgerFile, reason } = parseArgs();
+  if (command === 'accept') {
+    await acceptCommand(snapshotDir, onlyPrefixes, ledgerFile, reason);
+  } else {
+    await runCommand(snapshotDir, onlyPrefixes, ledgerFile);
+  }
 }
 
 main().catch(e => {
