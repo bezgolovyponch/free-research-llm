@@ -386,7 +386,7 @@ describe('zero-loss: reportOutcomesOf', () => {
     expect(outcomes).toHaveLength(0);
   });
 
-  it('returns eight units for a complete memo project', () => {
+  it('returns nine units for a complete memo project', () => {
     const project = {
       id: 'test-memo',
       question: 'Test',
@@ -394,6 +394,7 @@ describe('zero-loss: reportOutcomesOf', () => {
       nodes: [{ id: 'n1' }, { id: 'n2' }],
       report: {
         verdict: 'Buy it',
+        chosenOption: 'O2',
         options: [
           { option: 'A', support: ['n1'], against: [] },
           { option: 'B', support: [], against: ['n1'] },
@@ -409,12 +410,13 @@ describe('zero-loss: reportOutcomesOf', () => {
       },
     };
     const outcomes = reportOutcomesOf(project);
-    expect(outcomes).toHaveLength(8);
+    expect(outcomes).toHaveLength(9);
     const byUnit = Object.fromEntries(outcomes.map((o) => [o.unit, o.value]));
     expect(byUnit.ended).toBe(true);
     expect(byUnit.verdict).toBe(true);
     expect(byUnit.options).toBe(3);
     expect(byUnit.optionsLinked).toBe(2);
+    expect(byUnit.chosenOption).toBe('O2');
     expect(byUnit.scenarios).toBe(2);
     expect(byUnit.sensitivity).toBe(1);
     expect(byUnit.keyNumbers).toBe(3);
@@ -430,12 +432,13 @@ describe('zero-loss: reportOutcomesOf', () => {
       report: { verdict: '' },
     };
     const outcomes = reportOutcomesOf(project);
-    expect(outcomes).toHaveLength(8);
+    expect(outcomes).toHaveLength(9);
     const byUnit = Object.fromEntries(outcomes.map((o) => [o.unit, o.value]));
     expect(byUnit.ended).toBe(true);
     expect(byUnit.verdict).toBe(false);
     expect(byUnit.options).toBe(0);
     expect(byUnit.optionsLinked).toBe(0);
+    expect(byUnit.chosenOption).toBeNull();
     expect(byUnit.scenarios).toBe(0);
     expect(byUnit.sensitivity).toBe(0);
     expect(byUnit.keyNumbers).toBe(0);
@@ -518,6 +521,30 @@ describe('zero-loss: negativeReportFlips', () => {
   it('returns empty for baseline without reportOutcomes', () => {
     const flips = negativeReportFlips({}, { reportOutcomes: [{ project: 'p1', unit: 'ended', value: true }] });
     expect(flips).toHaveLength(0);
+  });
+  it('flips when the chosen option id changes', () => {
+    const base = { reportOutcomes: [{ project: 'p1', unit: 'chosenOption', value: 'O1' }] };
+    const current = { reportOutcomes: [{ project: 'p1', unit: 'chosenOption', value: 'O2' }] };
+    const flips = negativeReportFlips(base, current);
+    expect(flips).toHaveLength(1);
+    expect(flips[0].unit).toBe('chosenOption');
+    expect(flips[0].baselineValue).toBe('O1');
+    expect(flips[0].currentValue).toBe('O2');
+  });
+  it('flips when the chosen option id is lost', () => {
+    const base = { reportOutcomes: [{ project: 'p1', unit: 'chosenOption', value: 'O1' }] };
+    const current = { reportOutcomes: [{ project: 'p1', unit: 'chosenOption', value: null }] };
+    expect(negativeReportFlips(base, current)).toHaveLength(1);
+  });
+  it('stays quiet when the same id is chosen again', () => {
+    const base = { reportOutcomes: [{ project: 'p1', unit: 'chosenOption', value: 'O1' }] };
+    const current = { reportOutcomes: [{ project: 'p1', unit: 'chosenOption', value: 'O1' }] };
+    expect(negativeReportFlips(base, current)).toHaveLength(0);
+  });
+  it('stays quiet when a baseline without a chosen id gains one', () => {
+    const base = { reportOutcomes: [{ project: 'p1', unit: 'chosenOption', value: null }] };
+    const current = { reportOutcomes: [{ project: 'p1', unit: 'chosenOption', value: 'O1' }] };
+    expect(negativeReportFlips(base, current)).toHaveLength(0);
   });
 });
 

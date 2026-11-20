@@ -183,6 +183,7 @@ function reportOutcomesOf(project) {
   outcomes.push({ project: project.id, unit: 'options', value: (r.options ?? []).length });
   const optionsLinked = (r.options ?? []).filter((o) => (o.support ?? []).length > 0 || (o.against ?? []).length > 0).length;
   outcomes.push({ project: project.id, unit: 'optionsLinked', value: optionsLinked });
+  outcomes.push({ project: project.id, unit: 'chosenOption', value: r.chosenOption ?? null });
   outcomes.push({ project: project.id, unit: 'scenarios', value: (r.scenarios ?? []).length });
   outcomes.push({ project: project.id, unit: 'sensitivity', value: (r.sensitivity ?? []).length });
   outcomes.push({ project: project.id, unit: 'keyNumbers', value: (r.keyNumbers ?? []).length });
@@ -218,6 +219,8 @@ function negativeReportFlips(baseline, current) {
     } else if (typeof base.value === 'boolean' && base.value === true && curr.value !== true) {
       flips.push({ project: base.project, unit: base.unit, baselineValue: base.value, currentValue: curr.value });
     } else if (typeof base.value === 'number' && curr.value < base.value) {
+      flips.push({ project: base.project, unit: base.unit, baselineValue: base.value, currentValue: curr.value });
+    } else if (typeof base.value === 'string' && base.value !== '' && curr.value !== base.value) {
       flips.push({ project: base.project, unit: base.unit, baselineValue: base.value, currentValue: curr.value });
     }
   }
