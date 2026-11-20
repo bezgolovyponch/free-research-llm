@@ -885,7 +885,7 @@ export class ResearchEngine {
       replies.push(answer);
     }
     const findings = mergeFindings(replies, sources);
-    const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [], listsItems: Boolean(project.acceptance?.itemCount || kind?.label) });
+    const understanding = domainUnderstanding(findings, { hint, sources, members: isUmbrella(kind) ? kind.members : [], listsItems: Boolean(project.acceptance?.itemCount || kind?.label), kind: process.env.FRL_KIND_TERMS ? kind : null });
     const verifiedTitles = Number(project.decisionModel?.kind?.verified?.titles ?? 0);
     const matchedTitles = Number(project.decisionModel?.kind?.verified?.matched ?? 0);
     const sweptListings = (project.sweep?.pages ?? []).reduce((n, page) => n + (page.listings?.length ?? 0), 0);

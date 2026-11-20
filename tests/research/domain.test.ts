@@ -229,3 +229,34 @@ describe('understanding for a research that lists no items', () => {
     expect(domainUnderstanding(findings, { listsItems: true }).ready).toBe(false);
   });
 });
+
+describe('domainUnderstanding with the asked kind named on pages', () => {
+  const objectFinding = (url: string) => ({ aspect: 'object', statement: 'a hall where people climb short walls without ropes', url, host: new URL(url).host, sources: [url] });
+  const pages = (texts: string[]) => texts.map((text, i) => ({ url: `https://site${i + 1}.example/page`, title: `t${i + 1}`, snippet: '', text }));
+  const kind = { label: 'bouldering gym', terms: ['boulderhalle', 'bouldering'] };
+
+  it('uses a kind term found on enough distinct hosts when the findings named no terms', () => {
+    const sources = pages(['Die Boulderhalle im Westen', 'Unsere Boulderhalle hat offen', 'Boulderhalle Preise']);
+    const findings = [objectFinding('https://site1.example/page'), objectFinding('https://site2.example/page')];
+    const understanding = domainUnderstanding(findings, { sources, listsItems: true, kind });
+    expect(understanding.terms).toEqual(['boulderhalle']);
+    expect(understanding.basis).toContain('the asked kind is named on');
+    expect(understanding.ready).toBe(true);
+  });
+
+  it('stays not ready when the kind is named on too few hosts', () => {
+    const sources = pages(['Die Boulderhalle im Westen', 'an unrelated page', 'another unrelated page']);
+    const findings = [objectFinding('https://site1.example/page')];
+    const understanding = domainUnderstanding(findings, { sources, listsItems: true, kind });
+    expect(understanding.terms).toEqual([]);
+    expect(understanding.ready).toBe(false);
+  });
+
+  it('without a kind the behaviour is unchanged', () => {
+    const sources = pages(['Die Boulderhalle im Westen', 'Unsere Boulderhalle hat offen', 'Boulderhalle Preise']);
+    const findings = [objectFinding('https://site1.example/page')];
+    const understanding = domainUnderstanding(findings, { sources, listsItems: true });
+    expect(understanding.terms).toEqual([]);
+    expect(understanding.ready).toBe(false);
+  });
+});

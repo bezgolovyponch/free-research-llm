@@ -332,7 +332,7 @@ export function supportedMembers(members = [], sources = []) {
   return named;
 }
 
-export function domainUnderstanding(findings, { hint = '', sources = [], members = [], listsItems = true } = {}) {
+export function domainUnderstanding(findings, { hint = '', sources = [], members = [], listsItems = true, kind = null } = {}) {
   const list = Array.isArray(findings) ? findings.filter(Boolean) : [];
   const byAspect = (aspect) => list.filter((finding) => String(finding?.aspect ?? '') === aspect);
   const statements = (aspect) => byAspect(aspect).map((finding) => keyPhrase(finding.statement)).filter(Boolean).slice(0, MAX_STATEMENTS);
@@ -352,6 +352,13 @@ export function domainUnderstanding(findings, { hint = '', sources = [], members
     if (named.length >= MIN_MEMBERS) {
       understanding.terms = [...new Set(named.map((member) => member.term))];
       understanding.basis = `kinds of the category named on ${SUPPORT_HOSTS}+ sites: ${named.map((member) => member.label).join(', ')}`;
+    }
+  }
+  if (!understanding.terms.length && kind?.label) {
+    const named = supportedMembers([kind], sources);
+    if (named.length) {
+      understanding.terms = [named[0].term];
+      understanding.basis = `the asked kind is named on ${SUPPORT_HOSTS}+ sites: ${named[0].term}`;
     }
   }
   const namesNothing = byAspect('terms').length === 0;
