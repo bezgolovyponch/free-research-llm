@@ -235,3 +235,22 @@ describe('rolesSummary', () => {
     expect(rolesSummary([])).toBe('roles: 0 actor(s), 0 place(s) — 0 quoted');
   });
 });
+
+import { knowledgePieces } from '../../src/research/requestmodel.mjs';
+
+describe('knowledgePieces', () => {
+  it('builds one piece per missing aspect with the next free driver ids, naming the kind and places', () => {
+    const pieces = knowledgePieces({ nodes: [{ id: 'D1' }, { id: 'D2' }, { id: 'D2.1' }], missing: ['object', 'terms'], label: 'bouldering gym', places: ['Germany'], languages: ['English', 'German'], queries: ['boulderhalle leipzig'], serves: ['E1', 'Q1'] });
+    expect(pieces.map((p) => p.id)).toEqual(['D3', 'D4']);
+    expect(pieces[0].question).toContain('bouldering gym in Germany');
+    expect(pieces[1].question).toContain('English and German');
+    expect(pieces[0].serves).toEqual(['E1', 'Q1']);
+    expect(pieces[0].searchQueries).toContain('boulderhalle leipzig');
+    expect(pieces.map((p) => p.knowledge)).toEqual(['object', 'terms']);
+  });
+  it('returns nothing without a kind label or without missing aspects, and ignores unknown aspects', () => {
+    expect(knowledgePieces({ missing: ['object'], label: '' })).toEqual([]);
+    expect(knowledgePieces({ missing: [], label: 'x' })).toEqual([]);
+    expect(knowledgePieces({ missing: ['nonsense'], label: 'x' })).toEqual([]);
+  });
+});

@@ -126,3 +126,26 @@ export function captureAlternatives(requestModel, node, sources) {
   }
   return added;
 }
+
+export function knowledgePieces({ nodes = [], missing = [], label = '', places = [], languages = [], queries = [], serves = [] } = {}) {
+  const name = String(label ?? '').trim();
+  if (!name || !missing.length) return [];
+  const where = places.length ? ` in ${places.join(', ')}` : '';
+  const langs = languages.length > 1 ? ` (in ${languages.join(' and ')})` : '';
+  const questions = {
+    object: { title: `What a ${name} is`, question: `What exactly is a ${name}${where}, and what does it consist of?` },
+    terms: { title: `What a ${name} is called`, question: `What is a ${name} called${where}${langs}, by those who offer it and by those who look for it?` },
+  };
+  const taken = new Set((nodes ?? []).map((n) => n.id));
+  let next = 1;
+  const pieces = [];
+  for (const aspect of missing) {
+    const spec = questions[aspect];
+    if (!spec) continue;
+    while (taken.has(`D${next}`)) next++;
+    const id = `D${next}`;
+    taken.add(id);
+    pieces.push({ id, title: spec.title, question: spec.question, why: 'the research cannot judge items it cannot recognise; sources must establish this first', searchQueries: [...new Set([...(queries ?? []).slice(0, 2), spec.question])].slice(0, 3), serves: [...serves], knowledge: aspect });
+  }
+  return pieces;
+}

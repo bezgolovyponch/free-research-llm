@@ -46,7 +46,7 @@ import { BLOCKING, auditFeedback, auditTree, cleanTitle, kindWordsOf, leaflessIs
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { captureBaseline, championChallenger, lineageFor, recordChampionGap, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
-import { buildRequestModel, buildRoles, captureAlternatives, requestModelSummary, rolesSummary, servesless } from './requestmodel.mjs';
+import { buildRequestModel, buildRoles, captureAlternatives, knowledgePieces, requestModelSummary, rolesSummary, servesless } from './requestmodel.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported', 'covered']);
@@ -916,11 +916,29 @@ export class ResearchEngine {
     ].join(' · ');
     this.emit(project, 'decision', `understood before searching: ${summary}`);
     if (!isAnalysis && !understanding.ready) {
+      if (process.env.FRL_NO_PAUSE) {
+        const missing = [...(understanding.object.length ? [] : ['object']), ...(understanding.terms.length ? [] : ['terms'])];
+        const places = (brief.regions ?? []).map((code) => countryByCode(code)?.name ?? code);
+        project.knowledgeGaps = { missing, queries, label: kind?.label ?? '', places, languages };
+        this.emit(project, 'decision', `understanding incomplete (${missing.join(', ') || 'unclear'}): research continues and the gaps become knowledge pieces`);
+        return true;
+      }
       this.setPhase(project, 'needs-understanding');
       this.emit(project, 'phase', 'research paused: not enough sources explain what the item is and what it is called — add a hint');
       return false;
     }
     return true;
+  }
+
+  addKnowledgePieces(project) {
+    const gaps = project.knowledgeGaps;
+    if (!gaps) return [];
+    delete project.knowledgeGaps;
+    const serves = (project.requestModel?.requirements ?? deriveRequirementIds(project.decisionModel)).map((r) => r.id);
+    const pieces = knowledgePieces({ nodes: project.nodes, ...gaps, serves: serves.length ? serves : ['Q1'] });
+    for (const piece of pieces) project.nodes.push(blankNode(piece));
+    if (pieces.length) this.emit(project, 'tree', `knowledge pieces added for understanding gaps: ${pieces.map((p) => `${p.id} ${p.title}`).join('; ')}`);
+    return pieces;
   }
 
   async ensurePurpose(project) {
@@ -930,6 +948,13 @@ export class ResearchEngine {
     await this.rebuildDecisionModel(project);
     if (String(project.decisionModel?.purpose ?? '').trim()) return true;
     if (String(project.guidance ?? '').trim()) return true;
+    if (process.env.FRL_NO_PAUSE) {
+      const note = 'the purpose of this research (not stated; the research follows the question as written)';
+      const listed = project.assumptionsToConfirm ?? [];
+      if (!listed.includes(note)) project.assumptionsToConfirm = [...listed, note];
+      this.emit(project, 'decision', 'purpose not stated: research continues on the question as written; the purpose is listed to confirm');
+      return true;
+    }
     this.setPhase(project, 'needs-purpose');
     this.emit(project, 'phase', 'research paused: the purpose is not clear — state why you ask and what result is worth having (Hints field)');
     return false;
@@ -2139,6 +2164,7 @@ export class ResearchEngine {
         return project;
       }
       if (!project.nodes.length) await this.decompose(project);
+      this.addKnowledgePieces(project);
       if (!await this.validateConcept(project)) {
         await this.store.save(project, { reason: 'run paused: the concept did not validate' });
         return project;
