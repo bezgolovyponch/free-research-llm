@@ -425,7 +425,7 @@ export class App {
       actionQueue.clear(projectId);
       const project = await this.store.get(projectId);
       await this.store.remove(projectId);
-      if (project) this.noteApp(`Research deleted: ${String(project.question).slice(0, 110)}`);
+      if (project) await this.noteApp(`Research deleted: ${String(project.question).slice(0, 110)}`);
       await this.logs.append(`project-${projectId}`, { type: 'delete', message: 'queued delete applied; earlier queued actions dropped' });
       return;
     }
@@ -536,7 +536,7 @@ export class App {
   }
 
   noteApp(content) {
-    void (async () => {
+    return (async () => {
       try {
         await this.appChat.note(content);
       } catch {

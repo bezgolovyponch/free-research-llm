@@ -437,3 +437,14 @@ describe('App.drainQueue', () => {
     await fsp.rm(dataDir, { recursive: true, force: true });
   });
 });
+
+describe('App.noteApp', () => {
+  it('returns a promise so a caller can wait for the note to be written', async () => {
+    const dataDir = await fsp.mkdtemp(path2.join(os2.tmpdir(), 'frl-app-note-'));
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'gemini', FRL_DEMO: '1', FRL_WIKIPEDIA: '0' }, fetchImpl: fakeFetch([]), dataDir });
+    const pending = app.noteApp('a note');
+    expect(typeof pending?.then).toBe('function');
+    await pending;
+    await fsp.rm(dataDir, { recursive: true, force: true });
+  });
+});
