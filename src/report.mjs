@@ -141,6 +141,17 @@ export function toMarkdown(project) {
     if (r.sensitivity.length) out.push('## What flips the decision', '', ...r.sensitivity.map((s) => `- **${s.variable}:** ${s.effect}`), '');
     out.push('## Risks', '', bullets(r.risks), '', '## Open questions', '', bullets(r.openQuestions), '');
     if (r.nextSteps.length) out.push('## Next steps', '', ...r.nextSteps.map((s, i) => `${i + 1}. **${s.step}** — ${s.why}${s.how ? ` _How:_ ${s.how}` : ''}`), '');
+    const sideReport = Boolean(process.env.FRL_REGION_SIDE_REPORT);
+    if (sideReport && (project.outOfRegionSourceCount > 0 || project.outOfRegionItemCount > 0)) {
+      out.push('## Out of the asked regions', '', `**${project.outOfRegionSourceCount} source(s), ${project.outOfRegionItemCount} item(s)**`, '');
+      if (project.outOfRegionHosts?.length) {
+        out.push('| Host | Detected region |', '|---|---|');
+        for (const entry of project.outOfRegionHosts) {
+          out.push(`| ${entry.host} | ${entry.region} |`);
+        }
+        out.push('');
+      }
+    }
     out.push(`_Evidence quality: ${r.evidenceQuality.verified}/${r.evidenceQuality.total} nodes verified or supported; weak: ${r.evidenceQuality.weak.join(', ') || 'none'}._`, '');
   }
   const plan = actionPlan(project);
