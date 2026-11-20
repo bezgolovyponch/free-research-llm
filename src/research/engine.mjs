@@ -46,7 +46,7 @@ import { BLOCKING, auditFeedback, auditTree, cleanTitle, kindWordsOf, markListin
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { captureBaseline, championChallenger, lineageFor, recordChampionGap, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
-import { buildRequestModel, captureAlternatives, requestModelSummary, servesless } from './requestmodel.mjs';
+import { buildRequestModel, buildRoles, captureAlternatives, requestModelSummary, rolesSummary, servesless } from './requestmodel.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported', 'covered']);
@@ -578,6 +578,12 @@ export class ResearchEngine {
       this.emit(project, 'tree', requestModelSummary(requestModel));
       const orphans = servesless(project.nodes, requestModel.requirements);
       if (orphans.length) this.emit(project, 'tree', `pieces serving no requirement: ${orphans.join(', ')}`);
+      if (process.env.FRL_REQUEST_ROLES) {
+        const brief = this.briefOf(project);
+        const roles = buildRoles({ question: project.question, expected: project.acceptance?.expected, constraints: project.constraints, brief, domain: project.domain });
+        project.requestModel.roles = roles;
+        this.emit(project, 'tree', rolesSummary(roles));
+      }
     }
     this.emit(project, 'tree', `issue tree ready: ${tree.nodes.length} nodes (${reply.provider}/${reply.model})`);
     await this.store.save(project, { reason: 'issue tree decomposed' });

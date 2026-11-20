@@ -3664,6 +3664,52 @@ describe('ResearchEngine request model shadow', () => {
       if (original !== undefined) process.env.FRL_REQUEST_MODEL = original;
     }
   });
+
+  it('stores requestModel.roles with places and actors when both flags are on', async () => {
+    const originalModel = process.env.FRL_REQUEST_MODEL;
+    const originalRoles = process.env.FRL_REQUEST_ROLES;
+    process.env.FRL_REQUEST_MODEL = '1';
+    process.env.FRL_REQUEST_ROLES = '1';
+    try {
+      const provider = new ScriptedProvider();
+      const { engine } = engineWith(provider);
+      const events: string[] = [];
+      const project = await engine.createProject({ question: 'Find wholesalers in Germany and Poland for vintage clothing' });
+      engine.subscribe(project.id, (e: { type: string; message?: string }) => events.push(String(e.message ?? '')));
+      const done = await engine.run(project.id);
+      expect(done.requestModel).toBeDefined();
+      expect(done.requestModel.roles).toBeDefined();
+      expect(Array.isArray(done.requestModel.roles)).toBe(true);
+      expect(done.requestModel.roles.length).toBeGreaterThan(0);
+      const places = done.requestModel.roles.filter((r: { type: string }) => r.type === 'place');
+      const actors = done.requestModel.roles.filter((r: { type: string }) => r.type === 'actor');
+      expect(places.length).toBeGreaterThan(0);
+      expect(places.every((r: { role: string }) => r.role === 'sources must be in it' || r.role === 'where the result is used')).toBe(true);
+      expect(actors.every((r: { from: string }) => r.from === 'domain')).toBe(true);
+      expect(events.some((m) => m.startsWith('roles:'))).toBe(true);
+    } finally {
+      if (originalModel === undefined) delete process.env.FRL_REQUEST_MODEL; else process.env.FRL_REQUEST_MODEL = originalModel;
+      if (originalRoles === undefined) delete process.env.FRL_REQUEST_ROLES; else process.env.FRL_REQUEST_ROLES = originalRoles;
+    }
+  });
+
+  it('does not add roles key when FRL_REQUEST_ROLES is off but FRL_REQUEST_MODEL is on', async () => {
+    const originalModel = process.env.FRL_REQUEST_MODEL;
+    const originalRoles = process.env.FRL_REQUEST_ROLES;
+    process.env.FRL_REQUEST_MODEL = '1';
+    delete process.env.FRL_REQUEST_ROLES;
+    try {
+      const provider = new ScriptedProvider();
+      const { engine } = engineWith(provider);
+      const project = await engine.createProject({ question: 'Find wholesalers in Germany and Poland for vintage clothing' });
+      const done = await engine.run(project.id);
+      expect(done.requestModel).toBeDefined();
+      expect(done.requestModel.roles).toBeUndefined();
+    } finally {
+      if (originalModel === undefined) delete process.env.FRL_REQUEST_MODEL; else process.env.FRL_REQUEST_MODEL = originalModel;
+      if (originalRoles !== undefined) process.env.FRL_REQUEST_ROLES = originalRoles;
+    }
+  });
 });
 
 describe('ResearchEngine alternative-means capture', () => {
