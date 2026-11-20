@@ -3628,3 +3628,40 @@ describe('ResearchEngine out-of-region flag', () => {
     }
   });
 });
+
+describe('ResearchEngine request model shadow', () => {
+  it('stores the request model with grounded labels and emits the summary when the flag is on', async () => {
+    const original = process.env.FRL_REQUEST_MODEL;
+    process.env.FRL_REQUEST_MODEL = '1';
+    try {
+      const provider = new ScriptedProvider();
+      const { engine } = engineWith(provider);
+      const events: string[] = [];
+      const project = await engine.createProject({ question: 'Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland?' });
+      engine.subscribe(project.id, (e: { type: string; message?: string }) => events.push(String(e.message ?? '')));
+      const done = await engine.run(project.id);
+      expect(done.requestModel).toBeDefined();
+      expect(done.requestModel.requirements.length).toBeGreaterThan(0);
+      expect(done.requestModel.requirements.every((r: { source: string }) => r.source === 'quoted' || r.source === 'derived')).toBe(true);
+      expect(done.requestModel.purpose.source === 'quoted' || done.requestModel.purpose.source === 'derived').toBe(true);
+      expect(events.some((m) => m.startsWith('request model:'))).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.FRL_REQUEST_MODEL;
+      else process.env.FRL_REQUEST_MODEL = original;
+    }
+  });
+
+  it('stores nothing when the flag is off', async () => {
+    const original = process.env.FRL_REQUEST_MODEL;
+    delete process.env.FRL_REQUEST_MODEL;
+    try {
+      const provider = new ScriptedProvider();
+      const { engine } = engineWith(provider);
+      const project = await engine.createProject({ question: 'Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland?' });
+      const done = await engine.run(project.id);
+      expect(done.requestModel).toBeUndefined();
+    } finally {
+      if (original !== undefined) process.env.FRL_REQUEST_MODEL = original;
+    }
+  });
+});
