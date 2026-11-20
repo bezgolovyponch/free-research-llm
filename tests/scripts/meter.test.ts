@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { meterProject, bandOf, findPageText, loadProjects, readCalls, parseArgs, ROOT, DATA_DIR } from '../../scripts/meter.mjs';
 import { contractClass } from '../../src/research/deliverable.mjs';
+import { computeTiers } from '../../scripts/zero-loss.mjs';
 import { wilson } from '../../src/research/agreement.mjs';
 
 const makeProject = (overrides = {}) => ({
@@ -161,24 +162,26 @@ describe('meter: void', () => {
 });
 
 describe('meter: settled', () => {
-  it('counts confirmed, toConfirm, rejected, notJudged from stored tiers', () => {
+  it('counts items by the recomputed tiers of the zero-loss computeTiers path, never the stored tier field', () => {
     const project = makeProject();
     const rows = Array(8).fill(null).map(() => makeCallRow());
     const result = meterProject(project, rows, { voidProviders: new Set() });
-    expect(result.settled.items.confirmed).toBe(2);
-    expect(result.settled.items.toConfirm).toBe(1);
-    expect(result.settled.items.rejected).toBe(1);
-    expect(result.settled.items.notJudged).toBe(0);
+    const reference = computeTiers(project).tiers;
+    expect(result.settled.items.confirmed).toBe(reference.confirmed);
+    expect(result.settled.items.toConfirm).toBe(reference['to-confirm']);
+    expect(result.settled.items.rejected).toBe(reference.rejected);
+    expect(result.settled.items.notJudged).toBe(reference['not-judged']);
+    expect(result.settled.items.confirmed).toBe(4);
     expect(result.settled.pieces.settled).toBe(2);
     expect(result.settled.pieces.total).toBe(4);
-    expect(result.settled.units).toBe(4);
+    expect(result.settled.units).toBe(6);
   });
 
   it('settledPerCall = units / total calls', () => {
     const project = makeProject();
     const rows = Array(8).fill(null).map(() => makeCallRow());
     const result = meterProject(project, rows, { voidProviders: new Set() });
-    expect(result.settledPerCall).toBeCloseTo(4 / 8);
+    expect(result.settledPerCall).toBeCloseTo(6 / 8);
   });
 });
 

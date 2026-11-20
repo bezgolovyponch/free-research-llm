@@ -9,6 +9,7 @@ import { contractClass } from '../src/research/deliverable.mjs';
 import { quoteFound } from '../src/research/quote.mjs';
 import { plain } from '../src/research/itemgate.mjs';
 import { startedDirectly } from './tool-entry.mjs';
+import { computeTiers } from './zero-loss.mjs';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DATA_DIR = path.join(ROOT, 'data');
@@ -100,15 +101,8 @@ function meterProject(project, rows, { voidProviders }) {
   const failedShare = total === 0 ? null : failed / total;
   const singleProviderFlag = providerAnswered === 'multiple' ? false : providerAnswered !== null;
 
-  const acceptanceItems = project.acceptanceResult?.items ?? [];
-  const tierCounts = { confirmed: 0, toConfirm: 0, rejected: 0, notJudged: 0 };
-  for (const item of acceptanceItems) {
-    const tier = item.tier ?? 'not-judged';
-    if (tier === 'confirmed') tierCounts.confirmed++;
-    else if (tier === 'to-confirm') tierCounts.toConfirm++;
-    else if (tier === 'rejected') tierCounts.rejected++;
-    else tierCounts.notJudged++;
-  }
+  const recomputed = computeTiers(project).tiers;
+  const tierCounts = { confirmed: recomputed.confirmed ?? 0, toConfirm: recomputed['to-confirm'] ?? 0, rejected: recomputed.rejected ?? 0, notJudged: recomputed['not-judged'] ?? 0 };
 
   const nodes = project.nodes ?? [];
   let piecesSettled = 0;
