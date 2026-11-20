@@ -403,3 +403,186 @@ describe('research share links', () => {
     }
   });
 });
+
+describe('Action queue (FRL_ACTION_QUEUE=1)', () => {
+  let queueApp: App;
+  let queueBase: string;
+  let queueClose: () => void;
+  let queueDir: string;
+
+  beforeAll(async () => {
+    queueDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-queue-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ enabled: false, backends: [], lastErrors: [] }) };
+    queueApp = new App({ env: { FRL_ACTION_QUEUE: '1' }, dataDir: queueDir, providers: [new ScriptedProvider()], search });
+    const started = await startServer({ app: queueApp, port: 0 });
+    queueBase = started.url;
+    queueClose = () => started.server.close();
+  });
+
+  afterAll(async () => {
+    queueClose();
+    await queueApp.logs.queue;
+    await fs.rm(queueDir, { recursive: true, force: true, maxRetries: 3 });
+  });
+
+  async function queueCall(method: string, url: string, body?: unknown) {
+    const res = await fetch(queueBase + url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    return { status: res.status, body: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() };
+  }
+
+  it('queues delete when project is busy', async () => {
+    const created = await queueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+    queueApp.engine.running.add(created.body.id);
+    try {
+      const res = await queueCall('DELETE', `/api/projects/${created.body.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ queued: true, type: 'delete', position: 1 });
+      const project = await queueCall('GET', `/api/projects/${created.body.id}`);
+      expect(project.body.queuedActions).toMatchObject({ count: 1, types: { delete: 1 } });
+    } finally {
+      queueApp.engine.running.delete(created.body.id);
+    }
+  });
+
+  it('queues reset when improver is active', async () => {
+    const created = await queueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+    queueApp.improver.active.set(created.body.id, { stopped: false, deadline: Date.now() + 3600000, hours: 1, scope: [], exclude: [] });
+    try {
+      const res = await queueCall('POST', `/api/projects/${created.body.id}/reset`, { templateId: 'glamping-location' });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ queued: true, type: 'reset', position: 1 });
+      const project = await queueCall('GET', `/api/projects/${created.body.id}`);
+      expect(project.body.queuedActions).toMatchObject({ count: 1, types: { reset: 1 } });
+    } finally {
+      queueApp.improver.active.delete(created.body.id);
+    }
+  });
+
+  it('queues restore when project is busy', async () => {
+    const created = await queueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+    queueApp.engine.running.add(created.body.id);
+    try {
+      const res = await queueCall('POST', `/api/projects/${created.body.id}/restore`, { snapshot: 'test' });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ queued: true, type: 'restore', position: 1 });
+      const project = await queueCall('GET', `/api/projects/${created.body.id}`);
+      expect(project.body.queuedActions).toMatchObject({ count: 1, types: { restore: 1 } });
+    } finally {
+      queueApp.engine.running.delete(created.body.id);
+    }
+  });
+
+  it('queues recheck-support when improver is active', async () => {
+    const created = await queueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+    queueApp.improver.active.set(created.body.id, { stopped: false, deadline: Date.now() + 3600000, hours: 1, scope: [], exclude: [] });
+    try {
+      const res = await queueCall('POST', `/api/projects/${created.body.id}/recheck-support`, {});
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ queued: true, type: 'recheck-support', position: 1 });
+      const project = await queueCall('GET', `/api/projects/${created.body.id}`);
+      expect(project.body.queuedActions).toMatchObject({ count: 1, types: { 'recheck-support': 1 } });
+    } finally {
+      queueApp.improver.active.delete(created.body.id);
+    }
+  });
+
+  it('queues synthesize when improver is active', async () => {
+    const created = await queueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+    queueApp.improver.active.set(created.body.id, { stopped: false, deadline: Date.now() + 3600000, hours: 1, scope: [], exclude: [] });
+    try {
+      const res = await queueCall('POST', `/api/projects/${created.body.id}/synthesize`, {});
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ queued: true, type: 'synthesize', position: 1 });
+      const project = await queueCall('GET', `/api/projects/${created.body.id}`);
+      expect(project.body.queuedActions).toMatchObject({ count: 1, types: { synthesize: 1 } });
+    } finally {
+      queueApp.improver.active.delete(created.body.id);
+    }
+  });
+
+  it('drains queue FIFO on run end', async () => {
+    const created = await queueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+    queueApp.engine.running.add(created.body.id);
+    queueApp.improver.active.set(created.body.id, { stopped: false, deadline: Date.now() + 3600000, hours: 1, scope: [], exclude: [] });
+    try {
+      await queueCall('POST', `/api/projects/${created.body.id}/reset`, { templateId: 'glamping-location' });
+      await queueCall('POST', `/api/projects/${created.body.id}/restore`, { snapshot: 'test' });
+      await queueCall('POST', `/api/projects/${created.body.id}/recheck-support`, {});
+      await queueCall('POST', `/api/projects/${created.body.id}/synthesize`, {});
+      const projectBefore = await queueCall('GET', `/api/projects/${created.body.id}`);
+      expect(projectBefore.body.queuedActions.count).toBe(4);
+    } finally {
+      queueApp.engine.running.delete(created.body.id);
+      queueApp.improver.active.delete(created.body.id);
+    }
+    await queueApp.saveHandoff(await queueApp.engine.load(created.body.id), { reason: 'test' });
+    const projectAfter = await queueCall('GET', `/api/projects/${created.body.id}`);
+    expect(projectAfter.body.queuedActions).toBeUndefined();
+  });
+
+  it('delete ends the drain', async () => {
+    const created = await queueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+    queueApp.engine.running.add(created.body.id);
+    queueApp.improver.active.set(created.body.id, { stopped: false, deadline: Date.now() + 3600000, hours: 1, scope: [], exclude: [] });
+    try {
+      await queueCall('POST', `/api/projects/${created.body.id}/reset`, { templateId: 'glamping-location' });
+      await queueCall('DELETE', `/api/projects/${created.body.id}`);
+      await queueCall('POST', `/api/projects/${created.body.id}/synthesize`, {});
+      const projectBefore = await queueCall('GET', `/api/projects/${created.body.id}`);
+      expect(projectBefore.body.queuedActions.count).toBe(3);
+      expect(projectBefore.body.queuedActions.types.delete).toBe(1);
+    } finally {
+      queueApp.engine.running.delete(created.body.id);
+      queueApp.improver.active.delete(created.body.id);
+    }
+    await queueApp.saveHandoff(await queueApp.engine.load(created.body.id), { reason: 'test' });
+    const projectAfter = await queueCall('GET', `/api/projects/${created.body.id}`);
+    expect(projectAfter.status).toBe(404);
+  });
+
+  it('flag off keeps the 409', async () => {
+    const noQueueDir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-noqueue-'));
+    const search = { enabled: false, lastErrors: [], search: async () => [], describe: () => ({ enabled: false, backends: [], lastErrors: [] }) };
+    const noQueueApp = new App({ env: {}, dataDir: noQueueDir, providers: [new ScriptedProvider()], search });
+    const started = await startServer({ app: noQueueApp, port: 0 });
+    const noQueueBase = started.url;
+    async function noQueueCall(method: string, url: string, body?: unknown) {
+      const res = await fetch(noQueueBase + url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      return { status: res.status, body: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() };
+    }
+    try {
+      const created = await noQueueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+      noQueueApp.engine.running.add(created.body.id);
+      try {
+        const res = await noQueueCall('DELETE', `/api/projects/${created.body.id}`);
+        expect(res.status).toBe(409);
+        expect(res.body).toMatchObject({ error: 'stop it first: the research is running' });
+      } finally {
+        noQueueApp.engine.running.delete(created.body.id);
+      }
+    } finally {
+      started.server.close();
+      await noQueueApp.logs.queue;
+      await fs.rm(noQueueDir, { recursive: true, force: true, maxRetries: 3 });
+    }
+  });
+
+  it('writes journal line per applied action', async () => {
+    const created = await queueCall('POST', '/api/projects', { question: 'What is the best cafe in Brno?' });
+    queueApp.engine.running.add(created.body.id);
+    queueApp.improver.active.set(created.body.id, { stopped: false, deadline: Date.now() + 3600000, hours: 1, scope: [], exclude: [] });
+    try {
+      await queueCall('POST', `/api/projects/${created.body.id}/reset`, { templateId: 'glamping-location' });
+      await queueCall('POST', `/api/projects/${created.body.id}/synthesize`, {});
+    } finally {
+      queueApp.engine.running.delete(created.body.id);
+      queueApp.improver.active.delete(created.body.id);
+    }
+    await queueApp.saveHandoff(await queueApp.engine.load(created.body.id), { reason: 'test' });
+    const logs = await queueCall('GET', `/api/projects/${created.body.id}/logs`);
+    const queueEntries = logs.body.filter((e) => ['reset', 'synthesize'].includes(e.type));
+    expect(queueEntries.length).toBe(2);
+    expect(queueEntries.find((e) => e.type === 'reset')).toBeDefined();
+    expect(queueEntries.find((e) => e.type === 'synthesize')).toBeDefined();
+  });
+});

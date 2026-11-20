@@ -283,3 +283,31 @@ describe('ProjectStore.list outcome', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
+
+describe('ProjectStore removal tombstone', () => {
+  it('a removed project cannot be resurrected by a late save and get stays null', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-store-tomb-'));
+    const store = new ProjectStore({ dir });
+    const id = store.newId('Cafe in Brno?');
+    await store.save({ id, question: 'Q', phase: 'done' });
+    await store.remove(id);
+    expect(await store.get(id)).toBeNull();
+    expect(await store.save({ id, question: 'Q', phase: 'done' })).toBeNull();
+    expect(await store.get(id)).toBeNull();
+    const files = (await fs.readdir(dir)).filter((f) => f === `${id}.json`);
+    expect(files).toEqual([]);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('revive lets the id be saved again', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-store-tomb2-'));
+    const store = new ProjectStore({ dir });
+    const id = store.newId('Cafe in Brno?');
+    await store.save({ id, question: 'Q', phase: 'done' });
+    await store.remove(id);
+    store.revive(id);
+    await store.save({ id, question: 'Q2', phase: 'done' });
+    expect((await store.get(id))?.question).toBe('Q2');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});

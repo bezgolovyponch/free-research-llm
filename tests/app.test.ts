@@ -405,3 +405,35 @@ describe('App.reloadKeys lifts bench on key change', () => {
     await app.logs.queue;
   });
 });
+
+import fsp from 'node:fs/promises';
+import os2 from 'node:os';
+import path2 from 'node:path';
+import { actionQueue } from '../src/actionqueue.mjs';
+
+describe('App.drainQueue', () => {
+  it('applies a queued delete on drain and the tombstone keeps the project gone', async () => {
+    const dataDir = await fsp.mkdtemp(path2.join(os2.tmpdir(), 'frl-app-drain-'));
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'gemini', FRL_DEMO: '1', FRL_WIKIPEDIA: '0', FRL_ACTION_QUEUE: '1' }, fetchImpl: fakeFetch([]), dataDir });
+    const id = app.store.newId('Cafe in Brno?');
+    await app.store.save({ id, question: 'Q', phase: 'done' });
+    actionQueue.enqueue(id, { type: 'reset', body: {} });
+    actionQueue.enqueue(id, { type: 'delete', body: {} });
+    await app.drainQueue(id);
+    expect(actionQueue.has(id)).toBe(false);
+    expect(await app.store.get(id)).toBeNull();
+    expect(await app.store.save({ id, question: 'Q', phase: 'done' })).toBeNull();
+    await fsp.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('leaves the queue untouched when the flag is off', async () => {
+    const dataDir = await fsp.mkdtemp(path2.join(os2.tmpdir(), 'frl-app-drain2-'));
+    const app = new App({ env: { FRL_PROVIDER_ORDER: 'gemini', FRL_DEMO: '1', FRL_WIKIPEDIA: '0' }, fetchImpl: fakeFetch([]), dataDir });
+    const id = app.store.newId('Cafe in Brno?');
+    actionQueue.enqueue(id, { type: 'reset', body: {} });
+    await app.drainQueue(id);
+    expect(actionQueue.has(id)).toBe(true);
+    actionQueue.clear(id);
+    await fsp.rm(dataDir, { recursive: true, force: true });
+  });
+});
