@@ -3665,3 +3665,38 @@ describe('ResearchEngine request model shadow', () => {
     }
   });
 });
+
+describe('ResearchEngine alternative-means capture', () => {
+  const brief = { located: false, regions: [] };
+  const reqModel = () => ({ purpose: { text: '', source: 'derived', quote: '' }, requirements: [{ id: 'R1', clause: 'a', source: 'quoted', quote: 'a' }] });
+  const node = { id: 'D1', serves: ['R1'] };
+  const src = () => ({ kind: 'web', url: 'https://hub.example/offers', domain: 'hub.example', snippet: 's', text: 'Catalog: Quad safari tour for groups.', listings: [{ title: 'Quad safari tour', url: 'https://hub.example/quad' }] });
+
+  it('records alternatives when both flags are on', () => {
+    const originalCapture = process.env.FRL_OR_CAPTURE;
+    process.env.FRL_OR_CAPTURE = '1';
+    try {
+      const { engine } = engineWith({});
+      const project = { brief, question: 'q', requestModel: reqModel() };
+      engine.onConceptOnly(project, node, [src()]);
+      expect(project.requestModel.alternatives).toHaveLength(1);
+      expect(project.requestModel.alternatives[0]).toMatchObject({ requirementId: 'R1', means: 'Quad safari tour' });
+    } finally {
+      if (originalCapture === undefined) delete process.env.FRL_OR_CAPTURE;
+      else process.env.FRL_OR_CAPTURE = originalCapture;
+    }
+  });
+
+  it('records nothing when the flag is off', () => {
+    const originalCapture = process.env.FRL_OR_CAPTURE;
+    delete process.env.FRL_OR_CAPTURE;
+    try {
+      const { engine } = engineWith({});
+      const project = { brief, question: 'q', requestModel: reqModel() };
+      engine.onConceptOnly(project, node, [src()]);
+      expect(project.requestModel.alternatives).toBeUndefined();
+    } finally {
+      if (originalCapture !== undefined) process.env.FRL_OR_CAPTURE = originalCapture;
+    }
+  });
+});

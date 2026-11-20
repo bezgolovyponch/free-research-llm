@@ -53,3 +53,29 @@ export function requestModelSummary(model) {
   const derived = model.requirements.length - quoted;
   return `request model: ${model.requirements.length} requirement(s) — ${quoted} quoted, ${derived} derived; purpose ${model.purpose.source}`;
 }
+
+export function captureAlternatives(requestModel, node, sources) {
+  if (!requestModel?.requirements?.length) return 0;
+  const ids = new Set(requestModel.requirements.map((r) => r.id));
+  const serves = Array.isArray(node?.serves) ? node.serves.filter((id) => ids.has(id)) : [];
+  if (!serves.length) return 0;
+  requestModel.alternatives = requestModel.alternatives ?? [];
+  const known = new Set(requestModel.alternatives.map((a) => `${a.requirementId}|${String(a.means).toLowerCase().replace(/\s+/g, ' ')}`));
+  let added = 0;
+  for (const source of sources ?? []) {
+    const body = String(source?.text ?? '');
+    for (const listing of source?.listings ?? []) {
+      const means = String(listing?.title ?? '').replace(/\s+/g, ' ').trim();
+      if (!means) continue;
+      if (!quoteOnPage(body, means)) continue;
+      for (const requirementId of serves) {
+        const key = `${requirementId}|${means.toLowerCase()}`;
+        if (known.has(key)) continue;
+        known.add(key);
+        requestModel.alternatives.push({ requirementId, means, quote: means, url: listing?.url ?? source?.url ?? '' });
+        added++;
+      }
+    }
+  }
+  return added;
+}

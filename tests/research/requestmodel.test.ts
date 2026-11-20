@@ -83,3 +83,46 @@ describe('requestModelSummary', () => {
     expect(summary).toBe('request model: 2 requirement(s) — 1 quoted, 1 derived; purpose derived');
   });
 });
+
+import { captureAlternatives } from '../../src/research/requestmodel.mjs';
+
+describe('captureAlternatives', () => {
+  const model = () => ({
+    purpose: { text: '', source: 'derived', quote: '' },
+    requirements: [{ id: 'R1', clause: 'a', source: 'quoted', quote: 'a' }],
+  });
+  const node = { id: 'D1', serves: ['R1'] };
+  const source = () => ({
+    url: 'https://hub.example/offers',
+    text: 'Catalog: Quad safari tour for groups. Paintball arena sessions. Contact us.',
+    listings: [
+      { title: 'Quad safari tour', url: 'https://hub.example/quad' },
+      { title: 'Paintball arena sessions', url: 'https://hub.example/pb' },
+      { title: 'Ghost offer not on the page', url: 'https://hub.example/ghost' },
+    ],
+  });
+
+  it('records page-verified listing titles for the served requirement and skips unverified ones', () => {
+    const m = model();
+    const added = captureAlternatives(m, node, [source()]);
+    expect(added).toBe(2);
+    expect(m.alternatives.map((a) => a.means)).toEqual(['Quad safari tour', 'Paintball arena sessions']);
+    expect(m.alternatives.every((a) => a.requirementId === 'R1')).toBe(true);
+    expect(m.alternatives[0].url).toBe('https://hub.example/quad');
+  });
+
+  it('dedupes across calls and returns 0 for a node serving nothing', () => {
+    const m = model();
+    expect(captureAlternatives(m, node, [source()])).toBe(2);
+    expect(captureAlternatives(m, node, [source()])).toBe(0);
+    expect(captureAlternatives(m, { id: 'D2', serves: [] }, [source()])).toBe(0);
+    expect(captureAlternatives(m, { id: 'D3' }, [source()])).toBe(0);
+    expect(m.alternatives).toHaveLength(2);
+  });
+
+  it('returns 0 on an empty model or unknown serves ids', () => {
+    expect(captureAlternatives({ purpose: { text: '', source: 'derived', quote: '' }, requirements: [] }, node, [source()])).toBe(0);
+    const m = model();
+    expect(captureAlternatives(m, { id: 'D4', serves: ['NOPE'] }, [source()])).toBe(0);
+  });
+});

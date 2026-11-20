@@ -46,7 +46,7 @@ import { BLOCKING, auditFeedback, auditTree, cleanTitle, kindWordsOf, markListin
 import { basisOf, weakReason, effectiveGrade, nodeIdsIn, questionKind, sanitizeVerdict } from './result.mjs';
 import { captureBaseline, championChallenger, lineageFor, recordChampionGap, recordSample, regradeSettled, researchNoiseFloor, SETTLED } from './monitor.mjs';
 import { entityDomains, entityNames, entityQueries, hostOf, mentionedNames, ownerOnly, scopedQueries, terms } from '../search/selection.mjs';
-import { buildRequestModel, requestModelSummary, servesless } from './requestmodel.mjs';
+import { buildRequestModel, captureAlternatives, requestModelSummary, servesless } from './requestmodel.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const DONE = new Set(['verified', 'supported', 'weak', 'unsupported', 'covered']);
@@ -1058,6 +1058,10 @@ export class ResearchEngine {
           }
         }
       }
+    }
+    if (process.env.FRL_OR_CAPTURE && project.requestModel) {
+      const added = captureAlternatives(project.requestModel, node, kept);
+      if (added) this.emit(project, 'node', `${node.id}: ${added} alternative means recorded from pages`, { nodeId: node.id });
     }
     const gated = (brief.located === false && !isAnalysis) ? this.gateOnKind(project, node, kept) : kept;
     const query = evidenceQuery(node, brief);
