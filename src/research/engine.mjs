@@ -312,6 +312,7 @@ export function normalizeEstimate(raw) {
 }
 
 const MIN_JUDGED_TEXT = 300;
+const TOPIC_MIN_TERMS = 2;
 const JUDGE_PAGE_BUDGET = 90;
 const SITE_MEASURES = new Set(['coastKm', 'beachKm', 'lakeKm', 'workableMonths', 'comfortableMonths', 'optimalDays', 'hotDays', 'hottestC', 'coldestC', 'explorePoints', 'staysNearby', 'realTrendVsEu']);
 
@@ -1107,7 +1108,7 @@ export class ResearchEngine {
     }
     const gated = (brief.located === false && !isAnalysis) ? this.gateOnKind(project, node, kept) : kept;
     const query = evidenceQuery(node, brief);
-    const topical = gated.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= 2);
+    const topical = gated.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= TOPIC_MIN_TERMS);
     const offTopic = gated.length - topical.length;
     if (offTopic) this.emit(project, 'node', `${node.id}: ${offTopic} source(s) dropped before any model call — off topic (${gated.filter((s) => !topical.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
     return topical;
@@ -1417,7 +1418,18 @@ export class ResearchEngine {
       const direct = [...(node.sourceUrls?.length && this.search.readPages ? await this.search.readPages(node.sourceUrls) : [])];
       const queries = [...new Set([...entityQueries(node, entities.domains), ...scopedQueries(node, entities.names)])];
       const web = await this.search.search(queries, { maxSources: 8 - direct.length, exclude: direct.map((d) => d.url), wanted: terms(`${node.title} ${node.question}`), entities: entities.domains, usedDomains: this.usedDomains(project, node), names: mentionedNames(node, entities.names) });
-      this.onConceptOnly(project, node, [...direct, ...web]).forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
+      let allSources = [...direct, ...web];
+      if (process.env.FRL_DOMAIN_TO_PIECES && project.domainSources?.length) {
+        const brief = project.brief ?? this.briefOf(project);
+        const query = evidenceQuery(node, brief);
+        const existingUrls = new Set([...direct, ...web].map((s) => s.url).filter(Boolean));
+        const domainForNode = project.domainSources.filter((s) => s.url && !existingUrls.has(s.url) && topicCoverage(s, query) >= TOPIC_MIN_TERMS);
+        if (domainForNode.length) {
+          allSources = [...allSources, ...domainForNode];
+          this.emit(project, 'node', `${node.id}: ${domainForNode.length} page(s) reused from the domain study`, { nodeId: node.id });
+        }
+      }
+      this.onConceptOnly(project, node, allSources).forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
       if (!web.length && this.search.lastErrors.length) this.emit(project, 'warn', `${node.id}: search failed (${this.search.lastErrors.join('; ').slice(0, 200)})`, { nodeId: node.id });
     }
     return [...sources, ...this.dataSources(project, node)];
