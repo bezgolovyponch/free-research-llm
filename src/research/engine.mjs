@@ -7,7 +7,7 @@ import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
 import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
-import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf } from './verdict.mjs';
+import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf, chosenOptionId } from './verdict.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
 import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
@@ -1548,6 +1548,11 @@ export class ResearchEngine {
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
+    const rawOptions = (Array.isArray(r.options) ? r.options : []).slice(0, 6);
+    const keptOptions = rawOptions.map((o) => ({ option: String(o?.option ?? ''), support: nodeIdsIn(o?.support), against: nodeIdsIn(o?.against) })).filter((o) => o.option);
+    const optionsWithId = keptOptions.map((o, i) => ({ ...o, id: `O${i + 1}` }));
+    const optionsForReport = optionsWithId.map((o) => ({ option: o.option.slice(0, 160), support: o.support, against: o.against, id: o.id }));
+    const chosen = chosenOptionId(optionsWithId, r.chosen);
     project.report = {
       verdict: sanitizeVerdict(r.verdict).slice(0, 300),
       modelVerdict: sanitizeVerdict(r.verdict).slice(0, 300),
@@ -1563,7 +1568,9 @@ export class ResearchEngine {
       evidenceQuality: { ...counts, weak: project.nodes.filter((n) => ['weak', 'unsupported', 'failed'].includes(n.status)).map((n) => n.id) },
       bestEstimate: normalizeEstimate(r.bestEstimate),
       actionItems: (Array.isArray(r.actions) ? r.actions : []).slice(0, 12).map((x) => ({ action: String(x?.action ?? '').slice(0, 300), why: String(x?.why ?? '').slice(0, 300), horizon: String(x?.horizon ?? '').slice(0, 60), impact: Math.min(5, Math.max(1, Number(x?.impact) || 3)), nodeIds: nodeIdsIn(x?.nodeIds ?? x) })).filter((x) => x.action),
-      options: (Array.isArray(r.options) ? r.options : []).slice(0, 6).map((o) => ({ option: String(o?.option ?? '').slice(0, 160), support: nodeIdsIn(o?.support), against: nodeIdsIn(o?.against) })).filter((o) => o.option),
+      options: optionsForReport,
+      chosenOption: chosen.id,
+      ...(chosen.note ? { chosenOptionNote: chosen.note } : {}),
       basis: basisOf(project.nodes),
       model: `${reply.provider}/${reply.model}`,
       generatedAt: new Date().toISOString(),
