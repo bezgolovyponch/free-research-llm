@@ -960,7 +960,7 @@ describe('ResearchEngine', () => {
 
   it('honours a stop raised while collecting candidates', async () => {
     const { engine } = engineWith(new ScriptedProvider());
-    const project = await engine.createProject({ question: 'Should I open a bakery in Brno next year?' });
+    const project = await engine.createProject({ question: 'Find plots for a glamping business in Portugal, 20000EUR max', expected: '5 plots in Portugal under 20000 EUR' });
     let synthesized = false;
     engine.collectCandidates = async () => {
       engine.cancel(project.id);
@@ -1507,10 +1507,15 @@ describe('list-first research flow', () => {
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message === 'listings first: reading marketplace pages by code before any piece is researched')).toBe(true);
   });
 
-  it('keeps a single end-of-run table call for a research that does not ask for items', async () => {
+  it('keeps a single end-of-run table call for a list research without itemCount but with a kind (no listing portal)', async () => {
+    const proposal = { concept: 'wholesale suppliers of branded second-hand clothing', kind: { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing', 'used clothing wholesale'] }, criteria: [] };
+    const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
+      p.decisionModel = { ...aggregate([normalizeSample(proposal), normalizeSample(proposal)], { question: String(p.question) }), caseIds: [] };
+      return p.decisionModel;
+    } };
     const provider = new ScriptedProvider();
-    const { engine } = engineWith(provider);
-    const project = await engine.createProject({ question: 'Should I import e-bikes from Germany to Czechia?' });
+    const { engine } = engineWith(provider, fakeSearch, 2, { modeler } as never);
+    const project = await engine.createProject({ question: 'Find wholesale branded second hand clothing providers for a retail second hand shop in Czech Republic', templateId: 'generic', expected: '20 direct links to the providers with proposal and proof' });
     const calls: Array<{ sweep: boolean | null | undefined; research: number }> = [];
     engine.collectCandidates = (async (_p: unknown, options: { sweep?: boolean } = {}) => {
       calls.push({ sweep: options.sweep, research: provider.calls.filter((c) => c.marker === TASK_MARKERS.research).length });
@@ -1521,6 +1526,33 @@ describe('list-first research flow', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].research).toBeGreaterThan(0);
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'candidates' && l.message.startsWith('listings first:'))).toBe(false);
+  });
+});
+
+describe('analysis research contract', () => {
+  it('runs decompose → pieces → synthesize without portal sweep, candidate table, or kind gate', async () => {
+    const provider = new ScriptedProvider();
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Is buying fermented bean paste for resale in Poland profitable?' });
+    const sweepCalls: boolean[] = [];
+    const kindGateCalls: string[] = [];
+    const candidateTableCalls: number[] = [];
+    engine.searchHubs = async () => { sweepCalls.push(true); return 0; };
+    engine.collectCandidates = async () => { candidateTableCalls.push(1); return null; };
+    const originalGateOnKind = engine.gateOnKind.bind(engine);
+    engine.gateOnKind = (p: unknown, node: unknown, sources: unknown[]) => {
+      kindGateCalls.push('called');
+      return originalGateOnKind(p, node, sources);
+    };
+    const done = await engine.run(project.id);
+    expect(done.phase).toBe('done');
+    expect(done.nodes.length).toBeGreaterThan(0);
+    expect(done.nodes.every((n: { status: string }) => n.status === 'verified')).toBe(true);
+    expect(sweepCalls).toHaveLength(0);
+    expect(candidateTableCalls).toHaveLength(0);
+    expect(kindGateCalls).toHaveLength(0);
+    expect(done.report).toBeTruthy();
+    expect(done.report.verdict).toBeTruthy();
   });
 });
 

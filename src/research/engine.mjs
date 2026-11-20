@@ -1025,6 +1025,7 @@ export class ResearchEngine {
 
   onConceptOnly(project, node, sources) {
     const brief = project.brief ?? this.briefOf(project);
+    const isAnalysis = contractClass(project) === 'analysis';
     const kept = sources.filter((s) => onConcept(s, brief));
     const dropped = sources.length - kept.length;
     if (dropped) this.emit(project, 'node', `${node.id}: ${dropped} source(s) dropped before any model call — outside the asked regions (${sources.filter((s) => !kept.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
@@ -1032,7 +1033,7 @@ export class ResearchEngine {
       const outside = kept.filter((s) => regionVerdict(s, brief.regions)?.status === 'outside');
       if (outside.length) this.emit(project, 'node', `${node.id}: ${outside.length} source(s) kept from outside ${regionLabel(brief.regions)} — for an entity list the asked place is where the result is used (${outside.map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
     }
-    const gated = brief.located === false ? this.gateOnKind(project, node, kept) : kept;
+    const gated = (brief.located === false && !isAnalysis) ? this.gateOnKind(project, node, kept) : kept;
     const query = evidenceQuery(node, brief);
     const topical = gated.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= 2);
     const offTopic = gated.length - topical.length;
@@ -1773,6 +1774,7 @@ export class ResearchEngine {
     const fromTable = candidateDeliverables(project.candidates);
     const listed = new Set(fromTable.map((d) => d.url));
     const brief = project.brief ?? this.briefOf(project);
+    const isAnalysis = contractClass(project) === 'analysis';
     const readPage = this.cachedPageReader(pages);
     project.kindRejected = project.kindRejected ?? [];
     project.kindRejected = project.kindRejected.filter((entry) => {
@@ -1793,7 +1795,7 @@ export class ResearchEngine {
 
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
 
-    if (project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
+    if (!isAnalysis && project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
       const newChecklist = filterCountItems(project.decisionModel.checklist, askedCounts(project.acceptance));
       if (newChecklist) {
         project.checklist = newChecklist;
@@ -1911,7 +1913,7 @@ export class ResearchEngine {
       }
     }
 
-    if (project.checklist && readPage && project.acceptanceResult?.items?.length) {
+    if (!isAnalysis && project.checklist && readPage && project.acceptanceResult?.items?.length) {
       const progressLine = (reader) => `reading deeper pages: ${reader.read} read, ${reader.answered} check(s) answered, budget ${reader.budget}`;
       const deeperReader = new DeeperReader({ judge: this.checklistJudge, readPage, onProgress: (reader) => this.emit(project, 'acceptance', progressLine(reader)) });
       for (const item of deeperOrder(project.acceptanceResult.items, { checklist: project.checklist, kind: project.decisionModel?.kind ?? null, spec: project.acceptance })) {
@@ -2025,7 +2027,10 @@ export class ResearchEngine {
       if (project.phase === 'needs-understanding') {
         this.setPhase(project, 'created');
       }
-      await this.searchHubs(project);
+      const isAnalysis = contractClass(project) === 'analysis';
+      if (!isAnalysis) {
+        await this.searchHubs(project);
+      }
       this.reground(project);
       if (!await this.ensurePurpose(project)) {
         await this.store.save(project, { reason: 'run paused: the purpose is not stated' });
@@ -2059,7 +2064,7 @@ export class ResearchEngine {
       for (const fix of fixes.filter((f) => f.code === 'scope')) this.emit(project, 'tree', fix.detail);
       this.regrade(project);
       this.monitorPass(project);
-      const listingsFirst = Boolean(project.acceptance?.itemCount && this.search?.readPage && !this.demo);
+      const listingsFirst = Boolean(project.acceptance?.itemCount && this.search?.readPage && !this.demo && !isAnalysis);
       if (listingsFirst && !reuse) {
         this.emit(project, 'candidates', 'listings first: reading marketplace pages by code before any piece is researched');
         await this.collectCandidates(project, { sweep: true });
@@ -2114,10 +2119,14 @@ export class ResearchEngine {
       });
       const stoppedAfterPieces = await this.stopIfCancelled(project, id, release);
       if (stoppedAfterPieces) return stoppedAfterPieces;
-      try {
-        if (!reuse) await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
-      } catch (error) {
-        this.emit(project, 'warn', `candidate table not built: ${error.message}`);
+      if (isAnalysis) {
+        project.candidates = null;
+      } else {
+        try {
+          if (!reuse) await this.collectCandidates(project, { sweep: sweep ?? !this.quiet.has(id) });
+        } catch (error) {
+          this.emit(project, 'warn', `candidate table not built: ${error.message}`);
+        }
       }
       const stoppedBeforeMemo = await this.stopIfCancelled(project, id, release);
       if (stoppedBeforeMemo) return stoppedBeforeMemo;
