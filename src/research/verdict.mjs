@@ -225,3 +225,16 @@ export function runOutcome(project) {
   if (project?.phase !== 'done') return { state: project?.phase, confirmed, asked };
   return { state: asked > 0 && confirmed < asked ? 'short' : 'met', confirmed, asked };
 }
+
+function fold(text) {
+  return String(text ?? '').replace(/\s+/g, ' ').trim();
+}
+
+export function chosenOptionId(options, chosen) {
+  const foldedChosen = fold(chosen);
+  if (!foldedChosen) return { id: null, note: null };
+  const matches = options.filter((o) => fold(o?.option) === foldedChosen);
+  if (matches.length === 1) return { id: matches[0].id, note: null };
+  if (matches.length === 0) return { id: null, note: 'not among the options' };
+  return { id: null, note: 'ambiguous' };
+}

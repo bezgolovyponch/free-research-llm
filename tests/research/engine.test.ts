@@ -3460,3 +3460,134 @@ describe('gateOnKind', () => {
   });
 });
 });
+
+describe('ResearchEngine chosen option', () => {
+  const baseSynthesize = {
+    verdict: 'GO — test',
+    confidence: 'low',
+    bestEstimate: { value: '300', unit: 'EUR', low: '120', high: '450', basis: 'D2.2' },
+    summary: 'Test summary',
+    keyNumbers: [],
+    scenarios: [],
+    sensitivity: [],
+    risks: [],
+    openQuestions: [],
+    nextSteps: [],
+    actions: [],
+  };
+
+  function chosenOptProvider(synthesize: object) {
+    const scripted = new ScriptedProvider();
+    return {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }>; tier: string }) {
+        const prompt = args.messages.at(-1)!.content;
+        if (prompt.includes(TASK_MARKERS.synthesize)) {
+          return { content: JSON.stringify(synthesize), model: 'm', provider: 'demo', usage: {} };
+        }
+        return scripted.chat(args as never);
+      },
+    };
+  }
+
+  it('stores chosenOption id when model returns chosen matching second option', async () => {
+    const provider = chosenOptProvider({
+      ...baseSynthesize,
+      verdict: 'GO-IF — margin stays above 0 after real costs are confirmed',
+      bestEstimate: { value: '300', unit: 'EUR net margin per unit', low: '120', high: '450', basis: 'D2.2' },
+      keyNumbers: [{ label: 'Net margin per unit', value: '300', unit: 'EUR', nodeId: 'D2.2' }],
+      scenarios: [{ name: 'base', assumptions: 'test numbers', outcome: '300 EUR margin' }],
+      sensitivity: [{ variable: 'cost', effect: 'cost above 1200 EUR flips to NO-GO' }],
+      risks: ['test data is not real'],
+      openQuestions: ['which model provider will you connect?'],
+      nextSteps: [{ step: 'Connect a free model', why: 'real research needs a real model', how: 'Setup tab' }],
+      actions: [{ action: 'Confirm real costs before committing', why: 'margin rests on D2.2', nodeIds: ['D2.2'], impact: 4, horizon: '0-1 months' }],
+      options: [{ option: 'GO', support: ['D2.2'], against: ['D1'] }, { option: 'NO-GO', support: ['D1'], against: ['D2.2'] }, { option: 'GO-IF', support: ['D2.2'], against: ['D1'] }],
+      chosen: 'NO-GO',
+    });
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland?' });
+    const done = await engine.run(project.id);
+    expect(done.report.options).toHaveLength(3);
+    expect(done.report.options.map((o) => o.id)).toEqual(['O1', 'O2', 'O3']);
+    expect(done.report.options.map((o) => o.option)).toEqual(['GO', 'NO-GO', 'GO-IF']);
+    expect(done.report.chosenOption).toBe('O2');
+    expect(done.report.chosenOptionNote).toBeUndefined();
+    expect(done.report.verdict).toContain('GO-IF');
+  });
+
+  it('assigns ids O1.. over kept options when first option text is empty', async () => {
+    const provider = chosenOptProvider({
+      ...baseSynthesize,
+      options: [{ option: '', support: [], against: [] }, { option: 'NO-GO', support: ['D1'], against: [] }, { option: 'GO-IF', support: ['D2'], against: [] }],
+      chosen: 'NO-GO',
+    });
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Test question' });
+    const done = await engine.run(project.id);
+    expect(done.report.options).toHaveLength(2);
+    expect(done.report.options.map((o) => o.id)).toEqual(['O1', 'O2']);
+    expect(done.report.options.map((o) => o.option)).toEqual(['NO-GO', 'GO-IF']);
+    expect(done.report.chosenOption).toBe('O1');
+  });
+
+  it('sets chosenOption null with no note when model returns no chosen', async () => {
+    const provider = chosenOptProvider({
+      ...baseSynthesize,
+      options: [{ option: 'GO', support: ['D1'], against: [] }, { option: 'NO-GO', support: [], against: ['D1'] }],
+    });
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Test question' });
+    const done = await engine.run(project.id);
+    expect(done.report.chosenOption).toBeNull();
+    expect(done.report.chosenOptionNote).toBeUndefined();
+  });
+
+  it('sets chosenOption null with note when chosen does not match any option', async () => {
+    const provider = chosenOptProvider({
+      ...baseSynthesize,
+      options: [{ option: 'GO', support: ['D1'], against: [] }, { option: 'NO-GO', support: [], against: ['D1'] }],
+      chosen: 'something else',
+    });
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Test question' });
+    const done = await engine.run(project.id);
+    expect(done.report.chosenOption).toBeNull();
+    expect(done.report.chosenOptionNote).toBe('not among the options');
+  });
+
+  it('persists chosenOption through save and load', async () => {
+    const provider = chosenOptProvider({
+      ...baseSynthesize,
+      verdict: 'GO-IF — test',
+      options: [{ option: 'GO', support: ['D1'], against: [] }, { option: 'NO-GO', support: [], against: ['D1'] }, { option: 'GO-IF', support: ['D2'], against: [] }],
+      chosen: 'NO-GO',
+    });
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Test question' });
+    const done = await engine.run(project.id);
+    expect(done.report.chosenOption).toBe('O2');
+    const loaded = await engine.store.readFile(done.id);
+    expect(loaded.report.chosenOption).toBe('O2');
+    expect(loaded.report.options.map((o) => o.id)).toEqual(['O1', 'O2', 'O3']);
+  });
+
+  it('loads old project without chosenOption key without throwing', async () => {
+    const provider = chosenOptProvider({
+      ...baseSynthesize,
+      options: [{ option: 'GO', support: ['D1'], against: [] }, { option: 'NO-GO', support: [], against: ['D1'] }],
+    });
+    const { engine } = engineWith(provider);
+    const project = await engine.createProject({ question: 'Test question' });
+    const done = await engine.run(project.id);
+    const stored = await engine.store.readFile(done.id);
+    delete stored.report.chosenOption;
+    delete stored.report.chosenOptionNote;
+    await engine.store.save(stored);
+    const loaded = await engine.store.readFile(done.id);
+    expect(loaded.report.options.map((o) => o.id)).toEqual(['O1', 'O2']);
+    expect(loaded.report.chosenOption).toBeUndefined();
+  });
+});
