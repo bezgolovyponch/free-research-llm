@@ -3664,6 +3664,52 @@ describe('ResearchEngine request model shadow', () => {
       if (original !== undefined) process.env.FRL_REQUEST_MODEL = original;
     }
   });
+
+  it('stores requestModel.roles with places and actors when both flags are on', async () => {
+    const originalModel = process.env.FRL_REQUEST_MODEL;
+    const originalRoles = process.env.FRL_REQUEST_ROLES;
+    process.env.FRL_REQUEST_MODEL = '1';
+    process.env.FRL_REQUEST_ROLES = '1';
+    try {
+      const provider = new ScriptedProvider();
+      const { engine } = engineWith(provider);
+      const events: string[] = [];
+      const project = await engine.createProject({ question: 'Find wholesalers in Germany and Poland for vintage clothing' });
+      engine.subscribe(project.id, (e: { type: string; message?: string }) => events.push(String(e.message ?? '')));
+      const done = await engine.run(project.id);
+      expect(done.requestModel).toBeDefined();
+      expect(done.requestModel.roles).toBeDefined();
+      expect(Array.isArray(done.requestModel.roles)).toBe(true);
+      expect(done.requestModel.roles.length).toBeGreaterThan(0);
+      const places = done.requestModel.roles.filter((r: { type: string }) => r.type === 'place');
+      const actors = done.requestModel.roles.filter((r: { type: string }) => r.type === 'actor');
+      expect(places.length).toBeGreaterThan(0);
+      expect(places.every((r: { role: string }) => r.role === 'sources must be in it' || r.role === 'where the result is used')).toBe(true);
+      expect(actors.every((r: { from: string }) => r.from === 'domain')).toBe(true);
+      expect(events.some((m) => m.startsWith('roles:'))).toBe(true);
+    } finally {
+      if (originalModel === undefined) delete process.env.FRL_REQUEST_MODEL; else process.env.FRL_REQUEST_MODEL = originalModel;
+      if (originalRoles === undefined) delete process.env.FRL_REQUEST_ROLES; else process.env.FRL_REQUEST_ROLES = originalRoles;
+    }
+  });
+
+  it('does not add roles key when FRL_REQUEST_ROLES is off but FRL_REQUEST_MODEL is on', async () => {
+    const originalModel = process.env.FRL_REQUEST_MODEL;
+    const originalRoles = process.env.FRL_REQUEST_ROLES;
+    process.env.FRL_REQUEST_MODEL = '1';
+    delete process.env.FRL_REQUEST_ROLES;
+    try {
+      const provider = new ScriptedProvider();
+      const { engine } = engineWith(provider);
+      const project = await engine.createProject({ question: 'Find wholesalers in Germany and Poland for vintage clothing' });
+      const done = await engine.run(project.id);
+      expect(done.requestModel).toBeDefined();
+      expect(done.requestModel.roles).toBeUndefined();
+    } finally {
+      if (originalModel === undefined) delete process.env.FRL_REQUEST_MODEL; else process.env.FRL_REQUEST_MODEL = originalModel;
+      if (originalRoles !== undefined) process.env.FRL_REQUEST_ROLES = originalRoles;
+    }
+  });
 });
 
 describe('ResearchEngine alternative-means capture', () => {
@@ -3836,5 +3882,71 @@ describe('acceptanceResult.kind storage for verdict stability', () => {
     const { verdictInvariants } = await import('../../src/research/verdict.mjs');
     const reasons = verdictInvariants(project);
     expect(reasons.filter(r => r.includes('validCount mismatch'))).toHaveLength(0);
+  });
+});
+
+describe('FRL_TREE_LEAVES', () => {
+  const leafless = {
+    decision: 'd', successCriteria: 's', assumptionsToConfirm: [],
+    acceptance: { itemCount: 2, valueRange: [0, 10000], unit: 'EUR' },
+    nodes: [
+      { id: 'D1', parentId: null, title: 'Identify candidates', question: 'Which items exist?', serves: ['E1'] },
+      { id: 'D2', parentId: null, title: 'Screen prices', question: 'Which items cost under the limit?', serves: ['E1'] },
+    ],
+  };
+  const withLeaves = {
+    decision: 'd', successCriteria: 's', assumptionsToConfirm: [],
+    acceptance: { itemCount: 2, valueRange: [0, 10000], unit: 'EUR' },
+    nodes: [
+      { id: 'D1', parentId: null, title: 'Identify candidates', question: 'Which items exist?', serves: ['E1'] },
+      { id: 'D2', parentId: null, title: 'Screen prices', question: 'Which items cost under the limit?', serves: ['E1'] },
+      { id: 'D1.1', parentId: 'D1', title: 'Source one listings', question: 'Which items does source one list?', serves: ['E1'] },
+      { id: 'D1.2', parentId: 'D1', title: 'Source two listings', question: 'Which items does source two list?', serves: ['E1'] },
+      { id: 'D2.1', parentId: 'D2', title: 'Price rule', question: 'What price counts as under the limit?', serves: ['E1'] },
+      { id: 'D2.2', parentId: 'D2', title: 'Price unit', question: 'Which unit is each price in?', serves: ['E1'] },
+    ],
+  };
+  const scripted = (replies: object[], calls: Array<{ messages: Array<{ content: string }> }>) => ({
+    id: 'demo',
+    ready: true,
+    describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo', deep: 'demo', local: false, keyEnv: null, signup: '', modelCount: 1 }),
+    async chat({ messages }: { messages: Array<{ content: string }> }) {
+      calls.push({ messages });
+      return { content: JSON.stringify(replies.shift()), model: 'm', provider: 'demo', usage: {} };
+    },
+  });
+
+  it('flag on: a leafless tree triggers the corrective re-ask and the tree with leaves is kept', async () => {
+    const original = process.env.FRL_TREE_LEAVES;
+    process.env.FRL_TREE_LEAVES = '1';
+    try {
+      const calls: Array<{ messages: Array<{ content: string }> }> = [];
+      const { engine } = engineWith(scripted([leafless, withLeaves], calls));
+      const project = await engine.createProject({ question: 'Find items under 10000 EUR', expected: '2 items under 10000 EUR' });
+      await engine.decompose(project);
+      expect(calls).toHaveLength(2);
+      const feedback = calls[1].messages[1].content;
+      expect(feedback).toContain('no-leaves');
+      expect(feedback).toContain('D1 has no sub-questions');
+      expect(project.nodes.length).toBe(6);
+    } finally {
+      if (original === undefined) delete process.env.FRL_TREE_LEAVES;
+      else process.env.FRL_TREE_LEAVES = original;
+    }
+  });
+
+  it('flag off: the same leafless tree is accepted without a re-ask', async () => {
+    const original = process.env.FRL_TREE_LEAVES;
+    delete process.env.FRL_TREE_LEAVES;
+    try {
+      const calls: Array<{ messages: Array<{ content: string }> }> = [];
+      const { engine } = engineWith(scripted([leafless, withLeaves], calls));
+      const project = await engine.createProject({ question: 'Find items under 10000 EUR', expected: '2 items under 10000 EUR' });
+      await engine.decompose(project);
+      expect(calls).toHaveLength(1);
+      expect(project.nodes.length).toBe(2);
+    } finally {
+      if (original !== undefined) process.env.FRL_TREE_LEAVES = original;
+    }
   });
 });

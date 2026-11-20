@@ -126,3 +126,112 @@ describe('captureAlternatives', () => {
     expect(captureAlternatives(m, { id: 'D4', serves: ['NOPE'] }, [source()])).toBe(0);
   });
 });
+
+import { buildRoles, rolesSummary } from '../../src/research/requestmodel.mjs';
+
+describe('buildRoles places', () => {
+  it('uses "sources must be in it" when brief.located is true', () => {
+    const brief = { regions: ['DE', 'PL'], located: true };
+    const roles = buildRoles({ question: 'Find suppliers in Germany and Poland', expected: '', constraints: {}, brief, domain: null });
+    expect(roles).toHaveLength(2);
+    expect(roles[0]).toMatchObject({ name: 'Germany', type: 'place', role: 'sources must be in it', from: 'brief' });
+    expect(roles[1]).toMatchObject({ name: 'Poland', type: 'place', role: 'sources must be in it', from: 'brief' });
+  });
+
+  it('uses "where the result is used" when brief.located is false', () => {
+    const brief = { regions: ['CZ'], located: false };
+    const roles = buildRoles({ question: 'Find suppliers for Czech market', expected: '', constraints: {}, brief, domain: null });
+    expect(roles).toHaveLength(1);
+    expect(roles[0]).toMatchObject({ name: 'Czechia', type: 'place', role: 'where the result is used', from: 'brief' });
+  });
+
+  it('returns empty array when brief has no regions', () => {
+    const brief = { regions: [], located: true };
+    const roles = buildRoles({ question: 'Find suppliers', expected: '', constraints: {}, brief, domain: null });
+    expect(roles).toEqual([]);
+  });
+});
+
+describe('buildRoles actors', () => {
+  it('creates entry per string statement in domain.actors', () => {
+    const domain = { actors: ['Wholesalers', 'Retailers'] };
+    const roles = buildRoles({ question: 'Find suppliers', expected: '', constraints: {}, brief: { regions: [], located: true }, domain });
+    expect(roles).toHaveLength(2);
+    expect(roles[0]).toMatchObject({ name: 'Wholesalers', type: 'actor', from: 'domain' });
+    expect(roles[1]).toMatchObject({ name: 'Retailers', type: 'actor', from: 'domain' });
+  });
+
+  it('creates entry per object statement with text and keeps actorSource', () => {
+    const domain = { actors: [{ text: 'Logistics providers', source: 'https://example.com/logistics' }, { text: 'Customs brokers', source: 'https://example.com/customs' }] };
+    const roles = buildRoles({ question: 'Find suppliers', expected: '', constraints: {}, brief: { regions: [], located: true }, domain });
+    expect(roles).toHaveLength(2);
+    expect(roles[0]).toMatchObject({ name: 'Logistics providers', type: 'actor', from: 'domain', actorSource: 'https://example.com/logistics' });
+    expect(roles[1]).toMatchObject({ name: 'Customs brokers', type: 'actor', from: 'domain', actorSource: 'https://example.com/customs' });
+  });
+
+  it('skips empty actor names', () => {
+    const domain = { actors: ['Valid actor', '', { text: '  ', source: 'x' }, { text: 'Another valid', source: 'y' }] };
+    const roles = buildRoles({ question: 'Find suppliers', expected: '', constraints: {}, brief: { regions: [], located: true }, domain });
+    expect(roles).toHaveLength(2);
+    expect(roles.map((r) => r.name)).toEqual(['Valid actor', 'Another valid']);
+  });
+});
+
+describe('buildRoles grounding', () => {
+  it('marks place as quoted when region name appears in asker text', () => {
+    const brief = { regions: ['DE'], located: true };
+    const roles = buildRoles({ question: 'Find suppliers in Germany', expected: '', constraints: {}, brief, domain: null });
+    expect(roles[0].source).toBe('quoted');
+    expect(roles[0].quote).toBe('Germany');
+  });
+
+  it('marks place as derived when region name not in asker text', () => {
+    const brief = { regions: ['DE'], located: true };
+    const roles = buildRoles({ question: 'Find suppliers in Europe', expected: '', constraints: {}, brief, domain: null });
+    expect(roles[0].source).toBe('derived');
+    expect(roles[0].quote).toBe('');
+  });
+
+  it('marks actor as quoted when actor name appears in asker text', () => {
+    const domain = { actors: ['Wholesalers'] };
+    const roles = buildRoles({ question: 'Find wholesalers in Germany', expected: '', constraints: {}, brief: { regions: [], located: true }, domain });
+    expect(roles[0].source).toBe('quoted');
+    expect(roles[0].quote).toBe('Wholesalers');
+  });
+
+  it('marks actor as derived when actor name not in asker text', () => {
+    const domain = { actors: ['Wholesalers'] };
+    const roles = buildRoles({ question: 'Find suppliers in Germany', expected: '', constraints: {}, brief: { regions: [], located: true }, domain });
+    expect(roles[0].source).toBe('derived');
+    expect(roles[0].quote).toBe('');
+  });
+});
+
+describe('buildRoles empty inputs', () => {
+  it('returns empty array when brief and domain are null', () => {
+    const roles = buildRoles({ question: 'Find suppliers', expected: '', constraints: {}, brief: null, domain: null });
+    expect(roles).toEqual([]);
+  });
+
+  it('returns empty array when brief has no regions and domain has no actors', () => {
+    const brief = { regions: [], located: true };
+    const domain = { actors: [] };
+    const roles = buildRoles({ question: 'Find suppliers', expected: '', constraints: {}, brief, domain });
+    expect(roles).toEqual([]);
+  });
+});
+
+describe('rolesSummary', () => {
+  it('counts actors, places, and quoted', () => {
+    const roles = [
+      { name: 'Germany', type: 'place', role: 'x', source: 'quoted', quote: 'Germany', from: 'brief' },
+      { name: 'Poland', type: 'place', role: 'x', source: 'derived', quote: '', from: 'brief' },
+      { name: 'Wholesalers', type: 'actor', role: '', source: 'quoted', quote: 'Wholesalers', from: 'domain' },
+    ];
+    expect(rolesSummary(roles)).toBe('roles: 1 actor(s), 2 place(s) — 2 quoted');
+  });
+
+  it('handles empty array', () => {
+    expect(rolesSummary([])).toBe('roles: 0 actor(s), 0 place(s) — 0 quoted');
+  });
+});

@@ -1,5 +1,6 @@
 import { quoteOnPage } from '../search/pagequote.mjs';
 import { deriveRequirementIds } from './engine.mjs';
+import { countryByCode } from './brief.mjs';
 
 function askerText({ question = '', expected = '', constraints = {} } = {}) {
   const parts = [String(question ?? ''), String(expected ?? '')];
@@ -16,6 +17,45 @@ function grounded(text, source) {
   if (!candidate) return { source: 'derived', quote: '' };
   if (quoteOnPage(source.toLowerCase(), candidate.toLowerCase())) return { source: 'quoted', quote: candidate };
   return { source: 'derived', quote: '' };
+}
+
+function regionName(code) {
+  const country = countryByCode(code);
+  return country?.name ?? code;
+}
+
+export function buildRoles({ question = '', expected = '', constraints = {}, brief = null, domain = null } = {}) {
+  const source = askerText({ question, expected, constraints });
+  const roles = [];
+
+  if (brief?.regions?.length) {
+    const roleText = brief.located ? 'sources must be in it' : 'where the result is used';
+    for (const code of brief.regions) {
+      const name = regionName(code);
+      const ground = grounded(name, source);
+      roles.push({ name, type: 'place', role: roleText, source: ground.source, quote: ground.quote, from: 'brief' });
+    }
+  }
+
+  if (domain?.actors?.length) {
+    for (const actor of domain.actors) {
+      let name, actorSource;
+      if (typeof actor === 'string') {
+        name = actor;
+        actorSource = '';
+      } else if (actor && typeof actor === 'object') {
+        name = String(actor.text ?? '');
+        actorSource = String(actor.source ?? '');
+      } else {
+        continue;
+      }
+      if (!name.trim()) continue;
+      const ground = grounded(name, source);
+      roles.push({ name, type: 'actor', role: '', source: ground.source, quote: ground.quote, from: 'domain', actorSource });
+    }
+  }
+
+  return roles;
 }
 
 export function buildRequestModel({ question = '', expected = '', constraints = {}, decisionModel = null } = {}) {
@@ -52,6 +92,13 @@ export function requestModelSummary(model) {
   const quoted = model.requirements.filter((r) => r.source === 'quoted').length;
   const derived = model.requirements.length - quoted;
   return `request model: ${model.requirements.length} requirement(s) — ${quoted} quoted, ${derived} derived; purpose ${model.purpose.source}`;
+}
+
+export function rolesSummary(roles) {
+  const actors = roles.filter((r) => r.type === 'actor').length;
+  const places = roles.filter((r) => r.type === 'place').length;
+  const quoted = roles.filter((r) => r.source === 'quoted').length;
+  return `roles: ${actors} actor(s), ${places} place(s) — ${quoted} quoted`;
 }
 
 export function captureAlternatives(requestModel, node, sources) {
