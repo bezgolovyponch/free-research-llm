@@ -4111,6 +4111,219 @@ describe('FRL_NO_PAUSE', () => {
       else process.env.FRL_NO_PAUSE = original;
     }
   });
+
+  it('FRL_KIND_ALWAYS_HARD=1: judges kind check even without checklist, unjudged items become not-judged', async () => {
+    const originalFlag = process.env.FRL_KIND_ALWAYS_HARD;
+    process.env.FRL_KIND_ALWAYS_HARD = '1';
+    try {
+      const kindLabel = 'widget hall';
+      const kindId = `kind|Is this page one ${kindLabel} offered as asked (not a part, accessory, wanted ad or list)?`;
+      const pageText = 'We are a widget hall in Brno. We sell widgets. Our address is Brno. '.repeat(4);
+
+      const { engine } = engineWith(new ScriptedProvider(), {
+        enabled: true,
+        lastErrors: [],
+        async search() {
+          return [
+            { kind: 'web', title: 'Widget Hall 1', url: 'https://example.com/item/123456', domain: 'example.com', snippet: 's', text: pageText },
+          ];
+        },
+        async readPage(url: string) {
+          if (url === 'https://example.com/item/123456') return { status: 200, text: pageText };
+          return { status: 404, text: '' };
+        },
+        describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+      });
+
+      const p = {
+        id: 'p',
+        question: 'widget hall Brno',
+        acceptance: { itemCount: 5, urlsLive: true, mustMention: [] },
+        brief: { regions: ['CZ'], kind: { label: kindLabel, terms: ['widget hall', 'brno'] }, located: true },
+        decisionModel: { kind: { label: kindLabel, terms: ['widget hall', 'brno'] }, checklist: null, criteria: [], noLimit: [], missing: [] },
+        candidates: {
+          kept: [
+            { url: 'https://example.com/item/123456', title: 'Widget Hall 1', value: 100, unit: 'EUR', inRange: true, live: true, listing: true, evidence: true, purpose: [] },
+          ],
+          keptCount: 1,
+          toCheck: [],
+          toCheckCount: 0,
+          tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 },
+          screened: {},
+          screenedCount: 0,
+          found: 1,
+          verification: null,
+        },
+        log: [],
+        checklist: null,
+        report: {},
+        checkCache: {},
+      } as any;
+
+      const originalJudgeKind = engine.checklistJudge.judgeKind.bind(engine.checklistJudge);
+      engine.checklistJudge.judgeKind = async () => ({
+        id: kindId,
+        answer: 'yes',
+        quote: 'We are a widget hall in Brno',
+        hard: true,
+        clause: 'kind',
+      });
+
+      await engine.checkAcceptance(p);
+
+      engine.checklistJudge.judgeKind = originalJudgeKind;
+
+      expect(p.acceptanceResult).toBeDefined();
+      expect(p.acceptanceResult.items.length).toBeGreaterThan(0);
+
+      const item = p.acceptanceResult.items[0];
+      expect(item.checks).toBeDefined();
+      const kindCheck = item.checks.find((c: any) => c.id === kindId);
+      expect(kindCheck).toBeDefined();
+      expect(kindCheck.answer).toBe('yes');
+      expect(item.tier).toBe('confirmed');
+    } finally {
+      if (originalFlag === undefined) delete process.env.FRL_KIND_ALWAYS_HARD;
+      else process.env.FRL_KIND_ALWAYS_HARD = originalFlag;
+    }
+  });
+
+  it('FRL_KIND_ALWAYS_HARD=1: without kind check judged, item is to-confirm not confirmed', async () => {
+    const originalFlag = process.env.FRL_KIND_ALWAYS_HARD;
+    process.env.FRL_KIND_ALWAYS_HARD = '1';
+    try {
+      const kindLabel = 'widget hall';
+      const kindId = `kind|Is this page one ${kindLabel} offered as asked (not a part, accessory, wanted ad or list)?`;
+      const pageText = 'We are a widget hall in Brno. We sell widgets. Our address is Brno. '.repeat(4);
+
+      const { engine } = engineWith(new ScriptedProvider(), {
+        enabled: true,
+        lastErrors: [],
+        async search() {
+          return [
+            { kind: 'web', title: 'Widget Hall 1', url: 'https://example.com/item/123456', domain: 'example.com', snippet: 's', text: pageText },
+          ];
+        },
+        async readPage(url: string) {
+          if (url === 'https://example.com/item/123456') return { status: 200, text: pageText };
+          return { status: 404, text: '' };
+        },
+        describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+      });
+
+      const p = {
+        id: 'p',
+        question: 'widget hall Brno',
+        acceptance: { itemCount: 5, urlsLive: true, mustMention: [] },
+        brief: { regions: ['CZ'], kind: { label: kindLabel, terms: ['widget hall', 'brno'] }, located: true },
+        decisionModel: { kind: { label: kindLabel, terms: ['widget hall', 'brno'] }, checklist: null, criteria: [], noLimit: [], missing: [] },
+        candidates: {
+          kept: [
+            { url: 'https://example.com/item/123456', title: 'Widget Hall 1', value: 100, unit: 'EUR', inRange: true, live: true, listing: true, evidence: true, purpose: [] },
+          ],
+          keptCount: 1,
+          toCheck: [],
+          toCheckCount: 0,
+          tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 },
+          screened: {},
+          screenedCount: 0,
+          found: 1,
+          verification: null,
+        },
+        log: [],
+        checklist: null,
+        report: {},
+        checkCache: {},
+      } as any;
+
+      const originalJudgeKind = engine.checklistJudge.judgeKind.bind(engine.checklistJudge);
+      engine.checklistJudge.judgeKind = async () => ({
+        id: kindId,
+        answer: 'unknown',
+        quote: '',
+        hard: true,
+        clause: 'kind',
+      });
+
+      await engine.checkAcceptance(p);
+
+      engine.checklistJudge.judgeKind = originalJudgeKind;
+
+      expect(p.acceptanceResult).toBeDefined();
+      expect(p.acceptanceResult.items.length).toBeGreaterThan(0);
+
+      const item = p.acceptanceResult.items[0];
+      expect(item.checks).toBeDefined();
+      const kindCheck = item.checks.find((c: any) => c.id === kindId);
+      expect(kindCheck).toBeDefined();
+      expect(kindCheck.answer).toBe('unknown');
+      expect(item.tier).toBe('to-confirm');
+    } finally {
+      if (originalFlag === undefined) delete process.env.FRL_KIND_ALWAYS_HARD;
+      else process.env.FRL_KIND_ALWAYS_HARD = originalFlag;
+    }
+  });
+
+  it('FRL_KIND_ALWAYS_HARD unset: without checklist, no kind check added, items can be confirmed', async () => {
+    const originalFlag = process.env.FRL_KIND_ALWAYS_HARD;
+    delete process.env.FRL_KIND_ALWAYS_HARD;
+    try {
+      const kindLabel = 'widget hall';
+      const kindId = `kind|Is this page one ${kindLabel} offered as asked (not a part, accessory, wanted ad or list)?`;
+      const pageText = 'We are a widget hall in Brno. We sell widgets. Our address is Brno. '.repeat(4);
+
+      const { engine } = engineWith(new ScriptedProvider(), {
+        enabled: true,
+        lastErrors: [],
+        async search() {
+          return [
+            { kind: 'web', title: 'Widget Hall 1', url: 'https://example.com/item/123456', domain: 'example.com', snippet: 's', text: pageText },
+          ];
+        },
+        async readPage(url: string) {
+          if (url === 'https://example.com/item/123456') return { status: 200, text: pageText };
+          return { status: 404, text: '' };
+        },
+        describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+      });
+
+      const p = {
+        id: 'p',
+        question: 'widget hall Brno',
+        acceptance: { itemCount: 5, urlsLive: true, mustMention: [] },
+        brief: { regions: ['CZ'], kind: { label: kindLabel, terms: ['widget hall', 'brno'] }, located: true },
+        decisionModel: { kind: { label: kindLabel, terms: ['widget hall', 'brno'] }, checklist: null, criteria: [], noLimit: [], missing: [] },
+        candidates: {
+          kept: [
+            { url: 'https://example.com/item/123456', title: 'Widget Hall 1', value: 100, unit: 'EUR', inRange: true, live: true, listing: true, evidence: true, purpose: [] },
+          ],
+          keptCount: 1,
+          toCheck: [],
+          toCheckCount: 0,
+          tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 },
+          screened: {},
+          screenedCount: 0,
+          found: 1,
+          verification: null,
+        },
+        log: [],
+        checklist: null,
+        report: {},
+        checkCache: {},
+      } as any;
+
+      await engine.checkAcceptance(p);
+
+      expect(p.acceptanceResult).toBeDefined();
+      expect(p.acceptanceResult.items.length).toBeGreaterThan(0);
+
+      const item = p.acceptanceResult.items[0];
+      expect(item.checks).toBeUndefined();
+      expect(['confirmed', 'rejected']).toContain(item.tier);
+    } finally {
+      if (originalFlag !== undefined) process.env.FRL_KIND_ALWAYS_HARD = originalFlag;
+    }
+  });
 });
 
 describe('acceptanceResult.kind is the kind the judge uses', () => {

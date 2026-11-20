@@ -60,7 +60,7 @@ export function itemTier(item, hardIds, spec) {
 
 export function hardIdsOf(checklist, kind = null) {
   const ids = [...new Set(checklist?.flatMap?.((cluster) => cluster.items?.filter((ci) => ci.hard).map((ci) => cluster.clause + "|" + ci.question) ?? []) ?? [])];
-  if (checklist && kind?.label) {
+  if ((checklist || process.env.FRL_KIND_ALWAYS_HARD === '1') && kind?.label) {
     const kindId = kindCluster(kind).items[0].question;
     const id = 'kind|' + kindId;
     if (!ids.includes(id)) ids.push(id);
