@@ -6,15 +6,16 @@ function kindCheckId(kind) {
 
 export function evaluationKind(project) {
   const result = project?.acceptanceResult;
-  if (result && Object.hasOwn(result, 'kind')) return result.kind ?? null;
-  const stored = project?.decisionModel?.kind ?? null;
+  const hasStored = Boolean(result) && Object.hasOwn(result, 'kind');
+  const stored = hasStored ? result.kind ?? null : null;
+  const modelKind = project?.decisionModel?.kind ?? null;
   const briefKind = project?.brief?.kind ?? null;
   const judged = new Set((result?.items ?? []).flatMap((item) => (item?.checks ?? []).map((c) => c?.id)));
-  for (const candidate of [stored, briefKind]) {
+  for (const candidate of [stored, modelKind, briefKind]) {
     const id = kindCheckId(candidate);
     if (id && judged.has(id)) return candidate;
   }
-  return stored;
+  return hasStored ? stored : modelKind;
 }
 
 const KIND_PURPOSE_ID = 'purpose-kind';
