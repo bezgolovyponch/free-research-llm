@@ -2,20 +2,24 @@
 
 One plan for the owner, the Mac lead (Claude), Fable 5.2 (PC lead) and the fcc workers on both machines. It replaces every earlier list. Item names below are the only names used.
 
-## 1. The logic we implement (the human line)
+## 1. The process we implement: CRISP-DM, for every research (revision 4)
 
-A careful human researcher works in this order, and the engine follows it, each step proposed by a model and decided by code:
+No research classes with their own pipelines. One validated standard process runs for every research; the request's business understanding decides what each phase does.
 
-1. **Purpose** — why the asker wants this (from their words; quoted, or labelled "derived").
-2. **Contract** — what is delivered: a list of items, an analysis (data, trend, forecast, causes), or a decision; its unit and output format.
-3. **Requirements** — what must hold (AND), each traced to the asker's words; implicit ones stated and labelled "derived".
-4. **Alternative means** — ways each requirement can be met (OR), found on pages, never imagined by a model.
-5. **Roles** — actors and places with their role (location, origin, delivery, place of use).
-6. **Domain knowledge** — what the researcher must know to judge (prices, norms, terms, trends), gathered by its own pieces.
-7. **Research path** — tree pieces, each naming the requirement it serves.
-8. **Evidence** — code reads pages; every value carries a quote found on the decoded page; numbers recomputed by code.
-9. **Verdict** — sorted by the requirements (meets every must-have / to confirm / rejected), with coverage and confidence stated; never asks the owner for what sources can establish.
-10. **Learning** — verified outcomes improve later researches of the same contract; nothing learned from a model's word alone.
+- CRISP-DM (Wirth & Hipp 2000; CRISP-DM 1.0): business understanding → data understanding → data preparation → modelling → evaluation → deployment, iterative.
+- Its forecasting form (Hyndman & Athanasopoulos, Forecasting: Principles and Practice, "basic steps"): problem definition → gathering information (statistical data and accumulated expertise) → exploratory analysis → choosing and fitting models → using and evaluating; simple methods are the benchmark a model must beat.
+- LLM evidence: Data Interpreter (Hong et al. 2024, arXiv 2402.18679): a hierarchical task graph with each sub-problem verified raised accuracy "from 75.9% to 94.9%" on InfiAgent-DABench; Tan et al. NeurIPS 2024: LLM components do not improve forecasting → code computes, the model never does.
+
+| Phase | In FRL | Model proposes | Code decides |
+|---|---|---|---|
+| 1 Business understanding | purpose, deliverable (row unit, columns, operations, output format), requirements, roles, constraints — from the asker's words | the spec | each element quoted from the request; two families agree |
+| 2 Data understanding | the tree: pieces that find and read the sources each column needs (data and expertise) | queries, pieces | every piece serves a column or operation |
+| 3 Data preparation | the result rows: values with quotes | rows | quote found on the page; number in the quote; dedupe |
+| 4 Modelling | operators named by the request (screen, rank, aggregate, trend+forecast, compare, formula) | which operator the words ask for | operators are code; Theil–Sen, seasonal naive, Pareto, … |
+| 5 Evaluation | gates, verifier, benchmarks, coverage, zero-loss | — | a model must beat the simple benchmark; uncertainty stated |
+| 6 Deployment | the deliverable rendered in the asked format | — | the table/CSV is the result; a memo is secondary |
+
+Plots already follow it (candidate table = phase 3, screening/ranking = phase 4, verifier = phase 5, proposal table = phase 6). The freight research failed because phases 3, 4 and 6 did not exist for it.
 
 ## 2. Method basis (verified quotes live in src/research/methods.json and docs/design/methods-baseline.md)
 
