@@ -38,23 +38,29 @@ Pending, nothing built until read by the lead and the owner: **S1** (prediction-
 | Phase | Content | Exit |
 |---|---|---|
 | **0 Foundation** | E-A contract class (merged #242); E-B analysis skips item-only stages; E-C tree-clearing cause; 0.2 a version rebuild reproduces stored verdicts (pre-merge); 0.3 zero-loss union over classes (list + analysis/memo rules); E-Q action queue (no "stop it first"); P0 quote-on-page core | an analysis research runs end to end; list researches unchanged (zero-loss 0 flips, canary clean) |
-| **1 Request model** | B3 design (owner review) → B3.1 purpose + requirements + trace (`serves`) for all classes → B3.2 roles (was B2) → B3.3 knowledge pieces get sources (was B1) → B3.4 alternative means (OR) | three unrelated researches (plots, freight, action plan) get a correct model on paper and in replay; stored criteria never rebuilt |
+| **1 Request model** | D1 design by Fable (owner review) → B3.1 purpose + requirements + trace (`serves`) for all classes → B3.2 roles (was B2) → B3.3 knowledge pieces get sources (was B1) → B3.4 alternative means (OR) | three unrelated researches (plots, freight, action plan) get a correct model on paper and in replay; stored criteria never rebuilt |
 | **2 Evidence & verdict** | P2 quote integrity (adds matches only); verdict sorted by requirements; P3 climate index optional; code answers clauses a criterion measures (B5 merged) | headline = items meeting every must-have; memo numbers carry source + method |
 | **3 Coverage & cost** | P4 coverage figures (report only) → stop rule; adaptive second opinions (M12); waste meter actions; router waste (R) | calls per valid result not higher; coverage stated in every list memo |
 | **4 Learning** | loop target = requirement outcomes + zero-loss; itemised lessons (verified only); plan reuse per contract | loop keeps changes on all three classes |
 | **5 Composition & fields** | fields from the request's own frame (P1 returns here), composed results from confirmed fields only | no knowledge in code (5-question check) |
 
-## 4. Who does what (file ownership prevents collisions)
+## 4. Who does what (revision 1: Fable designs the logic; both fcc lanes implement)
 
 | Role | Owns | Does |
 |---|---|---|
-| **Owner** | priorities, labels, cost ratio, approvals | reviews B3 design and every phase exit |
-| **Mac lead (Claude)** | the plan, specs, review, merges, canary | writes each spec through the 5-question check; reads every diff and real output; never writes large code |
-| **Mac fcc** (2 instances, NVIDIA keys 2 and 3) | engine.mjs routing, deliverable.mjs, server/action queue, router, proposal/index.html, harness scripts | E-B, E-C, E-Q, 0.2, 0.3, B3.x, R, S |
-| **Fable 5.2 (PC lead)** | design validity, specs and reviews for its lane, the sweeps | S1, S2; Phase 1 coverage formulas; validity checks for P-packages |
-| **PC fcc** | quote.mjs, acceptance.mjs, listings.mjs, cci.mjs | P0, P2, P3, P4, later fields |
+| **Owner** | priorities, labels, cost ratio, approvals | approves each design before its code starts, and every phase exit |
+| **Fable 5.2 (PC) — logic designer** | the engine's reasoning design | writes the designs below, each with the 5-question check, a walk-through on three unrelated stored researches (plots b7772e list, freight 3c9f1f analysis, action plan fc04bd decision), the verified method behind each rule, and the smallest first PR with its zero-loss proof; validates P-packages; runs S1/S2 |
+| **Mac lead (Claude)** | the plan, dispatch, review, merges, canary | turns an approved design into one-step fcc specs, reads every diff and real output, merges with the canary; harness and infrastructure |
+| **Mac fcc** (NVIDIA keys 2, 3) | engine.mjs routing, deliverable.mjs, server/action queue, router, proposal/index.html, harness scripts | implements specs |
+| **PC fcc** | quote.mjs, acceptance.mjs, listings.mjs, cci.mjs | implements specs |
 
-A change touching the other machine's files goes to that machine as a patch.
+Designs owned by Fable, in phase order (each: ≤ 4 pages, no code):
+- **D1 Request model (Phase 1, next):** purpose, contract, requirements (AND) traced to the asker's words, derived implicit requirements, alternative means (OR) found on pages, roles, domain knowledge; how decompose, checklist, decision criteria, acceptance and the loop read it, feeding stored criteria and never rebuilding them.
+- **D2 Zero-loss rules per class (Phase 0.3):** what "no value lost" means for an analysis and for a decision memo (drivers, findings, verdict flips, numbers with source and method), stated so code can check it.
+- **D3 Verdict by requirements (Phase 2):** tiers from requirement outcomes for all three classes; confidence without a model's self-score (judge inflation); how alternatives (OR) satisfy a requirement.
+- **D4 Coverage and stopping (Phase 3):** the verified incidence formulas as report, then a stop rule on the coverage deficit, with channel independence handled.
+- **D5 Learning (Phase 4):** loop target from requirement outcomes, itemised verified lessons, reuse per contract without negative transfer.
+A change touching the other machine's files goes there as a patch.
 
 ## 5. Every change passes, in order
 
