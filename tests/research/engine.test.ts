@@ -4341,3 +4341,135 @@ describe('acceptanceResult.kind is the kind the judge uses', () => {
     expect(project.acceptanceResult.kind?.entity).toBe(project.decisionModel.kind.entity);
   });
 });
+
+describe('FRL_DOMAIN_TO_PIECES', () => {
+  const domainSearch = {
+    enabled: true,
+    lastErrors: [],
+    async search() {
+      return [
+        { kind: 'web', title: 'Bouldering gym Leipzig', url: 'https://gym1.example/', domain: 'gym1.example', snippet: 's', text: 'Boulderhalle Leipzig offers monthly membership for 50 EUR. Climbing without ropes on low walls.' },
+        { kind: 'web', title: 'Unrelated page', url: 'https://unrelated.example/', domain: 'unrelated.example', snippet: 's', text: 'This page is about cooking recipes and has nothing to do with bouldering.' },
+      ];
+    },
+    describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+  };
+  const pieceSearch = {
+    enabled: true,
+    lastErrors: [],
+    async search() {
+      return [
+        { kind: 'web', title: 'Another gym', url: 'https://another.example/', domain: 'another.example', snippet: 's', text: 'Another bouldering gym in Leipzig with prices.' },
+      ];
+    },
+    async readPages(urls: string[]) {
+      return urls.map((url) => ({ kind: 'web', title: 'Direct page', url, domain: new URL(url).host, snippet: 's', text: 'Direct source page about bouldering gym prices.' }));
+    },
+    describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }),
+  };
+  const provider = () => {
+    const scripted = new ScriptedProvider();
+    return {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }> }) {
+        return scripted.chat(args as never);
+      },
+    };
+  };
+  const baseProject = () => ({
+    id: 'p',
+    question: 'Find 5 bouldering gyms in Leipzig with their website and monthly price',
+    acceptance: { itemCount: 5 },
+    decisionModel: { kind: { label: 'bouldering gym', terms: ['boulderhalle'] } },
+    brief: { kind: { label: 'bouldering gym', terms: ['boulderhalle'] }, text: '', regions: ['DE'], located: false },
+    nodes: [
+      { id: 'D1', parentId: 'Q', title: 'Gym prices', question: 'What is the monthly price for bouldering gyms in Leipzig?', serves: ['E1'] },
+    ],
+    log: [],
+  });
+
+  it('flag on: a piece whose question matches a stored domain page gets it among node.sources and the emit appears', async () => {
+    const original = process.env.FRL_DOMAIN_TO_PIECES;
+    process.env.FRL_DOMAIN_TO_PIECES = '1';
+    try {
+      const { engine } = engineWith(provider(), pieceSearch);
+      const project = baseProject();
+      project.domainSources = [
+        { id: 'D1', kind: 'web', title: 'Bouldering gym Leipzig', url: 'https://gym1.example/', domain: 'gym1.example', snippet: 's', text: 'Boulderhalle Leipzig offers monthly membership for 50 EUR. Climbing without ropes on low walls.' },
+        { id: 'D2', kind: 'web', title: 'Unrelated page', url: 'https://unrelated.example/', domain: 'unrelated.example', snippet: 's', text: 'This page is about cooking recipes and has nothing to do with bouldering.' },
+      ];
+      const node = project.nodes[0];
+      const sources = await engine.gatherSources(project as never, node as never);
+      const domainSource = sources.find((s: { url: string }) => s.url === 'https://gym1.example/');
+      expect(domainSource).toBeDefined();
+      expect(domainSource.id).toMatch(/^S\d+$/);
+      const emit = project.log.find((l: { message: string }) => l.message.includes('reused from the domain study'));
+      expect(emit).toBeDefined();
+      expect(emit.message).toContain('D1: 1 page(s) reused from the domain study');
+    } finally {
+      if (original === undefined) delete process.env.FRL_DOMAIN_TO_PIECES;
+      else process.env.FRL_DOMAIN_TO_PIECES = original;
+    }
+  });
+
+  it('flag on: an unrelated domain page is not added', async () => {
+    const original = process.env.FRL_DOMAIN_TO_PIECES;
+    process.env.FRL_DOMAIN_TO_PIECES = '1';
+    try {
+      const { engine } = engineWith(provider(), pieceSearch);
+      const project = baseProject();
+      project.domainSources = [
+        { id: 'D1', kind: 'web', title: 'Unrelated page', url: 'https://unrelated.example/', domain: 'unrelated.example', snippet: 's', text: 'This page is about cooking recipes and has nothing to do with bouldering.' },
+      ];
+      const node = project.nodes[0];
+      const sources = await engine.gatherSources(project as never, node as never);
+      const domainSource = sources.find((s: { url: string }) => s.url === 'https://unrelated.example/');
+      expect(domainSource).toBeUndefined();
+    } finally {
+      if (original === undefined) delete process.env.FRL_DOMAIN_TO_PIECES;
+      else process.env.FRL_DOMAIN_TO_PIECES = original;
+    }
+  });
+
+  it('flag on: duplicates are not added when url already in piece sources', async () => {
+    const original = process.env.FRL_DOMAIN_TO_PIECES;
+    process.env.FRL_DOMAIN_TO_PIECES = '1';
+    try {
+      const { engine } = engineWith(provider(), pieceSearch);
+      const project = baseProject();
+      project.domainSources = [
+        { id: 'D1', kind: 'web', title: 'Bouldering gym Leipzig', url: 'https://gym1.example/', domain: 'gym1.example', snippet: 's', text: 'Boulderhalle Leipzig offers monthly membership for 50 EUR.' },
+      ];
+      project.nodes[0].sourceUrls = ['https://gym1.example/'];
+      const node = project.nodes[0];
+      const sources = await engine.gatherSources(project as never, node as never);
+      const gym1Sources = sources.filter((s: { url: string }) => s.url === 'https://gym1.example/');
+      expect(gym1Sources).toHaveLength(1);
+    } finally {
+      if (original === undefined) delete process.env.FRL_DOMAIN_TO_PIECES;
+      else process.env.FRL_DOMAIN_TO_PIECES = original;
+    }
+  });
+
+  it('flag off: no domain page added', async () => {
+    const original = process.env.FRL_DOMAIN_TO_PIECES;
+    delete process.env.FRL_DOMAIN_TO_PIECES;
+    try {
+      const { engine } = engineWith(provider(), pieceSearch);
+      const project = baseProject();
+      project.domainSources = [
+        { id: 'D1', kind: 'web', title: 'Bouldering gym Leipzig', url: 'https://gym1.example/', domain: 'gym1.example', snippet: 's', text: 'Boulderhalle Leipzig offers monthly membership for 50 EUR. Climbing without ropes on low walls.' },
+      ];
+      const node = project.nodes[0];
+      const sources = await engine.gatherSources(project as never, node as never);
+      const domainSource = sources.find((s: { url: string }) => s.url === 'https://gym1.example/');
+      expect(domainSource).toBeUndefined();
+      const emit = project.log.find((l: { message: string }) => l.message.includes('reused from the domain study'));
+      expect(emit).toBeUndefined();
+    } finally {
+      if (original !== undefined) process.env.FRL_DOMAIN_TO_PIECES = original;
+    }
+  });
+});
