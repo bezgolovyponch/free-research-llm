@@ -22,7 +22,7 @@ A careful human researcher works in this order, and the engine follows it, each 
 | Step | Fundamental (verified) | Recent LLM evidence (verified) | Use |
 |---|---|---|---|
 | 1–5 request model | Zave & Jackson K,S⊢R (M7); KAOS AND/OR refinement (M2); GQM purpose/viewpoint/context (M8); iStar roles | LLM goal extraction F1 0.61–0.76, best as an accelerator (M9); implicit requirements are the main agent failure (M10) | model proposes the model, code checks quotes and trace; a second family reviews |
-| 2 contract | systematic review stages (PRISMA, FOUNDATIONS) for lists only | — | routes stages by class (E-A merged) |
+| 2 contract | systematic review stages (PRISMA, FOUNDATIONS) for lists only | Fable v2: product = decision memo, lists one class | routes stages by class (E-A merged) |
 | 4 alternative means | KAOS OR-refinement (M2) | grounded expansion from pages, not model memory (LLM-Modulo M6) | pages name alternatives |
 | 8 evidence | wrapper induction | LLM-Modulo (M6); checklists TICK (M11); early pruning (M14) | code first, judge only what code cannot measure |
 | 9 verdict | ELECTRE TRI-nB sorting (M1) | rubric judges are noisy, batching trades accuracy (M11); judge relevance inflation (arXiv 2602.17170, PC-verified) | tiers by requirements; confidence never from a model's own score |
@@ -54,12 +54,14 @@ Pending, nothing built until read by the lead and the owner: **S1** (prediction-
 | **Mac fcc** (NVIDIA keys 2, 3) | engine.mjs routing, deliverable.mjs, server/action queue, router, proposal/index.html, harness scripts | implements specs |
 | **PC fcc** | quote.mjs, acceptance.mjs, listings.mjs, cci.mjs | implements specs |
 
-Designs owned by Fable, in phase order (each: ≤ 4 pages, no code):
-- **D1 Request model (Phase 1, next):** purpose, contract, requirements (AND) traced to the asker's words, derived implicit requirements, alternative means (OR) found on pages, roles, domain knowledge; how decompose, checklist, decision criteria, acceptance and the loop read it, feeding stored criteria and never rebuilding them.
+**Fable's prior work is the starting point, not a blank page.** Fable has already reviewed and combined the methods: the engine methods design v1, v1.1 dispositions on the external audit and the lead's review (28 rows: keep / accept / replace / reject, with a constants register), the engine design v2 decision (order: memo baseline, meter, quote-on-page tiers, case retrieval, fields later), and the wave-1 measurements on stored data (W1-A admission, W1-B case retrieval, W1-C fields, W1-D coverage, W1-F labels, W1-H harness). Each design below continues that work: it reuses what v1.1/v2 settled, states what changes and why, and keeps the dispositions' rules (no hand cuts — weights instead; pages name alternatives, never the model; verified vs admitted tiers; parity per valid result). Those documents are copied to docs/design/ on main so both machines read the same text.
+
+Designs owned by Fable, in phase order (each: ≤ 4 pages, no code; continuing v1.1/v2):
+- **D1 Request model (Phase 1, next; extends v2's frame/contract step and v1.1 G2 class → member → service → outcome):** purpose, contract, requirements (AND) traced to the asker's words, derived implicit requirements, alternative means (OR) found on pages, roles, domain knowledge; how decompose, checklist, decision criteria, acceptance and the loop read it, feeding stored criteria and never rebuilding them.
 - **D2 Zero-loss rules per class (Phase 0.3):** what "no value lost" means for an analysis and for a decision memo (drivers, findings, verdict flips, numbers with source and method), stated so code can check it.
-- **D3 Verdict by requirements (Phase 2):** tiers from requirement outcomes for all three classes; confidence without a model's self-score (judge inflation); how alternatives (OR) satisfy a requirement.
-- **D4 Coverage and stopping (Phase 3):** the verified incidence formulas as report, then a stop rule on the coverage deficit, with channel independence handled.
-- **D5 Learning (Phase 4):** loop target from requirement outcomes, itemised verified lessons, reuse per contract without negative transfer.
+- **D3 Verdict by requirements (Phase 2; v1.1 G5 admission ledger stays in shadow until ≥ 200 owner labels):** tiers from requirement outcomes for all three classes; confidence without a model's self-score (judge inflation); how alternatives (OR) satisfy a requirement.
+- **D4 Coverage and stopping (Phase 3; v1.1 G7 rebuilt, with the verified iNEXT incidence formulas):** the verified incidence formulas as report, then a stop rule on the coverage deficit, with channel independence handled.
+- **D5 Learning (Phase 4; v1.1 G10 two-tier memory, no decay, re-verify on reuse):** loop target from requirement outcomes, itemised verified lessons, reuse per contract without negative transfer.
 A change touching the other machine's files goes there as a patch.
 
 ## 5. Every change passes, in order
