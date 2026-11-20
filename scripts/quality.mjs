@@ -108,13 +108,22 @@ function sourceModules(files) {
   return files.filter((f) => /^(src|scripts|verifier)\/.*\.mjs$/.test(f));
 }
 
+export function pickBase({ head, originBase, localBase, parent, ci }) {
+  const base = originBase || localBase;
+  if (base && base !== head) return base;
+  return ci ? parent : '';
+}
+
 function mergeBase() {
-  const head = run('git', ['rev-parse', 'HEAD']).stdout.trim();
-  for (const ref of ['origin/main', 'main']) {
-    const base = run('git', ['merge-base', 'HEAD', ref]).stdout.trim();
-    if (base && base !== head) return base;
-  }
-  return process.env.CI ? run('git', ['rev-parse', 'HEAD~1']).stdout.trim() : '';
+  const rev = (args) => run('git', args).stdout.trim();
+  const ci = Boolean(process.env.CI);
+  return pickBase({
+    head: rev(['rev-parse', 'HEAD']),
+    originBase: rev(['merge-base', 'HEAD', 'origin/main']),
+    localBase: rev(['merge-base', 'HEAD', 'main']),
+    parent: ci ? rev(['rev-parse', 'HEAD~1']) : '',
+    ci,
+  });
 }
 
 function checkTestIntegrity(diff, commitMessages) {
