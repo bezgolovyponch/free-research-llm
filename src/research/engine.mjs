@@ -564,6 +564,7 @@ export class ResearchEngine {
     const acceptance = proposed.spec;
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
+    if (process.env.FRL_ANSWER_UNIT && acceptance?.itemCount) await this.ensureDecisionModel(project);
     if (listCount(project)) {
       await this.ensureDecisionModel(project);
       const brief = this.briefOf(project);
