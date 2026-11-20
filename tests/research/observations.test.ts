@@ -144,6 +144,17 @@ describe('result table extraction inside a research', () => {
     const out = await extract(project, router, null);
     expect(out.observations).toHaveLength(1);
     expect(out.observations[0]).toMatchObject({ time: '2026-03', value: 45, source: 'https://a.example/p' });
-    expect(out.rejected).toEqual({ quote: 1, number: 1 });
+    expect(out.rejected).toMatchObject({ quote: 1, number: 1 });
+  });
+});
+
+describe('a source no model could read', () => {
+  it('is skipped and counted, never fatal', async () => {
+    const { extract } = await import('../../src/research/observations.mjs');
+    const router = { complete: async () => { throw new Error('every provider failed'); } };
+    const project = { results: { spec: { columns: [{ name: 'value', type: 'value' }] } }, nodes: [{ id: 'D1', sources: [{ url: 'https://a.example/p', text: 'x 1' }] }] };
+    const out = await extract(project, router, null);
+    expect(out.observations).toEqual([]);
+    expect(out.rejected.failed).toBe(1);
   });
 });

@@ -218,6 +218,12 @@ export function createServer(app, gate = new AccessGate()) {
       await app.engine.load(id);
       return app.engine.leaveOne(id, String((await readJson(req)).clientId ?? ''));
     }],
+    ['POST', /^\/api\/projects\/([\w-]+)\/result-table$/, async (req, [id]) => {
+      const project = await app.engine.load(id);
+      const results = await app.engine.buildResultTable(project);
+      await app.engine.store.save(project, { reason: 'result table rebuilt' });
+      return { ok: true, rows: results?.table?.length ?? 0 };
+    }],
     ['POST', /^\/api\/projects\/([\w-]+)\/run$/, async (req, [id]) => {
       await app.engine.load(id);
       const clientId = String((await readJson(req)).clientId ?? '');
