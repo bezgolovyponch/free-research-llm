@@ -287,3 +287,94 @@ describe('2026-11-12 engine audit: site addresses and entity lists', () => {
     expect(describeBrief({ ...stored, located: true })).toContain('Deliver: 20 single wholesale clothing provider listing pages for sale\nWhere: Czechia\nExclude: offered for rent');
   });
 });
+
+describe('out-of-region side report (FRL_REGION_SIDE_REPORT)', () => {
+  const regions = ['CZ'];
+  const wholesale = { label: 'wholesale clothing provider', terms: ['wholesale second-hand clothing'] };
+  const nlSource = {
+    kind: 'web',
+    title: 'Dutch Wholesale',
+    url: 'https://www.dutchwholesale.nl/',
+    domain: 'dutchwholesale.nl',
+    locale: 'nl_NL',
+    snippet: 'Groothandel in kleding',
+    text: 'Wij leveren kleding in Nederland en België.',
+  };
+  const czDeliverySource = {
+    kind: 'web',
+    title: 'Polish Wholesale',
+    url: 'https://www.polishwholesale.pl/',
+    domain: 'polishwholesale.pl',
+    locale: 'pl_PL',
+    snippet: 'Hurtownia odzieży',
+    text: 'We ship full pallets to the Czech Republic and Slovakia within three working days.',
+  };
+
+  it('flags a .nl-only source as out-of-region when brief.located=false and regions=["CZ"]', () => {
+    const originalFlag = process.env.FRL_REGION_SIDE_REPORT;
+    process.env.FRL_REGION_SIDE_REPORT = '1';
+    try {
+      const brief = { kind: wholesale, regions, located: false };
+      expect(onConcept(nlSource, brief)).toBe(true);
+      const verdict = regionVerdict(nlSource, regions);
+      expect(verdict?.status).toBe('outside');
+      expect(nlSource.outOfRegion).toBeUndefined();
+    } finally {
+      if (originalFlag === undefined) delete process.env.FRL_REGION_SIDE_REPORT;
+      else process.env.FRL_REGION_SIDE_REPORT = originalFlag;
+    }
+  });
+
+  it('does not flag a source that states delivery to the asked region', () => {
+    const originalFlag = process.env.FRL_REGION_SIDE_REPORT;
+    process.env.FRL_REGION_SIDE_REPORT = '1';
+    try {
+      const brief = { kind: wholesale, regions, located: false };
+      expect(onConcept(czDeliverySource, brief)).toBe(true);
+      const verdict = regionVerdict(czDeliverySource, regions);
+      expect(verdict?.status).toBe('ships');
+      expect(verdict?.code).toBe('CZ');
+    } finally {
+      if (originalFlag === undefined) delete process.env.FRL_REGION_SIDE_REPORT;
+      else process.env.FRL_REGION_SIDE_REPORT = originalFlag;
+    }
+  });
+
+  it('does not flag sources when located=true', () => {
+    const originalFlag = process.env.FRL_REGION_SIDE_REPORT;
+    process.env.FRL_REGION_SIDE_REPORT = '1';
+    try {
+      const brief = { kind: wholesale, regions, located: true };
+      expect(onConcept(nlSource, brief)).toBe(false);
+    } finally {
+      if (originalFlag === undefined) delete process.env.FRL_REGION_SIDE_REPORT;
+      else process.env.FRL_REGION_SIDE_REPORT = originalFlag;
+    }
+  });
+
+  it('does not flag sources when regions is empty', () => {
+    const originalFlag = process.env.FRL_REGION_SIDE_REPORT;
+    process.env.FRL_REGION_SIDE_REPORT = '1';
+    try {
+      const brief = { kind: wholesale, regions: [], located: false };
+      expect(onConcept(nlSource, brief)).toBe(true);
+      const verdict = regionVerdict(nlSource, []);
+      expect(verdict).toBeNull();
+    } finally {
+      if (originalFlag === undefined) delete process.env.FRL_REGION_SIDE_REPORT;
+      else process.env.FRL_REGION_SIDE_REPORT = originalFlag;
+    }
+  });
+
+  it('does not flag sources when flag is off', () => {
+    const originalFlag = process.env.FRL_REGION_SIDE_REPORT;
+    delete process.env.FRL_REGION_SIDE_REPORT;
+    try {
+      const brief = { kind: wholesale, regions, located: false };
+      expect(onConcept(nlSource, brief)).toBe(true);
+      expect(nlSource.outOfRegion).toBeUndefined();
+    } finally {
+      if (originalFlag !== undefined) process.env.FRL_REGION_SIDE_REPORT = originalFlag;
+    }
+  });
+});

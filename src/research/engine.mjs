@@ -1034,12 +1034,22 @@ export class ResearchEngine {
   onConceptOnly(project, node, sources) {
     const brief = project.brief ?? this.briefOf(project);
     const isAnalysis = contractClass(project) === 'analysis';
+    const sideReport = Boolean(process.env.FRL_REGION_SIDE_REPORT);
     const kept = sources.filter((s) => onConcept(s, brief));
     const dropped = sources.length - kept.length;
     if (dropped) this.emit(project, 'node', `${node.id}: ${dropped} source(s) dropped before any model call — outside the asked regions (${sources.filter((s) => !kept.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
     if (brief.located === false && brief.regions?.length) {
       const outside = kept.filter((s) => regionVerdict(s, brief.regions)?.status === 'outside');
       if (outside.length) this.emit(project, 'node', `${node.id}: ${outside.length} source(s) kept from outside ${regionLabel(brief.regions)} — for an entity list the asked place is where the result is used (${outside.map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
+      if (sideReport) {
+        for (const source of kept) {
+          const verdict = regionVerdict(source, brief.regions);
+          if (verdict?.status === 'outside') {
+            source.outOfRegion = true;
+            source.detectedRegion = verdict.text;
+          }
+        }
+      }
     }
     const gated = (brief.located === false && !isAnalysis) ? this.gateOnKind(project, node, kept) : kept;
     const query = evidenceQuery(node, brief);
@@ -1823,6 +1833,32 @@ export class ResearchEngine {
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
       .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
     project.report.deliverables = deliverables;
+
+    const sideReport = Boolean(process.env.FRL_REGION_SIDE_REPORT);
+    if (brief.located === false && brief.regions?.length && sideReport) {
+      const extraSources = [...(project.hubSources ?? []), ...(project.domainSources ?? [])];
+      for (const source of extraSources) {
+        const verdict = regionVerdict(source, brief.regions);
+        if (verdict?.status === 'outside') {
+          source.outOfRegion = true;
+          source.detectedRegion = verdict.text;
+        }
+      }
+      const outOfRegionHosts = new Map();
+      for (const source of [...(project.nodes ?? []).flatMap((n) => n.sources ?? []), ...extraSources]) {
+        if (source.outOfRegion) {
+          const host = hostOf(source.url);
+          if (host && !outOfRegionHosts.has(host)) outOfRegionHosts.set(host, source.detectedRegion);
+        }
+      }
+      let outOfRegionItems = 0;
+      for (const deliverable of deliverables) {
+        if (deliverable.region?.startsWith('outside')) outOfRegionItems++;
+      }
+      project.outOfRegionSourceCount = outOfRegionHosts.size;
+      project.outOfRegionItemCount = outOfRegionItems;
+      project.outOfRegionHosts = [...outOfRegionHosts.entries()].map(([host, region]) => ({ host, region }));
+    }
     const convert = this.rates ? await this.rates.converter() : undefined;
     const checker = new AcceptanceChecker({ readPage, convert });
     project.checkCache = project.checkCache ?? {};

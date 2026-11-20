@@ -91,3 +91,76 @@ describe('result table csv', () => {
     expect(out.replace(/^﻿/, '').split(/\r?\n/)[0]).toBe('Месяц,Ставка,quote,source');
   });
 });
+
+describe('out-of-region side section in markdown', () => {
+  const baseProject = {
+    id: 'p1',
+    question: 'Find wholesale suppliers for Czechia',
+    acceptance: { expected: '20 suppliers' },
+    templateId: 'generic',
+    phase: 'done',
+    updatedAt: '2026-11-20T12:00:00.000Z',
+    report: { verdict: 'GO', confidence: 'high', summary: 'Found suppliers', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: { verified: 1, total: 1, weak: [] } },
+    nodes: [],
+  };
+
+  it('adds side section when outOfRegionSourceCount > 0', () => {
+    const originalFlag = process.env.FRL_REGION_SIDE_REPORT;
+    process.env.FRL_REGION_SIDE_REPORT = '1';
+    try {
+      const project = {
+        ...baseProject,
+        outOfRegionSourceCount: 2,
+        outOfRegionItemCount: 3,
+        outOfRegionHosts: [
+          { host: 'dutchwholesale.nl', region: 'outside CZ' },
+          { host: 'frenchwholesale.fr', region: 'outside CZ' },
+        ],
+      };
+      const md = toMarkdown(project as never);
+      expect(md).toContain('## Out of the asked regions');
+      expect(md).toContain('**2 source(s), 3 item(s)**');
+      expect(md).toContain('dutchwholesale.nl');
+      expect(md).toContain('frenchwholesale.fr');
+      expect(md).toContain('outside CZ');
+    } finally {
+      if (originalFlag === undefined) delete process.env.FRL_REGION_SIDE_REPORT;
+      else process.env.FRL_REGION_SIDE_REPORT = originalFlag;
+    }
+  });
+
+  it('does not add side section when flag is off', () => {
+    const originalFlag = process.env.FRL_REGION_SIDE_REPORT;
+    delete process.env.FRL_REGION_SIDE_REPORT;
+    try {
+      const project = {
+        ...baseProject,
+        outOfRegionSourceCount: 2,
+        outOfRegionItemCount: 3,
+        outOfRegionHosts: [{ host: 'dutchwholesale.nl', region: 'outside CZ' }],
+      };
+      const md = toMarkdown(project as never);
+      expect(md).not.toContain('## Out of the asked regions');
+    } finally {
+      if (originalFlag !== undefined) process.env.FRL_REGION_SIDE_REPORT = originalFlag;
+    }
+  });
+
+  it('does not add side section when counts are zero', () => {
+    const originalFlag = process.env.FRL_REGION_SIDE_REPORT;
+    process.env.FRL_REGION_SIDE_REPORT = '1';
+    try {
+      const project = {
+        ...baseProject,
+        outOfRegionSourceCount: 0,
+        outOfRegionItemCount: 0,
+        outOfRegionHosts: [],
+      };
+      const md = toMarkdown(project as never);
+      expect(md).not.toContain('## Out of the asked regions');
+    } finally {
+      if (originalFlag === undefined) delete process.env.FRL_REGION_SIDE_REPORT;
+      else process.env.FRL_REGION_SIDE_REPORT = originalFlag;
+    }
+  });
+});
