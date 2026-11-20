@@ -254,3 +254,14 @@ describe('knowledgePieces', () => {
     expect(knowledgePieces({ missing: ['nonsense'], label: 'x' })).toEqual([]);
   });
 });
+
+describe('request model records the answer unit on the expected result', () => {
+  it('tags E1 with the unit when the decision model carries a grounded unit', () => {
+    const model = buildRequestModel({ question: 'How many heat pumps were installed in Czechia in 2024?', expected: 'one figure with its source', decisionModel: { answerUnit: 'number', answerUnitQuote: 'one figure' } });
+    expect(model.requirements.find((r) => r.id === 'E1')?.unit).toBe('number');
+  });
+  it('adds no unit without a quote', () => {
+    const model = buildRequestModel({ question: 'How many heat pumps were installed in Czechia in 2024?', expected: 'one figure with its source', decisionModel: { answerUnit: 'number', answerUnitQuote: '' } });
+    expect(model.requirements.find((r) => r.id === 'E1')).not.toHaveProperty('unit');
+  });
+});

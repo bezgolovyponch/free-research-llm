@@ -108,3 +108,47 @@ describe('evidence probability of pieces that failed or never ran (audit 2026-11
     expect(resultModel({ question: 'Select wholesale suppliers', nodes: unstarted })).toMatchObject({ probability: 0.5 });
   });
 });
+
+describe('questionKind with FRL_ANSWER_UNIT', () => {
+  const baseProject = (overrides: Record<string, any> = {}) => ({
+    question: 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.',
+    acceptance: { expected: 'one figure for 2024 with its source and link', itemCount: 1 },
+    decisionModel: { answerUnit: null, answerUnitQuote: '' },
+    ...overrides,
+  });
+
+  it('questionKind returns estimate for grounded number unit under flag', () => {
+    const project = baseProject({
+      decisionModel: { answerUnit: 'number', answerUnitQuote: 'one figure for 2024' },
+    });
+    process.env.FRL_ANSWER_UNIT = '1';
+    expect(questionKind(project)).toBe('estimate');
+    delete process.env.FRL_ANSWER_UNIT;
+  });
+
+  it('questionKind returns list for items unit under flag', () => {
+    const project = baseProject({
+      decisionModel: { answerUnit: 'items', answerUnitQuote: 'list of heat pumps' },
+    });
+    process.env.FRL_ANSWER_UNIT = '1';
+    expect(questionKind(project)).toBe('list');
+    delete process.env.FRL_ANSWER_UNIT;
+  });
+
+  it('questionKind returns list for itemCount 1 when flag off', () => {
+    const project = baseProject({
+      decisionModel: { answerUnit: 'number', answerUnitQuote: 'one figure for 2024' },
+    });
+    expect(questionKind(project)).toBe('list');
+  });
+
+  it('questionKind returns estimate when no itemCount and no unit under flag', () => {
+    const project = baseProject({
+      acceptance: { expected: 'one figure for 2024', itemCount: null },
+      decisionModel: { answerUnit: null, answerUnitQuote: '' },
+    });
+    process.env.FRL_ANSWER_UNIT = '1';
+    expect(questionKind(project)).toBe('estimate');
+    delete process.env.FRL_ANSWER_UNIT;
+  });
+});

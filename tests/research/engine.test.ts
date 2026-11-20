@@ -4473,3 +4473,40 @@ describe('FRL_DOMAIN_TO_PIECES', () => {
     }
   });
 });
+
+describe('a grounded number answer is not decomposed as a list (FRL_ANSWER_UNIT)', () => {
+  const tree = {
+    decision: 'State the number of residential heat pumps installed in Czechia in 2024',
+    successCriteria: 'one figure with its source',
+    assumptionsToConfirm: [],
+    acceptance: { itemCount: 1, urlsLive: false, valueRange: null, unit: '', mustMention: [] },
+    nodes: [
+      { id: 'D1', parentId: null, title: 'Official statistics', question: 'What do official statistics report for 2024?', method: 'lookup', searchQueries: ['heat pump installations Czechia 2024'] },
+      { id: 'D1.1', parentId: 'D1', title: 'Statistics office', question: 'What does the statistics office report?', method: 'lookup', searchQueries: ['heat pumps statistics 2024'] },
+      { id: 'D1.2', parentId: 'D1', title: 'Industry association', question: 'What does the industry association report?', method: 'lookup', searchQueries: ['heat pump association sales 2024'] },
+    ],
+  };
+  const run = async (flag: boolean) => {
+    const before = process.env.FRL_ANSWER_UNIT;
+    if (flag) process.env.FRL_ANSWER_UNIT = '1';
+    else delete process.env.FRL_ANSWER_UNIT;
+    try {
+      const modeler = { fresh: (p: { decisionModel?: unknown }) => Boolean(p.decisionModel), build: async (p: Record<string, unknown>) => {
+        p.decisionModel = { kind: { label: 'heat pump', terms: ['heat pump'] }, criteria: [], noLimit: [], missing: [], answerUnit: 'number', answerUnitShare: 1, answerUnitQuote: 'Give the figure', caseIds: [] };
+        return p.decisionModel;
+      } };
+      const provider = { id: 'stub', ready: true, describe: () => ({ id: 'stub', label: 'Stub', state: 'ready', detail: '', configured: true, fast: 'stub', deep: 'stub', local: false, keyEnv: null, signup: '', modelCount: 1 }), async chat() { return { content: JSON.stringify(tree), model: 'stub', provider: 'stub', usage: {} }; } };
+      const engine = new ResearchEngine({ router: new ModelRouter({ providers: [provider] }), search: fakeSearch, store: new ProjectStore({ dir }), modeler } as never);
+      const project = await engine.createProject({ question: 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.', templateId: 'generic', expected: 'one figure with its source and link' });
+      await engine.decompose(project);
+      return project.log.some((l: { type: string; message: string }) => l.type === 'tree' && (l.message.startsWith('no listing portal is known') || l.message.startsWith('pieces covered by code on the candidate table')));
+    } finally {
+      if (before === undefined) delete process.env.FRL_ANSWER_UNIT;
+      else process.env.FRL_ANSWER_UNIT = before;
+    }
+  };
+  it('takes the list branch without the flag and skips it with the flag', async () => {
+    expect(await run(false)).toBe(true);
+    expect(await run(true)).toBe(false);
+  });
+});
