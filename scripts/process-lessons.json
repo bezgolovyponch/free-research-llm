@@ -864,5 +864,72 @@
     "signal": "Durres stag research find-40-activity-providers-in-du-3e0586 (2026-11-19): the clause \"within about 60 km\" became the hard numeric item distanceKm <= 60. None of the 23 delivered items carried distanceKm, because distance is measured only for candidate-table rows with coordinates or a stated place. All 19 judged items were unknown on that check with no quote and no model call, including 6 whose fetched page names the town, so 0 of 40 were confirmed while the own-website check was answered on the same pages.",
     "cause": "ChecklistJudge.judge() compared numeric items in code and left them unknown when the item had no value for the measure; nothing asked the page instead. The decision model picks a measure without knowing whether the delivered item can carry it. A hard check that is unknown on every item left no signal in the log or the audit. A null value also passed the old val !== undefined test and compared as 0.",
     "prevention": "Item own measure first, then the measure of the decision criterion the item states (#215, measures.mjs), and only a finite reading counts as a measurement (null, empty or non-numeric is not); when neither reads a value the question is asked from the item page with the same id, hard flag and quote check, instead of being left unknown. measuredReading/measuredValue in src/research/checklist.mjs; tests in tests/research/checklist.test.ts (an item with no measured distance is asked the distance question from its page; a null or non-numeric value is not a measurement). Rule: unknown is reserved for a question that was asked and not shown."
+  },
+  {
+    "id": "F-2026-11-20-knowledge-in-code",
+    "title": "content knowledge written into the engine as patterns and literal lists",
+    "touches": [
+      "decisions/",
+      "scripts/quality.mjs",
+      "scripts/process-lessons.json",
+      "src/search/",
+      "src/research/acceptance.mjs",
+      "src/workbook.mjs"
+    ],
+    "signal": "a package specified as case-agnostic ships hand-written readers for a closed set of named fields, with format patterns, literal lists of codes and symbols, and fixed output columns named after those fields; a core module carries a hand-picked partial list of a standard's members; all gates pass; the code review returns only format defects, each fixed by one more pattern",
+    "cause": "the rule 'no domain word in src' was applied as a word search, so a typed reader passed it and the lead wrote an exemption ('codes and symbols are data') into the worker prompt; the spec checked the brief's facts against the code but never its scope against the universality rule or its order against the design decision; the lists were picked from the same two list-type researches that served as both design evidence and proof",
+    "prevention": "rule: the engine may know structure (markup, property paths, quote checks, arithmetic) and never content (which fields exist, what their values look like, which codes or units are valid); fields come from the request's frame, values from the page's own structured data or a model proposal, and code only verifies that the quote is on the page and contains the value. Pre-dispatch question: the spec carries a universality line naming three stored researches of unrelated kinds, one a decision memo, and what the package does for each; if any answer is 'nothing' the package is a plug-in with its increment id and flag and does not start before the spine increments that precede it. The proof includes at least one research that was not design evidence. Gate: a commit adding a module-level collection of string literals or a regex alternation of literals under src/ must carry a body line 'knowledge: <path> — <the standard or structure it encodes, and where the full set comes from>'; a partial list picked from our own cases is rejected. A review that returns only format defects is a stop signal: re-check the scope before dispatching fixes"
+  },
+  {
+    "id": "F-2026-11-20-gate-passes-without-running",
+    "title": "a gate that did not run is reported as a pass",
+    "touches": [
+      "scripts/zero-loss.mjs",
+      "scripts/quality.mjs",
+      "scripts/**",
+      "tests/scripts/**"
+    ],
+    "signal": "a gate exits 0 with no output; a gate line reads 'PASS ... skipped: ... not found'; on one platform a gate blocks every commit or none; a gate result with no count of items checked",
+    "cause": "the gate has two outcomes only, so 'could not run' (missing input, entry guard that never matches on this platform's path form) falls into the same exit code and label as 'ran and found nothing'; no test ever fed a gate a known-bad input, so a gate that does nothing was indistinguishable from a gate that passes; path handling was written and tried on one platform only",
+    "prevention": "three outcomes: PASS, FAIL, SKIP. A gate whose input is missing prints SKIP with the missing path, and the quality run exits non-zero on any SKIP unless that gate is named in an explicit --allow-skip=<gate>, which is printed in the summary. Every gate prints 'checked N' and N=0 is FAIL. Each gate has a self-test that runs it as a child process on a planted failure and asserts a non-zero exit and non-empty output, and on a clean input asserts exit 0 with N>0; the self-tests run on both platforms. Entry guards and path comparisons use the runtime's path/URL conversion, never string concatenation or a literal separator"
+  },
+  {
+    "id": "F-2026-11-20-replay-gates-blind-to-new-paths",
+    "title": "gates that replay stored data passed code that only new runs execute",
+    "touches": [
+      "src/**",
+      "tests/**",
+      "scripts/quality.mjs",
+      "decisions/"
+    ],
+    "signal": "a change adds a new code path; every stored-data gate reports 0 flips or 'unchanged'; review then finds the evidence quoted for a value comes from a different record than the value, per-item work that repeats a whole-input pass, and a pattern whose optional part lets a non-member match",
+    "cause": "all gates compare stored outputs before and after, so a path that stored items never enter is not executed and 'unchanged' meant 'not run', not 'correct'; the spec named no test that executes the new path on adversarial input, and no invariant (evidence contains its claim, cost bounded by input size) was asserted in code",
+    "prevention": "pre-dispatch question: 'which gate executes the new lines?' — if the answer is only stored-data gates, the spec must name tests that do. Gate: quality fails when lines added under src/ are executed by no test (changed-line coverage). Standing tests for any path that emits a value with evidence: (1) invariant test — every emitted quote contains its own value and is taken from the same record as the value, run on a fixture with two records sharing the same key; (2) budget test — a synthetic large input with many candidates must finish within a fixed time and whole-input passes are counted and must not grow with the candidate count; (3) for every optional element in a pattern, a negative test with that element absent and a non-member word in its place"
+  },
+  {
+    "id": "F-2026-11-20-gate-base-from-stale-ref",
+    "title": "a gate measured the change against a stale local branch and blamed the commit for upstream work",
+    "touches": [
+      "scripts/quality.mjs",
+      ".githooks/**",
+      "tests/scripts/**"
+    ],
+    "signal": "a gate refuses a commit and names files that are not in the commit; the same commit passes on the other machine; the gate's list of changed files is far longer than the commit's own file list; the gate does not print which base it compared against",
+    "cause": "the base was 'the first candidate ref whose merge-base differs from HEAD'; on a branch with no commit yet the merge-base with the remote-tracking ref equals HEAD, so the choice fell through to the local branch of the same name, which nobody updates on a machine that works only in worktrees, and every upstream commit since then was counted as this commit's change. The base was chosen by 'different from HEAD', not by 'correct', and it was invisible in the output",
+    "prevention": "the base is the merge-base with the remote-tracking ref; a local branch is a candidate only when no remote-tracking ref resolves; among several candidates the newest wins, never the oldest; a base equal to HEAD never means 'try another ref'. The choice is a pure function with one test per case, including 'local branch far behind'. Every gate that compares against a base prints 'base <short sha> (<ref>), N commits, M files'. Pre-dispatch question for any gate that reads repository state: which ref does it read, and who keeps that ref current on each machine?"
+  },
+  {
+    "id": "F-2026-11-20-code-test-pinned-to-live-store",
+    "title": "tests of a tool asserted on the live data store, so appending a record broke the tool's tests",
+    "touches": [
+      "scripts/process-lessons.json",
+      "scripts/recall.mjs",
+      "tests/scripts/**",
+      "decisions/",
+      "docs/design/**"
+    ],
+    "signal": "a commit that only appends records to a data file fails tests of the code that reads it; a test's expected value is the exact list or count of the whole live store; a pattern in a test encodes the id convention; a convention is changed in a plan and the first record written under it is refused",
+    "cause": "the tests used the live store as their fixture, so each tested two things at once: the code's behaviour and the store's contents on the day the test was written; the id convention was changed in the plan without a search for the places that encode the old one and without one trial record under the new one",
+    "prevention": "a behaviour test of code runs on a fixture pinned inside the test; a test of the live store asserts invariants only (required fields, id pattern, unique ids, a historical prefix that never changes) and accepts appended records. Pre-dispatch question when a plan changes a convention (id, file name, format): grep code and tests for the old form and list the hits in the decision; the change ships with one trial record that passes the hooks before any real record depends on it"
   }
 ]
