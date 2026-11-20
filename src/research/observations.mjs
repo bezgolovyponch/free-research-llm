@@ -1,0 +1,137 @@
+import { quoteFound } from './quote.mjs';
+import { plain } from './itemgate.mjs';
+
+export function normalizeText(text) {
+  return plain(String(text ?? '').replace(/\s+/g, ' ')).trim();
+}
+
+export function columnQuoteInQuestion(quote, question, expected) {
+  const normQuote = normalizeText(quote);
+  if (!normQuote) return false;
+  const normQuestion = normalizeText(question);
+  const normExpected = normalizeText(expected);
+  return normQuestion.includes(normQuote) || normExpected.includes(normQuote);
+}
+
+export function numberInQuote(value, quote) {
+  const numStr = String(value).replace(/[.,]/g, '');
+  const normQuote = normalizeText(quote).replace(/[.,]/g, '');
+  return normQuote.includes(numStr);
+}
+
+export async function tableSpec(project, router) {
+  const question = project.question ?? '';
+  const expected = project.acceptance?.expected ?? '';
+
+  const prompt = [
+    { role: 'system', content: 'You propose a table specification for an analysis research. Answer with JSON only.' },
+    { role: 'user', content: 'TASK=TABLE_SPEC\nQuestion: ' + question + '\nExpected result: ' + expected + '\n\nThe asker wants a table of observations. Propose:\n- observationUnit: what each row represents (e.g., "monthly rate per lane", "quarterly revenue per product")\n- columns: array of { name, type: "time" | "entity" | "value", unit, quoteFromAsker }\n\nRules:\n- Each column must have a "quoteFromAsker" that is a verbatim substring of the question or expected result\n- Exactly one column must have type "value" (the measured variable)\n- If the request names periods (month, quarter, year, Dec 2026, etc.), include a "time" column\n- Entity columns capture grouping dimensions (lane, route, product, region, etc.)\n- The "unit" is the measurement unit from the asker\'s words (e.g., "USD/ton", "EUR", "%")\n- Output JSON only: { observationUnit, columns: [...] }' }
+  ];
+
+  const reply = await router.complete({ purpose: 'table-spec', tier: 'deep', messages: prompt });
+  const proposed = reply.data ?? {};
+  
+  const columns = (proposed.columns ?? []).filter(col => 
+    col.quoteFromAsker && columnQuoteInQuestion(col.quoteFromAsker, question, expected)
+  );
+  
+  const hasValue = columns.some(c => c.type === 'value');
+  if (!hasValue && columns.length) {
+    columns[0].type = 'value';
+  }
+  
+  return { observationUnit: proposed.observationUnit ?? 'observation', columns };
+}
+
+export function dedupeKey(row) {
+  return row.time + '|' + (row.entity ?? '') + '|' + row.value + '|' + row.source;
+}
+
+export async function extract(project, router, readPage) {
+  const spec = project.results?.spec;
+  if (!spec) return { spec: null, observations: [], at: new Date().toISOString() };
+  
+  const allObservations = [];
+  const seenKeys = new Set();
+  
+  for (const node of project.nodes ?? []) {
+    if (!node.sources?.length) continue;
+    
+    for (const source of node.sources) {
+      if (!source.url || source.kind === 'data' || source.kind === 'node') continue;
+      
+      let text = source.text ?? '';
+      if (!text && readPage) {
+        const page = await readPage(source.url).catch(() => null);
+        text = page?.text ?? '';
+      }
+      if (!text) continue;
+      
+      const prompt = [
+        { role: 'system', content: 'You extract observation rows from a source. Answer with JSON only: { rows: [...] }.' },
+        { role: 'user', content: 'TASK=EXTRACT_OBSERVATIONS\nSource: ' + source.url + '\nTable spec: ' + JSON.stringify(spec) + '\nText: ' + text.slice(0, 15000) + '\n\nExtract rows matching the spec. Each row: { time, entity, value, unit, quote }.\n- time: the period (e.g., "2026-12", "Dec 2026", "Q1 2027")\n- entity: the grouping value (e.g., "Asia-Europe", "lane X")\n- value: the numeric value\n- unit: the unit from the spec\'s value column\n- quote: the exact sentence from the text containing the value\n\nOnly extract rows where the value appears in the quote. Return { rows: [...] }.' }
+      ];
+
+      const reply = await router.complete({ purpose: 'extract-observations', tier: 'deep', messages: prompt });
+      const proposed = reply.data ?? {};
+      const rows = proposed.rows ?? [];
+      
+      const entityColNames = spec.columns.filter(c => c.type === 'entity').map(c => c.name);
+
+      for (const row of rows) {
+        if (!row.quote || !row.value) continue;
+        if (!quoteFound(text, row.quote)) continue;
+        if (!numberInQuote(row.value, row.quote)) continue;
+
+        const entity = entityColNames.map(name => row[name] ?? '').filter(Boolean).join('|') || null;
+        const key = dedupeKey({ ...row, entity, source: source.url });
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+
+        allObservations.push({
+          time: row.time,
+          entity,
+          value: Number(row.value),
+          unit: row.unit ?? (spec.columns.find(c => c.type === 'value')?.unit ?? ''),
+          quote: row.quote,
+          source: source.url,
+          nodeId: node.id
+        });
+      }
+    }
+  }
+  
+  return { spec, observations: allObservations, at: new Date().toISOString() };
+}
+
+export async function runObservations(project, router, readPage) {
+  if (project.contractClass !== 'analysis') return project;
+
+  const spec = await tableSpec(project, router);
+  project.results = { ...project.results, spec };
+
+  const extracted = await extract(project, router, readPage);
+  project.results = { ...project.results, ...extracted };
+
+  return project;
+}
+
+export function toCSV(table) {
+  if (!table?.rows?.length) return '';
+  const cols = table.columns;
+  const header = cols.join(',');
+  const rows = table.rows.map(r =>
+    cols.map(c => {
+      const val = r[c];
+      if (val === null || val === undefined) return '';
+      const str = String(val).replace(/"/g, '""');
+      return str.includes(',') || str.includes('"') || str.includes('\n') ? '"' + str + '"' : str;
+    }).join(',')
+  );
+  return [header, ...rows].join('\n');
+}
+
+export function toJSON(table) {
+  if (!table?.rows?.length) return '[]';
+  return JSON.stringify(table.rows, null, 2);
+}

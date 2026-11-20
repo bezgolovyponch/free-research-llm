@@ -1,0 +1,1 @@
+We build a retrieval-augmented LM system that significantly improves upon the baseline and approaches the human crowd performance on competitive forecasting platforms.

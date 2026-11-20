@@ -1,0 +1,1 @@
+removing the LLM component or replacing it with a basic attention layer does not degrade forecasting performance

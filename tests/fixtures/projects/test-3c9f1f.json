@@ -1,0 +1,88 @@
+{
+  "id": "test-3c9f1f",
+  "question": "What are the 2026 freight rate statistics per lane? Show monthly trend Dec 2026-2027 with reasons and justification. Output a CSV table.",
+  "acceptance": {
+    "expected": "CSV table with monthly rate per lane, 2026 rate statistics, monthly trend Dec 2026-2027, reasons with justification"
+  },
+  "templateId": "generic",
+  "decision": "Freight rate analysis",
+  "successCriteria": "Accurate monthly trend with justification",
+  "constraints": {},
+  "nodes": [
+    {
+      "id": "D1.1",
+      "title": "Asia-Europe lane rates",
+      "question": "What are the monthly freight rates for Asia-Europe lane in 2026?",
+      "status": "verified",
+      "finding": {
+        "answer": "Asia-Europe rates ranged from 800 to 1200 per FEU in 2026.",
+        "claims": [
+          {
+            "text": "Dec 2026 rate was 950/FEU",
+            "value": 950,
+            "unit": "USD/FEU",
+            "sourceIds": [
+              "S1"
+            ],
+            "quote": "December 2026 Asia-Europe spot rate reached 950 per FEU"
+          },
+          {
+            "text": "Nov 2026 rate was 920/FEU",
+            "value": 920,
+            "unit": "USD/FEU",
+            "sourceIds": [
+              "S1"
+            ],
+            "quote": "November 2026 rate was 920 per FEU"
+          }
+        ]
+      },
+      "sources": [
+        {
+          "id": "S1",
+          "url": "https://example.com/freight-asia-europe",
+          "title": "Asia-Europe Freight Rates 2026",
+          "text": "December 2026 Asia-Europe spot rate reached 950 per FEU. November 2026 rate was 920 per FEU. October 2026 rate was 890 per FEU."
+        }
+      ]
+    },
+    {
+      "id": "D1.2",
+      "title": "Transpacific lane rates",
+      "question": "What are the monthly freight rates for Transpacific lane in 2026?",
+      "status": "verified",
+      "finding": {
+        "answer": "Transpacific rates ranged from 1500 to 2500 per FEU in 2026.",
+        "claims": [
+          {
+            "text": "Dec 2026 rate was 2100/FEU",
+            "value": 2100,
+            "unit": "USD/FEU",
+            "sourceIds": [
+              "S2"
+            ],
+            "quote": "December 2026 Transpacific rate reached 2100 per FEU"
+          },
+          {
+            "text": "Nov 2026 rate was 2000/FEU",
+            "value": 2000,
+            "unit": "USD/FEU",
+            "sourceIds": [
+              "S2"
+            ],
+            "quote": "November 2026 Transpacific rate was 2000 per FEU"
+          }
+        ]
+      },
+      "sources": [
+        {
+          "id": "S2",
+          "url": "https://example.com/freight-transpacific",
+          "title": "Transpacific Freight Rates 2026",
+          "text": "December 2026 Transpacific rate reached 2100 per FEU. November 2026 Transpacific rate was 2000 per FEU. October 2026 rate was 1900 per FEU."
+        }
+      ]
+    }
+  ],
+  "contractClass": "analysis"
+}

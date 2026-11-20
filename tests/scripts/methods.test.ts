@@ -6,13 +6,13 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('methods gate', () => {
-  it('methods.json exists and has M1-M16', async () => {
+  it('methods.json exists and has M1-M20', async () => {
     const methodsPath = path.join(ROOT, 'src', 'research', 'methods.json');
     const content = await fs.readFile(methodsPath, 'utf8');
     const methods = JSON.parse(content);
-    expect(methods.length).toBe(16);
+    expect(methods.length).toBe(20);
     const ids = methods.map((m) => m.id);
-    for (let i = 1; i <= 16; i++) {
+    for (let i = 1; i <= 20; i++) {
       expect(ids).toContain(`M${i}`);
     }
   });
