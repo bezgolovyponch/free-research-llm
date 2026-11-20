@@ -1007,22 +1007,25 @@ export class ResearchEngine {
     const kind = project.decisionModel?.kind;
     const terms = kind?.validated?.terms ?? [];
     if (!terms.length) return sources;
-    const dropped = [];
-    const kept = sources.filter((source) => {
+    const onKind = [];
+    const noTerm = [];
+    const nearMiss = [];
+    for (const source of sources) {
       const text = `${source.title ?? ''} ${source.snippet ?? ''} ${source.text ?? ''}`;
       const near = (kind.not ?? []).find((phrase) => mentionsPhrase(text, phrase));
       if (near) {
-        dropped.push({ source, reason: `a near-miss kind (${near})` });
-        return false;
+        nearMiss.push({ source, reason: `a near-miss kind (${near})` });
+        continue;
       }
       if (!kindOnPage(text, { terms })) {
-        dropped.push({ source, reason: `not the asked kind (${kind.label})` });
-        return false;
+        noTerm.push({ source, reason: `not the asked kind (${kind.label})` });
+        continue;
       }
-      return true;
-    });
-    if (dropped.length) this.emit(project, 'node', `${node.id}: ${dropped.length} source(s) dropped before any model call — ${dropped.map((drop) => `${hostOf(drop.source.url)}: ${drop.reason}`).slice(0, 5).join(', ')}`, { nodeId: node.id });
-    return kept;
+      onKind.push(source);
+    }
+    const demoted = [...noTerm, ...nearMiss];
+    if (demoted.length) this.emit(project, 'node', `${node.id}: ${demoted.length} source(s) demoted behind on-kind sources - ${demoted.map((drop) => `${hostOf(drop.source.url)}: ${drop.reason}`).slice(0, 5).join(', ')}`, { nodeId: node.id });
+    return [...onKind, ...noTerm.map((d) => d.source), ...nearMiss.map((d) => d.source)];
   }
 
   onConceptOnly(project, node, sources) {
