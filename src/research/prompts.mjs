@@ -252,9 +252,23 @@ function itemsBlock(nodes) {
   return `\nCANDIDATE ITEMS FOUND (${items.length}; from passing pieces):\n${items.map((i) => `- [${i.nodeId}] ${String(i.title ?? i.name ?? '').slice(0, 80)} · ${i.value ?? '?'} ${i.unit ?? ''} · ${i.url}`).join('\n')}\nSCREEN them like a systematic review (identify → screen → include): check each item against the screening findings above (price incl. preparation, climate, distance, permits, demand), and state in the verdict the counts: identified, screened out (main reasons), included. An item with unknown facts is "to check", not included.\n`;
 }
 
-export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision', shortlist = '' }) {
+export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision', shortlist = '', observationsTable = null, forecast = null }) {
   const drivers = nodes.filter((n) => n.parentId === 'Q');
   const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}`);
+
+  let obsBlock = '';
+  if (observationsTable?.rows?.length) {
+    const header = observationsTable.columns.join(', ');
+    const rows = observationsTable.rows.slice(0, 50).map(r => Object.values(r).join(', ')).join('\n');
+    obsBlock = `\nOBSERVATION TABLE (computed by code from sources):\n${header}\n${rows}\n`;
+  }
+
+  let forecastBlock = '';
+  if (forecast?.length) {
+    const frows = forecast.map(f => `${f.time}, ${f.entity ?? ''}, ${f.value}, ${f.unit}, ${f.label}`).join('\n');
+    forecastBlock = `\nFORECAST (computed by code, never by model):\n${frows}\n`;
+  }
+
   return [
     { role: 'system', content: SYSTEM },
     {
@@ -272,11 +286,13 @@ RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported)
 ${lines.join('\n')}
 ${itemsBlock(nodes)}
 ${shortlist ? `\nCANDIDATE TABLE (screened by code against the hard limits; cite counts from it, never invent items):\n${shortlist}\nThe table counts are final and computed by code. Use the kept count as the number of results; never state a different count of results or say the target is not met when kept >= the expected item count.\n` : ''}
+${obsBlock}${forecastBlock}
 ${KIND_RULE[kind] ?? KIND_RULE.decision}
 Write the final memo. If the EXPECTED RESULT asks for items or links, the verdict says how many verified items were found; the item list itself is attached by machine. Always reach a result of the type asked above and always compute the best estimate of the answer, even when inputs are weak: use the weak findings as low–base–high ranges and state which node ids are assumptions. Never answer only "insufficient data": missing evidence is not evidence against, so say which weak inputs (node ids) would flip the verdict and at what value. Use only the results above; cite node ids like (D2.1). Weight verified findings over weak ones and say so. Give numbers with units. Be brief: compact JSON, at most 6 keyNumbers, 3 scenarios, 4 sensitivity items, 5 risks, 5 open questions, 5 next steps.
 JSON shape:
 {"verdict":"one line; never copy angle brackets or placeholders","confidence":"low|medium|high","actions":[{"action":"","why":"","nodeIds":["D1.1"],"impact":3,"horizon":""}],"options":[{"option":"GO","support":["D1"],"against":["D2"]}],"bestEstimate":{"value":"the computed answer","unit":"","low":"","high":"","basis":"node ids it rests on"},"summary":"3-5 sentences","keyNumbers":[{"label":"","value":"","unit":"","nodeId":""}],"scenarios":[{"name":"pessimistic|base|optimistic","assumptions":"","outcome":""}],"sensitivity":[{"variable":"","effect":"what change flips the decision"}],"risks":[""],"openQuestions":[""],"nextSteps":[{"step":"","why":"","how":""}]}
-Drivers: ${drivers.map((d) => d.id).join(', ')}.`,
+Drivers: ${drivers.map((d) => d.id).join(', ')}.
+The observation table and forecast are computed by code. Explain the drivers (reasons) from the pieces as justification, labelled. Treat forecast numbers as code-computed.`,
     },
   ];
 }

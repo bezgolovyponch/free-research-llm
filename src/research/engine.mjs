@@ -20,6 +20,8 @@ import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
 import { NO_ITEMS_DETAIL, asksForItems, contractClass } from './deliverable.mjs';
+import { runObservations, toCSV, toJSON, tableSpec, extract } from './observations.mjs';
+import { aggregateObservations, askedHorizon, buildResultsTable, forecast } from './forecast.mjs';
 import { harvestItems } from './harvest.mjs';
 import { buildBrief, countryByCode, describeBrief, onConcept, radiusIn, regionLabel, regionVerdict, regionsIn } from './brief.mjs';
 import { CONCEPT_PAGES, CONCEPT_SAMPLES, MIN_MEMBERS, MIN_PAGES, applyConceptCard, conceptCardPrompt, conceptPageLimit, conceptPages, conceptQueries, conceptQueryCount, conceptQueryPrompt, groundMembers, isUmbrella, mergeConceptCards, mentionsPhrase } from './concept.mjs';
@@ -1536,7 +1538,7 @@ export class ResearchEngine {
     const reply = await this.router.complete({
       purpose: 'synthesize',
       tier: 'deep',
-      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates) }), project.guidance),
+      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates), observationsTable: project.results?.table, forecast: project.results?.forecast }), project.guidance),
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
@@ -2119,6 +2121,23 @@ export class ResearchEngine {
       });
       const stoppedAfterPieces = await this.stopIfCancelled(project, id, release);
       if (stoppedAfterPieces) return stoppedAfterPieces;
+
+      const brief = project.brief ?? this.briefOf(project);
+      const noCandidateTable = brief.located === false || isAnalysis;
+      if (noCandidateTable && project.nodes.some((n) => n.sources?.length)) {
+        const readPage = this.cachedPageReader(pages);
+        const spec = await tableSpec(project, this.router);
+        project.results = { ...(project.results ?? {}), spec };
+        const extracted = await extract(project, this.router, readPage);
+        project.results = { ...project.results, ...extracted };
+        const aggregated = aggregateObservations(extracted.observations, spec);
+        const lastTime = aggregated.map((a) => String(a.time ?? '')).filter((t) => /^\d{4}-\d{2}$/.test(t)).sort().pop();
+        const horizon = askedHorizon(`${project.question ?? ''} ${project.acceptance?.expected ?? ''}`, lastTime);
+        const forecastRows = aggregated.length >= 2 && horizon > 0 ? forecast(aggregated, spec, horizon) : [];
+        project.results.table = buildResultsTable(spec, aggregated, forecastRows);
+        this.emit(project, 'results', `result table: ${extracted.observations.length} rows from ${new Set(extracted.observations.map((o) => o.source)).size} sources (${extracted.rejected?.quote ?? 0} rejected: quote not on page; ${extracted.rejected?.number ?? 0}: number not in quote)`);
+      }
+
       if (isAnalysis) {
         project.candidates = null;
       } else {

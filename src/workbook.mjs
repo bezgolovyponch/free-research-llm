@@ -270,9 +270,28 @@ export function piecesRows(project) {
   return rows;
 }
 
+const OBSERVATION_FIELD = { time: 'time', entity: 'entity', value: 'value', unit: 'unit' };
+
+const RESULT_TABLE_HEADER = ['time', 'entity', 'value', 'unit', 'type', 'min', 'max', 'basis', 'source'];
+
+export function observationTableRows(project) {
+  const results = project.results ?? {};
+  if (Array.isArray(results.table) && results.table.length) {
+    return [RESULT_TABLE_HEADER, ...results.table.map((r) => [r.time ?? '', r.entity ?? '', r.value ?? '', r.unit ?? '', r.type ?? '', r.min ?? r.low ?? '', r.max ?? r.high ?? '', r.type === 'forecast' ? (r.label ?? r.method ?? '') : (r.quote ?? ''), r.source ?? ''])];
+  }
+  const spec = results.spec;
+  const observations = results.observations ?? [];
+  if (!spec || !observations.length) return [];
+  const columns = spec.columns.filter((c) => OBSERVATION_FIELD[c.type]);
+  const header = [...columns.map((c) => c.name), 'quote', 'source'];
+  return [header, ...observations.map((o) => [...columns.map((c) => o[OBSERVATION_FIELD[c.type]] ?? ''), o.quote ?? '', o.source ?? ''])];
+}
+
 export function resultsSheets(project, exportedAt = new Date()) {
+  const results = project.results ?? {};
   const sheets = [
     { name: 'Summary', rows: summaryRows(project, exportedAt) },
+    ...(results.observations ? [{ name: 'Result table', rows: observationTableRows(project) }] : []),
     ...(project.candidates ? [
       ...(project.candidates.proposals ? [{ name: 'Proposals', rows: proposalRows(project) }] : []),
       { name: 'Listings', rows: plotRows(project) },

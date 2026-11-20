@@ -170,5 +170,49 @@
     "status": "verified",
     "url": "https://arxiv.org/abs/2411.00640",
     "sha256": "3c59142f449cd6ff38a61a7ae195f34ea654cd647181f624506bc9d7c3940901"
+  },
+  {
+    "id": "M17",
+    "title": "tidy data",
+    "source_url": "https://www.jstatsoft.org/article/view/v059i10",
+    "quote": "Each variable is a column, each observation is a row, and each type of observational unit is a table.",
+    "context": "Wickham, Tidy Data, J. Stat. Software 59(10), 2014 — tidy datasets are easy to manipulate, model and visualize because they have a specific structure.",
+    "transfer": "Observation tables follow tidy data principles: each row is one observation (time × entity), each column a variable with its unit, and the table represents one observational unit. The spec proposes columns from the asker's words and code enforces them.",
+    "status": "verified",
+    "url": "https://www.jstatsoft.org/article/view/v059i10",
+    "sha256": "ce9c601126b4433f582e06eefc64bcbff1ecf6a128aa7b257b2f1e900eb5ed23"
+  },
+  {
+    "id": "M18",
+    "title": "LLM forecasting ablation",
+    "source_url": "https://arxiv.org/abs/2406.16964",
+    "quote": "removing the LLM component or replacing it with a basic attention layer does not degrade forecasting performance",
+    "context": "Tan et al., Are Language Models Actually Useful for Time Series Forecasting?, NeurIPS 2024 — ablation studies on three LLM-based forecasting methods show the LLM adds no value; the forecast is computed by code, never by a model.",
+    "transfer": "The forecast operation is pure code (drift + seasonal naive + Theil–Sen trend), no model call. The model only proposes the table spec and extracts observations with quotes; all aggregation, trend, and forecast are deterministic code.",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2406.16964",
+    "sha256": "7537c7b2789be4fee132550bf37a93534d6b507cfb8914fe86996a3f4feba7ce"
+  },
+  {
+    "id": "M19",
+    "title": "simple forecasting benchmarks",
+    "source_url": "https://otexts.com/fpp3/toolbox.html#sec-simple-methods",
+    "quote": "A variation on the naïve method is to allow the forecasts to increase or decrease over time, where the amount of change over time (called the drift) is set to be the average change seen in the historical data.",
+    "context": "Hyndman & Athanasopoulos, Forecasting: Principles and Practice — seasonal naïve and drift as benchmark methods. Seasonal naïve: each forecast equals the last observed value from the same season. Drift: extrapolates the line between first and last observations.",
+    "transfer": "Forecast uses drift with Theil–Sen slope as the trend, plus seasonal naïve offsets when ≥12 periods exist. Interval from residual quantiles (10–90%) of the fitted series. Never a model call.",
+    "status": "verified",
+    "url": "https://otexts.com/fpp3/toolbox.html#sec-simple-methods",
+    "sha256": "3a3d58e7aa8aa700430e4c3aa809f76cc19b4e0c0eb0f14df854d83750f81c9d"
+  },
+  {
+    "id": "M20",
+    "title": "retrieval-augmented forecasting",
+    "source_url": "https://arxiv.org/abs/2402.18563",
+    "quote": "We build a retrieval-augmented LM system that significantly improves upon the baseline and approaches the human crowd performance on competitive forecasting platforms.",
+    "context": "Halawi et al., Approaching Human-Level Forecasting with Language Models, 2024 — retrieval-augmented LM system searches for relevant information, generates forecasts, and aggregates predictions. The system uses retrieval-augmented reasoning for explanations (drivers), not for the numbers.",
+    "transfer": "Drivers (reasons with justification) come from the pieces as labelled explanations; the model proposes them but they are traced to source quotes. The numbers (observations, aggregates, trend, forecast) are computed by code. Memocheck treats forecast numbers as code-computed.",
+    "status": "verified",
+    "url": "https://arxiv.org/abs/2402.18563",
+    "sha256": "cb45240c97627690c51e0d392a9b18e68f1b994aeaa34806a7cd2390ae426e36"
   }
 ]

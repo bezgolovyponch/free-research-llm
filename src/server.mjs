@@ -10,7 +10,7 @@ import { AccessGate, crossOrigin, newAccessToken } from './auth.mjs';
 import { NotFoundError, ProjectBusyError } from './research/engine.mjs';
 import { RemovalRefusedError, StoreBusyError } from './store.mjs';
 import { TEMPLATES } from './research/templates.mjs';
-import { candidatesCsv, itemsCsv, piecesCsv, resultsJson, sheetsCsvZip, toMarkdown } from './report.mjs';
+import { candidatesCsv, itemsCsv, piecesCsv, resultsJson, sheetsCsvZip, toMarkdown, observationsCsv } from './report.mjs';
 import { resultsSheets, resultsWorkbook } from './workbook.mjs';
 import { XLSX_TYPE } from './xlsx.mjs';
 import { resultStatus } from './research/gaps.mjs';
@@ -432,7 +432,7 @@ export function createServer(app, gate = new AccessGate()) {
         res.setHeader('content-disposition', `attachment; filename="${project.id}.md"`);
         return send(res, 200, toMarkdown(project), 'text/markdown; charset=utf-8');
       }
-      const exported = url.pathname.match(/^\/api\/projects\/([\w-]+)\/(results\.json|results\.xlsx|results\.zip|pieces\.csv|items\.csv|candidates\.csv)$/);
+      const exported = url.pathname.match(/^\/api\/projects\/([\w-]+)\/(results\.json|results\.xlsx|results\.zip|pieces\.csv|items\.csv|candidates\.csv|observations\.csv)$/);
       if (req.method === 'GET' && exported) {
         const project = await app.engine.load(exported[1]);
         const [kind, ext] = exported[2].split('.');
@@ -440,7 +440,7 @@ export function createServer(app, gate = new AccessGate()) {
         if (ext === 'json') return send(res, 200, resultsJson(project));
         if (ext === 'xlsx') return send(res, 200, resultsWorkbook(project), XLSX_TYPE);
         if (ext === 'zip') return send(res, 200, sheetsCsvZip(resultsSheets(project)), 'application/zip');
-        const table = { pieces: piecesCsv, items: itemsCsv, candidates: candidatesCsv }[kind];
+        const table = { pieces: piecesCsv, items: itemsCsv, candidates: candidatesCsv, observations: observationsCsv }[kind];
         return send(res, 200, `\ufeff${table(project)}`, 'text/csv; charset=utf-8');
       }
       for (const [method, pattern, handler] of routes) {
