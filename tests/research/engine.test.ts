@@ -1606,6 +1606,46 @@ describe('owner and expert knowledge from worldwide sources', () => {
     expect(prompt).toContain('Every query names "skoda fabia".');
     expect(prompt).toContain('Czech');
   });
+
+describe('conceptLanguages', () => {
+  let engine: ResearchEngine;
+  beforeEach(() => {
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }) });
+  });
+
+  it('a region code in REGION_LANGUAGES still yields its language', () => {
+    const langs = engine.conceptLanguages(['CZ']);
+    expect(langs).toContain('Czech');
+    expect(langs[0]).toBe('English');
+  });
+
+  it('the code AL yields a second entry naming the main language of Albania', () => {
+    const langs = engine.conceptLanguages(['AL']);
+    expect(langs).toContain('the main language of Albania');
+    expect(langs[0]).toBe('English');
+  });
+
+  it('an unknown two-letter code that countryByCode does not know yields only English', () => {
+    const langs = engine.conceptLanguages(['XX']);
+    expect(langs).toEqual(['English']);
+  });
+
+  it('keeps English first and deduplicates', () => {
+    const langs = engine.conceptLanguages(['CZ', 'DE', 'AT']);
+    expect(langs[0]).toBe('English');
+    expect(langs.filter((l) => l === 'English')).toHaveLength(1);
+    expect(langs.filter((l) => l === 'German')).toHaveLength(1);
+    expect(langs.filter((l) => l === 'Czech')).toHaveLength(1);
+  });
+
+  it('falls back to main language for countries missing from REGION_LANGUAGES like AL, ME, GE', () => {
+    const langs = engine.conceptLanguages(['AL', 'ME', 'GE']);
+    expect(langs).toContain('the main language of Albania');
+    expect(langs).toContain('the main language of Montenegro');
+    expect(langs).toContain('the main language of Georgia');
+    expect(langs[0]).toBe('English');
+  });
 });
 
 describe('distance from the asked place', () => {
@@ -3354,4 +3394,5 @@ describe('gateOnKind', () => {
     expect(result[0].id).toBe('S1');
     expect(result[1].id).toBe('S2');
   });
+});
 });

@@ -912,7 +912,9 @@ export class ResearchEngine {
   conceptLanguages(regions = []) {
     const languages = ['English'];
     for (const code of regions ?? []) {
-      const language = REGION_LANGUAGES[String(code ?? '').toUpperCase()];
+      const key = String(code ?? '').toUpperCase();
+      const country = countryByCode(key);
+      const language = REGION_LANGUAGES[key] ?? (country ? `the main language of ${country.name}` : '');
       if (language && !languages.includes(language)) languages.push(language);
     }
     return languages;
