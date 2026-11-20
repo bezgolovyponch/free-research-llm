@@ -4112,3 +4112,19 @@ describe('FRL_NO_PAUSE', () => {
     }
   });
 });
+
+describe('acceptanceResult.kind is the kind the judge uses', () => {
+  it('stores the decision model kind (with its entity flag) when one exists', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find wholesale suppliers', expected: '3 links' });
+    project.decisionModel = { kind: { label: 'wholesale supplier', terms: ['wholesale'] }, criteria: [] };
+    project.acceptance = { itemCount: 3, mustMention: [] };
+    project.nodes = [{ id: 'D1', parentId: 'Q', status: 'verified', finding: { items: [] } }];
+    project.hubSources = [];
+    project.domainSources = [];
+    project.report = {};
+    await engine.checkAcceptance(project);
+    expect(project.acceptanceResult.kind?.label).toBe('wholesale supplier');
+    expect(project.acceptanceResult.kind?.entity).toBe(project.decisionModel.kind.entity);
+  });
+});

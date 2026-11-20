@@ -555,3 +555,17 @@ describe('evaluationKind', () => {
     expect(reasons.filter(r => r.includes('validCount mismatch'))).toHaveLength(0);
   });
 });
+describe('evaluationKind is evidence-first', () => {
+  it('a stored kind that the items do not carry loses to the kind whose entity-form check id they do carry', () => {
+    const stored = { label: 'bouldering gym', terms: ['boulderhalle'] };
+    const modelKind = { label: 'bouldering gym', terms: ['boulderhalle'], entity: true };
+    const entityId = `kind|${kindCluster(modelKind).items[0].question}`;
+    expect(entityId).not.toBe(`kind|${kindCluster(stored).items[0].question}`);
+    const project = { acceptanceResult: { kind: stored, items: [{ url: 'https://a.example/1', checks: [{ id: entityId, answer: 'yes' }] }] }, decisionModel: { kind: modelKind }, brief: { kind: stored } };
+    expect(evaluationKind(project)).toEqual(modelKind);
+  });
+  it('the stored kind still decides when no judged item carries any candidate id', () => {
+    const stored = { label: 'x', terms: [] };
+    expect(evaluationKind({ acceptanceResult: { kind: stored, items: [] }, decisionModel: { kind: { label: 'y', terms: [] } } })).toEqual(stored);
+  });
+});
