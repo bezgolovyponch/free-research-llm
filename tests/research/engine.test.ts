@@ -3700,3 +3700,82 @@ describe('ResearchEngine alternative-means capture', () => {
     }
   });
 });
+
+describe('FRL_REQUEST_MODEL_ENFORCE', () => {
+  const treeWithEmptyServes = {
+    decision: 'd',
+    successCriteria: 's',
+    assumptionsToConfirm: [],
+    acceptance: { itemCount: 2, valueRange: [0, 10000], unit: 'EUR' },
+    nodes: [
+      { id: 'D1', parentId: null, title: 'Prices', question: 'What do things cost?', serves: [] },
+      { id: 'D2', parentId: null, title: 'Quality', question: 'What is the quality?', serves: ['R1'] },
+    ],
+  };
+  const treeFixed = {
+    decision: 'd',
+    successCriteria: 's',
+    assumptionsToConfirm: [],
+    acceptance: { itemCount: 2, valueRange: [0, 10000], unit: 'EUR' },
+    nodes: [
+      { id: 'D1', parentId: null, title: 'Prices', question: 'What do things cost?', serves: ['R1'] },
+      { id: 'D2', parentId: null, title: 'Quality', question: 'What is the quality?', serves: ['R1'] },
+    ],
+  };
+
+  it('flag on: retries when a node has empty serves, feedback contains serves-none detail', async () => {
+    const original = process.env.FRL_REQUEST_MODEL_ENFORCE;
+    process.env.FRL_REQUEST_MODEL_ENFORCE = '1';
+    try {
+      const calls: Array<{ messages: Array<{ content: string }> }> = [];
+      const replies = [treeWithEmptyServes, treeFixed];
+      const provider = {
+        id: 'demo',
+        ready: true,
+        describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo', deep: 'demo', local: false, keyEnv: null, signup: '', modelCount: 1 }),
+        async chat({ messages }: { messages: Array<{ content: string }> }) {
+          calls.push({ messages });
+          return { content: JSON.stringify(replies.shift()), model: 'm', provider: 'demo', usage: {} };
+        },
+      };
+      const { engine } = engineWith(provider);
+      const project = await engine.createProject({ question: 'Find items under 10000 EUR', expected: '2 items under 10000 EUR' });
+      await engine.decompose(project);
+      expect(calls).toHaveLength(2);
+      const secondCall = calls[1];
+      const feedback = secondCall.messages[1].content;
+      expect(feedback).toContain('serves-none');
+      expect(feedback).toContain('D1 names no requirement it serves');
+      expect(feedback).toContain('E1');
+      expect(feedback).toContain('Q1');
+    } finally {
+      if (original !== undefined) process.env.FRL_REQUEST_MODEL_ENFORCE = original;
+      else delete process.env.FRL_REQUEST_MODEL_ENFORCE;
+    }
+  });
+
+  it('flag off: no retry for the same reply with empty serves', async () => {
+    const original = process.env.FRL_REQUEST_MODEL_ENFORCE;
+    delete process.env.FRL_REQUEST_MODEL_ENFORCE;
+    try {
+      const calls: Array<{ messages: Array<{ content: string }> }> = [];
+      const replies = [treeWithEmptyServes, treeFixed];
+      const provider = {
+        id: 'demo',
+        ready: true,
+        describe: () => ({ id: 'demo', label: 'Demo', state: 'ready', detail: '', configured: true, fast: 'demo', deep: 'demo', local: false, keyEnv: null, signup: '', modelCount: 1 }),
+        async chat({ messages }: { messages: Array<{ content: string }> }) {
+          calls.push({ messages });
+          return { content: JSON.stringify(replies.shift()), model: 'm', provider: 'demo', usage: {} };
+        },
+      };
+      const { engine } = engineWith(provider);
+      const project = await engine.createProject({ question: 'Find items under 10000 EUR', expected: '2 items under 10000 EUR' });
+      await engine.decompose(project);
+      expect(calls).toHaveLength(1);
+    } finally {
+      if (original !== undefined) process.env.FRL_REQUEST_MODEL_ENFORCE = original;
+      else delete process.env.FRL_REQUEST_MODEL_ENFORCE;
+    }
+  });
+});

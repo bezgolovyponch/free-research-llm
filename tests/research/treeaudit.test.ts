@@ -386,3 +386,16 @@ describe('listing work needs an action on listings, not any verb (plot research 
   });
 });
 
+describe('auditFeedback renders unknown codes', () => {
+  it('includes the detail for a serves-none issue', () => {
+    const { auditFeedback } = require('../../src/research/treeaudit.mjs');
+    const issues = [
+      { code: 'serves-none', nodeId: 'D3', detail: 'D3 names no requirement it serves; every piece must serve one of: R1, R2' },
+      { code: 'single-child', nodeId: 'D1', detail: 'D1 has one sub-question (D1.1); a split needs at least 2' },
+    ];
+    const feedback = auditFeedback(issues);
+    expect(feedback).toContain('serves-none: D3 names no requirement it serves; every piece must serve one of: R1, R2');
+    expect(feedback).toContain('single-child: D1 has one sub-question (D1.1); a split needs at least 2');
+  });
+});
+
