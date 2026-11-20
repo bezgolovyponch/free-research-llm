@@ -30,6 +30,23 @@ export function quoteStates(text, quote, value) {
 }
 
 const NEED_KINDS = ['listings', 'knowledge', 'computed'];
+const ANSWER_UNITS = ['items', 'number', 'claim', 'choice'];
+const NO_UNIT = { answerUnit: null, answerUnitShare: 0, answerUnitQuote: '' };
+
+export function answerUnitOf(replies, askerWords) {
+  const votes = new Map();
+  for (const raw of replies) {
+    const unit = ANSWER_UNITS.includes(raw?.answerUnit) ? raw.answerUnit : null;
+    if (unit) votes.set(unit, [...(votes.get(unit) ?? []), String(raw?.answerUnitQuote ?? '').trim().slice(0, 200)]);
+  }
+  const majority = Math.floor(replies.length / 2) + 1;
+  for (const [unit, quotes] of votes) {
+    if (quotes.length < majority) continue;
+    const quote = quotes.find((q) => q && quoteFound(askerWords, q));
+    return quote ? { answerUnit: unit, answerUnitShare: Math.round((quotes.length / replies.length) * 100) / 100, answerUnitQuote: quote } : NO_UNIT;
+  }
+  return NO_UNIT;
+}
 const words = (text, max) => String(text ?? '').trim().slice(0, max);
 
 export function normalizeSample(raw) {
@@ -230,9 +247,11 @@ export function applyCalibration(kind, reply, titles, { itemTitles = [] } = {}) 
 
 export function decisionPrompt({ question, guidance = '', expected = '', examples = [] }) {
   const measures = Object.entries(MEASURES).map(([id, m]) => `- ${id}: ${m.label} (${m.unit})`).join('\n');
+  const unitAsk = process.env.FRL_ANSWER_UNIT ? ' "answerUnit" is the unit of the answer the asker expects: "items" (several separate things), "number" (one figure or estimate), "claim" (an answer in words) or "choice" (one of named options); "answerUnitQuote" is the words of the asker that show it, copied character for character from the question, expected result or guidance, or "" when nothing states it.' : '';
+  const unitKeys = process.env.FRL_ANSWER_UNIT ? ', "answerUnit": "items" | "number" | "claim" | "choice", "answerUnitQuote": "..."' : '';
   const shots = examples.map((c) => `Question: ${c.question}\nModel: ${JSON.stringify({ concept: c.concept, kind: c.kind ? { label: c.kind.label, terms: c.kind.terms, not: c.kind.not ?? [], ...(c.kind.members?.length ? { members: c.kind.members.map((m) => ({ label: m.label, terms: m.terms })) } : {}) } : null, criteria: c.criteria.map(({ clause, measure, op, value, quote }) => ({ clause, measure, op, value, quote })) })}`).join('\n\n');
   return [
-    { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label, the words (in English and in the languages of the named countries) that listing titles use for it, and "not", the words (in English and in the languages of the named countries, and of the countries around a named place) that listing titles use for things sold alongside the item that are not the item itself (parts, accessories, wanted ads, services). When the item asked is a category that covers several distinct kinds of seller or item (one asks for "home improvement contractors" and means roofers, plumbers, electricians and the like), "kind" also lists in "members" every kind the question reasonably covers, each {"label": "...", "terms": ["..."]} with the words its own sellers use, and "terms" holds the words for the category as a whole; "members" is [] when the item is one kind.\n"purpose" is one sentence "<who> wants <outcome> so that <value>" in the user's own terms, naming the decision the result serves. "value" is one sentence naming the result worth having and how it is judged (for example "a shortlist of <N> <items> within <distance> of <place>, each at or below <limit> and below the median price of comparable items"). "needs" is up to 8 items {"need": "...", "kind": "listings" | "knowledge" | "computed", "sources": ["a domain or a source type", up to 4]} where listings are read by code from portals, knowledge is researched by tree pieces, and computed is derived by code from the listings table. Answer with JSON only: {"concept": "...", "purpose": "...", "value": "...", "needs": [...], "kind": {"label": "...", "terms": ["..."], "not": ["..."], "members": [{"label": "...", "terms": ["..."]}]}, "criteria": [...], "unmodelled": ["..."]}` },
+    { role: 'system', content: `You turn a research question into a decision model that code will measure on every listing. Code can measure only these quantities:\n${measures}\nFor each clause of the question that one of them can test, return a criterion {clause, measure, op (one of <=, >=, <, >), value, quote}. "quote" is the exact words of the question or guidance that state the limit, copied character for character; when the question gives no number, set value to null and quote to "". Never invent a number. Clauses no measure can test go into "unmodelled". "kind" is the item the user wants listed: a short label, the words (in English and in the languages of the named countries) that listing titles use for it, and "not", the words (in English and in the languages of the named countries, and of the countries around a named place) that listing titles use for things sold alongside the item that are not the item itself (parts, accessories, wanted ads, services). When the item asked is a category that covers several distinct kinds of seller or item (one asks for "home improvement contractors" and means roofers, plumbers, electricians and the like), "kind" also lists in "members" every kind the question reasonably covers, each {"label": "...", "terms": ["..."]} with the words its own sellers use, and "terms" holds the words for the category as a whole; "members" is [] when the item is one kind.\n"purpose" is one sentence "<who> wants <outcome> so that <value>" in the user's own terms, naming the decision the result serves. "value" is one sentence naming the result worth having and how it is judged (for example "a shortlist of <N> <items> within <distance> of <place>, each at or below <limit> and below the median price of comparable items"). "needs" is up to 8 items {"need": "...", "kind": "listings" | "knowledge" | "computed", "sources": ["a domain or a source type", up to 4]} where listings are read by code from portals, knowledge is researched by tree pieces, and computed is derived by code from the listings table.${unitAsk} Answer with JSON only: {"concept": "...", "purpose": "...", "value": "...", "needs": [...], "kind": {"label": "...", "terms": ["..."], "not": ["..."], "members": [{"label": "...", "terms": ["..."]}]}, "criteria": [...], "unmodelled": ["..."]${unitKeys}}` },
     { role: 'user', content: `${shots ? `Approved examples:\n${shots}\n\n` : ''}Question: ${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
   ];
 }
@@ -435,6 +454,7 @@ export class DecisionModeler {
     const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));
     if (samples.length < 2) return project.decisionModel ?? null;
     const model = aggregate(samples, { question, guidance, cases: examples, id: project.id });
+    if (process.env.FRL_ANSWER_UNIT) Object.assign(model, answerUnitOf(replies.filter((r) => r?.data).map((r) => r.data), [question, project.acceptance?.expected ?? '', guidance].join('\n')));
     const stored = project.decisionModel;
     let finalModel = model;
     let rebuildWeaker = false;

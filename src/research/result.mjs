@@ -1,4 +1,4 @@
-import { NO_ITEMS_DETAIL, missingItems } from './deliverable.mjs';
+import { NO_ITEMS_DETAIL, answersWithNumber, missingItems } from './deliverable.mjs';
 import { createHash } from 'node:crypto';
 import { isEvidenceGap } from './verify.mjs';
 import { ROOT_ID } from './tree.mjs';
@@ -54,6 +54,7 @@ const KINDS = [
 ];
 
 export function questionKind(project) {
+  if (answersWithNumber(project)) return 'estimate';
   if (Number(project.acceptance?.itemCount) > 0) return 'list';
   const text = `${project.question ?? ''} ${project.decision ?? ''}`;
   return KINDS.find(([, re]) => re.test(text))?.[0] ?? 'decision';

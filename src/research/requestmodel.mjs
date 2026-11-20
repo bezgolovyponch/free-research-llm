@@ -70,7 +70,8 @@ export function buildRequestModel({ question = '', expected = '', constraints = 
     const bySupplied = supplied ? grounded(supplied, source) : null;
     const byClause = grounded(r.label, source);
     const ground = bySupplied?.source === 'quoted' ? bySupplied : byClause;
-    return { id: r.id, clause: r.label, source: ground.source, quote: ground.quote };
+    const unit = r.id === 'E1' && decisionModel?.answerUnit && decisionModel?.answerUnitQuote ? { unit: decisionModel.answerUnit } : {};
+    return { id: r.id, clause: r.label, source: ground.source, quote: ground.quote, ...unit };
   });
   return {
     purpose: { text: purposeText, source: purposeGround.source, quote: purposeGround.quote },

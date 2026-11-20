@@ -469,3 +469,48 @@ describe('2026-11-12 engine audit: the stored car research 0c750f', () => {
     expect(applyCalibration(kind, reply, [...cars, ...wheels], { itemTitles: wheels }).kind.not).toEqual(['parts', 'accessories', 'kola']);
   });
 });
+
+import { answerUnitOf } from '../../src/research/decision.mjs';
+
+describe('answer unit read from the request (FRL_ANSWER_UNIT)', () => {
+  const asker = 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.\none figure for 2024 residential heat pump installations in Czechia, with its source and link';
+  it('keeps the majority unit with its share when a quote is in the asker text', () => {
+    const replies = [
+      { answerUnit: 'number', answerUnitQuote: 'one figure for 2024' },
+      { answerUnit: 'number', answerUnitQuote: 'Give the figure' },
+      { answerUnit: 'items', answerUnitQuote: 'heat pumps' },
+    ];
+    expect(answerUnitOf(replies, asker)).toEqual({ answerUnit: 'number', answerUnitShare: 0.67, answerUnitQuote: 'one figure for 2024' });
+  });
+  it('drops the unit when no majority quote is found in the asker text', () => {
+    const replies = [
+      { answerUnit: 'number', answerUnitQuote: 'a single statistic' },
+      { answerUnit: 'number', answerUnitQuote: 'the total count' },
+      { answerUnit: 'claim', answerUnitQuote: '' },
+    ];
+    expect(answerUnitOf(replies, asker)).toEqual({ answerUnit: null, answerUnitShare: 0, answerUnitQuote: '' });
+  });
+  it('drops the unit without a majority and ignores values outside the closed set', () => {
+    const replies = [
+      { answerUnit: 'number', answerUnitQuote: 'Give the figure' },
+      { answerUnit: 'items', answerUnitQuote: 'heat pumps' },
+      { answerUnit: 'table', answerUnitQuote: 'Give the figure' },
+    ];
+    expect(answerUnitOf(replies, asker)).toEqual({ answerUnit: null, answerUnitShare: 0, answerUnitQuote: '' });
+  });
+  it('asks for the unit only when the flag is on', () => {
+    const before = process.env.FRL_ANSWER_UNIT;
+    try {
+      delete process.env.FRL_ANSWER_UNIT;
+      const off = decisionPrompt({ question: 'How many heat pumps?' })[0].content;
+      process.env.FRL_ANSWER_UNIT = '1';
+      const on = decisionPrompt({ question: 'How many heat pumps?' })[0].content;
+      expect(off).not.toContain('answerUnit');
+      expect(on).toContain('"answerUnit": "items" | "number" | "claim" | "choice"');
+      expect(on).toContain('"answerUnitQuote"');
+    } finally {
+      if (before === undefined) delete process.env.FRL_ANSWER_UNIT;
+      else process.env.FRL_ANSWER_UNIT = before;
+    }
+  });
+});

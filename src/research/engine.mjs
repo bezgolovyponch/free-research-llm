@@ -19,7 +19,7 @@ import { claimsToCheck, contextOf, needsRecheck, normalizeVote, resolveFromSourc
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
-import { NO_ITEMS_DETAIL, asksForItems, contractClass } from './deliverable.mjs';
+import { NO_ITEMS_DETAIL, asksForItems, contractClass, listCount } from './deliverable.mjs';
 import { runObservations, toCSV, toJSON, tableSpec, extract } from './observations.mjs';
 import { aggregateObservations, askedHorizon, buildResultsTable, forecast } from './forecast.mjs';
 import { harvestItems } from './harvest.mjs';
@@ -564,7 +564,7 @@ export class ResearchEngine {
     const acceptance = proposed.spec;
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
-    if (acceptance?.itemCount) {
+    if (listCount(project)) {
       await this.ensureDecisionModel(project);
       const brief = this.briefOf(project);
       if (brief.located) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NO_ITEMS_DETAIL, asksForItems, deliversItems, missingItems, contractClass } from '../../src/research/deliverable.mjs';
+import { NO_ITEMS_DETAIL, asksForItems, deliversItems, missingItems, contractClass, listCount } from '../../src/research/deliverable.mjs';
 import { effectiveGrade } from '../../src/research/result.mjs';
 
 const piece = (question: string, items: Array<{ url?: string }> = [], status = 'verified') => ({ id: 'D9', title: '', question, status, finding: { answer: 'x', items } });
@@ -59,5 +59,71 @@ describe('listing pieces', () => {
     expect(effectiveGrade(found)).toBe('verified');
     expect(effectiveGrade(piece('What is the average summer temperature in Algarve?'))).toBe('verified');
     expect(NO_ITEMS_DETAIL).toMatch(/returned none/);
+  });
+});
+
+describe('listCount and contractClass with FRL_ANSWER_UNIT', () => {
+  const baseProject = (overrides: Record<string, any> = {}) => ({
+    question: 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.',
+    acceptance: { expected: 'one figure for 2024 with its source and link', itemCount: 1 },
+    decisionModel: { answerUnit: null, answerUnitQuote: '' },
+    ...overrides,
+  });
+
+  it('listCount returns null for grounded number unit under the flag and itemCount without it', () => {
+    const project = baseProject({
+      decisionModel: { answerUnit: 'number', answerUnitQuote: 'one figure for 2024' },
+    });
+    expect(listCount(project)).toBe(1);
+    process.env.FRL_ANSWER_UNIT = '1';
+    try {
+      expect(listCount(project)).toBeNull();
+    } finally {
+      delete process.env.FRL_ANSWER_UNIT;
+    }
+  });
+
+  it('listCount returns itemCount for non-number unit', () => {
+    const project = baseProject({
+      decisionModel: { answerUnit: 'items', answerUnitQuote: 'list of heat pumps' },
+    });
+    expect(listCount(project)).toBe(1);
+  });
+
+  it('listCount returns itemCount when unit is null', () => {
+    const project = baseProject({ decisionModel: { answerUnit: null, answerUnitQuote: '' } });
+    expect(listCount(project)).toBe(1);
+  });
+
+  it('contractClass turns a kind-bearing list into analysis only for a grounded number unit under the flag', () => {
+    const project = baseProject({
+      decisionModel: { kind: { label: 'heat pump', terms: ['heat pump'] }, answerUnit: 'number', answerUnitQuote: 'one figure for 2024' },
+    });
+    expect(contractClass(project)).toBe('list');
+    process.env.FRL_ANSWER_UNIT = '1';
+    try {
+      expect(contractClass(project)).toBe('analysis');
+    } finally {
+      delete process.env.FRL_ANSWER_UNIT;
+    }
+  });
+
+  it('contractClass leaves a non-number unit to the existing rule under the flag', () => {
+    const project = baseProject({
+      decisionModel: { kind: { label: 'heat pump', terms: ['heat pump'] }, answerUnit: 'items', answerUnitQuote: 'list of heat pumps' },
+    });
+    process.env.FRL_ANSWER_UNIT = '1';
+    try {
+      expect(contractClass(project)).toBe('list');
+    } finally {
+      delete process.env.FRL_ANSWER_UNIT;
+    }
+  });
+
+  it('contractClass returns analysis for itemCount 1 when flag off (uses itemCountFromWords)', () => {
+    const project = baseProject({
+      decisionModel: { answerUnit: 'number', answerUnitQuote: 'one figure for 2024' },
+    });
+    expect(contractClass(project)).toBe('analysis');
   });
 });
