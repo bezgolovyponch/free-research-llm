@@ -99,6 +99,13 @@ function runTool(pkg, name, args) {
   return run(process.execPath, [binEntry(pkg, name, ROOT), ...args]);
 }
 
+export function freePort(spawn = spawnSync) {
+  const probe = "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{process.stdout.write(String(s.address().port));s.close()})";
+  const result = spawn(process.execPath, ['-e', probe], { encoding: 'utf8' });
+  const port = Number(String(result?.stdout ?? '').trim());
+  return Number.isInteger(port) && port > 0 ? port : null;
+}
+
 function repoFiles() {
   const listed = run('git', ['ls-files', '-co', '--exclude-standard']);
   return listed.status === 0 ? listed.stdout.split('\n').filter(Boolean).filter((f) => fs.existsSync(path.join(ROOT, f))) : [];
@@ -489,6 +496,10 @@ const gates = {
       return { passed: false, detail: `another quality gate holds ${lock.file} (pid ${lock.holder}); waited ${Math.round(LOCK_WAIT_MS / 60000)} min for it` };
     }
     try {
+      if (!process.env.FRL_E2E_PORT) {
+        const port = freePort();
+        if (port) process.env.FRL_E2E_PORT = String(port);
+      }
       const result = runTool('@playwright/test', 'playwright', ['test', '--reporter=line']);
       const summary = `${result.stdout}${result.stderr}`.match(/(\d+ passed[^\n]*|\d+ failed[^\n]*)/g);
       const failing = result.status === 0 ? [] : failingLines(`${result.stdout}${result.stderr}`, /^\s*(?:✘|\d+\)\s|Error:|Test timeout)/);

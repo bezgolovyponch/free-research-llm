@@ -70,3 +70,16 @@ describe('quality: checkWaste uses shared computeWasteStats', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
+import { freePort } from '../../scripts/quality.mjs';
+
+describe('freePort', () => {
+  it('returns a port the OS just handed out, so concurrent e2e runs never share one', () => {
+    const port = freePort();
+    expect(Number.isInteger(port)).toBe(true);
+    expect(port).toBeGreaterThan(0);
+  });
+  it('returns null when the probe prints nothing usable', () => {
+    expect(freePort(() => ({ stdout: 'not a port' }) as never)).toBeNull();
+    expect(freePort(() => ({ stdout: '' }) as never)).toBeNull();
+  });
+});
