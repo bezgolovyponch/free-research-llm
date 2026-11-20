@@ -12,8 +12,12 @@ function runCli(args: string[]): string {
 }
 
 describe('process lessons store', () => {
-  it('holds one entry per failure class F1 to F40, F44 to F46, F41, F43, F42, F47, F49, F48, F52, F51, F53, F54, F56, F57, F62, F63, F66, F58 and F59, in file order', () => {
-    expect(lessons.map((lesson: { id: string }) => lesson.id)).toEqual(['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F26', 'F27', 'F28', 'F29', 'F30', 'F31', 'F32', 'F33', 'F34', 'F35', 'F36', 'F37', 'F38', 'F39', 'F40', 'F44', 'F45', 'F46', 'F41', 'F43', 'F42', 'F47', 'F49', 'F48', 'F52', 'F51', 'F53', 'F54', 'F56', 'F57', 'F62', 'F63', 'F66', 'F58', 'F59']);
+  it('holds the numbered failure classes in their fixed order, then dated ids F-<date>-<short-name>, each id once', () => {
+    const numbered = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'F20', 'F21', 'F22', 'F23', 'F24', 'F25', 'F26', 'F27', 'F28', 'F29', 'F30', 'F31', 'F32', 'F33', 'F34', 'F35', 'F36', 'F37', 'F38', 'F39', 'F40', 'F44', 'F45', 'F46', 'F41', 'F43', 'F42', 'F47', 'F49', 'F48', 'F52', 'F51', 'F53', 'F54', 'F56', 'F57', 'F62', 'F63', 'F66', 'F58', 'F59'];
+    const ids = lessons.map((lesson: { id: string }) => lesson.id);
+    expect(ids.slice(0, numbered.length)).toEqual(numbered);
+    for (const id of ids.slice(numbered.length)) expect(id).toMatch(/^F-\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/);
+    expect(new Set(ids).size).toBe(ids.length);
     expect(matchLessons(lessons, ['src/research/semantic.mjs']).map((lesson: { id: string }) => lesson.id)).toContain('F56');
     const scoping = matchLessons(lessons, ['src/research/scoping.mjs']).map((lesson: { id: string }) => lesson.id);
     expect(scoping).toContain('F42');
@@ -72,14 +76,24 @@ describe('lesson lookup', () => {
   });
 
   it('ignores a repeated path', () => {
-    const matched = matchLessons(lessons, ['scripts/launch-worker.mjs', 'scripts/launch-worker.mjs']);
-    expect(matched.map((lesson: { id: string }) => lesson.id)).toEqual(['F3', 'F7']);
+    const store = [
+      { id: 'F3', touches: ['scripts/launch-worker.mjs'] },
+      { id: 'F-2026-11-20-example-name', touches: ['scripts/**'] },
+      { id: 'F9', touches: ['src/**'] },
+    ];
+    const matched = matchLessons(store, ['scripts/launch-worker.mjs', 'scripts/launch-worker.mjs']);
+    expect(matched.map((lesson: { id: string }) => lesson.id)).toEqual(['F3', 'F-2026-11-20-example-name']);
   });
 
   it('formats one line per lesson with signal and prevention', () => {
     const line = formatLesson(lessons.find((lesson: { id: string }) => lesson.id === 'F5'));
     expect(line).toMatch(/^F5 \| .+ \| signal: .+ \| prevention: .+$/);
     expect(line.split(' | ')).toHaveLength(4);
+  });
+
+  it('formats a dated id the same way as a numbered one', () => {
+    const lesson = { id: 'F-2026-11-20-example-name', title: 't', touches: ['a'], signal: 's', cause: 'c', prevention: 'p' };
+    expect(formatLesson(lesson)).toBe('F-2026-11-20-example-name | t | signal: s | prevention: p');
   });
 });
 
@@ -88,7 +102,7 @@ describe('recall command', () => {
     const out = runCli(['scripts/quality.mjs']);
     const lines = out.split('\n').filter(Boolean);
     expect(lines.length).toBeGreaterThan(0);
-    for (const line of lines) expect(line).toMatch(/^F\d+ \| .+ \| signal: .+ \| prevention: .+$/);
+    for (const line of lines) expect(line).toMatch(/^(?:F\d+|F-\d{4}-\d{2}-\d{2}-[a-z0-9-]+) \| .+ \| signal: .+ \| prevention: .+$/);
     expect(lines.some((line) => line.startsWith('F5 | '))).toBe(true);
   });
 
@@ -98,6 +112,6 @@ describe('recall command', () => {
 
   it('prints the lessons of the changed files for --changed', () => {
     const out = runCli(['--changed']);
-    for (const line of out.split('\n').filter(Boolean)) expect(line).toMatch(/^F\d+ \| .+ \| signal: .+ \| prevention: .+$/);
+    for (const line of out.split('\n').filter(Boolean)) expect(line).toMatch(/^(?:F\d+|F-\d{4}-\d{2}-\d{2}-[a-z0-9-]+) \| .+ \| signal: .+ \| prevention: .+$/);
   });
 });
