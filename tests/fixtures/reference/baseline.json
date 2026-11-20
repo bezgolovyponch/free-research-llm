@@ -22754,5 +22754,1409 @@
     "unknown": 0
    }
   ]
+ },
+ "reportOutcomes": [
+  {
+   "project": "do-stag-do-agencies-or-local-ope-609667",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-609667",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-609667",
+   "unit": "options",
+   "value": 2
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-609667",
+   "unit": "optionsLinked",
+   "value": 2
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-609667",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-609667",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-609667",
+   "unit": "keyNumbers",
+   "value": 3
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-609667",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-80c79a",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-80c79a",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-80c79a",
+   "unit": "options",
+   "value": 3
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-80c79a",
+   "unit": "optionsLinked",
+   "value": 3
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-80c79a",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-80c79a",
+   "unit": "sensitivity",
+   "value": 4
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-80c79a",
+   "unit": "keyNumbers",
+   "value": 4
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-80c79a",
+   "unit": "actionsLinked",
+   "value": 2
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-daf0f8",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-daf0f8",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-daf0f8",
+   "unit": "options",
+   "value": 2
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-daf0f8",
+   "unit": "optionsLinked",
+   "value": 2
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-daf0f8",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-daf0f8",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-daf0f8",
+   "unit": "keyNumbers",
+   "value": 3
+  },
+  {
+   "project": "do-stag-do-agencies-or-local-ope-daf0f8",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-3e0586",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-du-3e0586",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-du-3e0586",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-3e0586",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-3e0586",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-40-activity-providers-in-du-3e0586",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-3e0586",
+   "unit": "keyNumbers",
+   "value": 2
+  },
+  {
+   "project": "find-40-activity-providers-in-du-3e0586",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-54f7a7",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-du-54f7a7",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-du-54f7a7",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-54f7a7",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-54f7a7",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-40-activity-providers-in-du-54f7a7",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-54f7a7",
+   "unit": "keyNumbers",
+   "value": 3
+  },
+  {
+   "project": "find-40-activity-providers-in-du-54f7a7",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-du-66ee10",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-du-66ee10",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-du-66ee10",
+   "unit": "options",
+   "value": 2
+  },
+  {
+   "project": "find-40-activity-providers-in-du-66ee10",
+   "unit": "optionsLinked",
+   "value": 2
+  },
+  {
+   "project": "find-40-activity-providers-in-du-66ee10",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-40-activity-providers-in-du-66ee10",
+   "unit": "sensitivity",
+   "value": 4
+  },
+  {
+   "project": "find-40-activity-providers-in-du-66ee10",
+   "unit": "keyNumbers",
+   "value": 6
+  },
+  {
+   "project": "find-40-activity-providers-in-du-66ee10",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-fa-9f712e",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-fa-9f712e",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-fa-9f712e",
+   "unit": "options",
+   "value": 2
+  },
+  {
+   "project": "find-40-activity-providers-in-fa-9f712e",
+   "unit": "optionsLinked",
+   "value": 2
+  },
+  {
+   "project": "find-40-activity-providers-in-fa-9f712e",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-40-activity-providers-in-fa-9f712e",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-fa-9f712e",
+   "unit": "keyNumbers",
+   "value": 4
+  },
+  {
+   "project": "find-40-activity-providers-in-fa-9f712e",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-40-activity-providers-in-gr-fbadb7",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-gr-fbadb7",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-40-activity-providers-in-gr-fbadb7",
+   "unit": "options",
+   "value": 3
+  },
+  {
+   "project": "find-40-activity-providers-in-gr-fbadb7",
+   "unit": "optionsLinked",
+   "value": 3
+  },
+  {
+   "project": "find-40-activity-providers-in-gr-fbadb7",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-40-activity-providers-in-gr-fbadb7",
+   "unit": "sensitivity",
+   "value": 4
+  },
+  {
+   "project": "find-40-activity-providers-in-gr-fbadb7",
+   "unit": "keyNumbers",
+   "value": 5
+  },
+  {
+   "project": "find-40-activity-providers-in-gr-fbadb7",
+   "unit": "actionsLinked",
+   "value": 5
+  },
+  {
+   "project": "find-5-providers-in-china-for-wh-d6c713",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-5-providers-in-china-for-wh-d6c713",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-5-providers-in-china-for-wh-d6c713",
+   "unit": "options",
+   "value": 3
+  },
+  {
+   "project": "find-5-providers-in-china-for-wh-d6c713",
+   "unit": "optionsLinked",
+   "value": 3
+  },
+  {
+   "project": "find-5-providers-in-china-for-wh-d6c713",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-5-providers-in-china-for-wh-d6c713",
+   "unit": "sensitivity",
+   "value": 2
+  },
+  {
+   "project": "find-5-providers-in-china-for-wh-d6c713",
+   "unit": "keyNumbers",
+   "value": 2
+  },
+  {
+   "project": "find-5-providers-in-china-for-wh-d6c713",
+   "unit": "actionsLinked",
+   "value": 2
+  },
+  {
+   "project": "find-60-stag-agencies-up-to-10-p-b596fd",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-60-stag-agencies-up-to-10-p-b596fd",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-60-stag-agencies-up-to-10-p-b596fd",
+   "unit": "options",
+   "value": 2
+  },
+  {
+   "project": "find-60-stag-agencies-up-to-10-p-b596fd",
+   "unit": "optionsLinked",
+   "value": 2
+  },
+  {
+   "project": "find-60-stag-agencies-up-to-10-p-b596fd",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-60-stag-agencies-up-to-10-p-b596fd",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "find-60-stag-agencies-up-to-10-p-b596fd",
+   "unit": "keyNumbers",
+   "value": 2
+  },
+  {
+   "project": "find-60-stag-agencies-up-to-10-p-b596fd",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-accurate-and-verified-car-l-0c750f",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-accurate-and-verified-car-l-0c750f",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-accurate-and-verified-car-l-0c750f",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "find-accurate-and-verified-car-l-0c750f",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-accurate-and-verified-car-l-0c750f",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-accurate-and-verified-car-l-0c750f",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "find-accurate-and-verified-car-l-0c750f",
+   "unit": "keyNumbers",
+   "value": 5
+  },
+  {
+   "project": "find-accurate-and-verified-car-l-0c750f",
+   "unit": "actionsLinked",
+   "value": 2
+  },
+  {
+   "project": "find-appropriate-plots-to-buy-fo-b7772e",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-appropriate-plots-to-buy-fo-b7772e",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-appropriate-plots-to-buy-fo-b7772e",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "find-appropriate-plots-to-buy-fo-b7772e",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-appropriate-plots-to-buy-fo-b7772e",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-appropriate-plots-to-buy-fo-b7772e",
+   "unit": "sensitivity",
+   "value": 3
+  },
+  {
+   "project": "find-appropriate-plots-to-buy-fo-b7772e",
+   "unit": "keyNumbers",
+   "value": 5
+  },
+  {
+   "project": "find-appropriate-plots-to-buy-fo-b7772e",
+   "unit": "actionsLinked",
+   "value": 4
+  },
+  {
+   "project": "find-the-wholesale-branded-secon-b2f5b7",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "find-the-wholesale-branded-secon-b2f5b7",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "find-the-wholesale-branded-secon-b2f5b7",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "find-the-wholesale-branded-secon-b2f5b7",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "find-the-wholesale-branded-secon-b2f5b7",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "find-the-wholesale-branded-secon-b2f5b7",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "find-the-wholesale-branded-secon-b2f5b7",
+   "unit": "keyNumbers",
+   "value": 4
+  },
+  {
+   "project": "find-the-wholesale-branded-secon-b2f5b7",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-1ae86e",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-1ae86e",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-1ae86e",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-1ae86e",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-1ae86e",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-1ae86e",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-1ae86e",
+   "unit": "keyNumbers",
+   "value": 4
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-1ae86e",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-28dfd1",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-28dfd1",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-28dfd1",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-28dfd1",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-28dfd1",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-28dfd1",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-28dfd1",
+   "unit": "keyNumbers",
+   "value": 2
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-28dfd1",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-5f847e",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-5f847e",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-5f847e",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-5f847e",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-5f847e",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-5f847e",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-5f847e",
+   "unit": "keyNumbers",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-5f847e",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-6951de",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-6951de",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-6951de",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-6951de",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-6951de",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-6951de",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-6951de",
+   "unit": "keyNumbers",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-6951de",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-aece40",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-aece40",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-aece40",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-aece40",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-aece40",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-aece40",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-aece40",
+   "unit": "keyNumbers",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-aece40",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-b1e1a1",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-b1e1a1",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-b1e1a1",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-b1e1a1",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-b1e1a1",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-b1e1a1",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-b1e1a1",
+   "unit": "keyNumbers",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-b1e1a1",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-ee78c1",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-ee78c1",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-ee78c1",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-ee78c1",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-ee78c1",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-ee78c1",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-ee78c1",
+   "unit": "keyNumbers",
+   "value": 6
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-ee78c1",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-f0f21b",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-f0f21b",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-f0f21b",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-f0f21b",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-f0f21b",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-f0f21b",
+   "unit": "sensitivity",
+   "value": 5
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-f0f21b",
+   "unit": "keyNumbers",
+   "value": 3
+  },
+  {
+   "project": "for-a-stag-party-booking-site-fi-f0f21b",
+   "unit": "actionsLinked",
+   "value": 3
+  },
+  {
+   "project": "four-facts-about-varna-bulgaria--9608f9",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "four-facts-about-varna-bulgaria--9608f9",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "four-facts-about-varna-bulgaria--9608f9",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "four-facts-about-varna-bulgaria--9608f9",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "four-facts-about-varna-bulgaria--9608f9",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "four-facts-about-varna-bulgaria--9608f9",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "four-facts-about-varna-bulgaria--9608f9",
+   "unit": "keyNumbers",
+   "value": 2
+  },
+  {
+   "project": "four-facts-about-varna-bulgaria--9608f9",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "four-missing-facts-for-tenerife--5aba26",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "four-missing-facts-for-tenerife--5aba26",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "four-missing-facts-for-tenerife--5aba26",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "four-missing-facts-for-tenerife--5aba26",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "four-missing-facts-for-tenerife--5aba26",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "four-missing-facts-for-tenerife--5aba26",
+   "unit": "sensitivity",
+   "value": 2
+  },
+  {
+   "project": "four-missing-facts-for-tenerife--5aba26",
+   "unit": "keyNumbers",
+   "value": 6
+  },
+  {
+   "project": "four-missing-facts-for-tenerife--5aba26",
+   "unit": "actionsLinked",
+   "value": 0
+  },
+  {
+   "project": "list-up-to-10-stag-do-bachelor-p-d50f21",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "list-up-to-10-stag-do-bachelor-p-d50f21",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "list-up-to-10-stag-do-bachelor-p-d50f21",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "list-up-to-10-stag-do-bachelor-p-d50f21",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "list-up-to-10-stag-do-bachelor-p-d50f21",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "list-up-to-10-stag-do-bachelor-p-d50f21",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "list-up-to-10-stag-do-bachelor-p-d50f21",
+   "unit": "keyNumbers",
+   "value": 1
+  },
+  {
+   "project": "list-up-to-10-stag-do-bachelor-p-d50f21",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "seven-missing-facts-for-trieste--2a3dd1",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "seven-missing-facts-for-trieste--2a3dd1",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "seven-missing-facts-for-trieste--2a3dd1",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "seven-missing-facts-for-trieste--2a3dd1",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "seven-missing-facts-for-trieste--2a3dd1",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "seven-missing-facts-for-trieste--2a3dd1",
+   "unit": "sensitivity",
+   "value": 2
+  },
+  {
+   "project": "seven-missing-facts-for-trieste--2a3dd1",
+   "unit": "keyNumbers",
+   "value": 5
+  },
+  {
+   "project": "seven-missing-facts-for-trieste--2a3dd1",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-622bcc",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-622bcc",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-622bcc",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-622bcc",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-622bcc",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-622bcc",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-622bcc",
+   "unit": "keyNumbers",
+   "value": 5
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-622bcc",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-c4372c",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-c4372c",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-c4372c",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-c4372c",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-c4372c",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-c4372c",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-c4372c",
+   "unit": "keyNumbers",
+   "value": 6
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-c4372c",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-e898ba",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-e898ba",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-e898ba",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-e898ba",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-e898ba",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-e898ba",
+   "unit": "sensitivity",
+   "value": 2
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-e898ba",
+   "unit": "keyNumbers",
+   "value": 3
+  },
+  {
+   "project": "stag-do-bachelor-party-groups-fr-e898ba",
+   "unit": "actionsLinked",
+   "value": 2
+  },
+  {
+   "project": "three-durations-from-the-operato-4be963",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "three-durations-from-the-operato-4be963",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "three-durations-from-the-operato-4be963",
+   "unit": "options",
+   "value": 2
+  },
+  {
+   "project": "three-durations-from-the-operato-4be963",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "three-durations-from-the-operato-4be963",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "three-durations-from-the-operato-4be963",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "three-durations-from-the-operato-4be963",
+   "unit": "keyNumbers",
+   "value": 0
+  },
+  {
+   "project": "three-durations-from-the-operato-4be963",
+   "unit": "actionsLinked",
+   "value": 0
+  },
+  {
+   "project": "what-do-shooting-range-packages--2c0501",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "what-do-shooting-range-packages--2c0501",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "what-do-shooting-range-packages--2c0501",
+   "unit": "options",
+   "value": 2
+  },
+  {
+   "project": "what-do-shooting-range-packages--2c0501",
+   "unit": "optionsLinked",
+   "value": 2
+  },
+  {
+   "project": "what-do-shooting-range-packages--2c0501",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "what-do-shooting-range-packages--2c0501",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "what-do-shooting-range-packages--2c0501",
+   "unit": "keyNumbers",
+   "value": 4
+  },
+  {
+   "project": "what-do-shooting-range-packages--2c0501",
+   "unit": "actionsLinked",
+   "value": 2
+  },
+  {
+   "project": "what-do-shooting-range-packages--e0b1a1",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "what-do-shooting-range-packages--e0b1a1",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "what-do-shooting-range-packages--e0b1a1",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "what-do-shooting-range-packages--e0b1a1",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "what-do-shooting-range-packages--e0b1a1",
+   "unit": "scenarios",
+   "value": 1
+  },
+  {
+   "project": "what-do-shooting-range-packages--e0b1a1",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "what-do-shooting-range-packages--e0b1a1",
+   "unit": "keyNumbers",
+   "value": 1
+  },
+  {
+   "project": "what-do-shooting-range-packages--e0b1a1",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "which-escape-room-venues-in-tene-a1546c",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "which-escape-room-venues-in-tene-a1546c",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "which-escape-room-venues-in-tene-a1546c",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "which-escape-room-venues-in-tene-a1546c",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "which-escape-room-venues-in-tene-a1546c",
+   "unit": "scenarios",
+   "value": 2
+  },
+  {
+   "project": "which-escape-room-venues-in-tene-a1546c",
+   "unit": "sensitivity",
+   "value": 0
+  },
+  {
+   "project": "which-escape-room-venues-in-tene-a1546c",
+   "unit": "keyNumbers",
+   "value": 1
+  },
+  {
+   "project": "which-escape-room-venues-in-tene-a1546c",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "which-shooting-venues-in-tenerif-6b29cd",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "which-shooting-venues-in-tenerif-6b29cd",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "which-shooting-venues-in-tenerif-6b29cd",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "which-shooting-venues-in-tenerif-6b29cd",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "which-shooting-venues-in-tenerif-6b29cd",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "which-shooting-venues-in-tenerif-6b29cd",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "which-shooting-venues-in-tenerif-6b29cd",
+   "unit": "keyNumbers",
+   "value": 1
+  },
+  {
+   "project": "which-shooting-venues-in-tenerif-6b29cd",
+   "unit": "actionsLinked",
+   "value": 1
+  },
+  {
+   "project": "which-stag-do-or-bachelor-party--92ae13",
+   "unit": "ended",
+   "value": true
+  },
+  {
+   "project": "which-stag-do-or-bachelor-party--92ae13",
+   "unit": "verdict",
+   "value": true
+  },
+  {
+   "project": "which-stag-do-or-bachelor-party--92ae13",
+   "unit": "options",
+   "value": 1
+  },
+  {
+   "project": "which-stag-do-or-bachelor-party--92ae13",
+   "unit": "optionsLinked",
+   "value": 1
+  },
+  {
+   "project": "which-stag-do-or-bachelor-party--92ae13",
+   "unit": "scenarios",
+   "value": 3
+  },
+  {
+   "project": "which-stag-do-or-bachelor-party--92ae13",
+   "unit": "sensitivity",
+   "value": 1
+  },
+  {
+   "project": "which-stag-do-or-bachelor-party--92ae13",
+   "unit": "keyNumbers",
+   "value": 5
+  },
+  {
+   "project": "which-stag-do-or-bachelor-party--92ae13",
+   "unit": "actionsLinked",
+   "value": 1
+  }
+ ],
+ "kinds": {
+  "do-stag-do-agencies-or-local-ope-4a8358": "analysis",
+  "do-stag-do-agencies-or-local-ope-609667": "list",
+  "do-stag-do-agencies-or-local-ope-80c79a": "analysis",
+  "do-stag-do-agencies-or-local-ope-daf0f8": "list",
+  "find-40-activity-providers-in-du-3e0586": "list",
+  "find-40-activity-providers-in-du-54f7a7": "list",
+  "find-40-activity-providers-in-du-66ee10": "list",
+  "find-40-activity-providers-in-du-b0a124": "list",
+  "find-40-activity-providers-in-fa-9f712e": "list",
+  "find-40-activity-providers-in-gr-34627b": "list",
+  "find-40-activity-providers-in-gr-c1302d": "list",
+  "find-40-activity-providers-in-gr-fbadb7": "list",
+  "find-40-activity-providers-in-tr-db8d20": "list",
+  "find-40-activity-providers-in-tr-f5f763": "list",
+  "find-5-providers-in-china-for-wh-d6c713": "list",
+  "find-60-stag-agencies-up-to-10-p-b596fd": "list",
+  "find-accurate-and-verified-car-l-0c750f": "list",
+  "find-appropriate-plots-to-buy-fo-b7772e": "list",
+  "find-the-wholesale-branded-secon-b2f5b7": "list",
+  "for-a-stag-party-booking-site-fi-1ae86e": "list",
+  "for-a-stag-party-booking-site-fi-28dfd1": "list",
+  "for-a-stag-party-booking-site-fi-5f847e": "list",
+  "for-a-stag-party-booking-site-fi-6951de": "analysis",
+  "for-a-stag-party-booking-site-fi-aece40": "list",
+  "for-a-stag-party-booking-site-fi-b1e1a1": "list",
+  "for-a-stag-party-booking-site-fi-ee78c1": "list",
+  "for-a-stag-party-booking-site-fi-f0f21b": "analysis",
+  "four-facts-about-varna-bulgaria--9608f9": "list",
+  "four-missing-facts-for-tenerife--5aba26": "analysis",
+  "list-up-to-10-stag-do-bachelor-p-d50f21": "analysis",
+  "seven-missing-facts-for-trieste--2a3dd1": "analysis",
+  "stag-do-bachelor-party-groups-fr-622bcc": "list",
+  "stag-do-bachelor-party-groups-fr-c4372c": "list",
+  "stag-do-bachelor-party-groups-fr-e898ba": "list",
+  "three-durations-from-the-operato-4be963": "analysis",
+  "what-do-shooting-range-packages--2c0501": "list",
+  "what-do-shooting-range-packages--e0b1a1": "list",
+  "which-escape-room-venues-in-tene-a1546c": "list",
+  "which-shooting-venues-in-tenerif-6b29cd": "list",
+  "which-stag-do-or-bachelor-party--92ae13": "analysis"
  }
 }
