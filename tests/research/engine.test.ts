@@ -3779,3 +3779,62 @@ describe('FRL_REQUEST_MODEL_ENFORCE', () => {
     }
   });
 });
+
+describe('acceptanceResult.kind storage for verdict stability', () => {
+  it('stores brief.kind into acceptanceResult.kind when checkAcceptance runs', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find wholesale branded second hand clothing providers', expected: '20 direct links' });
+    const kindLabel = 'wholesale clothing provider';
+    const kindId = `kind|Is this page one ${kindLabel} offered as asked (not a part, accessory, wanted ad or list)?`;
+    project.brief = { kind: { label: kindLabel, terms: ['wholesale', 'second-hand'] }, text: '', regions: [], located: false };
+    project.checklist = [{ clause: 'kind', items: [{ id: 'check1', hard: true, question: 'Is this a wholesale clothing provider?' }] }];
+    project.acceptance = { itemCount: 3, mustMention: [] };
+    project.candidates = { kept: [
+      { url: 'https://a.example/1', title: 'Supplier 1', value: 100, unit: 'EUR' },
+      { url: 'https://a.example/2', title: 'Supplier 2', value: 200, unit: 'EUR' },
+      { url: 'https://a.example/3', title: 'Supplier 3', value: 300, unit: 'EUR' },
+    ]};
+    project.nodes = [
+      { id: 'D1', parentId: 'Q', status: 'verified', finding: { items: [
+        { url: 'https://a.example/1', title: 'Supplier 1', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+        { url: 'https://a.example/2', title: 'Supplier 2', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+        { url: 'https://a.example/3', title: 'Supplier 3', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+      ]}},
+    ];
+    project.hubSources = [];
+    project.domainSources = [];
+    project.report = {};
+    await engine.checkAcceptance(project);
+    expect(project.acceptanceResult.kind).toEqual({ label: 'wholesale clothing provider', terms: ['wholesale', 'second-hand'] });
+  });
+
+  it('verdictInvariants on a fixture whose items carry the brief-kind check id and whose decisionModel.kind differs reports no validCount mismatch', async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'Find items', expected: '3 items' });
+    const kindLabel = 'brief-kind';
+    const kindId = `kind|Is this page one ${kindLabel} offered as asked (not a part, accessory, wanted ad or list)?`;
+    project.brief = { kind: { label: kindLabel, terms: ['brief'] }, text: '', regions: [], located: false };
+    project.decisionModel = { kind: { label: 'decision-kind', terms: ['decision'] }, criteria: [] };
+    project.checklist = [{ clause: 'kind', items: [{ id: 'check1', hard: true, question: 'Is this a brief-kind?' }] }];
+    project.acceptance = { itemCount: 3, mustMention: [] };
+    project.candidates = { kept: [
+      { url: 'https://a.example/1', title: 'Item 1', value: 100, unit: 'EUR' },
+      { url: 'https://a.example/2', title: 'Item 2', value: 200, unit: 'EUR' },
+      { url: 'https://a.example/3', title: 'Item 3', value: 300, unit: 'EUR' },
+    ]};
+    project.nodes = [
+      { id: 'D1', parentId: 'Q', status: 'verified', finding: { items: [
+        { url: 'https://a.example/1', title: 'Item 1', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+        { url: 'https://a.example/2', title: 'Item 2', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+        { url: 'https://a.example/3', title: 'Item 3', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+      ]}},
+    ];
+    project.hubSources = [];
+    project.domainSources = [];
+    project.report = {};
+    await engine.checkAcceptance(project);
+    const { verdictInvariants } = await import('../../src/research/verdict.mjs');
+    const reasons = verdictInvariants(project);
+    expect(reasons.filter(r => r.includes('validCount mismatch'))).toHaveLength(0);
+  });
+});

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { evaluationKind } from '../../src/research/verdict.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -458,3 +459,91 @@ describe('canary: snap with --api flag (mock)', () => {
     await rm(af, { force: true });
   });
 });
+
+describe('canary: evaluationKind helper', () => {
+  it('stored acceptanceResult.kind wins over brief.kind and decisionModel.kind', () => {
+    const project = {
+      acceptanceResult: { kind: { label: 'stored-kind', terms: ['stored'] } },
+      brief: { kind: { label: 'brief-kind', terms: ['brief'] } },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'stored-kind', terms: ['stored'] });
+  });
+
+  it('without a stored kind and with no judged item carrying a kind-check id, the decision model kind is used', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: { label: 'brief-kind', terms: ['brief'] } },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'decision-kind', terms: ['decision'] });
+  });
+
+  it('decisionModel.kind is used when acceptanceResult.kind and brief.kind are missing', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: null },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'decision-kind', terms: ['decision'] });
+  });
+
+  it('returns null when all kind sources are missing', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: null },
+      decisionModel: { kind: null },
+    };
+    expect(evaluationKind(project)).toBeNull();
+  });
+
+  it('local acceptanceSummaryOf uses evaluationKind for brief-kind check id matching', async () => {
+    const mod = await import('../../scripts/canary.mjs');
+    const kindLabel = 'wholesale clothing provider';
+    const kindId = `kind|${kindLabel}`;
+    const project = {
+      id: 'test-project',
+      acceptance: { itemCount: 3, mustMention: [] },
+      brief: { kind: { label: kindLabel, terms: ['wholesale', 'second-hand'] } },
+      decisionModel: { checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }], kind: { label: 'different-kind', terms: ['different'] } },
+      checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }],
+      acceptanceResult: {
+        kind: { label: kindLabel, terms: ['wholesale', 'second-hand'] },
+        items: [
+          { url: 'https://a.example.org/1', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+          { url: 'https://a.example.org/2', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+          { url: 'https://a.example.org/3', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+        ],
+      },
+    };
+    const summary = mod.acceptanceSummaryOf(project);
+    expect(summary).toContain('3 of 3 confirmed');
+  });
+
+  it('computeTiers uses evaluationKind for kind-based check id matching', async () => {
+    const mod = await import('../../scripts/canary.mjs');
+    const kindLabel = 'brief-kind';
+    const kindId = `kind|${kindLabel}`;
+    const project = {
+      id: 'test-project',
+      acceptance: { itemCount: 3, mustMention: [] },
+      brief: { kind: { label: kindLabel, terms: ['brief'] } },
+      decisionModel: { checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }], kind: { label: 'decision-kind', terms: ['decision'] } },
+      checklist: [{ clause: 'kind', items: [{ question: kindLabel, hard: true }] }],
+      acceptanceResult: {
+        kind: { label: kindLabel, terms: ['brief'] },
+        items: [
+          { url: 'https://a.example.org/1', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+          { url: 'https://a.example.org/2', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+          { url: 'https://a.example.org/3', checks: [{ id: kindId, answer: 'no', quote: '', clause: 'kind' }], qualifies: false, live: true, listing: true, inRange: true },
+        ],
+      },
+    };
+    const tiers = mod.computeTiers(project);
+    expect(tiers.tiers.confirmed).toBe(2);
+    expect(tiers.tiers.rejected).toBe(1);
+    expect(tiers.tiers['to-confirm']).toBe(0);
+  });
+});
+
+import { kindCluster } from '../../src/research/checklist.mjs';

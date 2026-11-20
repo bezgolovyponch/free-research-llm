@@ -3,6 +3,7 @@ import { binomialCoefficient, mcNemarExact, negativeFlips, negativeTierFlips, po
 import { createAnswerTape, tapeKey } from '../../scripts/answer-tape.mjs';
 import { ChecklistJudge } from '../../src/research/checklist.mjs';
 import { ModelRouter } from '../../src/llm/router.mjs';
+import { evaluationKind } from '../../src/research/verdict.mjs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdir, writeFile, rm, readFile } from 'node:fs/promises';
@@ -1142,3 +1143,85 @@ describe('zero-loss: real path (child process)', () => {
     await rm(baselineFile, { force: true });
   });
 });
+
+describe('zero-loss: evaluationKind helper', () => {
+  it('stored acceptanceResult.kind wins over brief.kind and decisionModel.kind', () => {
+    const project = {
+      acceptanceResult: { kind: { label: 'stored-kind', terms: ['stored'] } },
+      brief: { kind: { label: 'brief-kind', terms: ['brief'] } },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'stored-kind', terms: ['stored'] });
+  });
+
+  it('without a stored kind and with no judged item carrying a kind-check id, the decision model kind is used', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: { label: 'brief-kind', terms: ['brief'] } },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'decision-kind', terms: ['decision'] });
+  });
+
+  it('decisionModel.kind is used when acceptanceResult.kind and brief.kind are missing', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: null },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'decision-kind', terms: ['decision'] });
+  });
+
+  it('returns null when all kind sources are missing', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: null },
+      decisionModel: { kind: null },
+    };
+    expect(evaluationKind(project)).toBeNull();
+  });
+
+  it('extractJudgedItems uses evaluationKind to build check ids matching brief-kind', () => {
+    const kindLabel = 'wholesale clothing provider';
+    const kindId = `kind|${kindCluster({ label: kindLabel, terms: [] }).items[0].question}`;
+    const project = {
+      id: 'test-project',
+      acceptance: { itemCount: 2, mustMention: [] },
+      brief: { kind: { label: kindLabel, terms: ['wholesale', 'second-hand'] } },
+      decisionModel: { checklist: [{ clause: 'kind', items: [{ question: 'Is this a wholesale clothing provider?', hard: true }] }], kind: { label: 'different-kind', terms: ['different'] } },
+      acceptanceResult: {
+        items: [
+          { url: 'https://a.example.org/1', title: 'Item 1', checks: [{ id: kindId, answer: 'yes', quote: 'q1', hard: true, clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true, tier: 'confirmed' },
+          { url: 'https://a.example.org/2', title: 'Item 2', checks: [{ id: kindId, answer: 'no', quote: '', hard: true, clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true, tier: 'rejected' },
+        ],
+      },
+    };
+    const items = extractJudgedItems(project);
+    expect(items).toHaveLength(2);
+    expect(items[0].checks[0].id).toBe(kindId);
+    expect(items[1].checks[0].id).toBe(kindId);
+  });
+
+  it('computeTiers uses evaluationKind for kind-based check id matching', () => {
+    const kindLabel = 'brief-kind';
+    const kindId = `kind|${kindCluster({ label: kindLabel, terms: [] }).items[0].question}`;
+    const project = {
+      id: 'test-project',
+      acceptance: { itemCount: 3, mustMention: [] },
+      brief: { kind: { label: kindLabel, terms: ['brief'] } },
+      decisionModel: { checklist: [{ clause: 'kind', items: [{ question: 'Is this a brief-kind?', hard: true }] }], kind: { label: 'decision-kind', terms: ['decision'] } },
+      acceptanceResult: {
+        items: [
+          { url: 'https://a.example.org/1', title: 'Item 1', checks: [{ id: kindId, answer: 'yes', quote: 'q1', hard: true, clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true, tier: 'confirmed' },
+          { url: 'https://a.example.org/2', title: 'Item 2', checks: [{ id: kindId, answer: 'yes', quote: 'q1', hard: true, clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true, tier: 'confirmed' },
+          { url: 'https://a.example.org/3', title: 'Item 3', checks: [{ id: kindId, answer: 'no', quote: '', hard: true, clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true, tier: 'rejected' },
+        ],
+      },
+    };
+    const tiers = computeTiers(project);
+    expect(tiers.tiers.confirmed).toBe(2);
+    expect(tiers.tiers.rejected).toBe(1);
+    expect(tiers.tiers['to-confirm']).toBe(0);
+  });
+});
+import { kindCluster } from '../../src/research/checklist.mjs';

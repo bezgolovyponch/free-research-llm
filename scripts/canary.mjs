@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { computeWasteStats } from './waste.mjs';
 import { startedDirectly } from './tool-entry.mjs';
+import { evaluationKind } from '../src/research/verdict.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_DATA_DIR = path.join(ROOT, 'data');
@@ -180,7 +181,7 @@ function acceptanceSummaryOf(project) {
   if (result?.verdict?.summary) return result.verdict.summary;
   const asked = result?.totalAsked || project.acceptance?.itemCount;
   const spec = { ...(project.acceptance ?? {}), ...(asked ? { itemCount: asked } : {}) };
-  return verdict(result?.items ?? [], spec, project.checklist, project.decisionModel?.kind ?? null).summary;
+  return verdict(result?.items ?? [], spec, project.checklist, evaluationKind(project)).summary;
 }
 
 function decisionCriteriaCount(project) {
@@ -272,7 +273,7 @@ function computeTiers(project) {
   if (!judgedItems.length) return { items: [], tiers: { confirmed: 0, 'to-confirm': 0, rejected: 0, 'not-judged': 0 }, summary: '' };
 
   const checklist = project?.decisionModel?.checklist ?? project?.checklist ?? [];
-  const kind = project?.decisionModel?.kind ?? null;
+  const kind = evaluationKind(project);
   const spec = project?.acceptance ?? {};
 
   const result = verdict(judgedItems, spec, checklist, kind);

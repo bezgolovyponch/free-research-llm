@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { basename, join, resolve, dirname } from 'node:path';
-import { verdict, runOutcome, verdictInvariants } from '../src/research/verdict.mjs';
+import { verdict, runOutcome, verdictInvariants, evaluationKind } from '../src/research/verdict.mjs';
 import { purposeChecks } from '../src/research/acceptance.mjs';
 
 function parseArgs() {
@@ -131,7 +131,7 @@ async function checkProject(project, projectPath, ledger, useLedger) {
 
   const acceptance = project.acceptance ?? {};
   const checklist = project.checklist ?? null;
-  const kindObj = project.decisionModel?.kind ?? project.brief?.kind ?? null;
+  const kindObj = evaluationKind(project);
   const acceptanceResult = project.acceptanceResult ?? null;
   const report = project.report ?? null;
 

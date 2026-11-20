@@ -10,7 +10,7 @@ import { ChecklistJudge } from '../src/research/checklist.mjs';
 import { sentenceSpans } from '../src/research/spans.mjs';
 import { ModelRouter } from '../src/llm/router.mjs';
 import { ProviderFactory, routeOrderFrom } from '../src/app.mjs';
-import { verdict, hardIdsOf, itemTier, qualifies } from '../src/research/verdict.mjs';
+import { verdict, hardIdsOf, itemTier, qualifies, evaluationKind } from '../src/research/verdict.mjs';
 import { contractClass } from '../src/research/deliverable.mjs';
 import { startedDirectly } from './tool-entry.mjs';
 
@@ -87,7 +87,7 @@ function extractJudgedItems(project) {
   if (!items.length) return [];
 
   const checklist = project?.decisionModel?.checklist ?? project?.checklist ?? [];
-  const kind = project?.decisionModel?.kind ?? null;
+  const kind = evaluationKind(project);
   const spec = project?.acceptance ?? {};
 
   return items.map((item) => {
@@ -123,7 +123,7 @@ function computeTiers(project) {
   if (!judgedItems.length) return { items: [], tiers: { confirmed: 0, 'to-confirm': 0, rejected: 0, 'not-judged': 0 }, summary: '' };
 
   const checklist = project?.decisionModel?.checklist ?? project?.checklist ?? [];
-  const kind = project?.decisionModel?.kind ?? null;
+  const kind = evaluationKind(project);
   const spec = project?.acceptance ?? {};
 
   const result = verdict(judgedItems, spec, checklist, kind);
