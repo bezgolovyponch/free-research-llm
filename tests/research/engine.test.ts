@@ -3591,3 +3591,40 @@ describe('ResearchEngine chosen option', () => {
     expect(loaded.report.chosenOption).toBeUndefined();
   });
 });
+
+describe('ResearchEngine out-of-region flag', () => {
+  const brief = { located: false, regions: ['CZ'] };
+  const node = { id: 'D1' };
+  const nlSource = () => ({ kind: 'web', title: 'NL shop', url: 'https://shop.nl/wholesale', domain: 'shop.nl', snippet: 's', text: 'wholesale bales' });
+  const czDeliverySource = () => ({ kind: 'web', title: 'Ships CZ', url: 'https://shop.nl/cz', domain: 'shop.nl', snippet: 's', text: 'We deliver to Czech Republic and EU.' });
+
+  it('marks a kept outside source with outOfRegion and the detected region when the flag is on', () => {
+    const { engine } = engineWith({});
+    const original = process.env.FRL_REGION_SIDE_REPORT;
+    process.env.FRL_REGION_SIDE_REPORT = '1';
+    try {
+      const outside = nlSource();
+      const ships = czDeliverySource();
+      engine.onConceptOnly({ brief, question: 'find wholesale suppliers' }, node, [outside, ships]);
+      expect(outside.outOfRegion).toBe(true);
+      expect(String(outside.detectedRegion)).toContain('outside');
+      expect(ships.outOfRegion).toBeUndefined();
+    } finally {
+      if (original === undefined) delete process.env.FRL_REGION_SIDE_REPORT;
+      else process.env.FRL_REGION_SIDE_REPORT = original;
+    }
+  });
+
+  it('leaves sources untouched when the flag is off', () => {
+    const { engine } = engineWith({});
+    const original = process.env.FRL_REGION_SIDE_REPORT;
+    delete process.env.FRL_REGION_SIDE_REPORT;
+    try {
+      const outside = nlSource();
+      engine.onConceptOnly({ brief, question: 'find wholesale suppliers' }, node, [outside]);
+      expect(outside.outOfRegion).toBeUndefined();
+    } finally {
+      if (original !== undefined) process.env.FRL_REGION_SIDE_REPORT = original;
+    }
+  });
+});
