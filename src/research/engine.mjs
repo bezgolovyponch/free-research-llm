@@ -1922,8 +1922,9 @@ export class ResearchEngine {
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
     if (project.acceptanceResult && typeof project.acceptanceResult === 'object') project.acceptanceResult.kind = project.decisionModel?.kind ?? brief.kind ?? null;
 
-    if (!isAnalysis && project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
-      const newChecklist = filterCountItems(project.decisionModel.checklist, askedCounts(project.acceptance));
+    const judgedChecklist = project.decisionModel?.checklist ?? (process.env.FRL_KIND_ALWAYS_HARD === '1' && project.decisionModel?.kind?.label ? [] : null);
+    if (!isAnalysis && project.acceptanceResult?.items?.length && judgedChecklist && readPage) {
+      const newChecklist = filterCountItems(judgedChecklist, askedCounts(project.acceptance));
       if (newChecklist) {
         project.checklist = newChecklist;
         const fingerprint = checklistFingerprint(newChecklist);

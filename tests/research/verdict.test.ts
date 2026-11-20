@@ -252,6 +252,89 @@ describe("verdict", () => {
     expect(expectedId).toContain("of one of these kinds: roofer, plumber");
   });
 
+  it("hardIdsOf: with FRL_KIND_ALWAYS_HARD=1, adds kind check even with null checklist", () => {
+    process.env.FRL_KIND_ALWAYS_HARD = '1';
+    try {
+      const kind = { label: "bouldering gym", terms: ["bouldering"], not: ["directory"] };
+      const idsWithNullChecklist = hardIdsOf(null, kind);
+      expect(idsWithNullChecklist).toContainEqual(expect.stringMatching(/^kind\|/));
+      expect(idsWithNullChecklist.filter((id) => id.startsWith("kind|"))).toHaveLength(1);
+
+      const idsWithEmptyChecklist = hardIdsOf([], kind);
+      expect(idsWithEmptyChecklist).toContainEqual(expect.stringMatching(/^kind\|/));
+
+      const idsWithChecklist = hardIdsOf([{ clause: "c", items: [{ id: "check1", hard: true, question: "q1" }] }], kind);
+      expect(idsWithChecklist).toContainEqual(expect.stringMatching(/^kind\|/));
+    } finally {
+      delete process.env.FRL_KIND_ALWAYS_HARD;
+    }
+  });
+
+  it("hardIdsOf: with FRL_KIND_ALWAYS_HARD unset, a null checklist adds no kind check and an empty one keeps main's behaviour", () => {
+    delete process.env.FRL_KIND_ALWAYS_HARD;
+    const kind = { label: "bouldering gym", terms: ["bouldering"], not: ["directory"] };
+    const idsWithNullChecklist = hardIdsOf(null, kind);
+    expect(idsWithNullChecklist).not.toContainEqual(expect.stringMatching(/^kind\|/));
+
+    const idsWithEmptyChecklist = hardIdsOf([], kind);
+    expect(idsWithEmptyChecklist).toContainEqual(expect.stringMatching(/^kind\|/));
+  });
+
+  it("verdict: with FRL_KIND_ALWAYS_HARD=1 and null checklist, unjudged kind check makes item not-judged", () => {
+    process.env.FRL_KIND_ALWAYS_HARD = '1';
+    try {
+      const kind = { label: "bouldering gym", terms: ["bouldering"], not: ["directory"] };
+      const item = baseItem({ qualifies: true, checks: [] });
+      const result = verdict([item], { itemCount: 1 }, null, kind);
+      expect(result.tiers.notJudged).toBe(1);
+      expect(result.tiers.confirmed).toBe(0);
+    } finally {
+      delete process.env.FRL_KIND_ALWAYS_HARD;
+    }
+  });
+
+  it("verdict: with FRL_KIND_ALWAYS_HARD=1 and null checklist, kind check yes makes item confirmed", () => {
+    process.env.FRL_KIND_ALWAYS_HARD = '1';
+    try {
+      const kind = { label: "bouldering gym", terms: ["bouldering"], not: ["directory"] };
+      const kindId = `kind|${kindCluster(kind).items[0].question}`;
+      const item = baseItem({ qualifies: true, checks: [{ id: kindId, answer: "yes", hard: true, clause: "kind", quote: "it is a gym" }] });
+      const result = verdict([item], { itemCount: 1 }, null, kind);
+      expect(result.tiers.confirmed).toBe(1);
+      expect(result.tiers.notJudged).toBe(0);
+    } finally {
+      delete process.env.FRL_KIND_ALWAYS_HARD;
+    }
+  });
+
+  it("verdict: with FRL_KIND_ALWAYS_HARD=1 and null checklist, kind check unknown makes item to-confirm", () => {
+    process.env.FRL_KIND_ALWAYS_HARD = '1';
+    try {
+      const kind = { label: "bouldering gym", terms: ["bouldering"], not: ["directory"] };
+      const kindId = `kind|${kindCluster(kind).items[0].question}`;
+      const item = baseItem({ qualifies: true, checks: [{ id: kindId, answer: "unknown", hard: true, clause: "kind", quote: "" }] });
+      const result = verdict([item], { itemCount: 1 }, null, kind);
+      expect(result.tiers.toConfirm).toBe(1);
+      expect(result.tiers.confirmed).toBe(0);
+    } finally {
+      delete process.env.FRL_KIND_ALWAYS_HARD;
+    }
+  });
+
+  it("verdict: with FRL_KIND_ALWAYS_HARD=1 and null checklist, kind check no makes item rejected", () => {
+    process.env.FRL_KIND_ALWAYS_HARD = '1';
+    try {
+      const kind = { label: "bouldering gym", terms: ["bouldering"], not: ["directory"] };
+      const kindId = `kind|${kindCluster(kind).items[0].question}`;
+      const item = baseItem({ qualifies: true, checks: [{ id: kindId, answer: "no", hard: true, clause: "kind", quote: "it is a directory" }] });
+      const result = verdict([item], { itemCount: 1 }, null, kind);
+      expect(result.tiers.rejected).toBe(1);
+      expect(result.tiers.confirmed).toBe(0);
+    } finally {
+      delete process.env.FRL_KIND_ALWAYS_HARD;
+    }
+  });
+
   it("all hard checks yes never rescue a dead link or a value out of range", () => {
     const yes = [{ id: "check1", answer: "yes", hard: true }, { id: "check2", answer: "yes", hard: true }, { id: "check3", answer: "yes", hard: true }];
     expect(qualifies(baseItem({ live: false, checks: yes }), {})).toBe(false);
