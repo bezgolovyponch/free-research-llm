@@ -1895,6 +1895,7 @@ export class ResearchEngine {
     const prices = lowPriceStats(project.candidates?.kept ?? []);
 
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
+    if (project.acceptanceResult && typeof project.acceptanceResult === 'object') project.acceptanceResult.kind = brief.kind ?? null;
 
     if (!isAnalysis && project.acceptanceResult?.items?.length && project.decisionModel?.checklist && readPage) {
       const newChecklist = filterCountItems(project.decisionModel.checklist, askedCounts(project.acceptance));

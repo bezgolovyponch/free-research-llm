@@ -1,5 +1,22 @@
 import { kindCluster } from './checklist.mjs';
 
+function kindCheckId(kind) {
+  return kind?.label ? `kind|${kindCluster(kind).items[0].question}` : null;
+}
+
+export function evaluationKind(project) {
+  const result = project?.acceptanceResult;
+  if (result && Object.hasOwn(result, 'kind')) return result.kind ?? null;
+  const stored = project?.decisionModel?.kind ?? null;
+  const briefKind = project?.brief?.kind ?? null;
+  const judged = new Set((result?.items ?? []).flatMap((item) => (item?.checks ?? []).map((c) => c?.id)));
+  for (const candidate of [stored, briefKind]) {
+    const id = kindCheckId(candidate);
+    if (id && judged.has(id)) return candidate;
+  }
+  return stored;
+}
+
 const KIND_PURPOSE_ID = 'purpose-kind';
 
 function judgedAsAskedKind(item) {
@@ -152,7 +169,7 @@ export function acceptanceSummaryOf(project) {
   if (result?.verdict?.summary) return result.verdict.summary;
   const asked = result?.totalAsked || project.acceptance?.itemCount;
   const spec = { ...(project.acceptance ?? {}), ...(asked ? { itemCount: asked } : {}) };
-  return verdict(result?.items ?? [], spec, project.checklist, project.decisionModel?.kind ?? null).summary;
+  return verdict(result?.items ?? [], spec, project.checklist, evaluationKind(project)).summary;
 }
 
 export function scoreOf(checks) {
@@ -163,7 +180,7 @@ export function verdictInvariants(project, { memo = true } = {}) {
   const reasons = [];
   const acceptanceResult = project.acceptanceResult;
   const checklist = project.checklist;
-  const kind = project.decisionModel?.kind ?? null;
+  const kind = evaluationKind(project);
 
   if (!acceptanceResult || !checklist) return [];
 

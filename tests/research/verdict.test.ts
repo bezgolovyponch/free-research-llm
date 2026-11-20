@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome, chosenOptionId } from "../../src/research/verdict.mjs";
+import { itemTier, itemEvidence, verdict, verdictInvariants, hardIdsOf, qualifies, acceptanceSummaryOf, runOutcome, chosenOptionId, evaluationKind } from "../../src/research/verdict.mjs";
 import { ChecklistJudge, LOW_PRICE_REASON, hardenKind, kindCluster, migrateChecks } from "../../src/research/checklist.mjs";
 import { lowPriceStats } from "../../src/research/candidates.mjs";
 import { fakeRouter } from "../helpers/fakes";
@@ -479,5 +479,79 @@ describe('chosenOptionId', () => {
   it('returns null with note when options list is empty', () => {
     const result = chosenOptionId([], 'GO');
     expect(result).toEqual({ id: null, note: 'not among the options' });
+  });
+});
+
+describe('evaluationKind', () => {
+  it('stored acceptanceResult.kind wins over brief.kind and decisionModel.kind', () => {
+    const project = {
+      acceptanceResult: { kind: { label: 'stored-kind', terms: ['stored'] } },
+      brief: { kind: { label: 'brief-kind', terms: ['brief'] } },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'stored-kind', terms: ['stored'] });
+  });
+
+  it('without a stored kind, the candidate whose kind-check id the judged items carry wins', () => {
+    const briefKind = { label: 'brief-kind', terms: ['brief'] };
+    const decisionKind = { label: 'decision-kind', terms: ['decision'] };
+    const briefId = `kind|${kindCluster(briefKind).items[0].question}`;
+    const decisionId = `kind|${kindCluster(decisionKind).items[0].question}`;
+    const judgedWith = (id: string) => ({ acceptanceResult: { items: [{ url: 'https://a.example/1', checks: [{ id, answer: 'yes' }] }], validCount: 1 }, brief: { kind: briefKind }, decisionModel: { kind: decisionKind } });
+    expect(evaluationKind(judgedWith(briefId))).toEqual(briefKind);
+    expect(evaluationKind(judgedWith(decisionId))).toEqual(decisionKind);
+  });
+
+  it('without a stored kind and with no matching check id, the decision model kind is used as before', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: { label: 'brief-kind', terms: ['brief'] } },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'decision-kind', terms: ['decision'] });
+  });
+
+  it('a stored null kind is honoured as the evaluation kind', () => {
+    const project = { acceptanceResult: { kind: null, items: [] }, decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } } };
+    expect(evaluationKind(project)).toBeNull();
+  });
+
+  it('decisionModel.kind is used when acceptanceResult.kind and brief.kind are missing', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: null },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+    };
+    expect(evaluationKind(project)).toEqual({ label: 'decision-kind', terms: ['decision'] });
+  });
+
+  it('returns null when all kind sources are missing', () => {
+    const project = {
+      acceptanceResult: { items: [], validCount: 0 },
+      brief: { kind: null },
+      decisionModel: { kind: null },
+    };
+    expect(evaluationKind(project)).toBeNull();
+  });
+
+  it('verdictInvariants on a fixture whose items carry the brief-kind check id and whose decisionModel.kind differs reports no validCount mismatch', () => {
+    const kindLabel = 'brief-kind';
+    const kindId = `kind|Is this page one ${kindLabel} offered as asked (not a part, accessory, wanted ad or list)?`;
+    const project = {
+      acceptance: { itemCount: 5, mustMention: [] },
+      checklist: [{ clause: 'c', items: [{ id: 'check1', hard: true, question: 'q1' }] }],
+      brief: { kind: { label: kindLabel, terms: ['brief'] } },
+      decisionModel: { kind: { label: 'decision-kind', terms: ['decision'] } },
+      acceptanceResult: {
+        validCount: 3,
+        items: [
+          { url: '1', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+          { url: '2', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+          { url: '3', checks: [{ id: kindId, answer: 'yes', quote: 'q', clause: 'kind' }], qualifies: true, live: true, listing: true, inRange: true },
+        ],
+      },
+    };
+    const reasons = verdictInvariants(project);
+    expect(reasons.filter(r => r.includes('validCount mismatch'))).toHaveLength(0);
   });
 });
