@@ -19,13 +19,15 @@ export function numberInQuote(value, quote) {
   return normQuote.includes(numStr);
 }
 
+export const TIDY_COLUMNS = [{ name: 'time', type: 'time' }, { name: 'entity', type: 'entity' }, { name: 'value', type: 'value' }, { name: 'unit', type: 'unit' }];
+
 export async function tableSpec(project, router) {
   const question = project.question ?? '';
   const expected = project.acceptance?.expected ?? '';
 
   const prompt = [
     { role: 'system', content: 'You propose a table specification for an analysis research. Answer with JSON only.' },
-    { role: 'user', content: 'TASK=TABLE_SPEC\nQuestion: ' + question + '\nExpected result: ' + expected + '\n\nThe asker wants a table of observations. Propose:\n- observationUnit: what each row represents (e.g., "monthly rate per lane", "quarterly revenue per product")\n- columns: array of { name, type: "time" | "entity" | "value", unit, quoteFromAsker }\n\nRules:\n- Each column must have a "quoteFromAsker" that is a verbatim substring of the question or expected result\n- Exactly one column must have type "value" (the measured variable)\n- If the request names periods (month, quarter, year, Dec 2026, etc.), include a "time" column\n- Entity columns capture grouping dimensions (lane, route, product, region, etc.)\n- The "unit" is the measurement unit from the asker\'s words (e.g., "USD/ton", "EUR", "%")\n- Output JSON only: { observationUnit, columns: [...] }' }
+    { role: 'user', content: 'TASK=TABLE_SPEC\nQuestion: ' + question + '\nExpected result: ' + expected + '\n\nThe asker wants a table of observations. Propose:\n- observationUnit: what each row represents (one measured value of one variable, at one time, for one entity)\n- columns: array of { name, type: "time" | "entity" | "value", unit, quoteFromAsker }\n\nRules:\n- Each column must have a "quoteFromAsker" that is a verbatim substring of the question or expected result\n- Exactly one column must have type "value" (the measured variable)\n- If the request names periods (month, quarter, year, Dec 2026, etc.), include a "time" column\n- Entity columns capture grouping dimensions (the groupings the asker names)\n- The "unit" is the measurement unit from the asker\'s words (e.g., "USD/ton", "EUR", "%")\n- Output JSON only: { observationUnit, columns: [...] }' }
   ];
 
   const reply = await router.complete({ purpose: 'table-spec', tier: 'deep', messages: prompt });
@@ -39,7 +41,9 @@ export async function tableSpec(project, router) {
   if (!hasValue && columns.length) {
     columns[0].type = 'value';
   }
-  
+  if (!columns.length) {
+    return { observationUnit: 'observation', derived: true, columns: TIDY_COLUMNS.map((c) => ({ ...c })) };
+  }
   return { observationUnit: proposed.observationUnit ?? 'observation', columns };
 }
 
@@ -53,6 +57,7 @@ export async function extract(project, router, readPage) {
   
   const allObservations = [];
   const seenKeys = new Set();
+  const rejected = { quote: 0, number: 0 };
   
   for (const node of project.nodes ?? []) {
     if (!node.sources?.length) continue;
@@ -69,10 +74,10 @@ export async function extract(project, router, readPage) {
       
       const prompt = [
         { role: 'system', content: 'You extract observation rows from a source. Answer with JSON only: { rows: [...] }.' },
-        { role: 'user', content: 'TASK=EXTRACT_OBSERVATIONS\nSource: ' + source.url + '\nTable spec: ' + JSON.stringify(spec) + '\nText: ' + text.slice(0, 15000) + '\n\nExtract rows matching the spec. Each row: { time, entity, value, unit, quote }.\n- time: the period (e.g., "2026-12", "Dec 2026", "Q1 2027")\n- entity: the grouping value (e.g., "Asia-Europe", "lane X")\n- value: the numeric value\n- unit: the unit from the spec\'s value column\n- quote: the exact sentence from the text containing the value\n\nOnly extract rows where the value appears in the quote. Return { rows: [...] }.' }
+        { role: 'user', content: 'TASK=EXTRACT_OBSERVATIONS\nSource: ' + source.url + '\nTable spec: ' + JSON.stringify(spec) + '\nText: ' + text.slice(0, 15000) + '\n\nWrite the time of each row as YYYY-MM when the source states a month, YYYY-Qn for a quarter, YYYY for a year only; leave time empty when the source states no period. Extract rows matching the spec. Each row: { time, entity, value, unit, quote }.\n- time: the period in that form\n- entity: the grouping value (as the source states it)\n- value: the numeric value\n- unit: the unit from the spec\'s value column\n- quote: the exact sentence from the text containing the value\n\nOnly extract rows where the value appears in the quote. Return { rows: [...] }.' }
       ];
 
-      const reply = await router.complete({ purpose: 'extract-observations', tier: 'deep', messages: prompt });
+      const reply = await router.complete({ purpose: 'extract-observations', tier: 'fast', messages: prompt });
       const proposed = reply.data ?? {};
       const rows = proposed.rows ?? [];
       
@@ -80,8 +85,8 @@ export async function extract(project, router, readPage) {
 
       for (const row of rows) {
         if (!row.quote || !row.value) continue;
-        if (!quoteFound(text, row.quote)) continue;
-        if (!numberInQuote(row.value, row.quote)) continue;
+        if (!quoteFound(text, row.quote)) { rejected.quote++; continue; }
+        if (!numberInQuote(row.value, row.quote)) { rejected.number++; continue; }
 
         const entity = entityColNames.map(name => row[name] ?? '').filter(Boolean).join('|') || null;
         const key = dedupeKey({ ...row, entity, source: source.url });
@@ -101,7 +106,7 @@ export async function extract(project, router, readPage) {
     }
   }
   
-  return { spec, observations: allObservations, at: new Date().toISOString() };
+  return { spec, observations: allObservations, rejected, at: new Date().toISOString() };
 }
 
 export async function runObservations(project, router, readPage) {

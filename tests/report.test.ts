@@ -83,3 +83,11 @@ describe('every tab as CSV', () => {
     expect(strFromU8(files['1-summary.csv'].subarray(3))).toBe('a,b\r\n\'=1+1,"x,y"\r\n');
   });
 });
+
+describe('result table csv', () => {
+  it('renders the observations as a csv with the spec headers', async () => {
+    const { observationsCsv } = await import('../src/report.mjs');
+    const out = observationsCsv({ results: { spec: { columns: [{ name: 'Месяц', type: 'time' }, { name: 'Ставка', type: 'value' }] }, observations: [{ time: '2026-03', value: 45, quote: 'q', source: 's' }] } });
+    expect(out.replace(/^﻿/, '').split(/\r?\n/)[0]).toBe('Месяц,Ставка,quote,source');
+  });
+});

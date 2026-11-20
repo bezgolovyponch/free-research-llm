@@ -4,7 +4,7 @@ import { templateById } from './research/templates.mjs';
 import { ROOT_ID, childrenOf } from './research/tree.mjs';
 import { actionPlan, resultStatus } from './research/gaps.mjs';
 import { preconditions, effect } from './research/nodevalidity.mjs';
-import { ACTION_LABEL, itemRows, piecesRows, plotRows } from './workbook.mjs';
+import { ACTION_LABEL, observationTableRows, itemRows, piecesRows, plotRows, summaryRows, proposalRows, checkRows, screenedRows, exampleRows, sourceRows, strategyRows, claimRows, piecesRows as _piecesRows } from './workbook.mjs';
 
 function bullets(items) {
   return items?.length ? items.map((i) => `- ${i}`).join('\n') : '- none';
@@ -92,9 +92,22 @@ export function candidatesCsv(project) {
   return csv(plotRows(project));
 }
 
+export function observationsCsv(project) {
+  return csv(observationTableRows(project));
+}
+
+export function observationsJson(project) {
+  const results = project.results ?? {};
+  const spec = results.spec;
+  const observations = results.observations ?? [];
+  if (!spec || !observations.length) return '{}';
+  return JSON.stringify({ spec, observations, at: results.at }, null, 2);
+}
+
 export function resultsJson(project) {
   const status = resultStatus(project);
   const broken = brokenNodes(project);
+  const results = project.results ?? {};
   return {
     question: project.question,
     expected: project.acceptance?.expected ?? null,
@@ -109,6 +122,7 @@ export function resultsJson(project) {
     items: project.acceptanceResult?.items ?? project.report?.deliverables ?? [],
     candidates: project.candidates ?? null,
     memo: project.report ? { summary: project.report.summary, keyNumbers: project.report.keyNumbers, scenarios: project.report.scenarios, sensitivity: project.report.sensitivity, risks: project.report.risks, nextSteps: project.report.nextSteps } : null,
+    observations: results.observations ? { spec: results.spec, observations: results.observations, at: results.at } : null,
   };
 }
 

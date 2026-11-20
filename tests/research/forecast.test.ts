@@ -158,3 +158,12 @@ describe('forecast pure functions', () => {
     });
   });
 });
+
+describe('the forecast horizon the asker names', () => {
+  it('counts the months from the last observed month to the end of the latest year the asker names', async () => {
+    const { askedHorizon } = await import('../../src/research/forecast.mjs');
+    expect(askedHorizon('trend for December 2026 and 2027', '2026-11')).toBe(13);
+    expect(askedHorizon('no year here', '2026-11')).toBe(0);
+    expect(askedHorizon('2026', '2026-12')).toBe(0);
+  });
+});

@@ -1766,6 +1766,15 @@ describe('domain learned before the tree is planned', () => {
     expect(done.log.some((l: { type: string; message: string }) => l.type === 'phase' && l.message.includes('not enough sources explain what the item is'))).toBe(false);
   });
 
+  it('builds the result table of an analysis research from its sources after the pieces', async () => {
+    const { engine } = engineWith(domainProvider(), domainSearch(3));
+    const project = await engine.createProject({ question: 'Is buying fermented bean paste for resale in Poland profitable?' });
+    const done = await engine.run(project.id);
+    const results = (done as unknown as { results?: { spec?: { columns: unknown[] } } }).results;
+    expect(results?.spec?.columns.length).toBeGreaterThan(0);
+    expect(done.log.some((l: { type: string; message: string }) => l.type === 'results' && l.message.startsWith('result table:'))).toBe(true);
+  });
+
   it('does not pause for a listed kind validated on real listing titles, and takes its terms from the kind', async () => {
     const emptySearch = {
       enabled: true,

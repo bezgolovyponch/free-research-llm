@@ -222,3 +222,13 @@ export function buildResultsTable(spec, aggregated, forecastRows) {
   
   return { columns: cols, rows };
 }
+
+export function askedHorizon(askerText, lastTime) {
+  const years = [...String(askerText ?? '').matchAll(/\b(19|20)\d{2}\b/g)].map((m) => Number(m[0]));
+  const last = String(lastTime ?? '').match(/^(\d{4})-(\d{2})$/);
+  if (!years.length || !last) return 0;
+  const lastYear = Number(last[1]);
+  const lastMonth = Number(last[2]);
+  const months = (Math.max(...years) - lastYear) * 12 + (12 - lastMonth);
+  return months > 0 ? months : 0;
+}

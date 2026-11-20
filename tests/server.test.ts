@@ -253,6 +253,7 @@ describe('HTTP server', () => {
     expect((await call('GET', `/api/projects/${created.id}/results.json`)).body).toMatchObject({ question: 'Should I sell used e-bikes in Brno this spring?', pieces: expect.any(Array) });
     expect((await fetch(`${base}/api/projects/${created.id}/items.csv`)).status).toBe(200);
     expect((await fetch(`${base}/api/projects/${created.id}/candidates.csv`)).headers.get('content-disposition')).toBe(`attachment; filename="${created.id}-candidates.csv"`);
+    expect((await fetch(`${base}/api/projects/${created.id}/observations.csv`)).headers.get('content-disposition')).toBe(`attachment; filename="${created.id}-observations.csv"`);
     const xlsx = await fetch(`${base}/api/projects/${created.id}/results.xlsx`);
     expect(xlsx.headers.get('content-type')).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     expect(xlsx.headers.get('content-disposition')).toBe(`attachment; filename="${created.id}-results.xlsx"`);

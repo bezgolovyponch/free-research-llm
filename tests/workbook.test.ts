@@ -165,3 +165,25 @@ describe('summary sheet (audit 2026-11-12, row A1)', () => {
     expect(rows.findIndex((r: unknown[]) => String(r[0]).startsWith('counted toward the result'))).toBeLessThan(rows.findIndex((r: unknown[]) => r[0] === 'fit every check (decision model)'));
   });
 });
+
+describe('result table rows', () => {
+  it('maps the spec columns by type and adds the quote and source of each observation', async () => {
+    const { observationTableRows } = await import('../src/workbook.mjs');
+    const project = { results: { spec: { columns: [{ name: 'Месяц', type: 'time' }, { name: 'Ставка', type: 'value' }, { name: 'Единица', type: 'unit' }] }, observations: [{ time: '2026-03', value: 45, unit: 'USD/t', quote: 'q', source: 'https://a.example/p' }] } };
+    expect(observationTableRows(project)).toEqual([['Месяц', 'Ставка', 'Единица', 'quote', 'source'], ['2026-03', 45, 'USD/t', 'q', 'https://a.example/p']]);
+    expect(observationTableRows({ results: {} })).toEqual([]);
+  });
+});
+
+describe('result table with forecast rows', () => {
+  it('writes observed rows with their quote and forecast rows with their method', async () => {
+    const { observationTableRows } = await import('../src/workbook.mjs');
+    const rows = observationTableRows({ results: { spec: { columns: [] }, observations: [{}], table: [
+      { time: '2026-05', value: 140, unit: 'USD/t', type: 'observed', quote: 'q', source: 's', min: 130, max: 150 },
+      { time: '2026-12', value: 150, unit: 'USD/t', type: 'forecast', low: 120, high: 180, label: 'forecast · drift + Theil-Sen · based on 3 observations' },
+    ] } });
+    expect(rows[0]).toEqual(['time', 'entity', 'value', 'unit', 'type', 'min', 'max', 'basis', 'source']);
+    expect(rows[1]).toEqual(['2026-05', '', 140, 'USD/t', 'observed', 130, 150, 'q', 's']);
+    expect(rows[2][7]).toContain('Theil-Sen');
+  });
+});
