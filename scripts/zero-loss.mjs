@@ -11,6 +11,7 @@ import { sentenceSpans } from '../src/research/spans.mjs';
 import { ModelRouter } from '../src/llm/router.mjs';
 import { ProviderFactory, routeOrderFrom } from '../src/app.mjs';
 import { verdict, hardIdsOf, itemTier, qualifies } from '../src/research/verdict.mjs';
+import { contractClass } from '../src/research/deliverable.mjs';
 import { startedDirectly } from './tool-entry.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,10 +21,11 @@ function parseArgs(argv) {
   const values = (flag) => argv.flatMap((arg, index) => (arg === flag && argv[index + 1] !== undefined ? [argv[index + 1]] : []));
   const value = (flag) => values(flag)[0] ?? null;
   const hasFlag = (flag) => argv.includes(flag);
-  if (!['record', 'check', 'exercised'].includes(command)) return { error: 'usage:\n  node scripts/zero-loss.mjs record <snapshotDir> --out <file> [--judge]\n  node scripts/zero-loss.mjs check <snapshotDir> --baseline <file> [--judge]\n  node scripts/zero-loss.mjs exercised <snapshotDir> --baseline <file>' };
+  if (!['record', 'check', 'exercised', 'upgrade'].includes(command)) return { error: 'usage:\n  node scripts/zero-loss.mjs record <snapshotDir> --out <file> [--judge]\n  node scripts/zero-loss.mjs check <snapshotDir> --baseline <file> [--judge]\n  node scripts/zero-loss.mjs exercised <snapshotDir> --baseline <file>\n  node scripts/zero-loss.mjs upgrade <snapshotDir> --baseline <file> [--drop-empty]' };
   const snapshotDir = path.resolve(value('<snapshotDir>') ?? argv[1]);
   if (!snapshotDir) return { error: 'snapshotDir is required' };
   const judge = hasFlag('--judge');
+  const dropEmpty = hasFlag('--drop-empty');
   if (command === 'record') {
     const out = value('--out');
     if (!out) return { error: '--out is required' };
@@ -33,6 +35,11 @@ function parseArgs(argv) {
     const baseline = value('--baseline');
     if (!baseline) return { error: '--baseline is required' };
     return { command, snapshotDir, baseline: path.resolve(baseline), judge };
+  }
+  if (command === 'upgrade') {
+    const baseline = value('--baseline');
+    if (!baseline) return { error: '--baseline is required' };
+    return { command, snapshotDir, baseline: path.resolve(baseline), dropEmpty };
   }
   const baseline = value('--baseline');
   if (!baseline) return { error: '--baseline is required' };
@@ -167,6 +174,112 @@ function extractStoredJudgeAnswers(project) {
   return outcomes;
 }
 
+function reportOutcomesOf(project) {
+  if (!project?.report || typeof project.report !== 'object') return [];
+  const r = project.report;
+  const outcomes = [];
+  outcomes.push({ project: project.id, unit: 'ended', value: project.phase === 'done' });
+  outcomes.push({ project: project.id, unit: 'verdict', value: (r.verdict ?? '').trim() !== '' });
+  outcomes.push({ project: project.id, unit: 'options', value: (r.options ?? []).length });
+  const optionsLinked = (r.options ?? []).filter((o) => (o.support ?? []).length > 0 || (o.against ?? []).length > 0).length;
+  outcomes.push({ project: project.id, unit: 'optionsLinked', value: optionsLinked });
+  outcomes.push({ project: project.id, unit: 'scenarios', value: (r.scenarios ?? []).length });
+  outcomes.push({ project: project.id, unit: 'sensitivity', value: (r.sensitivity ?? []).length });
+  outcomes.push({ project: project.id, unit: 'keyNumbers', value: (r.keyNumbers ?? []).length });
+  const actionItems = r.actionItems ?? [];
+  const nodeIds = new Set(project.nodes?.map((n) => n.id) ?? []);
+  const actionsLinked = actionItems.filter((a) => (a.nodeIds ?? []).some((id) => nodeIds.has(id))).length;
+  outcomes.push({ project: project.id, unit: 'actionsLinked', value: actionsLinked });
+  return outcomes;
+}
+
+function reportKey(outcome) {
+  return outcome.project + '|report|' + outcome.unit;
+}
+
+function negativeReportFlips(baseline, current) {
+  const baseByKey = new Map();
+  if (baseline.reportOutcomes) {
+    for (const o of baseline.reportOutcomes) {
+      baseByKey.set(reportKey(o), o);
+    }
+  }
+  const currByKey = new Map();
+  if (current.reportOutcomes) {
+    for (const o of current.reportOutcomes) {
+      currByKey.set(reportKey(o), o);
+    }
+  }
+  const flips = [];
+  for (const [key, base] of baseByKey) {
+    const curr = currByKey.get(key);
+    if (!curr) {
+      flips.push({ project: base.project, unit: base.unit, baselineValue: base.value, currentValue: null });
+    } else if (typeof base.value === 'boolean' && base.value === true && curr.value !== true) {
+      flips.push({ project: base.project, unit: base.unit, baselineValue: base.value, currentValue: curr.value });
+    } else if (typeof base.value === 'number' && curr.value < base.value) {
+      flips.push({ project: base.project, unit: base.unit, baselineValue: base.value, currentValue: curr.value });
+    }
+  }
+  return flips;
+}
+
+function nothingToCompare(baseline, current) {
+  const baselineProjectIds = baseline.projects ?? [...new Set(
+    [...(baseline.outcomes ?? []).map((o) => o.project),
+     ...(baseline.tierOutcomes ?? []).map((o) => o.project),
+     ...(baseline.storedJudgeOutcomes ?? []).map((o) => o.project),
+     ...(baseline.reportOutcomes ?? []).map((o) => o.project)]
+  )];
+  if (!baselineProjectIds.length) {
+    return [{ project: '*', kind: null, reason: 'baseline holds no project' }];
+  }
+  const currentProjectIds = current.projects ?? [...new Set(
+    [...(current.outcomes ?? []).map((o) => o.project),
+     ...(current.tierOutcomes ?? []).map((o) => o.project),
+     ...(current.storedJudgeOutcomes ?? []).map((o) => o.project),
+     ...(current.reportOutcomes ?? []).map((o) => o.project)]
+  )];
+  const currentKinds = current.kinds ?? {};
+  const baselineKinds = baseline.kinds ?? {};
+  const results = [];
+  for (const pid of baselineProjectIds) {
+    const inCurrent = currentProjectIds.includes(pid);
+    if (!inCurrent) {
+      const kind = currentKinds[pid] ?? baselineKinds[pid] ?? null;
+      results.push({ project: pid, kind, reason: 'absent from the snapshot' });
+      continue;
+    }
+    const families = [
+      { name: 'outcomes', base: baseline.outcomes ?? [], curr: current.outcomes ?? [], keyFn: keyOf },
+      { name: 'tierOutcomes', base: baseline.tierOutcomes ?? [], curr: current.tierOutcomes ?? [], keyFn: tierKey },
+      { name: 'storedJudgeOutcomes', base: baseline.storedJudgeOutcomes ?? [], curr: current.storedJudgeOutcomes ?? [], keyFn: checkKey },
+      { name: 'reportOutcomes', base: baseline.reportOutcomes ?? [], curr: current.reportOutcomes ?? [], keyFn: reportKey },
+    ];
+    let shared = 0;
+    for (const fam of families) {
+      const baseKeys = new Set(fam.base.filter((o) => o.project === pid).map(fam.keyFn));
+      const currKeys = new Set(fam.curr.filter((o) => o.project === pid).map(fam.keyFn));
+      for (const k of baseKeys) if (currKeys.has(k)) shared++;
+    }
+    const kind = currentKinds[pid] ?? baselineKinds[pid] ?? null;
+    if (shared === 0) {
+      const baseHasUnits = families.some((f) => f.base.some((o) => o.project === pid));
+      const currHasUnits = families.some((f) => f.curr.some((o) => o.project === pid));
+      if (!baseHasUnits && !currHasUnits) {
+        results.push({ project: pid, kind, reason: 'no units in the baseline' });
+      } else if (!baseHasUnits) {
+        results.push({ project: pid, kind, reason: 'no shared units' });
+      } else if (!currHasUnits) {
+        results.push({ project: pid, kind, reason: 'no units now' });
+      } else {
+        results.push({ project: pid, kind, reason: 'no shared units' });
+      }
+    }
+  }
+  return results;
+}
+
 async function outcomesOf(projectFile, srcDir) {
   const project = JSON.parse(await fs.readFile(projectFile, 'utf8'));
   const items = checklistItems(project);
@@ -228,11 +341,15 @@ async function outcomesOf(projectFile, srcDir) {
   }
 
   const storedJudgeOutcomes = extractStoredJudgeAnswers(project);
+  const reportOutcomes = reportOutcomesOf(project);
+  const kind = contractClass(project);
 
   return {
     outcomes,
     tierOutcomes,
     storedJudgeOutcomes,
+    reportOutcomes,
+    kind,
     criteriaCount: decisionCriteriaCount(project),
     hardCount: hardChecklistItemsCount(project),
     tierSummary: tierResult.summary,
@@ -385,22 +502,29 @@ async function checkSnapshot(snapshotDir, baselineFile, judge = false) {
   const allOutcomes = [];
   const allTierOutcomes = [];
   const allStoredJudgeOutcomes = [];
+  let allReportOutcomes = [];
+  const kinds = {};
   let totalCriteria = 0;
   let totalHard = 0;
 
   for (const project of projects) {
-    const { outcomes, tierOutcomes, storedJudgeOutcomes, criteriaCount, hardCount } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
+    const { outcomes, tierOutcomes, storedJudgeOutcomes, reportOutcomes, kind, criteriaCount, hardCount } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
     allOutcomes.push(...outcomes.map((o) => ({ ...o, project: project.id })));
     allTierOutcomes.push(...tierOutcomes.map((o) => ({ ...o, project: project.id })));
     allStoredJudgeOutcomes.push(...storedJudgeOutcomes);
+    allReportOutcomes.push(...reportOutcomes);
     totalCriteria += criteriaCount;
     totalHard += hardCount;
+    kinds[project.id] = kind;
   }
 
   const current = {
     outcomes: allOutcomes,
     tierOutcomes: allTierOutcomes,
     storedJudgeOutcomes: allStoredJudgeOutcomes,
+    reportOutcomes: allReportOutcomes,
+    kinds,
+    projects: projects.map((p) => p.id),
     totalCriteria,
     totalHard
   };
@@ -434,6 +558,9 @@ async function checkSnapshot(snapshotDir, baselineFile, judge = false) {
   const yesRateDiff = currentTotal ? currentYes / currentTotal - (baselineTotal ? baselineYes / baselineTotal : 0) : 0;
   const intervalBelowZero = bootstrapInterval.low !== null && bootstrapInterval.high !== null && bootstrapInterval.high < 0;
 
+  const reportFlips = negativeReportFlips(baseline, current);
+  const nothingCompare = nothingToCompare(baseline, current);
+
   console.log('\n=== Zero-Loss Check ===');
   console.log('Baseline: ' + baseline.outcomes.length + ' outcomes, ' + baselineYes + ' yes (' + (baselineYes / baselineTotal * 100).toFixed(1) + '%), criteria ' + baseline.totalCriteria + ', hard ' + baseline.totalHard);
   console.log('Current:  ' + current.outcomes.length + ' outcomes, ' + currentYes + ' yes (' + (currentYes / currentTotal * 100).toFixed(1) + '%), criteria ' + current.totalCriteria + ', hard ' + current.totalHard);
@@ -455,6 +582,18 @@ async function checkSnapshot(snapshotDir, baselineFile, judge = false) {
       console.log('  ' + flip.project + ' | ' + flip.url + ' | ' + flip.checkId + ' | baseline: ' + flip.baselineAnswer + ' -> current: ' + flip.currentAnswer);
     }
   }
+  console.log('Negative report flips: ' + reportFlips.length);
+  if (reportFlips.length) {
+    for (const flip of reportFlips) {
+      console.log('  ' + flip.project + ' | ' + flip.unit + ' | ' + flip.baselineValue + ' -> ' + flip.currentValue);
+    }
+  }
+  console.log('Nothing to compare: ' + nothingCompare.length);
+  if (nothingCompare.length) {
+    for (const entry of nothingCompare) {
+      console.log('  ' + entry.project + ' | ' + entry.kind + ' | ' + entry.reason);
+    }
+  }
   console.log('Positive flips (numeric): ' + positiveNumericFlips.length);
   console.log('Positive tier flips (not confirmed->confirmed): ' + positiveTierFlipsResult.length);
   console.log('Positive hard-check flips (not yes->yes): ' + positiveHardCheckFlipsResult.length);
@@ -471,7 +610,56 @@ async function checkSnapshot(snapshotDir, baselineFile, judge = false) {
   const pValue = mcNemarExact(b, c);
   console.log('McNemar exact (b=' + b + ', c=' + c + '): p = ' + pValue.toFixed(6));
 
-  const failed = flips.length > 0 || tierFlips.length > 0 || hardCheckFlips.length > 0 || criteriaDrop || hardDrop || intervalBelowZero;
+  const kindStats = {};
+  for (const entry of nothingCompare) {
+    const kind = entry.kind ?? 'unknown';
+    if (!kindStats[kind]) kindStats[kind] = { projects: 0, sharedUnits: 0, negativeFlips: 0, nothingToCompare: 0 };
+    kindStats[kind].projects++;
+    kindStats[kind].nothingToCompare++;
+  }
+  for (const flip of flips) {
+    const kind = kinds[flip.project] ?? 'unknown';
+    if (!kindStats[kind]) kindStats[kind] = { projects: 0, sharedUnits: 0, negativeFlips: 0, nothingToCompare: 0 };
+    kindStats[kind].negativeFlips++;
+  }
+  for (const flip of tierFlips) {
+    const kind = kinds[flip.project] ?? 'unknown';
+    if (!kindStats[kind]) kindStats[kind] = { projects: 0, sharedUnits: 0, negativeFlips: 0, nothingToCompare: 0 };
+    kindStats[kind].negativeFlips++;
+  }
+  for (const flip of hardCheckFlips) {
+    const kind = kinds[flip.project] ?? 'unknown';
+    if (!kindStats[kind]) kindStats[kind] = { projects: 0, sharedUnits: 0, negativeFlips: 0, nothingToCompare: 0 };
+    kindStats[kind].negativeFlips++;
+  }
+  for (const flip of reportFlips) {
+    const kind = kinds[flip.project] ?? 'unknown';
+    if (!kindStats[kind]) kindStats[kind] = { projects: 0, sharedUnits: 0, negativeFlips: 0, nothingToCompare: 0 };
+    kindStats[kind].negativeFlips++;
+  }
+  for (const pid of current.projects ?? []) {
+    const kind = kinds[pid] ?? 'unknown';
+    if (!kindStats[kind]) kindStats[kind] = { projects: 0, sharedUnits: 0, negativeFlips: 0, nothingToCompare: 0 };
+    kindStats[kind].projects++;
+  }
+
+  if (Object.keys(kindStats).length) {
+    console.log('\n=== Per-kind summary ===');
+    console.log('kind | projects | shared units | negative flips | nothing-to-compare');
+    for (const [kind, stats] of Object.entries(kindStats)) {
+      console.log(kind + ' | ' + stats.projects + ' | ' + stats.sharedUnits + ' | ' + stats.negativeFlips + ' | ' + stats.nothingToCompare);
+    }
+  }
+
+  const droppedCount = baseline.dropped ? baseline.dropped.length : 0;
+  if (droppedCount) {
+    console.log('\nDropped from baseline: ' + droppedCount);
+    for (const d of baseline.dropped) {
+      console.log('  ' + d.id + ' | ' + d.kind + ' | ' + d.reason);
+    }
+  }
+
+  const failed = flips.length > 0 || tierFlips.length > 0 || hardCheckFlips.length > 0 || reportFlips.length > 0 || nothingCompare.length > 0 || criteriaDrop || hardDrop || intervalBelowZero;
 
   if (judge) {
     const judgeResult = await runJudgeCheck(snapshotDir, baseline, current);
@@ -646,20 +834,24 @@ async function recordSnapshot(snapshotDir, outFile, judge = false) {
 
   let allTierOutcomes = [];
   let allStoredJudgeOutcomes = [];
+  let allReportOutcomes = [];
+  const kinds = {};
   const tierSummaries = {};
   const tierCountsPerProject = {};
   const perCheckPerProject = {};
 
   for (const project of projects) {
-    const { outcomes, tierOutcomes, storedJudgeOutcomes, criteriaCount, hardCount, tierSummary, tierCounts, perCheck } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
+    const { outcomes, tierOutcomes, storedJudgeOutcomes, reportOutcomes, kind, criteriaCount, hardCount, tierSummary, tierCounts, perCheck } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
     allOutcomes.push(...outcomes.map((o) => ({ ...o, project: project.id })));
     allTierOutcomes.push(...tierOutcomes.map((o) => ({ ...o, project: project.id })));
     allStoredJudgeOutcomes.push(...storedJudgeOutcomes);
+    allReportOutcomes.push(...reportOutcomes);
     totalCriteria += criteriaCount;
     totalHard += hardCount;
     if (tierSummary) tierSummaries[project.id] = tierSummary;
     if (tierCounts) tierCountsPerProject[project.id] = tierCounts;
     if (perCheck) perCheckPerProject[project.id] = perCheck;
+    kinds[project.id] = kind;
   }
 
   const snapshot = {
@@ -670,6 +862,8 @@ async function recordSnapshot(snapshotDir, outFile, judge = false) {
     outcomes: allOutcomes,
     tierOutcomes: allTierOutcomes,
     storedJudgeOutcomes: allStoredJudgeOutcomes,
+    reportOutcomes: allReportOutcomes,
+    kinds,
     tierSummaries,
     tierCountsPerProject,
     perCheckPerProject,
@@ -735,6 +929,80 @@ async function exercisedSnapshot(snapshotDir, baselineFile) {
   return 0;
 }
 
+async function upgradeSnapshot(snapshotDir, baselineFile, dropEmpty) {
+  const baseline = JSON.parse(await fs.readFile(baselineFile, 'utf8'));
+  const projectsDir = path.join(snapshotDir, 'projects');
+  const projects = await loadProjects(projectsDir);
+
+  const allOutcomes = [];
+  const allTierOutcomes = [];
+  const allStoredJudgeOutcomes = [];
+  let allReportOutcomes = [];
+  const kinds = {};
+  let totalCriteria = 0;
+  let totalHard = 0;
+
+  for (const project of projects) {
+    const { outcomes, tierOutcomes, storedJudgeOutcomes, reportOutcomes, kind, criteriaCount, hardCount } = await outcomesOf(path.join(projectsDir, project.id + '.json'), ROOT);
+    allOutcomes.push(...outcomes.map((o) => ({ ...o, project: project.id })));
+    allTierOutcomes.push(...tierOutcomes.map((o) => ({ ...o, project: project.id })));
+    allStoredJudgeOutcomes.push(...storedJudgeOutcomes);
+    allReportOutcomes.push(...reportOutcomes);
+    totalCriteria += criteriaCount;
+    totalHard += hardCount;
+    kinds[project.id] = kind;
+  }
+
+  const current = {
+    outcomes: allOutcomes,
+    tierOutcomes: allTierOutcomes,
+    storedJudgeOutcomes: allStoredJudgeOutcomes,
+    reportOutcomes: allReportOutcomes,
+    kinds,
+    projects: projects.map((p) => p.id),
+    totalCriteria,
+    totalHard
+  };
+
+  const nothingCompare = nothingToCompare(baseline, current);
+  let dropped = [];
+  const projectsToKeep = [...baseline.projects];
+
+  if (dropEmpty) {
+    for (const entry of nothingCompare) {
+      if (entry.reason === 'no units in the baseline') {
+        const idx = projectsToKeep.indexOf(entry.project);
+        if (idx >= 0) {
+          projectsToKeep.splice(idx, 1);
+          dropped.push({ id: entry.project, kind: entry.kind, reason: entry.reason });
+          console.log('Dropped from baseline: ' + entry.project + ' | ' + entry.kind + ' | ' + entry.reason);
+        }
+      }
+    }
+  }
+
+  const kindCounts = {};
+  for (const pid of current.projects) {
+    const kind = kinds[pid] ?? 'unknown';
+    kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
+  }
+  for (const [kind, count] of Object.entries(kindCounts)) {
+    console.log('Kind ' + kind + ': ' + count + ' project(s)');
+  }
+  console.log('Report units added: ' + allReportOutcomes.length);
+
+  baseline.projects = projectsToKeep;
+  baseline.reportOutcomes = current.reportOutcomes;
+  baseline.kinds = current.kinds;
+  if (dropEmpty && dropped.length) {
+    baseline.dropped = dropped;
+  }
+
+  await fs.writeFile(baselineFile, JSON.stringify(baseline, null, 1));
+  console.log('Updated baseline written to ' + baselineFile);
+  return 0;
+}
+
 async function main(argv) {
   const args = parseArgs(argv);
   if (args.error) {
@@ -747,9 +1015,12 @@ async function main(argv) {
   if (args.command === 'exercised') {
     return await exercisedSnapshot(args.snapshotDir, args.baseline);
   }
+  if (args.command === 'upgrade') {
+    return await upgradeSnapshot(args.snapshotDir, args.baseline, args.dropEmpty);
+  }
   return await checkSnapshot(args.snapshotDir, args.baseline, args.judge);
 }
 
 if (startedDirectly(import.meta.url)) process.exit(await main(process.argv.slice(2)));
 
-export { outcomesOf, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, getTapeDir, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers, outcomesDiffer, exercisedSnapshot };
+export { outcomesOf, negativeFlips, negativeTierFlips, positiveTierFlips, negativeHardCheckFlips, positiveHardCheckFlips, positiveFlips, mcNemarExact, binomialCoefficient, recordSnapshot, checkSnapshot, runJudgeCheck, createTapeRouter, getTapeDir, judgeKey, findPageText, getQualitativeItems, runJudgeOnItem, loadFullProject, extractJudgedItems, computeTiers, extractStoredJudgeAnswers, outcomesDiffer, exercisedSnapshot, reportOutcomesOf, reportKey, negativeReportFlips, nothingToCompare, upgradeSnapshot };
