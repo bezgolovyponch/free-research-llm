@@ -518,6 +518,7 @@ export class ResearchEngine {
       ready: project.domain.ready,
       basis: project.domain.basis,
     } : null;
+    const enforceRequestModel = process.env.FRL_REQUEST_MODEL_ENFORCE === '1';
     const ask = async (feedback) => {
       const reply = await this.router.complete({
         purpose: 'decompose',
@@ -536,17 +537,24 @@ export class ResearchEngine {
       }
       if (unknownServes) this.emit(project, 'tree', `${unknownServes} unknown requirement id(s) in 'serves' dropped`);
       const fixes = repairTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
-      return { reply, tree, issues: auditTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) })), fixes };
+      const issues = auditTree(tree.nodes, project.question, modelOf({ ...project, brief: this.briefOf(project) }));
+      if (enforceRequestModel) {
+        const ids = requirements.map((r) => r.id).join(', ');
+        for (const id of servesless(tree.nodes, requirements)) issues.push({ code: 'serves-none', nodeId: id, detail: `${id} names no requirement it serves; every piece must serve one of: ${ids}` });
+      }
+      return { reply, tree, issues, fixes };
     };
     let { reply, tree, issues, fixes } = await ask('');
-    if (issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced')) {
+    const retryCodes = new Set(['single-child', 'misplaced']);
+    if (enforceRequestModel) retryCodes.add('serves-none');
+    if (issues.some((i) => BLOCKING.has(i.code) || retryCodes.has(i.code))) {
       this.emit(project, 'tree', `tree checks failed (${issues.map((i) => i.code).join(', ')}); asking for a corrected tree`);
       const second = await ask(auditFeedback(issues)).catch(() => null);
       if (second && second.tree.nodes.length >= 2 && second.issues.length < issues.length) ({ reply, tree, issues, fixes } = second);
     }
     for (const fix of (fixes ?? []).filter((f) => f.code === 'scope')) this.emit(project, 'tree', fix.detail);
     if (tree.nodes.length < 2) throw new Error('the model returned an empty issue tree; try again or use a stronger model');
-    const passed = !issues.some((i) => BLOCKING.has(i.code) || i.code === 'single-child' || i.code === 'misplaced');
+    const passed = !issues.some((i) => BLOCKING.has(i.code) || retryCodes.has(i.code));
     this.router.recordOutcome?.({ provider: reply.provider, model: reply.model, purpose: 'decompose', passed });
     const proposed = project.acceptance?.locked ? { spec: project.acceptance, dropped: [] } : groundAcceptance(normalizeAcceptance(reply.data?.acceptance, project.acceptance?.expected), { expected: project.acceptance?.expected, question: project.question, constraints: project.constraints });
     const acceptance = proposed.spec;
