@@ -39,6 +39,10 @@ describe('quoteOnPage', () => {
   it('handles null body', () => {
     expect(quoteOnPage(null, 'anything')).toBe(false);
   });
+
+  it('does not decode an entity twice', () => {
+    expect(quoteOnPage('<p>&amp;#43;31 85</p>', '+31 85')).toBe(false);
+  });
 });
 
 describe('pageChecker', () => {
@@ -50,60 +54,33 @@ describe('pageChecker', () => {
     expect(check('10 EUR')).toBe(false);
   });
 
-  it('HTML entity case: <p>Call &#43;31 85 130</p> contains +31 85 130', () => {
-    const body = '<p>Call &#43;31 85 130</p>';
-    const check = pageChecker(body);
-    expect(check('+31 85 130')).toBe(true);
-  });
-
-  it('JSON escape case: a body {"telephone":"\\u002B33235078680"} contains +33235078680', () => {
-    const body = '{"telephone":"\\u002B33235078680"}';
-    const check = pageChecker(body);
-    expect(check('+33235078680')).toBe(true);
-  });
-
-  it('quote split by a tag: <b>12</b> € contains 12 €', () => {
-    const body = '<b>12</b> €';
-    const check = pageChecker(body);
-    expect(check('12 €')).toBe(true);
-  });
-
-  it('rejects empty quote', () => {
-    const check = pageChecker('anything');
-    expect(check('')).toBe(false);
-  });
-
-  it('rejects 2-character quote', () => {
-    const check = pageChecker('anything');
-    expect(check('an')).toBe(false);
-  });
-
-  it('rejects quote that differs only in letter case', () => {
-    const body = 'Price 12 EUR';
-    const check = pageChecker(body);
-    expect(check('12 eur')).toBe(false);
-  });
-
-  it('rejects quote that is absent', () => {
-    const body = '<p>Bale 12</p>';
-    const check = pageChecker(body);
-    expect(check('Bale 13')).toBe(false);
-  });
-
-  it('handles null body', () => {
-    const check = pageChecker(null);
-    expect(check('anything')).toBe(false);
-  });
-
-  it('a page of about 1.5 MB checked for 50 quotes through ONE checker finishes in under 3 seconds', () => {
-    const largeBody = 'A '.repeat(750000);
-    const check = pageChecker(largeBody);
-    const quotes = Array.from({ length: 50 }, (_, i) => `Quote ${i}`);
+  it('a page of about 1.5 MB with tags, entities and JSON escapes is built and checked for 50 quotes in under 3 seconds', () => {
+    const filler = '<div class="row"><span>Item &amp; more &#43;1&nbsp;m</span> {"name":"caf\\u00e9"}</div>\n';
+    const ending = Array.from(
+      { length: 25 },
+      (_, i) => `<li><b>Lot ${i}</b> &amp; price &#43;${i}&nbsp;EUR caf\\u00e9 ${i}</li>`,
+    ).join('');
+    const body = filler.repeat(Math.ceil(1500000 / filler.length)) + ending;
+    const present = Array.from({ length: 25 }, (_, i) => `Lot ${i} & price +${i} EUR café ${i}`);
+    const absent = Array.from({ length: 25 }, (_, i) => `Lot ${i + 100} & price +${i} EUR café ${i}`);
     const start = performance.now();
-    for (const q of quotes) {
-      check(q);
-    }
+    const check = pageChecker(body);
+    const found = present.map((quote) => check(quote));
+    const missed = absent.map((quote) => check(quote));
     const elapsed = performance.now() - start;
+    expect(body.length).toBeGreaterThan(1400000);
+    expect(body.length).toBeLessThan(1600000);
+    expect(found).toEqual(Array(25).fill(true));
+    expect(missed).toEqual(Array(25).fill(false));
+    expect(elapsed).toBeLessThan(3000);
+  });
+
+  it('a body of 1.5 million < characters with no > is built and checked for a 5-character quote in under 3 seconds', () => {
+    const body = '<'.repeat(1500000);
+    const start = performance.now();
+    const found = pageChecker(body)('abcde');
+    const elapsed = performance.now() - start;
+    expect(found).toBe(false);
     expect(elapsed).toBeLessThan(3000);
   });
 });

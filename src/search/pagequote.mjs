@@ -1,7 +1,7 @@
 import { decodeText } from './html.mjs';
 
 const MIN_QUOTE_LENGTH = 3;
-const TAG = /<[^>]*>/g;
+const TAG = /<[^<>]*>/g;
 
 function flat(text) {
   return decodeText(text).replace(/\s+/g, ' ').trim();

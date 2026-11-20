@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { absoluteUrl, domainOf } from '../../src/search/html.mjs';
-import { decodeText } from '../../src/search/html.mjs';
+import { absoluteUrl, decodeText, domainOf } from '../../src/search/html.mjs';
 
 describe('html helpers', () => {
   it('resolves links against the page, drops fragments and non-web schemes', () => {
@@ -16,8 +15,8 @@ describe('decodeText', () => {
     expect(decodeText('+33 2')).toBe('+33 2');
     expect(decodeText('\\u002B33 2')).toBe('+33 2');
     expect(decodeText('https:\\/\\/x.example\\/a.jpg')).toBe('https://x.example/a.jpg');
-    expect(decodeText('https:\\/\\/x.example\\/a.jpg')).toBe('https://x.example/a.jpg');
     expect(decodeText('say "hi"')).toBe('say "hi"');
+    expect(decodeText('say \\"hi\\"')).toBe('say "hi"');
   });
 
   it('decodes named, decimal and hex entities', () => {
@@ -34,6 +33,10 @@ describe('decodeText', () => {
   it('decodes entities in one pass', () => {
     expect(decodeText('&euro;')).toBe('&euro;');
     expect(decodeText('&#43;')).toBe('+');
+    expect(decodeText('&amp;')).toBe('&');
+    expect(decodeText('&lt;&gt;&quot;')).toBe('<>"');
+    expect(decodeText('&amp;#43;')).toBe('&#43;');
+    expect(decodeText('&amp;euro;')).toBe('&euro;');
   });
 
   it('leaves unknown entities as written', () => {
