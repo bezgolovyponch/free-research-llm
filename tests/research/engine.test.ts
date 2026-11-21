@@ -4952,3 +4952,48 @@ describe('the own-site pass under FRL_OWN_SITE', () => {
     expect(plain.acceptanceResult!.items[0]).toMatchObject({ url: DIRECTORY, tier: 'to-confirm' });
   });
 });
+
+describe('the memo verdict says when its figure rests on an assumption (FRL_ASSUMED_FIGURES)', () => {
+  const setUp = async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.', expected: 'one figure with its source' });
+    project.acceptance = { itemCount: null, mustMention: [] };
+    project.report = { verdict: '12,000 residential heat pumps were installed in Czechia in 2024 according to the EHPA 2024/2025 Market Report.', modelVerdict: '12,000 residential heat pumps were installed in Czechia in 2024 according to the EHPA 2024/2025 Market Report.', confidence: 'medium', openQuestions: [], bestEstimate: { value: '12000', unit: 'units', low: '', high: '', basis: 'D4' } };
+    project.nodes = [
+      { id: 'D4', parentId: 'Q', status: 'weak', finding: { answer: 'The EHPA report estimates that 12,000 residential heat pumps were sold in Czechia in 2024.', claims: [{ text: 'The EHPA report estimates that 12,000 residential heat pumps were sold in Czechia in 2024.', sourceIds: ['D4.2'], quote: 'estimates that 12,000 residential heat pumps', assumption: false, attributed: true }] } },
+      { id: 'D4.2', parentId: 'D4', status: 'weak', finding: { answer: 'The EHPA report estimates that 12,000 residential heat pumps were sold in Czechia in 2024.', claims: [{ text: 'EHPA estimates 12,000 residential heat pumps sold in 2024.', value: 12000, sourceIds: ['S9'], quote: 'The table shows the number of units sold in 2024', assumption: true, attributed: null }] } },
+    ];
+    return { engine, project };
+  };
+
+  it('adds the note, keeps the figures and lowers confidence', async () => {
+    const before = process.env.FRL_ASSUMED_FIGURES;
+    process.env.FRL_ASSUMED_FIGURES = '1';
+    try {
+      const { engine, project } = await setUp();
+      engine.planActions(project);
+      expect(project.report.verdict).toContain('— 12,000 rests on an assumption (D4.2): no source read states it');
+      expect(project.report.assumedFigures).toEqual([{ figure: '12000', from: 'D4.2' }]);
+      expect(project.report.confidence).toBe('low');
+      engine.planActions(project);
+      expect(project.report.verdict.match(/rests on an assumption/g)).toHaveLength(1);
+    } finally {
+      if (before === undefined) delete process.env.FRL_ASSUMED_FIGURES;
+      else process.env.FRL_ASSUMED_FIGURES = before;
+    }
+  });
+
+  it('changes nothing without the flag', async () => {
+    const before = process.env.FRL_ASSUMED_FIGURES;
+    delete process.env.FRL_ASSUMED_FIGURES;
+    try {
+      const { engine, project } = await setUp();
+      engine.planActions(project);
+      expect(project.report.verdict).not.toContain('rests on an assumption');
+      expect(project.report.assumedFigures).toBeUndefined();
+      expect(project.report.confidence).toBe('medium');
+    } finally {
+      if (before !== undefined) process.env.FRL_ASSUMED_FIGURES = before;
+    }
+  });
+});

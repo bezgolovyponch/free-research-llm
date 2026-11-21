@@ -34,7 +34,8 @@ import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryP
 import { listingKey, nextPageUrl } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
-import { checkFindings, conflictQuestions, findingsNote, lowersConfidence } from './findingscheck.mjs';
+import { checkFindings, conflictQuestions, findingsNote, lowersConfidence, memoAnswer } from './findingscheck.mjs';
+import { assumedFigures, assumedInText, assumedNote } from './attribution.mjs';
 import { applyStrategy, asksSea, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
@@ -129,6 +130,10 @@ function calibrationTitles(pages, max = CALIBRATION_TITLES) {
 
 function strings(value, max = 8) {
   return (Array.isArray(value) ? value : value ? [value] : []).map((v) => String(v).trim()).filter(Boolean).slice(0, max);
+}
+
+function askedWords(project) {
+  return `${project.question ?? ''} ${project.acceptance?.expected ?? ''}`;
 }
 
 const GROUP_KNOWLEDGE_GROUPS = 6;
@@ -1706,7 +1711,7 @@ export class ResearchEngine {
     const reply = await this.router.complete({
       purpose: 'synthesize',
       tier: 'deep',
-      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates), observationsTable: project.results?.table, forecast: project.results?.forecast }), project.guidance),
+      messages: withGuidance(synthesizePrompt({ question: project.question, decision: project.decision, successCriteria: project.successCriteria, template, constraints: project.constraints, nodes: project.nodes, expected: project.acceptance?.expected, kind: questionKind(project), shortlist: shortlistText(project.candidates), observationsTable: project.results?.table, forecast: project.results?.forecast, ...(process.env.FRL_ASSUMED_FIGURES ? { assumed: assumedFigures(project.nodes, askedWords(project)) } : {}) }), project.guidance),
     });
     const r = reply.data ?? {};
     const counts = progress(project.nodes);
@@ -1766,7 +1771,9 @@ export class ResearchEngine {
     const table = tableVerdict(project.candidates, project.acceptance?.itemCount ?? null);
     const said = project.report.modelVerdict ?? project.report.verdict;
     project.report.claimCheck = checkMemoClaims(project.report, project.candidates, { valueRange: project.acceptance?.valueRange ?? null, rules: project.candidates?.strategy?.rules ?? null, itemCount: project.acceptance?.itemCount ?? null, asked: `${project.question ?? ''} ${project.acceptance?.expected ?? ''}` });
-    const note = `${claimNote(project.report.claimCheck)}${findingsNote(project.report.findingsCheck)}`;
+    const assumed = process.env.FRL_ASSUMED_FIGURES ? assumedInText(memoAnswer(project.report), assumedFigures(project.nodes, askedWords(project)), project.nodes, askedWords(project)) : [];
+    if (assumed.length) Object.assign(project.report, { assumedFigures: assumed, confidence: 'low' });
+    const note = `${claimNote(project.report.claimCheck)}${findingsNote(project.report.findingsCheck)}${assumedNote(assumed)}`;
     project.report.verdict = `${provisionalVerdict(table ? `${table} — model memo: ${said}` : said, status).slice(0, 600 - note.length)}${note}`;
     project.report.status = { provisional: status.provisional, coverage: status.coverage, confidence: status.confidence, blocking: status.blocking, counts: status.counts };
     project.report.actions = status.plan.slice(0, 40);

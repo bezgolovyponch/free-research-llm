@@ -2,6 +2,7 @@ import { collectDeliverables } from './acceptance.mjs';
 import { countryByCode, describeBrief } from './brief.mjs';
 import { MAX_NODES, METHODS } from './tree.mjs';
 import { resultModel } from './result.mjs';
+import { shownFigure } from './attribution.mjs';
 
 const REGION_LANGUAGE = { PT: 'Portuguese', ES: 'Spanish', TR: 'Turkish', VN: 'Vietnamese', GR: 'Greek', IT: 'Italian', FR: 'French', DE: 'German', BG: 'Bulgarian', HR: 'Croatian', RO: 'Romanian', PL: 'Polish', CZ: 'Czech', NL: 'Dutch', SE: 'Swedish', DK: 'Danish', NO: 'Norwegian', FI: 'Finnish', HU: 'Hungarian', SK: 'Slovak', SI: 'Slovenian', EE: 'Estonian', LV: 'Latvian', LT: 'Lithuanian', GB: 'English', US: 'English', IE: 'English', CH: 'German', AT: 'German', BE: 'Dutch' };
 
@@ -252,9 +253,13 @@ function itemsBlock(nodes) {
   return `\nCANDIDATE ITEMS FOUND (${items.length}; from passing pieces):\n${items.map((i) => `- [${i.nodeId}] ${String(i.title ?? i.name ?? '').slice(0, 80)} · ${i.value ?? '?'} ${i.unit ?? ''} · ${i.url}`).join('\n')}\nSCREEN them like a systematic review (identify → screen → include): check each item against the screening findings above (price incl. preparation, climate, distance, permits, demand), and state in the verdict the counts: identified, screened out (main reasons), included. An item with unknown facts is "to check", not included.\n`;
 }
 
-export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision', shortlist = '', observationsTable = null, forecast = null }) {
+export function synthesizePrompt({ question, decision, successCriteria, template, constraints, nodes, expected, kind = 'decision', shortlist = '', observationsTable = null, forecast = null, assumed = null }) {
   const drivers = nodes.filter((n) => n.parentId === 'Q');
-  const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}`);
+  const assumedLine = (n) => {
+    const items = assumed?.get?.(n.id) ?? [];
+    return items.length ? `\n  assumed, no source read states it: ${items.map((item) => `${shownFigure(item.figure)} (${item.from})`).join(', ')}` : '';
+  };
+  const lines = nodes.map((n) => `${n.id} [${n.status}] ${n.question}\n  -> ${n.finding?.answer ?? 'not researched'}${n.finding?.calculation?.formula ? `\n  calc: ${n.finding.calculation.formula} = ${n.finding.calculation.recomputed ?? n.finding.calculation.result} ${n.finding.calculation.unit ?? ''}` : ''}${assumedLine(n)}`);
 
   let obsBlock = '';
   if (observationsTable?.rows?.length) {
@@ -283,7 +288,7 @@ ${constraintsText(constraints)}
 DECISION RULE: ${template.decisionRule}
 
 RESEARCH RESULTS (status in brackets: verified > supported > weak > unsupported):
-${lines.join('\n')}
+${lines.join('\n')}${nodes.some((n) => assumedLine(n)) ? '\nA figure marked "assumed, no source read states it" is an estimate made by the research itself: call it an estimate, and never attribute it to a source, a report or an organisation.' : ''}
 ${itemsBlock(nodes)}
 ${shortlist ? `\nCANDIDATE TABLE (screened by code against the hard limits; cite counts from it, never invent items):\n${shortlist}\nThe table counts are final and computed by code. Use the kept count as the number of results; never state a different count of results or say the target is not met when kept >= the expected item count.\n` : ''}
 ${obsBlock}${forecastBlock}
