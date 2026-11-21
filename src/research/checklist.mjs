@@ -66,6 +66,27 @@ export function addressCheckPrompt({ question, address, opening, options }) {
     { role: 'user', content: `Question: ${question}\n${ADDRESS_LABEL} ${address}\nOpening sentences of the page:\n${opening}\n\nOptions:\n${optionLines(options)}` },
   ];
 }
+export const WORDING_VOTES = 3;
+export const WORDING_NONE = 'none';
+
+export function oneItemOptions(wordings) {
+  return [...wordings.map((text, at) => ({ id: at, text })), { id: WORDING_NONE, text: 'None of these asks about one single item' }];
+}
+
+export function oneItemPrompt({ asked, options }) {
+  return [
+    { role: 'system', content: 'A checklist question is asked of each delivered item on its own: a judge reads the page of one item and answers it for that item alone. Below are several wordings of the same checklist question. Pick the wording that asks about one single item (this one item), not about a list, a set or all items together. When several do, pick the one that keeps the asker\'s words most faithfully. Pick the last option when none asks about one single item. Answer with JSON only: {"pick":"<letter>"}' },
+    { role: 'user', content: `The asker's words: ${asked}\n\nWordings:\n${optionLines(options)}` },
+  ];
+}
+
+export async function oneItemQuestion({ router, asked = '', wordings }) {
+  if (!router || (wordings?.length ?? 0) < 2) return null;
+  const result = await closedVote({ router, task: 'one-item-question', tier: 'fast', n: WORDING_VOTES, quorum: 2, options: oneItemOptions(wordings), field: 'pick', seed: wordings.join('|'), prompt: (shown) => oneItemPrompt({ asked, options: shown }), keyOf: (id) => String(id) }).catch(() => null);
+  const pick = agreed(result)?.id;
+  return Number.isInteger(pick) ? wordings[pick] : null;
+}
+
 export const SINGLE_KIND_OPINION = 'second opinion from one provider family only: not rejected, to confirm';
 export const SINGLE_KIND_REASON ='priced far below comparable items, and only one independent judgement was available: confirm it is the item itself';
 
@@ -131,7 +152,7 @@ export function normalizeSample(raw) {
   return { items };
 }
 
-export function clusterChecklist(samples, { askerWords = '' } = {}) {
+export function clusterChecklist(samples, { askerWords = '', keepWordings = false } = {}) {
   const byQuote = Boolean(process.env.FRL_QUOTED_CHECKS) && Boolean(String(askerWords).trim());
   const allItems = [];
   for (let sampleIdx = 0; sampleIdx < samples.length; sampleIdx++) {
@@ -197,7 +218,8 @@ export function clusterChecklist(samples, { askerWords = '' } = {}) {
 
     const clause = (quotedItem?.quote ?? group[0].clause).toLowerCase().trim();
     const provenance = byQuote ? { source: quotedItem ? 'quoted' : 'derived', quote: quotedItem?.quote ?? '', share: Math.round((sampleCount / samples.length) * 100) / 100 } : {};
-    clusters.push({ clause, ...provenance, items: [{ clause, question: mostCommonQuestion, hard, numeric }] });
+    const wordings = keepWordings ? { wordings: [...questionCounts.entries()].sort((a, b) => b[1] - a[1]).map(([text]) => text) } : {};
+    clusters.push({ clause, ...provenance, items: [{ clause, question: mostCommonQuestion, hard, numeric, ...wordings }] });
   }
 
   return clusters;
@@ -402,7 +424,18 @@ export class ChecklistModeler {
       }
     }
     if (samples.length < 2) return null;
+    if (process.env.FRL_ONE_ITEM_QUESTION) return this.oneItemWordings(clusterChecklist(samples, { askerWords, keepWordings: true }));
     return clusterChecklist(samples, { askerWords });
+  }
+
+  async oneItemWordings(clusters) {
+    return Promise.all(clusters.map(async (cluster) => ({
+      ...cluster,
+      items: await Promise.all(cluster.items.map(async ({ wordings, ...item }) => ({
+        ...item,
+        question: (await oneItemQuestion({ router: this.router, asked: cluster.quote || cluster.clause, wordings })) ?? item.question,
+      }))),
+    })));
   }
 }
 
