@@ -60,6 +60,43 @@ export async function findRelevantLinks(links, itemUrl, keyWords, max = 3) {
   return [...new Set([...matching, ...companyPages])].slice(0, max);
 }
 
+export const LINK_CANDIDATES = 80;
+
+function pathWords(url) {
+  try {
+    return decodeURIComponent(new URL(url).pathname).replace(/[/_\-.+]+/g, ' ').trim();
+  } catch {
+    return '';
+  }
+}
+
+export async function linksByMeaning(links, itemUrl, question, embedder, max = 3) {
+  const prefix = entityPrefix(itemUrl);
+  const here = itemUrl.replace(/#.*$/, '').replace(/\/+$/, '');
+  const profile = prefix ? `${new URL(itemUrl).origin}${prefix}` : '';
+  const first = profile && profile !== here ? [profile] : [];
+  const seen = new Set([here, ...first]);
+  const candidates = [];
+  for (const link of links ?? []) {
+    let fullUrl;
+    try {
+      fullUrl = new URL(link.url, itemUrl).href.replace(/#.*$/, '');
+    } catch {
+      continue;
+    }
+    const key = fullUrl.replace(/\/+$/, '');
+    if (seen.has(key) || !sameHost(fullUrl, itemUrl)) continue;
+    if (prefix && !insideEntity(fullUrl, prefix)) continue;
+    seen.add(key);
+    candidates.push({ url: fullUrl, text: `${link.text ?? ''} ${pathWords(fullUrl)}`.trim() });
+  }
+  const shortlist = candidates.slice(0, LINK_CANDIDATES);
+  if (!shortlist.length) return first;
+  const ranked = await embedder.rank(question, shortlist.map((c) => c.text), max).catch(() => null);
+  if (!ranked?.order?.length) return null;
+  return [...first, ...ranked.order.map((index) => shortlist[index]?.url).filter(Boolean)].slice(0, max);
+}
+
 function onlyCheck(checklist, checkId) {
   return checklist
     .map((cluster) => ({ ...cluster, items: cluster.items.filter((ci) => `${cluster.clause}|${ci.question}` === checkId) }))
@@ -78,9 +115,10 @@ export function deeperOrder(items, { checklist = null, kind = null, spec = null 
 }
 
 export class DeeperReader {
-  constructor({ judge, readPage, budget = DEEPER_PAGE_BUDGET, onProgress = () => {} } = {}) {
+  constructor({ judge, readPage, embedder = null, budget = DEEPER_PAGE_BUDGET, onProgress = () => {} } = {}) {
     this.judge = judge;
     this.readPage = readPage;
+    this.embedder = embedder;
     this.budget = budget;
     this.onProgress = onProgress;
     this.read = 0;
@@ -99,8 +137,9 @@ export class DeeperReader {
     const links = page?.links ?? [];
     if (links.length === 0 && !entityPrefix(item.url)) return item;
     for (const check of unknownHard) {
-      const keyWords = extractKeyWords(check.clause + ' ' + check.id.split('|').pop());
-      const relevantUrls = await findRelevantLinks(links, item.url, keyWords);
+      const question = check.id.split('|').pop();
+      const byMeaning = process.env.FRL_LINKS_BY_MEANING && this.embedder?.ready ? await linksByMeaning(links, item.url, question, this.embedder) : null;
+      const relevantUrls = byMeaning ?? await findRelevantLinks(links, item.url, extractKeyWords(check.clause + ' ' + question));
       for (const url of relevantUrls) {
         const cacheKey = `${url}::${check.id}::judge:${JUDGE_VERSION}`;
         let deeperChecks;

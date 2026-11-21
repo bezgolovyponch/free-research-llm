@@ -86,6 +86,13 @@ describe('App composition', () => {
     expect(new App({ env: { ...base, FRL_TOPIC_BY_MEANING: '1', FRL_DEMO: '1' }, fetchImpl, dataDir: '/tmp/frl-unused-embed' }).engine.embedder).toBeNull();
   });
 
+  it('gives the research engine an embedder under FRL_LINKS_BY_MEANING alone, outside demo mode', () => {
+    const fetchImpl = (async () => jsonResponse({})) as never;
+    const base = { FRL_PROVIDER_ORDER: 'gemini', FRL_WIKIPEDIA: '0', CLOUDFLARE_API_TOKEN: 't', CLOUDFLARE_ACCOUNT_ID: 'a' };
+    expect(new App({ env: { ...base, FRL_LINKS_BY_MEANING: '1' }, fetchImpl, dataDir: '/tmp/frl-unused-embed' }).engine.embedder?.ready).toBe(true);
+    expect(new App({ env: { ...base, FRL_LINKS_BY_MEANING: '1', FRL_DEMO: '1' }, fetchImpl, dataDir: '/tmp/frl-unused-embed' }).engine.embedder).toBeNull();
+  });
+
   it('adds /v1 to a bare local address, as saved for Ollama', () => {
     expect(localBase('http://localhost:11434/')).toBe('http://localhost:11434/v1');
     expect(localBase('http://192.168.5.26:8090')).toBe('http://192.168.5.26:8090/v1');

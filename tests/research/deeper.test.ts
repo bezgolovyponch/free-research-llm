@@ -228,3 +228,88 @@ describe('DeeperReader entity prefix without a language segment', () => {
     expect(checked.checks[0]).toMatchObject({ answer: 'yes', source: own });
   });
 });
+
+describe('DeeperReader with FRL_LINKS_BY_MEANING', () => {
+  const PRICE_ID = 'adult monthly membership price in eur|Does this gym state its adult monthly membership price in EUR?';
+  const priceList = [{ clause: 'adult monthly membership price in eur', items: [{ question: 'Does this gym state its adult monthly membership price in EUR?', hard: true }] }];
+  const GYM = 'https://boulderhalle.example.de/bouldern/';
+  const PREISE = 'https://boulderhalle.example.de/preise/';
+  const IMPRESSUM = 'https://boulderhalle.example.de/impressum/';
+  const KONTAKT = 'https://boulderhalle.example.de/kontakt/';
+  const gymLinks = [
+    { url: '/kontakt/', text: 'Kontakt' },
+    { url: '/impressum/', text: 'Impressum' },
+    { url: '/preise/#tarife', text: 'Preise' },
+    { url: '/preise/', text: 'Preise & Tarife' },
+    { url: '/bouldern/#top', text: 'nach oben' },
+    { url: 'https://instagram.example.com/gym', text: 'Instagram' },
+  ];
+  const ranker = (calls: Array<{ query: string; texts: string[] }>, ok = true) => ({
+    ready: true,
+    rank: vi.fn(async (query: string, texts: string[], k: number) => {
+      calls.push({ query, texts });
+      if (!ok) throw new Error('embedding failed');
+      const order = texts.map((t, i) => ({ i, near: /preise/i.test(t) ? 0 : 1 })).sort((a, b) => a.near - b.near).map((x) => x.i);
+      return { model: 'fake', order: order.slice(0, k) };
+    }),
+  });
+  const pages = {
+    [GYM]: { text: 'Bouldern in Leipzig', status: 200, links: gymLinks },
+    [PREISE]: { text: 'Monatsbeitrag Erwachsene 55 Euro', status: 200, links: [] },
+    [IMPRESSUM]: { text: 'Impressum', status: 200, links: [] },
+    [KONTAKT]: { text: 'Kontakt', status: 200, links: [] },
+  };
+  const priceYes = [{ id: PRICE_ID, answer: 'yes', quote: 'Monatsbeitrag Erwachsene 55 Euro', hard: true, clause: 'adult monthly membership price in eur' }];
+  const run = async (embedder: object | null) => {
+    const readPage = vi.fn(async (url: string) => pages[url] ?? null);
+    const judge = { judge: vi.fn(async (page: { url: string }) => (page.url === PREISE ? priceYes : [])) };
+    const item = { url: GYM, checks: [{ id: PRICE_ID, hard: true, answer: 'unknown', clause: 'adult monthly membership price in eur' }] };
+    await new DeeperReader({ judge, readPage, embedder }).readDeeperForUnknown(item, priceList, {});
+    return { item, read: readPage.mock.calls.map((c) => c[0]) };
+  };
+  const withFlag = async (body: () => Promise<void>) => {
+    process.env.FRL_LINKS_BY_MEANING = '1';
+    try {
+      await body();
+    } finally {
+      delete process.env.FRL_LINKS_BY_MEANING;
+    }
+  };
+
+  it('reads the same-site link nearest in meaning to the open question, where the word match falls back to the company pages', async () => {
+    const calls: Array<{ query: string; texts: string[] }> = [];
+    await withFlag(async () => {
+      const { item, read } = await run(ranker(calls));
+      expect(read).toEqual([GYM, PREISE]);
+      expect(item.checks[0]).toMatchObject({ answer: 'yes', source: PREISE });
+    });
+    expect(calls[0].query).toBe('Does this gym state its adult monthly membership price in EUR?');
+    expect(calls[0].texts).toEqual(['Kontakt kontakt', 'Impressum impressum', 'Preise preise']);
+    const words = await run(ranker([]));
+    expect(words.read).toEqual([GYM, KONTAKT, IMPRESSUM]);
+    expect(words.item.checks[0].answer).toBe('unknown');
+  });
+
+  it('falls back to the word match when the embedder is not ready or fails', async () => {
+    await withFlag(async () => {
+      expect((await run(null)).read).toEqual([GYM, KONTAKT, IMPRESSUM]);
+      expect((await run({ ...ranker([]), ready: false })).read).toEqual([GYM, KONTAKT, IMPRESSUM]);
+      expect((await run(ranker([], false))).read).toEqual([GYM, KONTAKT, IMPRESSUM]);
+    });
+  });
+
+  it('keeps a marketplace item inside its own company and reads the company profile first', async () => {
+    const locationCheck = 'supplier located in nl|Is the supplier located in the Netherlands?';
+    const locationList = [{ clause: 'supplier located in nl', items: [{ question: 'Is the supplier located in the Netherlands?', hard: true }] }];
+    const calls: Array<{ query: string; texts: string[] }> = [];
+    const readPage = vi.fn(async (url: string) => (url === EUROPAGES_ITEM_URL ? itemPage([{ url: EUROPAGES_ANOTHER_COMPANY_URL, text: 'Preise' }, { url: EUROPAGES_SAME_COMPANY_OTHER_URL, text: 'Another product' }]) : { text: 'page', status: 200, links: [] }));
+    const judge = { judge: vi.fn(async () => []) };
+    const item = { url: EUROPAGES_ITEM_URL, checks: [{ id: locationCheck, hard: true, answer: 'unknown', clause: 'supplier located in nl' }] };
+    await withFlag(async () => {
+      await new DeeperReader({ judge, readPage, embedder: ranker(calls) }).readDeeperForUnknown(item, locationList, {});
+    });
+    const read = readPage.mock.calls.map((c) => c[0]);
+    expect(read).toEqual([EUROPAGES_ITEM_URL, EUROPAGES_PROFILE_URL, EUROPAGES_SAME_COMPANY_OTHER_URL]);
+    expect(read).not.toContain(EUROPAGES_ANOTHER_COMPANY_URL);
+  });
+});
