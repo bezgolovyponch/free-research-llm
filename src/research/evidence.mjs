@@ -40,6 +40,10 @@ export function bm25(docs, query) {
   });
 }
 
+export function wholeText(text) {
+  return String(text ?? '').replace(/[ \t ]+/g, ' ').replace(/ ?\n\s*/g, '\n').trim();
+}
+
 export function selectEvidence(sources, query, budget = EVIDENCE_CHARS) {
   const chunks = sources.map((s) => passages(s.text || s.snippet || ''));
   const flat = chunks.flatMap((list, si) => list.map((text, pi) => ({ si, pi, text })));
@@ -49,6 +53,10 @@ export function selectEvidence(sources, query, budget = EVIDENCE_CHARS) {
     const mine = flat.filter((c) => c.si === si);
     const relevance = mine.reduce((best, c) => Math.max(best, c.score), 0);
     if (source.kind === 'data' || !mine.length) return { ...source, relevance };
+    if (process.env.FRL_EVIDENCE_WHOLE) {
+      const whole = wholeText(source.text || source.snippet || '');
+      if (whole.length <= budget) return { ...source, relevance, evidence: whole };
+    }
     const chosen = [];
     let used = 0;
     for (const c of [...mine].sort((a, b) => b.score - a.score || a.pi - b.pi)) {

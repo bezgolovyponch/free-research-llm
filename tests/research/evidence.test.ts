@@ -45,3 +45,36 @@ describe('evidence selection (BM25, as GPT Researcher and PaperQA2 rank context)
     expect(evidenceQuery({ title: 'Season', question: 'How long?', metric: 'months' }, { kind: { terms: ['land', 'plot'] } })).toBe('Season How long? months land plot');
   });
 });
+
+describe('a source that fits the evidence budget is shown whole (FRL_EVIDENCE_WHOLE)', () => {
+  const survey = 'Dodávka tepelných čerpadel na trh v České republice v roce 2024 Výsledek statistického šetření za rok 2024 Statistické šetření v oblasti tepelných čerpadel je prováděno oddělením analýz a datové podpory koncepcí Ministerstva průmyslu a obchodu (MPO) od roku 2004. Šetření je zaměřeno na strukturu dodávek tepelných čerpadel na český trh za předcházející rok. Jak bylo očekáváno v roce 2024 došlo k výraznému poklesu prodeje tepelných čerpadel (o téměř 60 %). Odhad roční dodávky tepelných čerpadel na český trh (ks) Rok Vzduch-voda Vzduch-voda odvětrávací Země-voda Voda-voda Celkem 2010 4 199 0 1 707 53 5 959 2011 4 908 0 1 951 50 6 909 2012 5 323 21 1 808 44 7 196 2013 5 752 23 1 679 49 7 503 2014 6 267 45 1 512 46 7 870 2015 7 304 31 1 463 107 8 905 2016 10 827 40 1 435 83 12 385 2017 13 718 65 1 438 120 15 341 2018 16 977 70 1 568 80 18 695 2019 21 603 67 1 333 84 23 087 2020 22 680 69 1 371 69 24 189 2021 29 737 162 1 566 57 31 522 2022 57 966 120 2 269 85 60 439 2023 52 898 26 2 603 93 55 620 2024 23 094 80 1 634 107 24 918 Pozn.: Tepelná čerpadla vzduch-vzduch nebyla bilancována. 2 3 Zdroj dat: MPO';
+  const query = 'Official government statistics What is the 2024 installation figure from MPO or CZ Statistical Office? installation count';
+  const sources = () => [{ id: 'S1', url: 'https://stats.example/survey.pdf', text: survey }, { id: 'S2', url: 'https://news.example', text: `${'Heat pumps installed in 2024: official statistics. '.repeat(60)}\n\nEnd of the article.` }];
+  const withFlag = <T,>(flag: boolean, body: () => T): T => {
+    const before = process.env.FRL_EVIDENCE_WHOLE;
+    if (flag) process.env.FRL_EVIDENCE_WHOLE = '1';
+    else delete process.env.FRL_EVIDENCE_WHOLE;
+    try {
+      return body();
+    } finally {
+      if (before === undefined) delete process.env.FRL_EVIDENCE_WHOLE;
+      else process.env.FRL_EVIDENCE_WHOLE = before;
+    }
+  };
+
+  it('shows a short survey with its table whole, where the passage ranking showed only the lines naming the query words', () => {
+    const before = withFlag(false, () => selectEvidence(sources(), query));
+    expect(before[0].evidence).not.toContain('2024 23 094 80 1 634 107 24 918');
+    const after = withFlag(true, () => selectEvidence(sources(), query));
+    expect(after[0].evidence).toBe(survey);
+    expect(after[0].relevance).toBe(before[0].relevance);
+  });
+
+  it('keeps ranked passages for a source longer than the budget, and the same relevance order', () => {
+    const before = withFlag(false, () => selectEvidence(sources(), query));
+    const after = withFlag(true, () => selectEvidence(sources(), query));
+    expect(sources()[1].text.length).toBeGreaterThan(EVIDENCE_CHARS);
+    expect(after[1].evidence).toBe(before[1].evidence);
+    expect(diverseOrder(after).map((s: { id: string }) => s.id)).toEqual(diverseOrder(before).map((s: { id: string }) => s.id));
+  });
+});
