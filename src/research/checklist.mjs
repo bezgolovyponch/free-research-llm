@@ -37,6 +37,7 @@ export const LOW_PRICE_REASON = 'priced far below comparable items: confirm it i
 export const KIND_ANSWERS = { A: 'yes', B: 'no', C: 'no', D: 'no', E: 'no', U: 'unknown' };
 export const KIND_NONE = 'U';
 export const NO_CHECK_VOTES = 3;
+export const CHECKLIST_RETRY_ROUNDS = 2;
 export const NO_READINGS = [
   { id: 'fails', text: 'The sentence shows the item does not meet it: it states the item lacks it, or gives another value, place or kind for the very thing the question asks about' },
   { id: 'other', text: 'The sentence is about something else (another product, price, place or detail) and does not show whether the item meets it' },
@@ -370,9 +371,19 @@ export class ChecklistModeler {
   }
 
   async build(question, guidance = '', expected = '') {
-    const samples = await proposeChecklist({ router: this.router, question, guidance, samples: this.samples, expected });
+    const askerWords = [question, expected, guidance].join('\n');
+    let samples = await proposeChecklist({ router: this.router, question, guidance, samples: this.samples, expected });
+    if (process.env.FRL_CHECKLIST_REQUIRED) {
+      for (let round = 0; round < CHECKLIST_RETRY_ROUNDS && samples.length < 2; round++) {
+        samples = [...samples, ...await proposeChecklist({ router: this.router, question, guidance, samples: Math.max(1, this.samples - samples.length), expected })];
+      }
+      if (samples.length === 1 && process.env.FRL_QUOTED_CHECKS) {
+        const quoted = samples[0].items.filter((item) => item.quote && quoteFound(askerWords, item.quote));
+        return quoted.length ? clusterChecklist([{ items: quoted }], { askerWords }) : null;
+      }
+    }
     if (samples.length < 2) return null;
-    return clusterChecklist(samples, { askerWords: [question, expected, guidance].join('\n') });
+    return clusterChecklist(samples, { askerWords });
   }
 }
 

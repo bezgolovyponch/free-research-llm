@@ -1234,3 +1234,63 @@ describe('a hard "no" rejects only when a second vote agrees its sentence shows 
     expect(votes).toBe(0);
   });
 });
+
+describe('a checklist survives proposals that fail (FRL_CHECKLIST_REQUIRED)', () => {
+  const question = 'Find 5 bouldering gyms in Leipzig, Germany, each with its own website URL and the adult monthly membership price in EUR.';
+  const expected = '5 bouldering gyms, each with its own website URL and an adult monthly membership price in EUR';
+  const own = { clause: 'own website', question: "Is this page the bouldering gym's own website?", hard: true, numeric: null, quote: 'each with its own website URL' };
+  const price = { clause: 'monthly price', question: 'Does this bouldering gym page state its adult monthly membership price in EUR?', hard: true, numeric: null, quote: 'adult monthly membership price in EUR' };
+  const invented = { clause: 'open late', question: 'Is this bouldering gym open after 22:00?', hard: true, numeric: null, quote: 'open late' };
+  const routerAnswering = (answers: (call: number) => boolean) => {
+    let calls = 0;
+    return {
+      get calls() { return calls; },
+      complete: async () => {
+        calls++;
+        if (!answers(calls)) throw new Error('gemini HTTP 429: daily quota');
+        return { provider: 'test', data: { items: [own, price, invented] } };
+      },
+    };
+  };
+  const built = async (flag: boolean, router: { complete: () => Promise<unknown> }) => {
+    const before = { required: process.env.FRL_CHECKLIST_REQUIRED, quoted: process.env.FRL_QUOTED_CHECKS };
+    process.env.FRL_QUOTED_CHECKS = '1';
+    if (flag) process.env.FRL_CHECKLIST_REQUIRED = '1';
+    else delete process.env.FRL_CHECKLIST_REQUIRED;
+    try {
+      return await new ChecklistModeler({ router: router as never, samples: 3 }).build(question, '', expected);
+    } finally {
+      if (before.required === undefined) delete process.env.FRL_CHECKLIST_REQUIRED;
+      else process.env.FRL_CHECKLIST_REQUIRED = before.required;
+      if (before.quoted === undefined) delete process.env.FRL_QUOTED_CHECKS;
+      else process.env.FRL_QUOTED_CHECKS = before.quoted;
+    }
+  };
+
+  it('asks again for the proposals that failed, and builds the checklist from all that answered', async () => {
+    const off = routerAnswering((call) => call > 2);
+    expect(await built(false, off)).toBeNull();
+    expect(off.calls).toBe(3);
+    const on = routerAnswering((call) => call > 2);
+    const checklist = await built(true, on);
+    expect(on.calls).toBe(5);
+    expect(checklist!.map((c: { clause: string }) => c.clause)).toEqual(['each with its own website url', 'adult monthly membership price in eur', 'open late']);
+    expect(checklist!.slice(0, 2).map((c: { source: string }) => c.source)).toEqual(['quoted', 'quoted']);
+  });
+
+  it('keeps only the asker-quoted items of a lone proposal when every retry fails', async () => {
+    const on = routerAnswering((call) => call === 1);
+    const checklist = await built(true, on);
+    expect(on.calls).toBe(7);
+    expect(checklist).toEqual([
+      { clause: 'each with its own website url', source: 'quoted', quote: 'each with its own website URL', share: 1, items: [{ clause: 'each with its own website url', question: "Is this page the bouldering gym's own website?", hard: true, numeric: undefined }] },
+      { clause: 'adult monthly membership price in eur', source: 'quoted', quote: 'adult monthly membership price in EUR', share: 1, items: [{ clause: 'adult monthly membership price in eur', question: 'Does this bouldering gym page state its adult monthly membership price in EUR?', hard: true, numeric: undefined }] },
+    ]);
+  });
+
+  it('gives no checklist when no proposal answers at all, after the retries', async () => {
+    const none = routerAnswering(() => false);
+    expect(await built(true, none)).toBeNull();
+    expect(none.calls).toBe(9);
+  });
+});
