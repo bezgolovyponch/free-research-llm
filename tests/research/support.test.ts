@@ -201,3 +201,41 @@ describe('a meaning check no model answered (audit 2026-11-12, plots research b7
     expect(needsRecheck(older, { ...finding, claims: [older] }, node)).toBe(true);
   });
 });
+
+describe('the year an answer gives a figure must show in its quote (FRL_PERIOD_IN_QUOTE)', () => {
+  it('flags a year the answer adds to a figure whose quote says only "last year"', async () => {
+    const { periodUnshown } = await import('../../src/research/support.mjs');
+    const claim = { text: 'Czechs bought 23,338 heat pumps last year.', quote: 'Czechs bought 23,338 heat pumps last year.' };
+    const around = 'oEnergetice.cz, ČTK 27 May 2026, 10:44 Czechs bought 23,338 heat pumps last year. This was almost identical to the previous year.';
+    expect(periodUnshown({ claim, answer: '23,338 residential heat pumps were installed in Czechia in 2024 (source: S2).', around })).toEqual(['2024']);
+  });
+
+  it('passes when any year of the sentence shows in the quote or the text around it', async () => {
+    const { periodUnshown } = await import('../../src/research/support.mjs');
+    const table = { text: 'Sales of heat pumps: 20 030 (2024)', quote: 'Sales of heat pumps: 20 030 (2024)' };
+    expect(periodUnshown({ claim: table, answer: 'EHPA data (cited in JRC 2026 country fiche) shows sales of 20,030 units in 2024.' })).toEqual([]);
+    const wage = { text: 'The average monthly wage in 2024 was 1 524 Eur.', quote: 'priemerná nominálna mesačná mzda zamestnanca v hospodárstve SR v roku 2024 dosiahla hodnotu 1 524 Eur.' };
+    expect(periodUnshown({ claim: wage, answer: 'The average gross monthly wage in Slovakia in 2024 was EUR 1,524.' })).toEqual([]);
+    const dated = { text: 'Czechs bought 23,338 heat pumps last year.', quote: 'Czechs bought 23,338 heat pumps last year.' };
+    expect(periodUnshown({ claim: dated, answer: 'An article of May 2026 reports 23,338 heat pumps bought the year before.', around: '27 May 2026 Czechs bought 23,338 heat pumps last year.' })).toEqual([]);
+  });
+
+  it('ignores answers that give the figure no year, claims without a figure, and years inside longer numbers', async () => {
+    const { periodUnshown } = await import('../../src/research/support.mjs');
+    const claim = { text: 'Bell tents cost from €950', quote: 'Bell tents cost from €950' };
+    expect(periodUnshown({ claim, answer: 'A bell tent costs from €950.' })).toEqual([]);
+    expect(periodUnshown({ claim: { text: 'Prices rose', quote: 'Prices rose' }, answer: 'Prices rose in 2024.' })).toEqual([]);
+    expect(periodUnshown({ claim, answer: 'In 2024 a bell tent cost from €950.', around: 'order 120241 Bell tents cost from €950' })).toEqual(['2024']);
+  });
+
+  it('turns a supported record into one to confirm and names the missing year first in its cause', async () => {
+    const { periodRecord } = await import('../../src/research/support.mjs');
+    const record = supportRecord({ votes: [{ provider: 'a', vote: 'yes' }, { provider: 'b', vote: 'yes' }] });
+    const flagged = periodRecord(record, ['2024']);
+    expect(record.verdict).toBe('supported');
+    expect(flagged).toMatchObject({ verdict: 'disagree', period: ['2024'], votes: record.votes, version: SUPPORT_LOGIC_VERSION });
+    expect(toConfirm(flagged)).toBe(true);
+    expect(flagged.cause.startsWith('• The quote and the text around it do not show 2024, the year the answer gives this figure')).toBe(true);
+    expect(flagged.cause.length).toBeLessThanOrEqual(CAUSE_MAX_CHARS);
+  });
+});

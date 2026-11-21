@@ -15,7 +15,7 @@ import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
 import { needsEscalation, verifyFinding, withMeaning } from './verify.mjs';
 import { OfflineError } from '../llm/router.mjs';
-import { claimsToCheck, contextOf, needsRecheck, normalizeVote, resolveFromSources, supportAudit, supportPrompt, supportRecord, termCheck, toConfirm } from './support.mjs';
+import { claimsToCheck, contextOf, needsRecheck, normalizeVote, periodRecord, periodUnshown, resolveFromSources, supportAudit, supportPrompt, supportRecord, termCheck, toConfirm } from './support.mjs';
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
@@ -1565,7 +1565,7 @@ export class ResearchEngine {
     return supportRecord({ votes: [first, second].filter(Boolean), term: termCheck(claim.text, shown) });
   }
 
-  async checkClaimSupport(project, node, claim, author) {
+  async checkClaimSupport(project, node, claim, author, answer = '') {
     let record = await this.voteOnQuote(project, claim, claim.quote, author, contextOf(claim.quote, node.sources ?? [], claim.sourceIds ?? []));
     const found = toConfirm(record) ? resolveFromSources(claim, node.sources ?? []) : null;
     if (found) {
@@ -1575,13 +1575,14 @@ export class ResearchEngine {
         record = { ...retry, resolvedFrom: found.sourceId };
       }
     }
-    claim.support = record;
+    const years = process.env.FRL_PERIOD_IN_QUOTE && !toConfirm(record) ? periodUnshown({ claim, answer, around: contextOf(claim.quote, node.sources ?? [], claim.sourceIds ?? []) }) : [];
+    claim.support = years.length ? periodRecord(record, years) : record;
   }
 
   async checkSupport(project, node, finding, author) {
     this.throwIfCancelled(project);
     const claims = claimsToCheck(finding, node);
-    for (let i = 0; i < claims.length; i += SUPPORT_PARALLEL) await Promise.all(claims.slice(i, i + SUPPORT_PARALLEL).map((claim) => this.checkClaimSupport(project, node, claim, author)));
+    for (let i = 0; i < claims.length; i += SUPPORT_PARALLEL) await Promise.all(claims.slice(i, i + SUPPORT_PARALLEL).map((claim) => this.checkClaimSupport(project, node, claim, author, finding?.answer ?? '')));
     const open = claims.filter((c) => toConfirm(c.support)).length;
     if (claims.length) this.emit(project, 'node', `${node.id}: meaning checked for ${claims.length} claim(s), ${open} to confirm`, { nodeId: node.id });
     return { checked: claims.length, open };

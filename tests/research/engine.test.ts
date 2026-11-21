@@ -4863,3 +4863,32 @@ describe('a figure question without an item count (FRL_UNIT_EVERY_QUESTION)', ()
     }
   });
 });
+
+describe('the year of a figure under FRL_PERIOD_IN_QUOTE', () => {
+  const quote = 'Czechs bought 23,338 heat pumps last year.';
+  const nodeOf = () => ({ id: 'D5.2', method: 'lookup', sources: [{ id: 'S2', text: `oEnergetice.cz, 27 May 2026. ${quote} This was almost identical to the previous year.` }] });
+  const claimOf = () => ({ text: quote, quote, sourceIds: ['S2'], attributed: true });
+  const agreeing = () => {
+    const { engine, router } = engineWith(new ScriptedProvider());
+    router.complete = (async (request: { purpose: string }) => ({ data: { supports: 'yes', reason: '' }, provider: request.purpose === 'support' ? 'gemini' : 'groq', model: 'm' })) as typeof router.complete;
+    return engine;
+  };
+
+  it('sends to confirm a claim whose quote does not show the year the answer gives its figure, after both models agreed', async () => {
+    const wrongYear = { answer: '23,338 residential heat pumps were installed in Czechia in 2024 (source: S2).', claims: [claimOf()] };
+    const rightYear = { answer: 'A report of May 2026 says 23,338 heat pumps were bought in Czechia the year before.', claims: [claimOf()] };
+    process.env.FRL_PERIOD_IN_QUOTE = '1';
+    try {
+      expect(await agreeing().checkSupport({ id: 'p', nodes: [] }, nodeOf(), wrongYear, 'cerebras')).toEqual({ checked: 1, open: 1 });
+      expect(wrongYear.claims[0].support).toMatchObject({ verdict: 'disagree', period: ['2024'] });
+      expect(wrongYear.claims[0].support.votes.map((v: { vote: string }) => v.vote)).toEqual(['yes', 'yes']);
+      await agreeing().checkSupport({ id: 'p', nodes: [] }, nodeOf(), rightYear, 'cerebras');
+      expect(rightYear.claims[0].support.verdict).toBe('supported');
+    } finally {
+      delete process.env.FRL_PERIOD_IN_QUOTE;
+    }
+    const off = { answer: '23,338 residential heat pumps were installed in Czechia in 2024 (source: S2).', claims: [claimOf()] };
+    await agreeing().checkSupport({ id: 'p', nodes: [] }, nodeOf(), off, 'cerebras');
+    expect(off.claims[0].support.verdict).toBe('supported');
+  });
+});
