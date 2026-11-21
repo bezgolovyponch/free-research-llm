@@ -355,4 +355,48 @@ describe('the engine with a category', () => {
     expect(await engine.validateConcept(p as never)).toBe(false);
     expect(p.log.some((l) => l.message.includes('one page about the kinds of "home improvement contractor" was found'))).toBe(true);
   });
+
+  it('under FRL_NO_PAUSE goes on without Hints when the pages name a single kind in different words, and the gap becomes one knowledge piece', async () => {
+    const before = process.env.FRL_NO_PAUSE;
+    process.env.FRL_NO_PAUSE = '1';
+    try {
+      const pages = [
+        { title: 'Groothandel', url: 'https://a.example/', text: 'Tweedehands kleding per kilo in balen.' },
+        { title: 'Hurtownia', url: 'https://b.example/', text: 'Odziez uzywana na wage, bele.' },
+      ];
+      const { engine } = engineWith([], pages);
+      const p = { ...project(), nodes: [], guidance: '', decisionModel: { kind: { label: 'used clothing wholesaler', terms: ['used clothing wholesaler'] }, criteria: [] } } as never as { phase?: string; nodes: Array<{ title: string; knowledge?: string }>; decisionModel: { kind: { validated: { basis: string } } }; log: Array<{ type: string; message: string }> };
+      expect(await engine.validateConcept(p as never)).toBe(true);
+      expect(p.phase).toBeUndefined();
+      expect(p.decisionModel.kind.validated.basis).toBe('no-pause');
+      expect(p.nodes.map((n) => n.title)).toEqual(['What a used clothing wholesaler is called']);
+      expect(p.log.some((l) => l.type === 'decision' && l.message.includes('"used clothing wholesaler" do not call it the same thing: research continues, each page is judged for the kind, and the gap becomes a knowledge piece'))).toBe(true);
+      expect(await engine.validateConcept(p as never)).toBe(true);
+      expect(p.nodes).toHaveLength(1);
+    } finally {
+      if (before === undefined) delete process.env.FRL_NO_PAUSE;
+      else process.env.FRL_NO_PAUSE = before;
+    }
+  });
+
+  it('under FRL_NO_PAUSE goes on when the pages confirm only one kind of the category, and asks what the category consists of', async () => {
+    const before = process.env.FRL_NO_PAUSE;
+    process.env.FRL_NO_PAUSE = '1';
+    try {
+      const pages = [
+        { title: 'Roof repair Porto', url: 'https://a.example/', text: 'Roof repair.' },
+        { title: 'Roof repair Braga', url: 'https://b.example/', text: 'Roof repair.' },
+      ];
+      const { engine } = engineWith([], pages);
+      const p = { ...project(), nodes: [] } as never as { phase?: string; nodes: Array<{ title: string; question: string }>; decisionModel: { kind: { label: string; validated: { basis: string } } } };
+      expect(await engine.validateConcept(p as never)).toBe(true);
+      expect(p.phase).toBeUndefined();
+      expect(p.decisionModel.kind.validated.basis).toBe('no-pause');
+      expect(p.nodes.map((n) => n.title)).toEqual([`What a ${p.decisionModel.kind.label} is`]);
+      expect(p.nodes[0].question).toContain('what does it consist of?');
+    } finally {
+      if (before === undefined) delete process.env.FRL_NO_PAUSE;
+      else process.env.FRL_NO_PAUSE = before;
+    }
+  });
 });

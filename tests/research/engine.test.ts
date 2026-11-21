@@ -4563,3 +4563,27 @@ describe('a grounded number answer carries no item count and no item-kind valida
     }
   });
 });
+
+describe('a concept gap becomes knowledge pieces instead of a pause (FRL_NO_PAUSE)', () => {
+  it('goes on when no page about the kind is found and asks what it is and what it is called; pauses without the flag', async () => {
+    for (const flag of [false, true]) {
+      const before = process.env.FRL_NO_PAUSE;
+      if (flag) process.env.FRL_NO_PAUSE = '1';
+      else delete process.env.FRL_NO_PAUSE;
+      try {
+        const { engine } = engineWith(new ScriptedProvider(), { enabled: true, lastErrors: [], async search() { return []; }, describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }) });
+        const project = await engine.createProject({ question: 'Find 5 bouldering gyms in Leipzig', expected: '5 gyms' });
+        project.nodes = [];
+        project.decisionModel = { kind: { label: 'bouldering gym', terms: ['boulderhalle'] }, criteria: [] };
+        project.brief = { regions: ['DE'], kind: project.decisionModel.kind, located: false, text: '' };
+        const proceeds = await engine.validateConcept(project);
+        expect(proceeds).toBe(flag);
+        expect(project.phase === 'needs-concept').toBe(!flag);
+        expect(project.nodes.map((n: { title: string }) => n.title)).toEqual(flag ? ['What a bouldering gym is', 'What a bouldering gym is called'] : []);
+      } finally {
+        if (before === undefined) delete process.env.FRL_NO_PAUSE;
+        else process.env.FRL_NO_PAUSE = before;
+      }
+    }
+  });
+});
