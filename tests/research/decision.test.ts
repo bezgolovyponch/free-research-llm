@@ -514,3 +514,33 @@ describe('answer unit read from the request (FRL_ANSWER_UNIT)', () => {
     }
   });
 });
+
+describe('the decision model checklist keeps the conditions the asker wrote (FRL_QUOTED_CHECKS)', () => {
+  it('passes the expected result to the checklist so a minority condition quoted from it is kept', async () => {
+    const before = process.env.FRL_QUOTED_CHECKS;
+    process.env.FRL_QUOTED_CHECKS = '1';
+    try {
+      let checklistCalls = 0;
+      const gym = { clause: 'located in leipzig', question: 'Is this bouldering gym located in Leipzig?', hard: true, quote: 'in Leipzig' };
+      const own = { clause: 'own website', question: 'Is this page the gym\'s own website?', hard: true, quote: 'each with its own website URL' };
+      const router = {
+        complete: async ({ purpose }: { purpose: string }) => {
+          if (purpose === 'checklist') {
+            checklistCalls += 1;
+            return { data: { items: checklistCalls === 1 ? [gym, own] : [gym] } };
+          }
+          return { data: { concept: 'bouldering gyms in Leipzig', kind: { label: 'bouldering gym', terms: ['boulderhalle'] }, criteria: [], unmodelled: [] } };
+        },
+      };
+      const modeler = new DecisionModeler({ router: router as never, samples: 3 });
+      const project = { id: 'p', question: 'Find 5 bouldering gyms in Leipzig', guidance: '', acceptance: { expected: '5 bouldering gyms, each with its own website URL' } } as Record<string, any>;
+      await modeler.build(project);
+      expect(checklistCalls).toBe(3);
+      const clauses = (project.decisionModel.checklist ?? []).map((c: { clause: string }) => c.clause);
+      expect(clauses).toContain('each with its own website url');
+    } finally {
+      if (before === undefined) delete process.env.FRL_QUOTED_CHECKS;
+      else process.env.FRL_QUOTED_CHECKS = before;
+    }
+  });
+});

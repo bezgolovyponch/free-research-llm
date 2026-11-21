@@ -1,4 +1,5 @@
 import { plain } from './itemgate.mjs';
+import { quoteFound } from './quote.mjs';
 import { isUmbrella } from './concept.mjs';
 import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
 import { agreed, closedVote, matchPrompt, retrieveThenVerify } from './semantic.mjs';
@@ -74,8 +75,8 @@ export function migrateChecks(project) {
   return changed;
 }
 
-export async function proposeChecklist({ router, question, guidance = '', samples = 3 }) {
-  const messages = checklistPrompt({ question, guidance });
+export async function proposeChecklist({ router, question, guidance = '', samples = 3, expected = '' }) {
+  const messages = checklistPrompt({ question, guidance, expected });
   const replies = await Promise.all(
     Array.from({ length: samples }, () =>
       router.complete({ purpose: 'checklist', tier: 'deep', temperature: 0.7, messages }).catch(() => null)
@@ -95,11 +96,13 @@ export function normalizeSample(raw) {
       value: i.numeric.value !== null && i.numeric.value !== undefined ? Number(i.numeric.value) : null,
       unit: String(i.numeric.unit ?? ''),
     } : undefined,
+    ...(process.env.FRL_QUOTED_CHECKS ? { quote: String(i?.quote ?? '').trim().slice(0, 200) } : {}),
   })).filter((i) => i.clause && i.question);
   return { items };
 }
 
-export function clusterChecklist(samples) {
+export function clusterChecklist(samples, { askerWords = '' } = {}) {
+  const byQuote = Boolean(process.env.FRL_QUOTED_CHECKS) && Boolean(String(askerWords).trim());
   const allItems = [];
   for (let sampleIdx = 0; sampleIdx < samples.length; sampleIdx++) {
     for (const item of samples[sampleIdx].items) {
@@ -125,7 +128,8 @@ export function clusterChecklist(samples) {
 
   for (const group of groups) {
     const sampleCount = new Set(group.map((i) => i.sampleIdx)).size;
-    if (sampleCount < majority) continue;
+    const quotedItem = byQuote ? group.find((i) => i.quote && quoteFound(askerWords, i.quote)) : null;
+    if (sampleCount < majority && !quotedItem) continue;
 
     const questions = group.map((i) => i.question);
     const questionCounts = new Map();
@@ -135,7 +139,7 @@ export function clusterChecklist(samples) {
     const mostCommonQuestion = [...questionCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 
     const hardCount = group.filter((i) => i.hard).length;
-    const hard = hardCount >= majority;
+    const hard = hardCount >= majority || Boolean(quotedItem);
 
     let numeric = undefined;
     const numericItems = group.filter((i) => i.numeric);
@@ -159,8 +163,9 @@ export function clusterChecklist(samples) {
       numeric = { measure, op, value, unit };
     }
 
-    const clause = group[0].clause.toLowerCase().trim();
-    clusters.push({ clause, items: [{ clause, question: mostCommonQuestion, hard, numeric }] });
+    const clause = (quotedItem?.quote ?? group[0].clause).toLowerCase().trim();
+    const provenance = byQuote ? { source: quotedItem ? 'quoted' : 'derived', quote: quotedItem?.quote ?? '', share: Math.round((sampleCount / samples.length) * 100) / 100 } : {};
+    clusters.push({ clause, ...provenance, items: [{ clause, question: mostCommonQuestion, hard, numeric }] });
   }
 
   return clusters;
@@ -316,11 +321,13 @@ function answerFromMatch(match, row, context) {
   return null;
 }
 
-function checklistPrompt({ question, guidance = '' }) {
+function checklistPrompt({ question, guidance = '', expected = '' }) {
+  const quoted = Boolean(process.env.FRL_QUOTED_CHECKS);
   const sys = 'You turn a research question into a checklist of yes/no questions about ONE delivered item. Each clause of the question produces items that test that single item. Answer with JSON only: {"items": [{"clause": "short phrase from the question naming the property", "question": "Does this <kind> ...?", "hard": true/false, "numeric": {"measure": "distanceKm|areaM2|coastKm|...", "op": "<=|>=|<|>", "value": 123, "unit": "km|m2|..."} | null}]}.\n\n- "clause" is a short phrase naming the property tested (e.g. "<property> is <value>", "within <distance> of <place>"), NOT the whole sentence.\n- "question" is a yes/no question about ONE item: "Does this <kind> ...?".\n- "hard" = true when the user stated it as a requirement (must have, required, up to, at least, within). Soft = preference (highest, best, prefer, ratio).\n- "numeric" is present only when the question asks for a measurable quantity that code can verify. Use only these measures: distanceKm (distance from the asked place), priceEur, coastKm, beachKm, lakeKm, workableMonths, comfortableMonths, optimalDays, hotDays, hottestC, coldestC, explorePoints, staysNearby, areaM2, realTrendVsEu. When the question gives no number, set value to null. Never invent a number.\n- DROP price limits (checked by the acceptance value range in any currency) and collection/count clauses ("at least N items", "up to M as trade-off", "list of X") — they are checked at acceptance level, not per item.\n- Each clause must yield at least one item. If a clause has no numeric measure, numeric is null and the question is qualitative.\n- The guidance field may add constraints; treat them as additional clauses.';
+  const quoteRule = '\n- Each item also has "quote": the words of the question, expected result or guidance that state this condition, copied character for character; "" when no words of the user state it and the item is your own reading.';
   return [
-    { role: 'system', content: sys },
-    { role: 'user', content: 'Question: ' + question + (guidance ? '\nGuidance: ' + guidance : '') }
+    { role: 'system', content: quoted ? sys + quoteRule : sys },
+    { role: 'user', content: 'Question: ' + question + (quoted && expected ? '\nExpected result: ' + expected : '') + (guidance ? '\nGuidance: ' + guidance : '') }
   ];
 }
 
@@ -349,10 +356,10 @@ export class ChecklistModeler {
     this.samples = samples;
   }
 
-  async build(question, guidance = '') {
-    const samples = await proposeChecklist({ router: this.router, question, guidance, samples: this.samples });
+  async build(question, guidance = '', expected = '') {
+    const samples = await proposeChecklist({ router: this.router, question, guidance, samples: this.samples, expected });
     if (samples.length < 2) return null;
-    return clusterChecklist(samples);
+    return clusterChecklist(samples, { askerWords: [question, expected, guidance].join('\n') });
   }
 }
 
