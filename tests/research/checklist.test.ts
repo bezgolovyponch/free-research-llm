@@ -1173,3 +1173,23 @@ describe('a check the asker wrote is kept on its quote, not by vote (FRL_QUOTED_
     expect(seen[1][0].content).toContain('Each item also has "quote"');
   });
 });
+
+describe('a request to state a value is an item, not a dropped limit (FRL_QUOTED_CHECKS)', () => {
+  it('tells the proposal to keep a requested value as a hard item only with the flag', async () => {
+    const seen: Array<Array<{ role: string; content: string }>> = [];
+    const router = { complete: async ({ messages }: { messages: Array<{ role: string; content: string }> }) => { seen.push(messages); return { data: { items: [{ clause: 'in brno', question: 'Is this coworking space in Brno?', hard: true }] } }; } };
+    const before = process.env.FRL_QUOTED_CHECKS;
+    try {
+      delete process.env.FRL_QUOTED_CHECKS;
+      await proposeChecklist({ router: router as never, question: 'Find 4 coworking spaces in Brno with the price of a one-day pass in CZK', samples: 1 });
+      process.env.FRL_QUOTED_CHECKS = '1';
+      await proposeChecklist({ router: router as never, question: 'Find 4 coworking spaces in Brno with the price of a one-day pass in CZK', samples: 1 });
+    } finally {
+      if (before === undefined) delete process.env.FRL_QUOTED_CHECKS;
+      else process.env.FRL_QUOTED_CHECKS = before;
+    }
+    expect(seen[0][0].content).not.toContain('is not a limit and is not dropped');
+    expect(seen[1][0].content).toContain('A request that each item states a value (its price, a fee, a size, a duration) is not a limit and is not dropped');
+    expect(seen[1][0].content).toContain('Only a bound on that value (at most, under, at least) is left to the acceptance value range.');
+  });
+});
