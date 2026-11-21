@@ -2296,6 +2296,7 @@ export class ResearchEngine {
         isFinished: finished,
         prerequisites: (nodeId) => prerequisitesOf(project.nodes, byId.get(nodeId)),
         known: (nodeId) => byId.has(nodeId),
+        settledOnly: Boolean(process.env.FRL_SETTLED_PREREQUISITES),
         lanes: () => this.lanesFor(id),
         shouldStop: () => this.cancelled.has(id),
         work: async (nodeId) => {
