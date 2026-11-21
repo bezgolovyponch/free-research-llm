@@ -4892,3 +4892,63 @@ describe('the year of a figure under FRL_PERIOD_IN_QUOTE', () => {
     expect(off.claims[0].support.verdict).toBe('supported');
   });
 });
+
+describe('the own-site pass under FRL_OWN_SITE', () => {
+  const DIRECTORY = 'https://climbing.example/gym/482135';
+  const OWN = 'https://kosmos.example/';
+  const QUESTION = 'Does this gym state its adult monthly membership price in EUR?';
+  const family = (id: string) => ({
+    id,
+    ready: true,
+    describe: () => ({ id, label: id, state: 'ready', detail: '', configured: true, fast: `${id}-fast`, deep: `${id}-deep`, local: true, keyEnv: null, signup: '', modelCount: 1 }),
+    async chat({ messages }: { messages: { content: string }[] }) {
+      const prompt = messages.map((m) => m.content).join('\n');
+      if (prompt.includes('This page offers:')) {
+        const letter = /^([A-M])\) one /m.exec(prompt)?.[1] ?? 'U';
+        return { content: JSON.stringify({ kind: letter, span: 'S1' }), model: `${id}-fast`, provider: id, usage: {} };
+      }
+      if (prompt.includes('own website of that item')) {
+        const letter = /^([A-Z])\) https:\/\/kosmos\.example\//m.exec(prompt)?.[1] ?? 'Z';
+        return { content: JSON.stringify({ pick: letter }), model: `${id}-fast`, provider: id, usage: {} };
+      }
+      const content = prompt.includes('Item page text:')
+        ? { answers: [prompt.includes('Monatsbeitrag') ? { id: 'q1', answer: 'yes', spans: ['S1'] } : { id: 'q1', answer: 'unknown', spans: [] }] }
+        : { answer: 'ok', claims: [], confidence: 'high' };
+      return { content: JSON.stringify(content), model: `${id}-fast`, provider: id, usage: {} };
+    },
+  });
+  const run = async () => {
+    const search = {
+      ...fakeSearch,
+      async readPage(url: string) {
+        if (url === OWN) return { status: 200, text: 'Bouldering bei KOSMOS. Monatsbeitrag Erwachsene 55 Euro.', links: [] };
+        if (url === DIRECTORY) return { status: 200, text: `Bouldering in Leipzig. ${'A climbing directory entry for a large bouldering hall with many routes. '.repeat(6)}`, links: [{ url: 'https://maps.example/x', text: 'Map' }, { url: OWN, text: 'Website' }] };
+        return { status: 200, text: '', links: [] };
+      },
+    };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [family('alpha'), family('beta')] }), search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Find 3 bouldering gyms in Leipzig, each with the adult monthly membership price in EUR' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 1, expected: '1 bouldering gym with its adult monthly membership price in EUR' } });
+    const row = { title: 'Kosmos | Climbing Directory', url: DIRECTORY, value: null, unit: '', plan: { tier: 'fits', verdict: 'Fits', why: [], risks: [] } };
+    project.candidates = { kept: [row], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
+    project.brief = { located: true, kind: { label: 'bouldering gym', terms: ['bouldering'] }, regions: [] };
+    project.decisionModel = { kind: { label: 'bouldering gym', terms: ['bouldering'] }, checklist: [{ clause: 'adult monthly membership price in eur', source: 'quoted', quote: 'adult monthly membership price in EUR', items: [{ clause: 'adult monthly membership price in eur', question: QUESTION, hard: true }] }] };
+    project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    await engine.checkAcceptance(project);
+    return project;
+  };
+
+  it('moves a directory item to the own website two families agree on, where its price is read', async () => {
+    process.env.FRL_OWN_SITE = '1';
+    try {
+      const project = await run();
+      const item = project.acceptanceResult!.items[0];
+      expect(item).toMatchObject({ url: OWN, via: DIRECTORY, tier: 'confirmed' });
+      expect(project.log.some((l: { message: string }) => l.message === 'own websites: 1 page(s) asked, 1 item(s) moved to their own site, 0 merged into an item already listed')).toBe(true);
+    } finally {
+      delete process.env.FRL_OWN_SITE;
+    }
+    const plain = await run();
+    expect(plain.acceptanceResult!.items[0]).toMatchObject({ url: DIRECTORY, tier: 'to-confirm' });
+  });
+});
