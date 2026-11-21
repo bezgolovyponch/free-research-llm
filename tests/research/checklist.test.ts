@@ -1193,3 +1193,44 @@ describe('a request to state a value is an item, not a dropped limit (FRL_QUOTED
     expect(seen[1][0].content).toContain('Only a bound on that value (at most, under, at least) is left to the acceptance value range.');
   });
 });
+
+describe('a hard "no" rejects only when a second vote agrees its sentence shows the item fails (FRL_CONFIRMED_NO)', () => {
+  const checklist = [
+    { clause: 'adult monthly membership price in eur', items: [{ clause: 'adult monthly membership price in eur', question: 'Does this bouldering gym state its adult monthly membership price in EUR?', hard: true, numeric: null }] },
+    { clause: 'in leipzig, germany', items: [{ clause: 'in leipzig, germany', question: 'Does this bouldering gym locate in Leipzig, Germany?', hard: true, numeric: null }] },
+  ];
+  const page = 'Die Boulderhalle liegt in Dresden. Regulär 99,00 € Ermäßigt 80,00 € für die 10er-Karte.';
+  const router = () => fakeRouter({
+    '': { answers: [{ id: 'q1', answer: 'no', spans: ['S2'] }, { id: 'q2', answer: 'no', spans: ['S1'] }] },
+    'no-check': (request: { messages: Array<{ content: string }> }) => (request.messages[1].content.includes('Dresden') ? { pick: 'fails' } : { pick: 'other' }),
+  });
+  const judged = async (flag: boolean) => {
+    const before = process.env.FRL_CONFIRMED_NO;
+    if (flag) process.env.FRL_CONFIRMED_NO = '1';
+    else delete process.env.FRL_CONFIRMED_NO;
+    try {
+      const fake = router();
+      const checks = await new ChecklistJudge({ router: fake as never }).judge({ url: 'https://boulder.example' }, page, checklist);
+      return { checks, votes: fake.count('no-check') };
+    } finally {
+      if (before === undefined) delete process.env.FRL_CONFIRMED_NO;
+      else process.env.FRL_CONFIRMED_NO = before;
+    }
+  };
+
+  it('turns a "no" whose sentence shows another value of a different thing into unknown, and keeps a "no" whose sentence shows another place', async () => {
+    const { checks, votes } = await judged(true);
+    expect(checks).toEqual([
+      { id: 'adult monthly membership price in eur|Does this bouldering gym state its adult monthly membership price in EUR?', answer: 'unknown', quote: '', hard: true, clause: 'adult monthly membership price in eur', noUnconfirmed: 'Regulär 99,00 € Ermäßigt 80,00 € für die 10er-Karte.' },
+      { id: 'in leipzig, germany|Does this bouldering gym locate in Leipzig, Germany?', answer: 'no', quote: 'Die Boulderhalle liegt in Dresden.', hard: true, clause: 'in leipzig, germany' },
+    ]);
+    expect(votes).toBe(4);
+  });
+
+  it('keeps every "no" as the judge gave it, with no second vote, without the flag', async () => {
+    const { checks, votes } = await judged(false);
+    expect(checks.map((check: { answer: string }) => check.answer)).toEqual(['no', 'no']);
+    expect(checks.some((check: Record<string, unknown>) => 'noUnconfirmed' in check)).toBe(false);
+    expect(votes).toBe(0);
+  });
+});

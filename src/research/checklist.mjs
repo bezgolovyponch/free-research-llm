@@ -2,7 +2,7 @@ import { plain } from './itemgate.mjs';
 import { quoteFound } from './quote.mjs';
 import { isUmbrella } from './concept.mjs';
 import { pickSpans, quoteFromSpans, sentenceSpans, spansBlock } from './spans.mjs';
-import { agreed, closedVote, matchPrompt, retrieveThenVerify } from './semantic.mjs';
+import { agreed, closedVote, matchPrompt, optionLines, retrieveThenVerify } from './semantic.mjs';
 import { MEASURES as DecisionMeasures, compare, adaptForChecklist } from './measures.mjs';
 
 const isAnswer = (entry) => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry) && 'id' in entry && 'answer' in entry;
@@ -36,6 +36,19 @@ export const JUDGE_PAGE_CHARS = 40000;
 export const LOW_PRICE_REASON = 'priced far below comparable items: confirm it is the item itself';
 export const KIND_ANSWERS = { A: 'yes', B: 'no', C: 'no', D: 'no', E: 'no', U: 'unknown' };
 export const KIND_NONE = 'U';
+export const NO_CHECK_VOTES = 3;
+export const NO_READINGS = [
+  { id: 'fails', text: 'The sentence shows the item does not meet it: it states the item lacks it, or gives another value, place or kind for the very thing the question asks about' },
+  { id: 'other', text: 'The sentence is about something else (another product, price, place or detail) and does not show whether the item meets it' },
+  { id: 'meets', text: 'The sentence shows the item meets it' },
+];
+
+export function noCheckPrompt({ question, quote, options }) {
+  return [
+    { role: 'system', content: 'You check one "no" answer. A judge read an item page and answered "no" to a question about the item, citing the sentence below. Pick the option that says what the sentence itself shows. Answer with JSON only: {"pick":"<letter>"}' },
+    { role: 'user', content: `Question: ${question}\nSentence: ${quote}\n\nOptions:\n${optionLines(options)}` },
+  ];
+}
 export const SINGLE_KIND_OPINION = 'second opinion from one provider family only: not rejected, to confirm';
 export const SINGLE_KIND_REASON ='priced far below comparable items, and only one independent judgement was available: confirm it is the item itself';
 
@@ -432,6 +445,12 @@ export class ChecklistJudge {
     }));
   }
 
+  async confirmNo(question, found) {
+    const result = await closedVote({ router: this.router, task: 'no-check', tier: 'fast', n: NO_CHECK_VOTES, quorum: 2, options: NO_READINGS, field: 'pick', seed: `${question.question}|${found.quote}`, prompt: (shown) => noCheckPrompt({ question: question.question, quote: found.quote, options: shown }), keyOf: (id) => String(id) }).catch(() => null);
+    if (agreed(result)?.id === 'fails') return found;
+    return { answer: 'unknown', quote: '', noUnconfirmed: found.quote };
+  }
+
   async judgeKind(spans, cluster) {
     const question = cluster.items[0];
     const check = { id: `${cluster.clause}|${question.question}`, answer: 'unknown', quote: '', hard: question.hard, clause: cluster.clause };
@@ -518,8 +537,9 @@ export class ChecklistJudge {
         for (const [short, found] of await this.answersFromPage(missing, spans)) answers.set(short, found);
       }
       for (const q of asked) {
-        const found = answers.get(q.short);
-        checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause });
+        const given = answers.get(q.short);
+        const found = process.env.FRL_CONFIRMED_NO && q.hard && given?.answer === 'no' && this.router ? await this.confirmNo(q, given) : given;
+        checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause, ...(found?.noUnconfirmed ? { noUnconfirmed: found.noUnconfirmed } : {}) });
       }
     }
 
