@@ -829,6 +829,29 @@ describe('filterCountItems', () => {
   it('keeps every item when no count was asked', () => {
     expect(kept([])).toHaveLength(clusters.length);
   });
+
+  it('with FRL_ITEM_COUNT_ONLY counts only the asked item count, so a value or a year the asker names per item keeps its check', () => {
+    const goKarts = { expected: '4 indoor go-kart tracks in Vienna, each with its own website URL and a 10-minute adult race price in EUR', itemCount: 4, valueRange: null };
+    const figure = { expected: 'one figure for 2024 residential heat pump installations in Czechia, with its source and link', itemCount: null, valueRange: null };
+    const asked = [
+      { clause: 'the price of a 10-minute adult race in eur', items: [{ clause: 'the price of a 10-minute adult race in eur', question: 'Does this go-kart track state the price of a 10-minute adult race in EUR?', hard: true, numeric: null }] },
+      { clause: 'in 2024', items: [{ clause: 'in 2024', question: 'Does this figure refer to the year 2024?', hard: true, numeric: null }] },
+      { clause: 'count', items: [{ clause: 'count', question: 'Is this one of the 4 tracks asked for?', hard: true, numeric: null }] },
+    ];
+    const questions = (counts: number[]) => filterCountItems(asked, counts)!.flatMap((c) => c.items.map((i) => i.question));
+    expect(askedCounts(goKarts).sort((x: number, y: number) => x - y)).toEqual([4, 10]);
+    expect(askedCounts(figure)).toEqual([2024]);
+    process.env.FRL_ITEM_COUNT_ONLY = '1';
+    try {
+      expect(askedCounts(goKarts)).toEqual([4]);
+      expect(askedCounts(figure)).toEqual([]);
+      expect(askedCounts(acceptance)).toEqual([20]);
+      expect(questions(askedCounts(goKarts))).toEqual(['Does this go-kart track state the price of a 10-minute adult race in EUR?', 'Does this figure refer to the year 2024?']);
+      expect(questions(askedCounts(figure))).toHaveLength(3);
+    } finally {
+      delete process.env.FRL_ITEM_COUNT_ONLY;
+    }
+  });
 });
 
 describe('kind options for a research that looks for businesses', () => {

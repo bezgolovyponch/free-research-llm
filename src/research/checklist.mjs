@@ -364,6 +364,7 @@ function checklistPrompt({ question, guidance = '', expected = '' }) {
 }
 
 export function askedCounts(acceptance) {
+  if (process.env.FRL_ITEM_COUNT_ONLY) return [acceptance?.itemCount].filter((n) => Number.isFinite(n) && n > 1);
   const bounds = new Set((acceptance?.valueRange ?? []).map(Number));
   const stated = (String(acceptance?.expected ?? '').match(/\d+/g) ?? []).map(Number).filter((n) => !bounds.has(n));
   return [...new Set([acceptance?.itemCount, ...stated].filter((n) => Number.isFinite(n) && n > 1))];
