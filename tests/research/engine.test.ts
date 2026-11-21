@@ -4664,3 +4664,65 @@ describe('the memo is checked against its own verified findings (FRL_MEMO_CONSIS
     }
   });
 });
+
+describe('sources are kept and reused by meaning, across languages (FRL_TOPIC_BY_MEANING)', () => {
+  const survey = { id: 'D1', kind: 'web', title: 'Dodávka tepelných čerpadel na trh v České republice v roce 2024', url: 'https://mpo.example/survey.pdf', domain: 'mpo.example', snippet: '', text: 'Odhad roční dodávky tepelných čerpadel na český trh (ks) Rok Celkem 2023 55 620 2024 24 918' };
+  const shop = { id: 'D2', kind: 'web', title: 'Air source heat pump factory', url: 'https://shop.example/pump', domain: 'shop.example', snippet: '', text: 'Official heat pump installation factory: residential heat pumps, installation figure guarantee, statistics of our installation count.' };
+  const article = { id: 'D3', kind: 'web', title: 'Trh s tepelnými čerpadly v ČR', url: 'https://news.example/trh', domain: 'news.example', snippet: '', text: 'Prodej tepelných čerpadel v roce 2024 klesl.' };
+  const office = { kind: 'web', title: 'Český statistický úřad', url: 'https://csu.example/energie', domain: 'csu.example', snippet: '', text: `Spotřeba energie v domácnostech a instalace tepelných čerpadel podle krajů. ${'Údaje o vytápění domácností za rok 2024 podle druhu paliva a typu budovy. '.repeat(6)}` };
+  const elsewhere = { kind: 'web', title: 'Garden furniture sale', url: 'https://garden.example/sale', domain: 'garden.example', snippet: '', text: `Garden chairs and tables on sale this week only. ${'Teak benches, parasols and outdoor cushions in many colours. '.repeat(6)}` };
+  const searchWith = (results: object[]) => ({ enabled: true, lastErrors: [], async search() { return results.map((r) => ({ ...r })); }, describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }) });
+  const project = (domainSources: object[]) => ({
+    id: 'p',
+    question: 'How many residential heat pumps were installed in Czechia in 2024?',
+    brief: { text: '', regions: ['CZ'], located: true },
+    domainSources,
+    nodes: [{ id: 'D1.1', parentId: 'Q', title: 'Official government statistics', question: 'What is the 2024 installation figure from MPO or CZ Statistical Office?', metric: 'installation count' }],
+    log: [] as Array<{ message: string }>,
+  });
+  const ranker = () => {
+    const calls: Array<{ query: string; candidates: string[]; k: number }> = [];
+    const near = (text: string) => (/tepeln/i.test(text) ? 0 : 1);
+    return { calls, ready: true, async rank(query: string, candidates: string[], k = candidates.length) { calls.push({ query, candidates, k }); return { model: 'fake', order: candidates.map((text, index) => ({ index, near: near(text) })).sort((a, b) => a.near - b.near || a.index - b.index).map((hit) => hit.index).slice(0, k) }; } };
+  };
+  const gather = async (flags: string[], embedder: object | null, { domainSources = [] as object[], results = [] as object[] } = {}) => {
+    const names = ['FRL_DOMAIN_TO_PIECES', 'FRL_TOPIC_BY_MEANING'];
+    const before = names.map((name) => process.env[name]);
+    names.forEach((name) => delete process.env[name]);
+    flags.forEach((name) => { process.env[name] = '1'; });
+    try {
+      const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: searchWith(results), store: new ProjectStore({ dir }), embedder });
+      const p = project(domainSources);
+      const sources = await engine.gatherSources(p as never, p.nodes[0] as never);
+      return { urls: sources.map((s: { url: string }) => s.url), log: p.log.map((l) => l.message) };
+    } finally {
+      names.forEach((name, i) => { if (before[i] === undefined) delete process.env[name]; else process.env[name] = before[i]; });
+    }
+  };
+
+  it('reuses the two domain pages closest in meaning to the piece, though the Czech survey shares no query word, and drops the word-matching shop page', async () => {
+    const embedder = ranker();
+    const { urls, log } = await gather(['FRL_DOMAIN_TO_PIECES', 'FRL_TOPIC_BY_MEANING'], embedder, { domainSources: [survey, shop, article] });
+    expect(urls).toEqual(['https://mpo.example/survey.pdf', 'https://news.example/trh']);
+    expect(log).toContain('D1.1: 2 page(s) reused from the domain study');
+    expect(embedder.calls[0].k).toBe(2);
+    expect(embedder.calls[0].query).toContain('Official government statistics');
+    expect(embedder.calls[0].candidates[0]).toContain('Dodávka tepelných čerpadel');
+  });
+
+  it('keeps a searched page in another language that is in the better half by meaning, where the word rule dropped it as off topic', async () => {
+    const off = await gather([], ranker(), { results: [office, elsewhere] });
+    expect(off.urls).toEqual([]);
+    expect(off.log.some((line) => line.includes('dropped before any model call — off topic (csu.example, garden.example)'))).toBe(true);
+    const on = await gather(['FRL_TOPIC_BY_MEANING'], ranker(), { results: [office, elsewhere] });
+    expect(on.urls).toEqual(['https://csu.example/energie']);
+    expect(on.log.some((line) => line.includes('off topic (garden.example)'))).toBe(true);
+  });
+
+  it('keeps the word-overlap rule without the flag, and without a ready embedder', async () => {
+    const wordsOnly = ['https://shop.example/pump'];
+    expect((await gather(['FRL_DOMAIN_TO_PIECES'], ranker(), { domainSources: [survey, shop, article] })).urls).toEqual(wordsOnly);
+    expect((await gather(['FRL_DOMAIN_TO_PIECES', 'FRL_TOPIC_BY_MEANING'], null, { domainSources: [survey, shop, article] })).urls).toEqual(wordsOnly);
+    expect((await gather(['FRL_DOMAIN_TO_PIECES', 'FRL_TOPIC_BY_MEANING'], { ready: false, rank: async () => null }, { domainSources: [survey, shop, article] })).urls).toEqual(wordsOnly);
+  });
+});

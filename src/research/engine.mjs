@@ -314,7 +314,9 @@ export function normalizeEstimate(raw) {
 
 const MIN_JUDGED_TEXT = 300;
 const TOPIC_MIN_TERMS = 2;
+const DOMAIN_PAGES_PER_PIECE = 2;
 const JUDGE_PAGE_BUDGET = 90;
+const meaningText = (source) => `${source.title ?? ''} ${source.snippet ?? ''} ${source.text ?? ''}`;
 const SITE_MEASURES = new Set(['coastKm', 'beachKm', 'lakeKm', 'workableMonths', 'comfortableMonths', 'optimalDays', 'hotDays', 'hottestC', 'coldestC', 'explorePoints', 'staysNearby', 'realTrendVsEu']);
 
 export function needsSiteFit(strategy, decisionModel) {
@@ -1138,7 +1140,7 @@ export class ResearchEngine {
     }
     const gated = (brief.located === false && !isAnalysis) ? this.gateOnKind(project, node, kept) : kept;
     const query = evidenceQuery(node, brief);
-    const topical = gated.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= TOPIC_MIN_TERMS);
+    const topical = gated.filter((s) => s.kind === 'data' || !s.url || s.listings?.length || (s.locale && !/^en/i.test(s.locale)) || String(s.text ?? '').length < MIN_JUDGED_TEXT || topicCoverage(s, query) >= TOPIC_MIN_TERMS || s.nearInMeaning === true);
     const offTopic = gated.length - topical.length;
     if (offTopic) this.emit(project, 'node', `${node.id}: ${offTopic} source(s) dropped before any model call — off topic (${gated.filter((s) => !topical.includes(s)).map((s) => hostOf(s.url)).slice(0, 5).join(', ')})`, { nodeId: node.id });
     return topical;
@@ -1453,16 +1455,35 @@ export class ResearchEngine {
         const brief = project.brief ?? this.briefOf(project);
         const query = evidenceQuery(node, brief);
         const existingUrls = new Set([...direct, ...web].map((s) => s.url).filter(Boolean));
-        const domainForNode = project.domainSources.filter((s) => s.url && !existingUrls.has(s.url) && topicCoverage(s, query) >= TOPIC_MIN_TERMS);
+        const domainForNode = await this.domainPagesFor(project, query, existingUrls);
         if (domainForNode.length) {
           allSources = [...allSources, ...domainForNode];
           this.emit(project, 'node', `${node.id}: ${domainForNode.length} page(s) reused from the domain study`, { nodeId: node.id });
         }
       }
-      this.onConceptOnly(project, node, allSources).forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
+      this.onConceptOnly(project, node, await this.markByMeaning(project, node, allSources)).forEach((s, i) => sources.push({ ...s, id: `S${i + 1}` }));
       if (!web.length && this.search.lastErrors.length) this.emit(project, 'warn', `${node.id}: search failed (${this.search.lastErrors.join('; ').slice(0, 200)})`, { nodeId: node.id });
     }
     return [...sources, ...this.dataSources(project, node)];
+  }
+
+  async domainPagesFor(project, query, existingUrls) {
+    const open = project.domainSources.filter((s) => s.url && !existingUrls.has(s.url));
+    if (process.env.FRL_TOPIC_BY_MEANING && this.embedder?.ready && open.length) {
+      const ranked = await this.embedder.rank(query, open.map(meaningText), DOMAIN_PAGES_PER_PIECE).catch(() => null);
+      if (ranked?.order?.length) return ranked.order.map((index) => open[index]).filter(Boolean).map((s) => ({ ...s, nearInMeaning: true }));
+    }
+    return open.filter((s) => topicCoverage(s, query) >= TOPIC_MIN_TERMS);
+  }
+
+  async markByMeaning(project, node, sources) {
+    if (!process.env.FRL_TOPIC_BY_MEANING || !this.embedder?.ready) return sources;
+    const web = sources.filter((s) => s.url && s.kind !== 'data' && s.nearInMeaning !== true);
+    if (web.length < 2) return sources;
+    const ranked = await this.embedder.rank(evidenceQuery(node, project.brief ?? this.briefOf(project)), web.map(meaningText)).catch(() => null);
+    if (!ranked?.order?.length) return sources;
+    const near = new Set(ranked.order.slice(0, Math.ceil(web.length / 2)).map((index) => web[index]));
+    return sources.map((s) => (near.has(s) ? { ...s, nearInMeaning: true } : s));
   }
 
   async searchGaps(project, node) {
@@ -1472,7 +1493,7 @@ export class ResearchEngine {
     if (!queries.length) return;
     node.followUpQueries = [...(node.followUpQueries ?? []), ...queries];
     this.emit(project, 'node', `${node.id}: searching the gaps — ${queries.join(' | ').slice(0, 160)}`, { nodeId: node.id });
-    const found = this.onConceptOnly(project, node, await this.search.search(queries, { maxSources: 4, exclude: node.sources.map((s) => s.url).filter(Boolean) }));
+    const found = this.onConceptOnly(project, node, await this.markByMeaning(project, node, await this.search.search(queries, { maxSources: 4, exclude: node.sources.map((s) => s.url).filter(Boolean) })));
     const { sources, added } = mergeSources(node.sources, found);
     node.sources = sources;
     this.emit(project, 'node', `${node.id}: ${added.length} new source(s) from gap search`, { nodeId: node.id });
@@ -1489,7 +1510,7 @@ export class ResearchEngine {
     const queries = [...new Set([node.question, `${node.title} ${node.metric ?? ''}`.trim()].filter(Boolean))].filter((q) => !(node.searchQueries ?? []).includes(q));
     if (!queries.length) return;
     this.emit(project, 'node', `${node.id}: retrieved pages do not match the question; searching again before any model call`, { nodeId: node.id });
-    const found = this.onConceptOnly(project, node, await this.search.search(queries, { maxSources: 4, exclude: node.sources.map((s) => s.url).filter(Boolean) }));
+    const found = this.onConceptOnly(project, node, await this.markByMeaning(project, node, await this.search.search(queries, { maxSources: 4, exclude: node.sources.map((s) => s.url).filter(Boolean) })));
     const { sources, added } = mergeSources(node.sources, found);
     node.sources = sources;
     node.followUpQueries = [...(node.followUpQueries ?? []), ...queries];
