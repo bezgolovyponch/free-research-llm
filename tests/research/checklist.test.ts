@@ -1095,3 +1095,23 @@ describe('checklist clause matching to criteria and plan checks', () => {
     expect(matchCalls).toBe(2);
   });
 });
+
+describe('"no" means the page states the contrary (FRL_NO_MEANS_CONTRARY)', () => {
+  const q = [{ short: 'q1', question: 'Is the adult monthly membership price in EUR provided for this bouldering gym?' }];
+  const original = 'You are a strict judge of one item page. The page is shown as numbered sentences. For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it. Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only, one entry per question: {"answers":[{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]}';
+  it('keeps the original judge prompt without the flag and defines "no" as a stated contrary with it', () => {
+    const before = process.env.FRL_NO_MEANS_CONTRARY;
+    try {
+      delete process.env.FRL_NO_MEANS_CONTRARY;
+      expect(judgePrompt({ questions: q, block: '[S1] Typ Einmalzahlung Monatlich' })[0].content).toBe(original);
+      process.env.FRL_NO_MEANS_CONTRARY = '1';
+      const on = judgePrompt({ questions: q, block: '[S1] Typ Einmalzahlung Monatlich' })[0].content;
+      expect(on).toContain('"no" only when a sentence shows it is not so');
+      expect(on).toContain('a page that does not mention it is "unknown", never "no"');
+      expect(on).toContain('An answer without a sentence id is not counted');
+    } finally {
+      if (before === undefined) delete process.env.FRL_NO_MEANS_CONTRARY;
+      else process.env.FRL_NO_MEANS_CONTRARY = before;
+    }
+  });
+});

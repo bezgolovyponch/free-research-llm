@@ -526,7 +526,10 @@ export class ChecklistJudge {
 }
 
 export function judgePrompt({ questions, block }) {
-  const sys = 'You are a strict judge of one item page. The page is shown as numbered sentences. For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it. Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only, one entry per question: {"answers":[{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]}';
+  const answers = process.env.FRL_NO_MEANS_CONTRARY
+    ? 'For each question answer "yes" when a sentence shows it is so, "no" only when a sentence shows it is not so (the page states the item lacks it, or states a different value, place or kind), and "unknown" when no sentence settles it: a page that does not mention it is "unknown", never "no". Give in "spans" the ids of the one or two sentences that show the answer.'
+    : 'For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it.';
+  const sys = `You are a strict judge of one item page. The page is shown as numbered sentences. ${answers} Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only, one entry per question: {"answers":[{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]}`;
   const qText = questions.map((q) => `${q.short}: ${q.question}`).join('\n');
   return [
     { role: 'system', content: sys },
