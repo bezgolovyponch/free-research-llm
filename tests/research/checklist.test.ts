@@ -1294,3 +1294,30 @@ describe('a checklist survives proposals that fail (FRL_CHECKLIST_REQUIRED)', ()
     expect(none.calls).toBe(9);
   });
 });
+
+describe('two requirements the asker wrote in different words are never merged (FRL_QUOTED_DISTINCT)', () => {
+  const asker = 'Find 4 coworking spaces in Brno, Czechia, each with its own website URL and the price of a one-day pass in CZK.\n4 coworking spaces in Brno, each with its own website URL and a one-day pass price in CZK\n';
+  const place = { clause: 'in brno', question: 'Is this coworking space in Brno, Czechia?', hard: true, numeric: null, quote: 'in Brno, Czechia' };
+  const price = { clause: 'day pass price', question: 'Does this coworking space page state the price of a one-day pass in CZK?', hard: true, numeric: null, quote: 'the price of a one-day pass in CZK' };
+  const reworded = { clause: 'located in brno', question: 'Is this coworking space located in Brno, Czechia?', hard: true, numeric: null, quote: 'in Brno' };
+  const clauses = (flag: boolean, samples: Array<{ items: object[] }>) => {
+    const before = { distinct: process.env.FRL_QUOTED_DISTINCT, quoted: process.env.FRL_QUOTED_CHECKS };
+    process.env.FRL_QUOTED_CHECKS = '1';
+    if (flag) process.env.FRL_QUOTED_DISTINCT = '1';
+    else delete process.env.FRL_QUOTED_DISTINCT;
+    try {
+      return clusterChecklist(samples as never, { askerWords: asker }).map((c: { clause: string }) => c.clause);
+    } finally {
+      if (before.distinct === undefined) delete process.env.FRL_QUOTED_DISTINCT;
+      else process.env.FRL_QUOTED_DISTINCT = before.distinct;
+      if (before.quoted === undefined) delete process.env.FRL_QUOTED_CHECKS;
+      else process.env.FRL_QUOTED_CHECKS = before.quoted;
+    }
+  };
+  const samples = () => [{ items: [place, price] }, { items: [place, price] }, { items: [reworded, price] }];
+
+  it('keeps the place and the day-pass price apart though their questions share the kind words, and still merges two wordings of the same ask', () => {
+    expect(clauses(false, samples())).toEqual(['in brno, czechia']);
+    expect(clauses(true, samples())).toEqual(['in brno, czechia', 'the price of a one-day pass in czk']);
+  });
+});
