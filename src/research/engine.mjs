@@ -881,7 +881,7 @@ export class ResearchEngine {
     const object = kind ? [kind.label, ...(kind.terms ?? [])].filter(Boolean).join(', ') : '';
     const hint = project.guidance ?? '';
     const brief = project.brief ?? this.briefOf(project);
-    const languages = typeof this.conceptLanguages === 'function' ? this.conceptLanguages(brief.regions ?? []) : ['English', 'German'];
+    const languages = this.languagesFor(brief.regions ?? []);
     const reply = await this.router.complete({ purpose: 'decision-model', tier: 'deep', messages: domainQueryPrompt({ question: project.question, purpose, languages, object, hint }) }).catch(() => null);
     const queries = (Array.isArray(reply?.data?.queries) ? reply.data.queries : []).map((query) => String(query ?? '').replace(/\s+/g, ' ').trim()).filter((query) => query.length >= 4).slice(0, DOMAIN_QUERIES);
     if (!queries.length) return true;
@@ -996,6 +996,7 @@ export class ResearchEngine {
     const found = await this.search.search(queries, { maxSources: limit }).catch(() => []);
     const pages = conceptPages(found, limit);
     if (pages.length < MIN_PAGES) {
+      if (process.env.FRL_NO_PAUSE) return this.conceptGapBecomesPiece(project, brief, kind, { pages: pages.length, missing: ['object'], reason: `${pages.length ? 'one page' : 'no page'} about the kinds of "${kind.label}" was found` });
       this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: ${pages.length ? 'one page' : 'no page'} about the kinds of "${kind.label}" was found — name the kinds you mean in the Hints field`);
       return false;
@@ -1005,6 +1006,7 @@ export class ResearchEngine {
     const members = groundMembers(kind.members, card.members ?? [], pages);
     const confirmed = members.filter((member) => member.grounded.length);
     if (confirmed.length < MIN_MEMBERS) {
+      if (process.env.FRL_NO_PAUSE) return this.conceptGapBecomesPiece(project, brief, kind, { pages: pages.length, missing: ['object'], reason: `the ${pages.length} page(s) about "${kind.label}" confirm ${confirmed.length ? `only ${confirmed.map((member) => member.label).join(', ')}` : 'none of its kinds'}` });
       this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: the ${pages.length} page(s) about "${kind.label}" confirm ${confirmed.length ? `only ${confirmed.map((member) => member.label).join(', ')}` : 'none of its kinds'} — name the kinds you mean in the Hints field`);
       return false;
@@ -1024,6 +1026,20 @@ export class ResearchEngine {
     return true;
   }
 
+  languagesFor(regions) {
+    return typeof this.conceptLanguages === 'function' ? this.conceptLanguages(regions) : ['English', 'German'];
+  }
+
+  conceptGapBecomesPiece(project, brief, kind, { pages = 0, missing = ['terms'], reason }) {
+    project.decisionModel.kind = { ...kind, validated: { pages, terms: [], basis: 'no-pause', at: new Date().toISOString() } };
+    const places = (brief.regions ?? []).map((code) => countryByCode(code)?.name ?? code);
+    project.knowledgeGaps = { missing, queries: [], label: kind.label, places, languages: this.languagesFor(brief.regions ?? []) };
+    this.emit(project, 'decision', `${reason}: research continues, each page is judged for the kind, and the gap becomes a knowledge piece`);
+    this.addKnowledgePieces(project);
+    this.briefOf(project);
+    return true;
+  }
+
   async validateConcept(project) {
     const brief = project.brief ?? this.briefOf(project);
     if (brief.located !== false) return true;
@@ -1031,12 +1047,14 @@ export class ResearchEngine {
     const kind = project.decisionModel?.kind;
     if (!kind) return true;
     if (kind.validated?.terms?.length) return true;
+    if (process.env.FRL_NO_PAUSE && kind.validated?.basis === 'no-pause') return true;
     if (!this.router || !this.search?.search || this.demo) return true;
     if (isUmbrella(kind)) return this.validateUmbrella(project, brief, kind);
     const queries = await this.conceptQueriesFor(project, brief, kind);
     const found = await this.search.search(queries, { maxSources: CONCEPT_PAGES }).catch(() => []);
     const pages = conceptPages(found);
     if (!pages.length) {
+      if (process.env.FRL_NO_PAUSE) return this.conceptGapBecomesPiece(project, brief, kind, { missing: ['object', 'terms'], reason: `no page about "${kind.label}" was found` });
       this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: no page about "${kind.label}" was found — say what the item is in the Hints field`);
       return false;
@@ -1050,6 +1068,7 @@ export class ResearchEngine {
         this.emit(project, 'decision', `the ${pages.length} page(s) about "${kind.label}" name it in different words; your Hints describe the item, so the research goes on and each page is judged for the kind`);
         return true;
       }
+      if (process.env.FRL_NO_PAUSE) return this.conceptGapBecomesPiece(project, brief, kind, { pages: pages.length, reason: `the ${pages.length} page(s) about "${kind.label}" do not call it the same thing` });
       this.setPhase(project, 'needs-concept');
       this.emit(project, 'phase', `research paused: the ${pages.length} page(s) about "${kind.label}" do not call it the same thing — say what the item is in the Hints field`);
       return false;
