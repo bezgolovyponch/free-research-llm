@@ -62,8 +62,31 @@ export async function resolveOwnSites({ items, hardIds, spec, router, judge, rea
   let asked = 0;
   let moved = 0;
   let merged = 0;
+  const twins = Boolean(process.env.FRL_MERGE_CONFIRMED_TWINS);
+  const gone = new Set();
   for (const item of items) {
     const pageUrl = item.pageUrl ?? item.url;
+    if (twins && asked < budget && itemTier(item, hardIds, spec) === 'confirmed') {
+      const listed = (item.links ?? []).filter((link) => {
+        const twin = byHost.get(hostOf(link.url, pageUrl));
+        return Boolean(twin) && twin !== item && !gone.has(twin);
+      });
+      const offered = listed.length ? externalCandidates(listed, pageUrl) : [];
+      if (offered.length) {
+        asked++;
+        const pick = await pickOwnSite({ router, item, candidates: offered });
+        const twin = pick ? byHost.get(hostOf(pick)) : null;
+        if (twin && twin !== item && !gone.has(twin)) {
+          twin.checks = mergeChecks(twin.checks, item.checks, pageUrl);
+          twin.alsoOn = [...(twin.alsoOn ?? []), pageUrl];
+          gone.add(item);
+          merged++;
+          continue;
+        }
+      }
+      kept.push(item);
+      continue;
+    }
     const candidates = asked < budget && itemTier(item, hardIds, spec) === 'to-confirm' ? externalCandidates(item.links, pageUrl) : [];
     if (!candidates.length) {
       kept.push(item);
@@ -72,9 +95,10 @@ export async function resolveOwnSites({ items, hardIds, spec, router, judge, rea
     asked++;
     const pick = await pickOwnSite({ router, item, candidates });
     const twin = pick ? byHost.get(hostOf(pick)) : null;
-    if (twin && twin !== item) {
+    if (twin && twin !== item && !(twins && gone.has(twin))) {
       twin.checks = mergeChecks(twin.checks, item.checks, pageUrl);
       twin.alsoOn = [...(twin.alsoOn ?? []), pageUrl];
+      if (twins) gone.add(item);
       merged++;
       continue;
     }

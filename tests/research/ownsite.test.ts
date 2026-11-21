@@ -99,3 +99,56 @@ describe('resolveOwnSites', () => {
     expect(out.items).toHaveLength(2);
   });
 });
+
+describe('a confirmed directory item merged into its listed own site (FRL_MERGE_CONFIRMED_TWINS)', () => {
+  const own = { title: 'Preise – KOSMOS', url: 'https://kosmos-bouldern.de/angebot/preise/', live: true, listing: true, purpose: [], links: [{ url: 'https://instagram.com/kosmos', text: 'Instagram' }], checks: [check(PRICE, 'yes', '55 Euro'), check(SITE, 'yes', 'Page address: x')] };
+  const confirmedDirectory = () => directory({ checks: [check(PRICE, 'yes', 'Monthly Membership Adults 55.00 EUR.'), check(SITE, 'yes', 'Website')] });
+  const run = async (items: Array<Record<string, unknown>>, pick: unknown) => {
+    const router = fakeRouter({ 'own-site': pick });
+    const out = await resolveOwnSites({ items, hardIds, spec, router: router as never, judge: { async judge() { return []; } }, readPage: async () => ({ status: 200, text: '', links: [] }), judgeArgs: [] });
+    return { out, router };
+  };
+  const withFlag = async (body: () => Promise<void>) => {
+    process.env.FRL_MERGE_CONFIRMED_TWINS = '1';
+    try {
+      await body();
+    } finally {
+      delete process.env.FRL_MERGE_CONFIRMED_TWINS;
+    }
+  };
+
+  it('counts one entity once when a confirmed directory page links to the listed own site the vote agrees on, and keeps both without the flag', async () => {
+    const plain = await run([{ ...own }, confirmedDirectory()], { pick: 'https://kosmos-bouldern.de/' });
+    expect(plain.out).toMatchObject({ asked: 0, merged: 0 });
+    expect(plain.out.items).toHaveLength(2);
+    await withFlag(async () => {
+      const { out, router } = await run([{ ...own }, confirmedDirectory()], { pick: 'https://kosmos-bouldern.de/' });
+      expect(out).toMatchObject({ asked: 1, moved: 0, merged: 1 });
+      expect(out.items).toHaveLength(1);
+      expect(out.items[0]).toMatchObject({ url: own.url, alsoOn: ['https://climbing.place/climbing-gym/detail/leipzig/kosmos-boulderhalle'] });
+      expect(router.userText('own-site')).toContain('https://kosmos-bouldern.de/');
+      expect(router.userText('own-site')).not.toContain('hike.place');
+    });
+  });
+
+  it('asks nothing for a confirmed page without a link to another listed item, and keeps both when the vote picks none', async () => {
+    await withFlag(async () => {
+      const alone = await run([{ ...own, links: [{ url: 'https://facebook.com/kosmos', text: 'Facebook' }] }], { pick: OWN_SITE_NONE });
+      expect([alone.out.asked, alone.router.calls.length, alone.out.items.length]).toEqual([0, 0, 1]);
+      const social = { title: 'KOSMOS on Instagram', url: 'https://instagram.com/kosmos', live: true, listing: true, purpose: [], links: [], checks: [check(PRICE, 'unknown'), check(SITE, 'unknown')] };
+      const kept = await run([{ ...own }, social], { pick: OWN_SITE_NONE });
+      expect(kept.out).toMatchObject({ asked: 1, merged: 0 });
+      expect(kept.out.items.map((item: { url: string }) => item.url)).toEqual([own.url, social.url]);
+    });
+  });
+
+  it('never merges into an item that was itself merged away', async () => {
+    await withFlag(async () => {
+      const second = { ...confirmedDirectory(), url: 'https://boulderhallenfinder.de/kosmos', title: 'KOSMOS | Boulderhallenfinder', links: [{ url: 'https://climbing.place/climbing-gym/detail/leipzig/kosmos-boulderhalle', text: 'Climbing Place' }] };
+      const firstLink = (request: { choice?: { ids?: unknown[] } }) => ({ pick: (request.choice?.ids ?? []).find((id) => id !== OWN_SITE_NONE) });
+      const { out } = await run([{ ...own }, confirmedDirectory(), second], firstLink);
+      expect(out.merged).toBe(1);
+      expect(out.items.map((item: { url: string }) => item.url)).toEqual([own.url, second.url]);
+    });
+  });
+});
