@@ -463,10 +463,10 @@ export class ChecklistJudge {
     }
   }
 
-  async answersFromPage(asked, spans) {
+  async answersFromPage(asked, spans, about = null) {
     const shown = spans.length ? await shownSpans(spans, asked.map((q) => q.question).join(' '), this.embedder) : [];
     if (!shown.length) return new Map();
-    const reply = await this.complete(judgePrompt({ questions: asked, block: spansBlock(shown, JUDGE_BLOCK_CHARS) }));
+    const reply = await this.complete(judgePrompt({ questions: asked, block: spansBlock(shown, JUDGE_BLOCK_CHARS), about }));
     const validated = applyQuoteCheck(replyList(reply?.data), shown);
     return new Map(asked.flatMap((q) => {
       const found = validated.find((r) => shortIdOf(r) === q.short);
@@ -486,9 +486,9 @@ export class ChecklistJudge {
     return agreed(result)?.id === 'shows';
   }
 
-  async answerOnAddress(question, given, address, askedSpans, spans) {
+  async answerOnAddress(question, given, address, askedSpans, spans, about = null) {
     if (await this.confirmAddress(question, given, address, askedSpans)) return given;
-    const plain = (await this.answersFromPage([question], spans)).get(question.short);
+    const plain = (await this.answersFromPage([question], spans, about)).get(question.short);
     return { ...(plain ?? { answer: 'unknown', quote: '' }), addressUnconfirmed: address };
   }
 
@@ -571,17 +571,18 @@ export class ChecklistJudge {
     const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
     const address = process.env.FRL_PAGE_ADDRESS && this.router ? String(item?.pageUrl ?? item?.url ?? '').trim() : '';
     const askedSpans = address ? sentenceSpans(`${ADDRESS_LABEL} ${address}\n${pageText}`, { limit: JUDGE_PAGE_CHARS }) : spans;
+    const about = process.env.FRL_DEEPER_ITEM_NAMED && item?.of?.url ? item.of : null;
 
     for (let at = 0; at < questions.length; at += JUDGE_QUESTIONS_PER_CALL) {
       const asked = questions.slice(at, at + JUDGE_QUESTIONS_PER_CALL);
-      const answers = await this.answersFromPage(asked, askedSpans);
+      const answers = await this.answersFromPage(asked, askedSpans, about);
       const missing = asked.filter((q) => !answers.has(q.short));
       if (missing.length) {
-        for (const [short, found] of await this.answersFromPage(missing, askedSpans)) answers.set(short, found);
+        for (const [short, found] of await this.answersFromPage(missing, askedSpans, about)) answers.set(short, found);
       }
       for (const q of asked) {
         const given = answers.get(q.short);
-        const vetted = address && given?.answer === 'yes' && String(given.quote ?? '').startsWith(ADDRESS_LABEL) ? await this.answerOnAddress(q, given, address, askedSpans, spans) : given;
+        const vetted = address && given?.answer === 'yes' && String(given.quote ?? '').startsWith(ADDRESS_LABEL) ? await this.answerOnAddress(q, given, address, askedSpans, spans, about) : given;
         const found = process.env.FRL_CONFIRMED_NO && q.hard && vetted?.answer === 'no' && this.router ? await this.confirmNo(q, vetted) : vetted;
         checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause, ...(found?.noUnconfirmed ? { noUnconfirmed: found.noUnconfirmed } : {}), ...(found?.addressUnconfirmed ? { addressUnconfirmed: found.addressUnconfirmed } : {}) });
       }
@@ -596,15 +597,17 @@ export class ChecklistJudge {
   }
 }
 
-export function judgePrompt({ questions, block }) {
+export function judgePrompt({ questions, block, about = null }) {
   const answers = process.env.FRL_NO_MEANS_CONTRARY
     ? 'For each question answer "yes" when a sentence shows it is so, "no" only when a sentence shows it is not so (the page states the item lacks it, or states a different value, place or kind), and "unknown" when no sentence settles it: a page that does not mention it is "unknown", never "no". Give in "spans" the ids of the one or two sentences that show the answer.'
     : 'For each question answer "yes", "no" or "unknown", and give in "spans" the ids of the one or two sentences that show it.';
-  const sys = `You are a strict judge of one item page. The page is shown as numbered sentences. ${answers} Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only, one entry per question: {"answers":[{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]}`;
+  const named = about ? ' This page is linked from the item named below, and every question is about that item: answer "yes" or "no" only from a sentence about that item; a sentence about another item, place or offer answers nothing, so the answer is "unknown".' : '';
+  const sys = `You are a strict judge of one item page. The page is shown as numbered sentences. ${answers}${named} Never write the sentence itself. An answer without a sentence id is not counted, so answer "unknown" with empty "spans" when no sentence shows it. Answer with JSON only, one entry per question: {"answers":[{"id":"q1","answer":"yes|no|unknown","spans":["S12"]}]}`;
   const qText = questions.map((q) => `${q.short}: ${q.question}`).join('\n');
+  const itemLine = about ? `The item: ${about.title ? `${about.title} — ` : ''}${about.url}\n\n` : '';
   return [
     { role: 'system', content: sys },
-    { role: 'user', content: `Item page text:\n${block}\n\nQuestions:\n${qText}` },
+    { role: 'user', content: `${itemLine}Item page text:\n${block}\n\nQuestions:\n${qText}` },
   ];
 }
 

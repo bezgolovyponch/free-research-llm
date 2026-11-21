@@ -1383,3 +1383,36 @@ describe('the judge sees the page address, and a yes resting on it alone needs a
     expect(checks[0]).not.toHaveProperty('addressUnconfirmed');
   });
 });
+
+describe('a linked page is judged about the item it was read for (FRL_DEEPER_ITEM_NAMED)', () => {
+  const checklist = [{ clause: 'price of a one-day pass in czk', items: [{ clause: 'price of a one-day pass in czk', question: 'Does this coworking space state the price of a one-day pass in CZK?', hard: true, numeric: null }] }];
+  const article = 'Kolik stojí coworking v Česku. WorkLounge Smíchov, day pass od 450 Kč za osobu a den.';
+  const of = { title: 'Clubco — coworking | Cowork.cz', url: 'https://cowork.cz/prostor/clubco' };
+  const judgedText = async (flag: boolean, item: Record<string, unknown>) => {
+    const before = process.env.FRL_DEEPER_ITEM_NAMED;
+    if (flag) process.env.FRL_DEEPER_ITEM_NAMED = '1';
+    else delete process.env.FRL_DEEPER_ITEM_NAMED;
+    try {
+      const fake = fakeRouter({ '': { answers: [{ id: 'q1', answer: 'unknown', spans: [] }] } });
+      await new ChecklistJudge({ router: fake as never }).judge(item as never, article, checklist);
+      return fake.calls.map((call: { messages: Array<{ content: string }> }) => call.messages.map((m) => m.content).join(' ')).find((text: string) => text.includes('Item page text:')) ?? '';
+    } finally {
+      if (before === undefined) delete process.env.FRL_DEEPER_ITEM_NAMED;
+      else process.env.FRL_DEEPER_ITEM_NAMED = before;
+    }
+  };
+
+  it('names the item and asks for answers about that item only', async () => {
+    const text = await judgedText(true, { url: 'https://cowork.cz/clanky/kolik-stoji-coworking', of });
+    expect(text).toContain('The item: Clubco — coworking | Cowork.cz — https://cowork.cz/prostor/clubco');
+    expect(text).toContain('a sentence about another item, place or offer answers nothing, so the answer is "unknown"');
+  });
+
+  it('names nothing for an item page itself or without the flag', async () => {
+    expect(await judgedText(true, { url: 'https://cowork.cz/prostor/clubco' })).not.toContain('The item:');
+    const off = await judgedText(false, { url: 'https://cowork.cz/clanky/kolik-stoji-coworking', of });
+    expect(off).toContain('Item page text:');
+    expect(off).not.toContain('The item:');
+    expect(off).not.toContain('answers nothing');
+  });
+});
