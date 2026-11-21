@@ -192,7 +192,14 @@ export class ModelRouter {
     return [...this.providers].sort((a, b) => rank(a) - rank(b));
   }
 
-  available({ avoid, tier = 'fast', purpose, tokens = 0, closed = false } = {}) {
+  apartFrom(avoid, tier = 'fast') {
+    const avoided = new Set((Array.isArray(avoid) ? avoid : [avoid]).filter(Boolean));
+    const family = (p) => familyOf(p.describe?.()?.[tier] ?? p.selected?.[tier], p.id);
+    const avoidedFamilies = new Set(this.providers.filter((p) => avoided.has(p.id)).map(family));
+    return (p) => !avoided.has(p.id) && !avoidedFamilies.has(family(p));
+  }
+
+  available({ avoid, tier = 'fast', purpose, tokens = 0, closed = false, apart = false } = {}) {
     const time = this.now();
     this.restPaidProviders(time);
     const open = this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && (this.cooldownUntil.get(p.id) ?? 0) <= time && !this.trialBusy(p.id, time) && !this.needsPayment(p.id, time));
@@ -208,6 +215,10 @@ export class ModelRouter {
     const avoidedFamilies = new Set(this.providers.filter((p) => avoided.has(p.id)).map(family));
     const other = usable.filter((p) => !avoided.has(p.id) && !avoidedFamilies.has(family(p)));
     const sameFamily = usable.filter((p) => !avoided.has(p.id) && avoidedFamilies.has(family(p)));
+    if (apart) {
+      const slowLast = this.demoteSlow(other, tier);
+      return this.demotePaid(closed ? this.demoteLetterBiased(slowLast, tier) : slowLast);
+    }
     const preferred = [...this.demoteSlow(other, tier), ...this.demoteSlow(sameFamily, tier)];
     return preferred.length ? this.demotePaid([...(closed ? this.demoteLetterBiased(preferred, tier) : preferred), ...usable.filter((p) => avoided.has(p.id))]) : usable;
   }
@@ -220,8 +231,10 @@ export class ModelRouter {
     return replyFamily(model ?? this.modelOf(this.providers.find((p) => p.id === providerId), tier), providerId);
   }
 
-  families({ tier = 'fast', purpose } = {}) {
-    return independentFamilies(this.available({ tier, purpose }).map((p) => this.familyOf(p.id, { tier })));
+  families({ tier = 'fast', purpose, within = 0 } = {}) {
+    const time = this.now();
+    const soon = within > 0 ? this.ordered(tier, purpose).filter((p) => (p.canServe ? p.canServe(tier) : p.ready) && !this.needsPayment(p.id, time) && !this.isBanned(p, tier) && (this.cooldownUntil.get(p.id) ?? 0) - time <= within) : [];
+    return independentFamilies([...this.available({ tier, purpose }), ...soon].map((p) => this.familyOf(p.id, { tier })));
   }
 
   letterBias() {
@@ -587,9 +600,9 @@ export class ModelRouter {
     return true;
   }
 
-  shortestCooldownMs() {
+  shortestCooldownMs(eligible = null) {
     const time = this.now();
-    const waits = this.providers.filter((p) => p.ready).map((p) => (this.trialBusy(p.id, time) ? TRIAL_POLL_MS : (this.cooldownUntil.get(p.id) ?? 0) - time));
+    const waits = this.providers.filter((p) => p.ready && (!eligible || eligible(p))).map((p) => (this.trialBusy(p.id, time) ? TRIAL_POLL_MS : (this.cooldownUntil.get(p.id) ?? 0) - time));
     return waits.length ? Math.max(0, Math.min(...waits)) : Infinity;
   }
 
@@ -662,18 +675,19 @@ export class ModelRouter {
     this.notify({ kind: 'gave-up', purpose, tier, reasons });
   }
 
-  async waitForCooldown({ avoid, tier, purpose, tokens, closed = false }, notice = { at: null }) {
+  async waitForCooldown({ avoid, tier, purpose, tokens, closed = false, apart = false }, notice = { at: null }) {
     let waited = 0;
     let first = true;
+    const eligible = apart ? this.apartFrom(avoid, tier) : null;
     for (;;) {
-      const wait = first ? this.shortestCooldownMs() : Math.max(this.shortestCooldownMs(), TRIAL_POLL_MS);
+      const wait = first ? this.shortestCooldownMs(eligible) : Math.max(this.shortestCooldownMs(eligible), TRIAL_POLL_MS);
       if (waited + wait > this.maxWaitMs) return [];
-      if (first) this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
+      if (first) this.record({ purpose, tier, provider: 'router', ok: false, ms: wait, error: apart ? `every other model family rate-limited, waiting ${Math.ceil(wait / 1000)}s` : `all providers rate-limited, waiting ${Math.ceil(wait / 1000)}s` });
       this.noticeWaiting(notice, { ms: wait, purpose, tier });
       await this.sleep(wait);
       waited += wait;
       first = false;
-      const candidates = this.available({ avoid, tier, purpose, tokens, closed });
+      const candidates = this.available({ avoid, tier, purpose, tokens, closed, apart });
       if (candidates.length || !this.trialPending()) return candidates;
     }
   }
@@ -744,22 +758,24 @@ export class ModelRouter {
     return null;
   }
 
-  async complete({ messages, tier = 'fast', json = true, purpose = 'chat', avoid, temperature, task = null, choice = null }) {
+  async complete({ messages, tier = 'fast', json = true, purpose = 'chat', avoid, temperature, task = null, choice = null, apart = false }) {
     const request = { messages, tier, json, purpose, temperature, task, choice };
     const errors = [];
     const tokens = estimateTokens(messages);
     const offline = { step: 0, waited: 0 };
     const notice = { at: null };
     const closed = Boolean(choice);
-    let candidates = this.available({ avoid, tier, purpose, tokens, closed });
+    const strict = Boolean(apart) && (Array.isArray(avoid) ? avoid : [avoid]).some(Boolean);
+    let candidates = this.available({ avoid, tier, purpose, tokens, closed, apart: strict });
     let round = 0;
     let offlineExhausted = false;
-    while (round < MAX_WAIT_ROUNDS) {
-      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose, tokens, closed }, notice);
+    while (round < (strict ? 1 : MAX_WAIT_ROUNDS)) {
+      if (!candidates.length) candidates = await this.waitForCooldown({ avoid, tier, purpose, tokens, closed, apart: strict }, notice);
       if (!candidates.length) break;
       const stateBefore = this.snapshotProviderState(candidates);
       const reply = await this.tryProviders(candidates, request, errors);
       if (reply) return reply;
+      if (strict) break;
       if (errors.length && errors.every((error) => isNetworkError(error))) {
         this.restoreProviderState(stateBefore);
         if (await this.waitOffline(offline)) {
@@ -773,6 +789,7 @@ export class ModelRouter {
       candidates = [];
       round++;
     }
+    if (strict) throw new NoModelAvailableError(`no other model family answered for ${purpose}${errors.length ? `: ${errors.join(' || ').slice(0, 300)}` : ''}`);
     this.noticeGaveUp({ purpose, tier }, errors);
     if (!errors.length) {
       throw new NoModelAvailableError(this.ready ? 'all free model quotas are cooling down after rate limits; retry in a minute' : 'no model provider is configured — open Setup');

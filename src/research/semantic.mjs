@@ -71,7 +71,7 @@ export function shortText(value, maxWords, maxChars = 200) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().split(' ').slice(0, maxWords).join(' ').slice(0, maxChars);
 }
 
-async function attempt({ router, task, tier = 'fast', messages, schema, avoid, temperature, budget, stage, choice = null }) {
+async function attempt({ router, task, tier = 'fast', messages, schema, avoid, temperature, budget, stage, choice = null, apart = false }) {
   const purpose = tier === 'deep' ? DRAFT_PURPOSE : JUDGE_PURPOSE;
   const heat = temperature ?? (tier === 'deep' ? DRAFT_TEMPERATURE : 0);
   const calls = [];
@@ -80,7 +80,7 @@ async function attempt({ router, task, tier = 'fast', messages, schema, avoid, t
     if (budget && !budget.take(stage)) return { value: null, calls, skipped: true };
     let reply = null;
     try {
-      reply = await router.complete({ purpose, tier, temperature: heat, messages: asked, avoid, task, ...(choice ? { choice } : {}) });
+      reply = await router.complete({ purpose, tier, temperature: heat, messages: asked, avoid, task, ...(choice ? { choice } : {}), ...(apart ? { apart: true } : {}) });
     } catch {
       reply = null;
     }
@@ -110,7 +110,8 @@ export async function vote({ n = 3, quorum = 2, key = (value) => JSON.stringify(
   const router = request.router;
   const familyOf = (reply) => router.familyOf?.(reply.provider, { tier, model: reply.model }) ?? replyFamily(reply.model, reply.provider ?? '');
   const counted = (exclude ?? []).filter((entry) => entry?.provider || entry?.model).map(familyOf);
-  const reachable = router.families?.({ tier, purpose }) ?? null;
+  const apart = Boolean(process.env.FRL_VOTE_APART);
+  const reachable = router.families?.({ tier, purpose, ...(apart && router.maxWaitMs > 0 ? { within: router.maxWaitMs } : {}) }) ?? null;
   const open = reachable ? reachable.filter((family) => !counted.some((other) => sameFamily(other, family))) : null;
   const rounds = open && open.length < Math.max(1, Math.min(2, quorum)) ? Math.min(1, n) : n;
   const replies = [];
@@ -119,8 +120,9 @@ export async function vote({ n = 3, quorum = 2, key = (value) => JSON.stringify(
   const used = [...(request.avoid ?? [])];
   let winner = null;
   for (let index = 0; index < rounds && winner === null; index++) {
-    const result = await attempt({ ...request, schema: (data) => schema(data, index), choice: typeof choice === 'function' ? choice(index) : choice, messages: typeof messages === 'function' ? messages(index) : messages, avoid: avoidSame && used.length ? [...used] : undefined });
+    const result = await attempt({ ...request, schema: (data) => schema(data, index), choice: typeof choice === 'function' ? choice(index) : choice, messages: typeof messages === 'function' ? messages(index) : messages, avoid: avoidSame && used.length ? [...used] : undefined, ...(apart && avoidSame && used.length ? { apart: true } : {}) });
     recordCalls(router, result.calls.filter((call) => !call.valid), purpose, () => false);
+    if (result.value === null && apart && avoidSame && used.length && !result.calls.length) break;
     if (result.value === null) continue;
     if (result.provider) used.push(result.provider);
     const value = normalize(result.value, index);

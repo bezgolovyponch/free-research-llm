@@ -1699,3 +1699,46 @@ describe('ModelRouter wait, give-up and payment events', () => {
     expect(paymentRequired({ status: 429, message: 'x HTTP 429: slow down' })).toBe(false);
   });
 });
+
+describe('a later vote call kept apart from the families that already answered', () => {
+  const make = (id: string, model: string) => ({ ...provider(id, ['{"pick":"A"}', '{"pick":"A"}']), selected: { fast: model, deep: model }, describe: () => ({ id, fast: model, deep: model }) });
+
+  it('asks only another model family, and waits for one to come back instead of asking the same family again', async () => {
+    let now = 0;
+    const waits: number[] = [];
+    const groq = make('groq', 'qwen/qwen3.8-27b');
+    const cloudflare = make('cloudflare', '@cf/qwen/qwen3.8-27b');
+    const gemini = make('gemini', 'gemini-3.8-flash');
+    const router = new ModelRouter({ providers: [groq, cloudflare, gemini], routeOrder: { fast: ['groq', 'cloudflare', 'gemini'], deep: ['groq', 'cloudflare', 'gemini'] }, now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; } });
+    router.cooldownUntil.set('gemini', 5000);
+    expect(router.available({ tier: 'fast', avoid: ['groq'] }).map((p: { id: string }) => p.id)).toEqual(['cloudflare', 'groq']);
+    expect(router.available({ tier: 'fast', avoid: ['groq'], apart: true })).toEqual([]);
+    expect(router.families({ tier: 'fast' })).toHaveLength(1);
+    expect(router.families({ tier: 'fast', within: 65000 })).toHaveLength(2);
+    await expect(router.complete({ messages: [], avoid: ['groq'], apart: true })).resolves.toMatchObject({ provider: 'gemini' });
+    expect(waits).toEqual([5000]);
+    expect(cloudflare.calls).toEqual([]);
+    expect(router.ledger.map((r: { provider: string; error?: string }) => [r.provider, r.error ?? ''])).toEqual([['router', 'every other model family rate-limited, waiting 5s'], ['gemini', '']]);
+  });
+
+  it('gives up at once when no other family can answer within the wait, and never asks the same family', async () => {
+    let now = 0;
+    const waits: number[] = [];
+    const groq = make('groq', 'qwen/qwen3.8-27b');
+    const cloudflare = make('cloudflare', '@cf/qwen/qwen3.8-27b');
+    const gemini = make('gemini', 'gemini-3.8-flash');
+    const router = new ModelRouter({ providers: [groq, cloudflare, gemini], routeOrder: { fast: ['groq', 'cloudflare', 'gemini'], deep: ['groq', 'cloudflare', 'gemini'] }, now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; } });
+    router.cooldownUntil.set('gemini', 3600000);
+    expect(router.families({ tier: 'fast', within: 65000 })).toHaveLength(1);
+    await expect(router.complete({ messages: [], avoid: ['groq'], apart: true })).rejects.toThrow(/no other model family answered/);
+    expect([waits, cloudflare.calls, gemini.calls]).toEqual([[], [], []]);
+    await expect(router.complete({ messages: [], avoid: ['groq'] })).resolves.toMatchObject({ provider: 'cloudflare' });
+  });
+
+  it('asks the first call of a vote as before, with nothing to keep apart from', async () => {
+    const groq = make('groq', 'qwen/qwen3.8-27b');
+    const gemini = make('gemini', 'gemini-3.8-flash');
+    const router = new ModelRouter({ providers: [groq, gemini], routeOrder: { fast: ['groq', 'gemini'], deep: ['groq', 'gemini'] } });
+    await expect(router.complete({ messages: [], apart: true })).resolves.toMatchObject({ provider: 'groq' });
+  });
+});
