@@ -63,6 +63,36 @@ describe('runInLanes', () => {
     expect(g.finished.has('c')).toBe(false);
   });
 
+  it('with settledOnly a prerequisite that marks itself finished mid-work still holds back its dependants until its work returns', async () => {
+    const run = async (settledOnly: boolean) => {
+      const finished = new Set<string>();
+      const log: string[] = [];
+      await runInLanes({
+        order: ['a', 'b', 'P'],
+        isFinished: (id: string) => finished.has(id),
+        prerequisites: (id: string) => (id === 'P' ? ['a', 'b'] : []),
+        known: () => true,
+        lanes: () => 2,
+        shouldStop: () => false,
+        settledOnly,
+        work: async (id: string) => {
+          log.push(`start ${id}`);
+          if (id === 'a') {
+            finished.add('a');
+            await tick(40);
+          } else await tick(5);
+          finished.add(id);
+          log.push(`end ${id}`);
+        },
+      });
+      return log;
+    };
+    const settled = await run(true);
+    expect(settled.indexOf('start P')).toBeGreaterThan(settled.indexOf('end a'));
+    const early = await run(false);
+    expect(early.indexOf('start P')).toBeLessThan(early.indexOf('end a'));
+  });
+
   it('breaks a dependency cycle instead of hanging', async () => {
     const g = graph({ a: ['b'], b: ['a'] });
     await runInLanes(g.options(() => 2, [], { now: 0, max: 0 }));

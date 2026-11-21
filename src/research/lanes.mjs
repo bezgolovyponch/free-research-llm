@@ -26,11 +26,12 @@ export class Mutex {
   }
 }
 
-export async function runInLanes({ order, isFinished, prerequisites, known, lanes, work, shouldStop }) {
+export async function runInLanes({ order, isFinished, prerequisites, known, lanes, work, shouldStop, settledOnly = false }) {
   const queue = order.filter((id) => !isFinished(id));
   const running = new Map();
   let fatal = null;
-  const ready = (id) => prerequisites(id).every((p) => !known(p) || isFinished(p));
+  const settled = (id) => isFinished(id) && !(settledOnly && running.has(id));
+  const ready = (id) => prerequisites(id).every((p) => !known(p) || settled(p));
   while (queue.length || running.size) {
     while (!fatal && !shouldStop() && queue.length && running.size < Math.max(1, lanes())) {
       let index = queue.findIndex(ready);

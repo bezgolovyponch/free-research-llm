@@ -98,6 +98,40 @@ describe('ResearchEngine', () => {
     expect(done.log.some((l: { type: string }) => l.type === 'escalate')).toBe(true);
   });
 
+  it('with FRL_SETTLED_PREREQUISITES a parent is combined from the final answer of a piece still on its retry, not from the failed first answer', async () => {
+    const scripted = new ScriptedProvider();
+    let poisoned = false;
+    const provider = {
+      id: 'demo',
+      ready: true,
+      describe: () => scripted.describe(),
+      async chat(args: { messages: Array<{ role: string; content: string }>; tier: string }) {
+        const prompt = args.messages.at(-1)!.content;
+        if (prompt.includes(TASK_MARKERS.research)) {
+          if (!poisoned) {
+            poisoned = true;
+            return { content: JSON.stringify({ answer: 'made up first answer', claims: [{ text: 'price 5', sourceIds: ['S99'] }], confidence: 'high' }), model: 'm', provider: 'demo', usage: {} };
+          }
+          if (args.tier === 'deep') await new Promise((r) => setTimeout(r, 150));
+        }
+        return scripted.chat(args);
+      },
+    };
+    process.env.FRL_SETTLED_PREREQUISITES = '1';
+    try {
+      const { engine } = engineWith(provider);
+      const project = await engine.createProject({ question: 'Where should I build a glamping site in Czechia?' });
+      const done = await engine.run(project.id);
+      const retried = done.nodes.find((n: { attempts: number }) => n.attempts === 2);
+      const parent = done.nodes.find((n: { id: string }) => n.id === retried.parentId);
+      const seen = parent.sources.find((s: { id: string }) => s.id === retried.id).text;
+      expect(seen).toBe(retried.finding.answer);
+      expect(seen).not.toBe('made up first answer');
+    } finally {
+      delete process.env.FRL_SETTLED_PREREQUISITES;
+    }
+  });
+
   it('searches the gaps of a failed answer before the deep-tier retry', async () => {
     let critiques = 0;
     const scripted = new ScriptedProvider();
