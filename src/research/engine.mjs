@@ -33,6 +33,7 @@ import { domainFindingsPrompt, domainQueryPrompt, domainUnderstanding, hubQueryP
 import { listingKey, nextPageUrl } from '../search/listings.mjs';
 import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
+import { checkFindings, conflictQuestions, findingsNote, lowersConfidence } from './findingscheck.mjs';
 import { applyStrategy, asksSea, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
@@ -1701,6 +1702,7 @@ export class ResearchEngine {
       model: `${reply.provider}/${reply.model}`,
       generatedAt: new Date().toISOString(),
     };
+    await this.checkMemoAgainstFindings(project);
     await this.checkAcceptance(project, pages);
     this.planActions(project);
     if (project.report.claimCheck) {
@@ -1710,13 +1712,26 @@ export class ResearchEngine {
     this.emit(project, 'report', `decision memo ready: ${project.report.verdict}`);
   }
 
+  async checkMemoAgainstFindings(project) {
+    if (!process.env.FRL_MEMO_CONSISTENCY || !project.report || !this.router || this.demo || contractClass(project) !== 'analysis') return null;
+    const check = await checkFindings({ question: project.question, report: project.report, nodes: project.nodes, router: this.router }).catch(() => null);
+    if (!check) return null;
+    project.report.findingsCheck = check;
+    if (lowersConfidence(check)) {
+      project.report.confidence = 'low';
+      project.report.openQuestions = [...(project.report.openQuestions ?? []), ...conflictQuestions(check)];
+    }
+    this.emit(project, 'report', `memo checked against ${check.checked} finding(s): ${check.conflicts.length} contradiction(s)${check.ungrounded ? ', the estimate appears in no finding' : ''}`);
+    return check;
+  }
+
   planActions(project) {
     if (!project.report) return null;
     const status = resultStatus(project);
     const table = tableVerdict(project.candidates, project.acceptance?.itemCount ?? null);
     const said = project.report.modelVerdict ?? project.report.verdict;
     project.report.claimCheck = checkMemoClaims(project.report, project.candidates, { valueRange: project.acceptance?.valueRange ?? null, rules: project.candidates?.strategy?.rules ?? null, itemCount: project.acceptance?.itemCount ?? null, asked: `${project.question ?? ''} ${project.acceptance?.expected ?? ''}` });
-    const note = claimNote(project.report.claimCheck);
+    const note = `${claimNote(project.report.claimCheck)}${findingsNote(project.report.findingsCheck)}`;
     project.report.verdict = `${provisionalVerdict(table ? `${table} — model memo: ${said}` : said, status).slice(0, 600 - note.length)}${note}`;
     project.report.status = { provisional: status.provisional, coverage: status.coverage, confidence: status.confidence, blocking: status.blocking, counts: status.counts };
     project.report.actions = status.plan.slice(0, 40);
