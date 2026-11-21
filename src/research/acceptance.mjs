@@ -1,8 +1,9 @@
+import { agreed, closedVote, optionLines } from './semantic.mjs';
 import { plain } from './itemgate.mjs';
 import { regionVerdict } from './brief.mjs';
 import { isUmbrella, memberTerms } from './concept.mjs';
 import { entitiesFromJsonLd } from '../search/listings.mjs';
-import { verdict, itemTier, hardIdsOf, scoreOf } from './verdict.mjs';
+import { verdict, itemTier, hardIdsOf, scoreOf, qualifies } from './verdict.mjs';
 import { ENTITY_PATH, directoryEntityKey } from './entitypath.mjs';
 export { qualifies } from './verdict.mjs';
 const CURRENCIES = {
@@ -724,4 +725,45 @@ export class AcceptanceChecker {
     });
     return { score: Math.round(score * 1000) / 1000, checks: checks.map((c) => ({ ...c, value: Math.round(Math.min(1, c.value) * 1000) / 1000, passed: c.value >= 0.999 })), items: sortedItems, checkedAt: new Date().toISOString(), validCount: verdictResult.validCount, totalAsked: spec.itemCount ?? 0, verdict: verdictResult };
   }
+}
+
+export const NAME_QUOTE_VOTES = 3;
+export const NAME_QUOTE_READINGS = [
+  { id: 'shows', text: 'The sentence puts the item in the asked place, or gives it the asked name, written in this or another language or spelling' },
+  { id: 'fails', text: 'The sentence puts the item in another place, or gives it another name' },
+  { id: 'other', text: 'The sentence says nothing about where the item is or what it is called' },
+];
+
+export function nameQuotePrompt({ question, names, quote, options }) {
+  return [
+    { role: 'system', content: 'You read one sentence from an item page. Decide from the sentence alone what it says about where the item is or what it is called. A place or name may be written in another language or spelling than the asker used. Answer with JSON only: {"pick":"<letter>"}' },
+    { role: 'user', content: `Question: ${question}\nThe asker's words: ${names.join(', ')}\nSentence: ${quote}\n\nOptions:\n${optionLines(options)}` },
+  ];
+}
+
+export function namesCover(clause, names) {
+  return (names ?? []).length > 0 && names.every((name) => wordMatch(clause, [name]));
+}
+
+export async function namesByQuote({ items, purpose, spec, router }) {
+  const lists = new Map((purpose ?? []).filter((c) => c.type === 'any').map((c) => [c.id, c.names]));
+  const tally = { asked: 0, passed: 0 };
+  if (!router || !lists.size) return tally;
+  for (const item of items ?? []) {
+    const failed = (item.purpose ?? []).filter((c) => !c.passed && lists.has(c.id));
+    if (!failed.length || (item.checks ?? []).some((c) => c.hard && c.answer === 'no')) continue;
+    if (!qualifies({ ...item, purpose: item.purpose.map((c) => (lists.has(c.id) ? { ...c, passed: true } : c)) }, spec)) continue;
+    for (const criterion of failed) {
+      const names = lists.get(criterion.id);
+      const check = (item.checks ?? []).find((c) => c.hard && c.answer === 'yes' && c.quote && namesCover(c.clause, names));
+      if (!check) continue;
+      tally.asked++;
+      const question = String(check.id ?? '').startsWith(`${check.clause}|`) ? String(check.id).slice(check.clause.length + 1) : check.clause;
+      const result = await closedVote({ router, task: 'name-quote', tier: 'fast', n: NAME_QUOTE_VOTES, quorum: 2, options: NAME_QUOTE_READINGS, field: 'pick', seed: `${question}|${check.quote}`, prompt: (shown) => nameQuotePrompt({ question, names, quote: check.quote, options: shown }), keyOf: (id) => String(id) }).catch(() => null);
+      if (agreed(result)?.id !== 'shows') continue;
+      Object.assign(criterion, { passed: true, byQuote: check.quote });
+      tally.passed++;
+    }
+  }
+  return tally;
 }

@@ -4997,3 +4997,68 @@ describe('the memo verdict says when its figure rests on an assumption (FRL_ASSU
     }
   });
 });
+
+describe('the asked place named in the page\'s own words under FRL_NAMES_BY_QUOTE', () => {
+  const PAGE = 'https://kartbahn.example/bahn/482135';
+  const PLACE = 'Is this go-kart track located in Vienna, Austria?';
+  const PRICE = 'Does this go-kart track state the price of a 10-minute race in EUR?';
+  const family = (id: string) => ({
+    id,
+    ready: true,
+    describe: () => ({ id, label: id, state: 'ready', detail: '', configured: true, fast: `${id}-fast`, deep: `${id}-deep`, local: true, keyEnv: null, signup: '', modelCount: 1 }),
+    async chat({ messages }: { messages: { content: string }[] }) {
+      const prompt = messages.map((m) => m.content).join('\n');
+      if (prompt.includes('This page offers:')) {
+        const letter = /^([A-M])\) one /m.exec(prompt)?.[1] ?? 'U';
+        return { content: JSON.stringify({ kind: letter, span: 'S1' }), model: `${id}-fast`, provider: id, usage: {} };
+      }
+      if (prompt.includes("The asker's words:")) {
+        const letter = /^([A-Z])\) The sentence puts the item in the asked place/m.exec(prompt)?.[1] ?? 'Z';
+        return { content: JSON.stringify({ pick: letter }), model: `${id}-fast`, provider: id, usage: {} };
+      }
+      if (prompt.includes('Item page text:')) {
+        const asked = [...prompt.matchAll(/^(q\d+): (.+)$/gm)].map((m) => ({ id: m[1], answer: 'yes', spans: [m[2] === PLACE ? 'S1' : 'S2'] }));
+        return { content: JSON.stringify({ answers: asked }), model: `${id}-fast`, provider: id, usage: {} };
+      }
+      return { content: JSON.stringify({ answer: 'ok', claims: [], confidence: 'high' }), model: `${id}-fast`, provider: id, usage: {} };
+    },
+  });
+  const run = async () => {
+    const search = {
+      ...fakeSearch,
+      async readPage(url: string) {
+        if (url === PAGE) return { status: 200, text: `Monza Kartbahn, die schnellste Indoor go-kart track bei Hochwassergasse 12, 1230 Wien.\nZehn Minuten Rennen kosten 18 Euro pro Person.\n${'Unsere Strecke hat zwei Ebenen und eine Steilkurve fuer alle Fahrer. '.repeat(4)}`, links: [] };
+        return { status: 200, text: '', links: [] };
+      },
+    };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [family('alpha'), family('beta')] }), search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Find 1 indoor go-kart track in Vienna, Austria, with the price of a 10-minute race in EUR' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 1, expected: '1 indoor go-kart track with the price of a 10-minute race in EUR' } });
+    const row = { title: 'Monza Kartbahn', url: PAGE, value: null, unit: '', plan: { tier: 'fits', verdict: 'Fits', why: [], risks: [] } };
+    project.candidates = { kept: [row], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
+    project.brief = { located: true, kind: { label: 'go-kart track', terms: ['go-kart track'] }, regions: [] };
+    project.decisionModel = { kind: { label: 'go-kart track', terms: ['go-kart track'] }, checklist: [
+      { clause: 'in vienna, austria', source: 'quoted', quote: 'in Vienna, Austria', items: [{ clause: 'in vienna, austria', question: PLACE, hard: true }] },
+      { clause: 'the price of a 10-minute race in eur', source: 'quoted', quote: 'the price of a 10-minute race in EUR', items: [{ clause: 'the price of a 10-minute race in eur', question: PRICE, hard: true }] },
+    ] };
+    project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    await engine.checkAcceptance(project);
+    return project;
+  };
+
+  it('keeps a page that says Wien, when two families agree its sentence names the asked place', async () => {
+    const plain = await run();
+    expect(plain.acceptanceResult!.items[0]).toMatchObject({ url: PAGE, tier: 'rejected' });
+    expect(plain.acceptanceResult!.items[0].purpose).toEqual(expect.arrayContaining([{ id: 'purpose-names-1', passed: false }]));
+    process.env.FRL_NAMES_BY_QUOTE = '1';
+    try {
+      const project = await run();
+      const item = project.acceptanceResult!.items[0];
+      expect(item).toMatchObject({ url: PAGE, tier: 'confirmed' });
+      expect(item.purpose).toEqual(expect.arrayContaining([{ id: 'purpose-names-1', passed: true, byQuote: expect.stringContaining('1230 Wien') }]));
+      expect(project.log.some((l: { message: string }) => l.message === 'asked names by quote: 1 quote(s) asked, 1 page(s) name the asked place in their own words')).toBe(true);
+    } finally {
+      delete process.env.FRL_NAMES_BY_QUOTE;
+    }
+  });
+});

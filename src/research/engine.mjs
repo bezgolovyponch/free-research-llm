@@ -6,7 +6,7 @@ import { describeProfile, parseCsv, profileTable } from '../data/csv.mjs';
 import { htmlToText } from '../search/html.mjs';
 import { followUpQueries, mergeSources } from './followup.mjs';
 import { appendAppMessage, runSummary } from './notify.mjs';
-import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
+import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedSurfaceUrl, itemCountFromWords, kindOnPage, namesByQuote, normalizeAcceptance, purposeChecks } from './acceptance.mjs';
 import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf, chosenOptionId } from './verdict.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
 import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
@@ -2137,6 +2137,11 @@ export class ResearchEngine {
           }
         }
       }
+    }
+
+    if (process.env.FRL_NAMES_BY_QUOTE && !isAnalysis && this.router && !this.demo && project.acceptanceResult?.items?.length) {
+      const named = await namesByQuote({ items: project.acceptanceResult.items, purpose: purposeChecks(project), spec: project.acceptance, router: this.router });
+      if (named.asked) this.emit(project, 'acceptance', `asked names by quote: ${named.asked} quote(s) asked, ${named.passed} page(s) name the asked place in their own words`);
     }
 
     if (process.env.FRL_OWN_SITE && !isAnalysis && project.checklist && readPage && this.router && !this.demo && project.acceptanceResult?.items?.length) {

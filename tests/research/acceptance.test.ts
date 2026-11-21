@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { AcceptanceChecker, MAX_ITEM_CHECKS, INSPECT_PER_ASKED, PAGE_READS_AT_ONCE, collectDeliverables, currencyOf, entityDeliverables, entityProfile, ownWebsite, hasCriteria, headlinePrice, inRange, isExcludedSurfaceUrl, itemCountFromWords, looksLikeListing, normalizeAcceptance, parseAmounts, purposeChecks, toAmount } from '../../src/research/acceptance.mjs';
+import { namesByQuote, namesCover } from '../../src/research/acceptance.mjs';
+import { fakeRouter, pickLetter } from '../helpers/fakes';
 
 describe('acceptance', () => {
   it('parses European and English price formats with currencies', () => {
@@ -968,5 +970,51 @@ describe('supplier websites from directory profiles', () => {
     expect(lynch.map((d: { url: string }) => d.url)).toEqual(['https://lynchvintagewholesale.co.uk/']);
     const retail = await entityDeliverables(page('https://dust.example/', 'Dust Vintage', 'Wholesale bales for retail shops.') as never, { terms: ['wholesale', 'bales'], kindTerms: ['wholesale', 'bales'], not: ['retail'], kindLabel: 'wholesale clothing supplier' });
     expect(retail).toHaveLength(1);
+  });
+});
+
+describe('FRL_NAMES_BY_QUOTE: a page that names the asked place in its own words', () => {
+  const purpose = [{ id: 'purpose-names-1', type: 'any', names: ['Vienna', 'Austria'], label: '' }];
+  const PLACE = 'Is this venue located in Vienna, Austria?';
+  const hard = (clause: string, question: string, answer: string, quote: string) => ({ id: `${clause}|${question}`, clause, answer, quote, hard: true });
+  const item = (url: string, checks: object[]) => ({ url, title: url, live: true, evidence: url, listing: false, inRange: null, purpose: [{ id: 'purpose-names-1', passed: false }], checks });
+  const reading = (request: { messages: { content: string }[] }) => ({ pick: pickLetter(request as never, (text) => text.startsWith(request.messages[1].content.includes('1230 Wien') ? 'The sentence puts the item in the asked place' : 'The sentence says nothing')) });
+
+  it('finds the hard checks whose clause holds every asked name', () => {
+    expect(namesCover('in vienna, austria', ['Vienna', 'Austria'])).toBe(true);
+    expect(namesCover('indoor go-kart tracks in vienna, austria', ['Vienna', 'Austria'])).toBe(true);
+    expect(namesCover('the price of a 10-minute adult race in eur', ['Vienna', 'Austria'])).toBe(false);
+    expect(namesCover('in vienna', ['Vienna', 'Austria'])).toBe(false);
+    expect(namesCover('in vienna', [])).toBe(false);
+  });
+
+  it('passes the name check when two families agree the quote of a yes on those words shows the place, and keeps it failed otherwise', async () => {
+    const router = fakeRouter({ 'name-quote': reading });
+    const wien = item('https://praterwien.example/', [hard('in vienna, austria', PLACE, 'yes', 'Hochwassergasse 12, 1230 Wien'), hard('the price of a 10-minute adult race in eur', 'Does it state the price?', 'unknown', '')]);
+    const other = item('https://desks.example/', [hard('in vienna, austria', PLACE, 'yes', 'Head to the website or mobile app')]);
+    expect(await namesByQuote({ items: [wien, other], purpose, spec: {}, router })).toEqual({ asked: 2, passed: 1 });
+    expect(wien.purpose).toEqual([{ id: 'purpose-names-1', passed: true, byQuote: 'Hochwassergasse 12, 1230 Wien' }]);
+    expect(other.purpose).toEqual([{ id: 'purpose-names-1', passed: false }]);
+    expect(router.userText('name-quote')).toContain("The asker's words: Vienna, Austria");
+    expect(router.userText('name-quote')).toContain(`Question: ${PLACE}`);
+    expect(router.userText('name-quote')).toContain('Sentence: Hochwassergasse 12, 1230 Wien');
+  });
+
+  it('keeps the name check failed on a single family\'s judgement', async () => {
+    const router = fakeRouter({ 'name-quote': reading }, { providers: ['p1'] });
+    const wien = item('https://praterwien.example/', [hard('in vienna, austria', PLACE, 'yes', 'Hochwassergasse 12, 1230 Wien')]);
+    expect(await namesByQuote({ items: [wien], purpose, spec: {}, router })).toEqual({ asked: 1, passed: 0 });
+    expect(wien.purpose[0].passed).toBe(false);
+  });
+
+  it('asks nothing for a page with a hard no, without a yes on the asked words, that fails another gate, or without a router', async () => {
+    const router = fakeRouter({ 'name-quote': reading });
+    const refused = item('https://a.example/', [hard('in vienna, austria', PLACE, 'yes', '1230 Wien'), hard('the price of a 10-minute adult race in eur', 'Does it state the price?', 'no', 'Preis auf Anfrage')]);
+    const unsure = item('https://b.example/', [hard('in vienna, austria', PLACE, 'unknown', '')]);
+    const elsewhere = item('https://c.example/', [hard('the price of a 10-minute adult race in eur', 'Does it state the price?', 'yes', '18 Euro')]);
+    const dead = { ...item('https://d.example/', [hard('in vienna, austria', PLACE, 'yes', '1230 Wien')]), live: false };
+    expect(await namesByQuote({ items: [refused, unsure, elsewhere, dead], purpose, spec: {}, router })).toEqual({ asked: 0, passed: 0 });
+    expect(router.calls).toHaveLength(0);
+    expect(await namesByQuote({ items: [item('https://e.example/', [hard('in vienna, austria', PLACE, 'yes', '1230 Wien')])], purpose, spec: {}, router: null })).toEqual({ asked: 0, passed: 0 });
   });
 });
