@@ -4826,3 +4826,40 @@ describe('sources are kept and reused by meaning, across languages (FRL_TOPIC_BY
     expect(runs).toBe(before + 1);
   });
 });
+
+describe('a figure question without an item count (FRL_UNIT_EVERY_QUESTION)', () => {
+  const question = 'What was the average gross monthly wage in Slovakia in 2024? Give the figure in EUR with its source.';
+  const voted = { answerUnit: 'number', answerUnitShare: 1, answerUnitQuote: 'Give the figure in EUR', question, guidance: '', samples: 3 };
+  const run = async () => {
+    const asked: string[] = [];
+    const modeler = { answerUnit: async (project: { question: string }) => (asked.push(project.question), voted), fresh: () => false, build: async () => null };
+    const router = new ModelRouter({ providers: [new ScriptedProvider()] });
+    const engine = new ResearchEngine({ router, search: fakeSearch, store: new ProjectStore({ dir }), modeler });
+    const project = await engine.createProject({ question });
+    const done = await engine.run(project.id);
+    return { done, asked };
+  };
+
+  it('votes the answer unit once and frames the memo as an estimate instead of a GO/NO-GO decision', async () => {
+    process.env.FRL_ANSWER_UNIT = '1';
+    process.env.FRL_UNIT_EVERY_QUESTION = '1';
+    try {
+      const { done, asked } = await run();
+      expect(asked).toEqual([question]);
+      expect(done.answerUnit).toMatchObject({ answerUnit: 'number', answerUnitQuote: 'Give the figure in EUR' });
+      expect(done.report.kind).toBe('estimate');
+      expect(done.log.some((l: { message: string }) => l.message.startsWith('answer unit: number, 3 of 3 proposals'))).toBe(true);
+    } finally {
+      delete process.env.FRL_ANSWER_UNIT;
+      delete process.env.FRL_UNIT_EVERY_QUESTION;
+    }
+    process.env.FRL_ANSWER_UNIT = '1';
+    try {
+      const { done, asked } = await run();
+      expect(asked).toEqual([]);
+      expect(done.report.kind).toBe('decision');
+    } finally {
+      delete process.env.FRL_ANSWER_UNIT;
+    }
+  });
+});

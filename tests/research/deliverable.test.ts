@@ -127,3 +127,38 @@ describe('listCount and contractClass with FRL_ANSWER_UNIT', () => {
     expect(contractClass(project)).toBe('analysis');
   });
 });
+
+describe('answersWithNumber with FRL_UNIT_EVERY_QUESTION', () => {
+  const asked = { answerUnit: 'number', answerUnitQuote: 'Give the figure in EUR', answerUnitShare: 1, question: 'q', guidance: '', samples: 3 };
+  const withFlags = (flags: string[], body: () => void) => {
+    for (const flag of flags) process.env[flag] = '1';
+    try {
+      body();
+    } finally {
+      for (const flag of flags) delete process.env[flag];
+    }
+  };
+
+  it('reads the unit voted for a question without an item count', async () => {
+    const { answersWithNumber, askedUnit } = await import('../../src/research/deliverable.mjs');
+    const project = { question: 'What was the average gross monthly wage in Slovakia in 2024? Give the figure in EUR with its source.', acceptance: { expected: '', itemCount: null }, answerUnit: asked };
+    expect(answersWithNumber(project)).toBe(false);
+    withFlags(['FRL_ANSWER_UNIT'], () => expect(answersWithNumber(project)).toBe(false));
+    withFlags(['FRL_ANSWER_UNIT', 'FRL_UNIT_EVERY_QUESTION'], () => {
+      expect(askedUnit(project)).toBe('number');
+      expect(answersWithNumber(project)).toBe(true);
+      expect(contractClass(project)).toBe('analysis');
+      expect(answersWithNumber({ ...project, answerUnit: { ...asked, answerUnitQuote: '' } })).toBe(false);
+      expect(answersWithNumber({ ...project, answerUnit: { ...asked, answerUnit: 'claim' } })).toBe(false);
+    });
+  });
+
+  it('lets a grounded decision-model unit win over the question unit', async () => {
+    const { answersWithNumber, askedUnit } = await import('../../src/research/deliverable.mjs');
+    const project = { question: 'q', acceptance: { itemCount: 3 }, decisionModel: { answerUnit: 'items', answerUnitQuote: 'Find 3' }, answerUnit: asked };
+    withFlags(['FRL_ANSWER_UNIT', 'FRL_UNIT_EVERY_QUESTION'], () => {
+      expect(askedUnit(project)).toBe('items');
+      expect(answersWithNumber(project)).toBe(false);
+    });
+  });
+});

@@ -256,6 +256,13 @@ export function decisionPrompt({ question, guidance = '', expected = '', example
   ];
 }
 
+export function answerUnitPrompt({ question, guidance = '', expected = '' }) {
+  return [
+    { role: 'system', content: 'You read a research question and name the unit of the answer the asker expects: "items" (several separate things), "number" (one figure or estimate), "claim" (an answer in words) or "choice" (one of named options). "answerUnitQuote" is the words of the asker that show it, copied character for character from the question, expected result or guidance, or "" when nothing states it. Answer with JSON only: {"answerUnit": "items" | "number" | "claim" | "choice", "answerUnitQuote": "..."}' },
+    { role: 'user', content: `Question: ${question}${expected ? `\nExpected result: ${expected}` : ''}${guidance ? `\nGuidance: ${guidance}` : ''}` },
+  ];
+}
+
 export function evaluateCriterion(row, criterion, ctx = {}) {
   const m = MEASURES[criterion.measure];
   const value = m?.read(row, ctx);
@@ -437,6 +444,18 @@ export class DecisionModeler {
     this.cases = cases;
     this.samples = samples;
     this.checklistModeler = new ChecklistModeler({ router, samples });
+  }
+
+  async answerUnit(project) {
+    const question = project.question;
+    const guidance = String(project.guidance ?? '');
+    const expected = project.acceptance?.expected ?? '';
+    const messages = answerUnitPrompt({ question, guidance, expected });
+    const replies = await Promise.all(Array.from({ length: this.samples }, () => this.router.complete({ purpose: 'answer-unit', tier: 'fast', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
+    const data = replies.filter((r) => r?.data).map((r) => r.data);
+    if (data.length < 2) return null;
+    const unit = answerUnitOf(data, [question, expected, guidance].join('\n'));
+    return unit.answerUnit ? { ...unit, question, guidance, samples: data.length } : null;
   }
 
   fresh(project) {
