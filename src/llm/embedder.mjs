@@ -79,6 +79,10 @@ export class Embedder {
     return this.routes.some((route) => route.keys.every((key) => this.env[key]));
   }
 
+  newRun() {
+    this.embedded = 0;
+  }
+
   fileOf(model) {
     return path.join(this.dir, `${slugOf(model)}.json`);
   }

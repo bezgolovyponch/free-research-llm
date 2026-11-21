@@ -502,6 +502,7 @@ export class ResearchEngine {
   }
 
   async decompose(project, phase = 'decomposing') {
+    this.embedder?.newRun?.();
     this.setPhase(project, phase);
     this.emit(project, 'phase', 'decomposing the question into an issue tree');
     await this.store.save(project, { reason: 'decomposing the question' });

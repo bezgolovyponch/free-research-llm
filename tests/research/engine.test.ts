@@ -4725,4 +4725,14 @@ describe('sources are kept and reused by meaning, across languages (FRL_TOPIC_BY
     expect((await gather(['FRL_DOMAIN_TO_PIECES', 'FRL_TOPIC_BY_MEANING'], null, { domainSources: [survey, shop, article] })).urls).toEqual(wordsOnly);
     expect((await gather(['FRL_DOMAIN_TO_PIECES', 'FRL_TOPIC_BY_MEANING'], { ready: false, rank: async () => null }, { domainSources: [survey, shop, article] })).urls).toEqual(wordsOnly);
   });
+
+  it('starts a new embedding allowance when a research is decomposed', async () => {
+    let runs = 0;
+    const embedder = { ready: true, rank: async () => null, newRun: () => { runs++; } };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }), embedder });
+    const project = await engine.createProject({ question: 'Is it profitable to buy used RAV4 hybrids in Germany and sell them in Poland?' });
+    const before = runs;
+    await engine.decompose(project);
+    expect(runs).toBe(before + 1);
+  });
 });
