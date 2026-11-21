@@ -1,5 +1,5 @@
 import { MIN_SCHEMA_ITEMS, applySchema } from './schema.mjs';
-import { absoluteUrl, domainOf, htmlToText } from './html.mjs';
+import { absoluteUrl, domainOf, htmlToText, withTableHeaders } from './html.mjs';
 import { sourceCountry } from '../research/brief.mjs';
 import { extractListings, listingKey, pagePlace } from './listings.mjs';
 import { selectDiverse } from './selection.mjs';
@@ -373,7 +373,7 @@ export class SearchService {
       else if (found.items.length >= MIN_SCHEMA_ITEMS) this.recipes.dropSchema(base);
     }
     return {
-      text: (html ? htmlToText(body) : body.trim()).slice(0, READ_TEXT_LIMIT),
+      text: (html ? htmlToText(process.env.FRL_TABLE_HEADERS ? withTableHeaders(body) : body) : body.trim()).slice(0, READ_TEXT_LIMIT),
       links: html ? extractLinks(body, base) : extractMarkdownLinks(body, base),
       listings: found.items,
       next: found.next,
