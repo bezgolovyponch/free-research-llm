@@ -10,6 +10,7 @@ import { ModelRouter } from './llm/router.mjs';
 import { OutcomeBook } from './llm/outcomes.mjs';
 import { ScriptedProvider } from './llm/scripted-provider.mjs';
 import { ResearchEngine } from './research/engine.mjs';
+import { Embedder } from './llm/embedder.mjs';
 import { KEYED_SEARCH_BACKENDS, SearchService, SearxngBackend, WikipediaBackend } from './search/search.mjs';
 import { SiteRecipes } from './search/recipes.mjs';
 import { SiteAssessor } from './research/site.mjs';
@@ -191,7 +192,8 @@ export class App {
     } };
     this.cases = new CaseBank({ file: path.join(this.dataDir, 'cases.json') });
     this.arms = new ArmBook({ file: path.join(this.dataDir, 'arms.json') });
-    this.engine = new ResearchEngine({ arms: this.arms, modeler: this.demo ? null : new DecisionModeler({ router: this.router, cases: this.cases }), cases: this.cases, verifier, router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, parcels: new ParcelRegistry({ file: path.join(this.dataDir, 'parcels.json') }), onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
+    const embedder = !this.demo && this.env.FRL_TOPIC_BY_MEANING ? new Embedder({ env: this.env, fetchImpl: this.fetchImpl }) : null;
+    this.engine = new ResearchEngine({ embedder, arms: this.arms, modeler: this.demo ? null : new DecisionModeler({ router: this.router, cases: this.cases }), cases: this.cases, verifier, router: this.router, search: this.search, store: this.store, demo: this.demo, rates, sites: this.sites, parcels: new ParcelRegistry({ file: path.join(this.dataDir, 'parcels.json') }), onEvent: (projectId, event, project) => this.recordEvent(projectId, event, project), onStop: (project, options) => this.saveHandoff(project, options) });
     this.lessons = new LessonBook({ file: path.join(this.dataDir, 'lessons.json') });
     this.improver = new ProjectImprover({ engine: this.engine, lessons: this.lessons, checkpoint: async (id, resume) => this.handoffs.write(await this.engine.load(id), { reason: 'loop running (checkpoint for a crash or power cut)', resume }) });
     this.suggester = new SubIssueSuggester({ engine: this.engine });

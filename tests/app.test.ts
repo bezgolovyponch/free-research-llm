@@ -77,6 +77,15 @@ describe('App composition', () => {
     expect(app.status().providers[0]).toMatchObject({ state: 'ready', fast: 'Qwen3-4B' });
   });
 
+  it('gives the research engine an embedder only under FRL_TOPIC_BY_MEANING, outside demo mode', () => {
+    const fetchImpl = (async () => jsonResponse({})) as never;
+    const base = { FRL_PROVIDER_ORDER: 'gemini', FRL_WIKIPEDIA: '0', CLOUDFLARE_API_TOKEN: 't', CLOUDFLARE_ACCOUNT_ID: 'a' };
+    expect(new App({ env: base, fetchImpl, dataDir: '/tmp/frl-unused-embed' }).engine.embedder).toBeNull();
+    const on = new App({ env: { ...base, FRL_TOPIC_BY_MEANING: '1' }, fetchImpl, dataDir: '/tmp/frl-unused-embed' }).engine.embedder;
+    expect(on?.ready).toBe(true);
+    expect(new App({ env: { ...base, FRL_TOPIC_BY_MEANING: '1', FRL_DEMO: '1' }, fetchImpl, dataDir: '/tmp/frl-unused-embed' }).engine.embedder).toBeNull();
+  });
+
   it('adds /v1 to a bare local address, as saved for Ollama', () => {
     expect(localBase('http://localhost:11434/')).toBe('http://localhost:11434/v1');
     expect(localBase('http://192.168.5.26:8090')).toBe('http://192.168.5.26:8090/v1');
