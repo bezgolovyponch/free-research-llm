@@ -104,6 +104,22 @@ export function causeOf({ verdict, votes = [], missing = [], blocker = null }) {
   ], CAUSE_MAX_CHARS);
 }
 
+const YEAR_PATTERN = /\b(?:19|20)\d{2}\b/g;
+
+export function periodUnshown({ claim, answer = '', around = '' }) {
+  const figures = new Set(numbersIn(claim?.text));
+  if (!figures.size) return [];
+  const sentence = String(answer ?? '').split(/(?<=[.!?])\s+/).find((s) => numbersIn(s).some((n) => figures.has(n)) && (s.match(YEAR_PATTERN) ?? []).length);
+  if (!sentence) return [];
+  const years = [...new Set(sentence.match(YEAR_PATTERN))];
+  const shown = `${around ?? ''} ${claim?.quote ?? ''}`;
+  return years.some((year) => new RegExp(`(?<!\\d)${year}(?!\\d)`).test(shown)) ? [] : years;
+}
+
+export function periodRecord(record, years) {
+  return { ...record, verdict: 'disagree', period: years, cause: clip([`• The quote and the text around it do not show ${years.join(' or ')}, the year the answer gives this figure`, record?.cause || null], CAUSE_MAX_CHARS) };
+}
+
 export function supportRecord({ votes = [], term = null, at = new Date().toISOString(), blocker = null }) {
   const voted = supportVerdict(votes);
   const verdict = voted === 'supported' && term && !term.passed ? 'disagree' : voted;
