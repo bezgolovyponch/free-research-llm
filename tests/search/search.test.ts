@@ -257,3 +257,21 @@ describe('relevance on every engine', () => {
   });
 });
 
+
+describe('readPage with FRL_TABLE_HEADERS', () => {
+  const body = `<html><body><h1>Preise</h1><p>${'Unsere Halle hat viele Routen und Kurse fuer alle. '.repeat(10)}</p><table><tr><th></th><th>Normal</th><th>Ermäßigt</th></tr><tr><th>Monatliche Zahlung</th><th>55 Euro</th><th>45 Euro</th></tr></table></body></html>`;
+  const read = async () => {
+    const fetchImpl = fakeFetch([[/gym\.example/, () => new Response(body, { headers: { 'content-type': 'text/html' } })]]);
+    return (await new SearchService({ fetchImpl, backends: [], jinaReader: false }).readPage('https://gym.example/preise')).text;
+  };
+
+  it('pairs table cells with their column headers in the page text only under the flag', async () => {
+    expect(await read()).not.toContain('Normal 55 Euro');
+    process.env.FRL_TABLE_HEADERS = '1';
+    try {
+      expect(await read()).toContain('Monatliche Zahlung: Normal 55 Euro; Ermäßigt 45 Euro');
+    } finally {
+      delete process.env.FRL_TABLE_HEADERS;
+    }
+  });
+});

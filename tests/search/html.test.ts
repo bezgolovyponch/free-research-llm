@@ -50,3 +50,30 @@ describe('decodeText', () => {
     expect(decodeText(undefined)).toBe('');
   });
 });
+
+describe('withTableHeaders pairs each cell with its column (FRL_TABLE_HEADERS)', () => {
+  const kosmos = '<table border="1"><tbody><tr><td colspan="4"><h3>KOSMOS-ABO (Unbegrenzte Eintritte)</h3></td></tr><tr><th>&nbsp;</th><th><strong>Normal</strong></th><th><strong>Ermäßigt<sup>1</sup></strong></th><th><strong>Kinder (6-11)</strong></th></tr><tr><th>Monatliche zahlung<br>(6 Monate mindestlaufzeit)<sup>5</sup></th><th><strong>55 Euro</strong></th><th><strong>45 Euro</strong></th><th><strong>30 Euro</strong></th></tr></tbody></table>';
+
+  it('reads a price table as row label, then each column header with its value', async () => {
+    const { htmlToText, withTableHeaders } = await import('../../src/search/html.mjs');
+    expect(htmlToText(kosmos)).not.toContain('Normal 55 Euro');
+    const text = htmlToText(withTableHeaders(`<p>Preise</p>${kosmos}<p>Weiter</p>`));
+    expect(text.split('\n').map((line) => line.trim())).toEqual(['Preise', 'KOSMOS-ABO (Unbegrenzte Eintritte)', 'Normal | Ermäßigt 1 | Kinder (6-11)', 'Monatliche zahlung (6 Monate mindestlaufzeit) 5: Normal 55 Euro; Ermäßigt 1 45 Euro; Kinder (6-11) 30 Euro', 'Weiter']);
+  });
+
+  it('pairs by header when the first column has a heading too, and starts a new section after a one-cell row', async () => {
+    const { tableLines } = await import('../../src/search/html.mjs');
+    const table = '<tr><th>Tarif</th><th>Preis</th></tr><tr><td>Tageskarte</td><td>14 Euro</td></tr><tr><td colspan="2">Kurse</td></tr><tr><th>Kurs</th><th>Dauer</th></tr><tr><td>Einsteiger</td><td>2 Stunden</td></tr>';
+    expect(tableLines(table)).toBe('Tarif | Preis\nTarif Tageskarte; Preis 14 Euro\nKurse\nKurs | Dauer\nKurs Einsteiger; Dauer 2 Stunden');
+  });
+
+  it('keeps rows that do not fit the header, and leaves nested or very large tables as they are', async () => {
+    const { tableLines, withTableHeaders, TABLE_MAX_ROWS } = await import('../../src/search/html.mjs');
+    expect(tableLines('<tr><th></th><th>A</th><th>B</th></tr><tr><td>x</td><td>1</td></tr>')).toBe('A | B\nx | 1');
+    const nested = '<table><tr><td><table><tr><td>a</td><td>b</td></tr></table></td></tr></table>';
+    expect(withTableHeaders(nested)).toContain('<table><tr><td><table>');
+    const big = `<table>${'<tr><td>a</td><td>b</td></tr>'.repeat(TABLE_MAX_ROWS + 1)}</table>`;
+    expect(withTableHeaders(big)).toBe(big);
+    expect(withTableHeaders('<table><tr><td>x &lt; y</td><td>z</td></tr><tr><td>1</td><td>2</td></tr></table>')).toContain('x &lt; y');
+  });
+});

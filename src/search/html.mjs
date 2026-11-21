@@ -14,6 +14,55 @@ export function htmlToText(html) {
     .trim();
 }
 
+export const TABLE_MAX_ROWS = 60;
+export const TABLE_MAX_COLUMNS = 12;
+
+function cellText(html) {
+  return htmlToText(html).replace(/\s+/g, ' ').trim();
+}
+
+function rowsOf(table) {
+  return [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map((row) => [...row[1].matchAll(/<t([hd])\b[^>]*>([\s\S]*?)<\/t\1>/gi)].map((cell) => cellText(cell[2])));
+}
+
+export function tableLines(table) {
+  const rows = rowsOf(table);
+  if (!rows.length || rows.length > TABLE_MAX_ROWS || rows.some((cells) => cells.length > TABLE_MAX_COLUMNS)) return null;
+  const lines = [];
+  let header = null;
+  for (const cells of rows) {
+    const filled = cells.filter(Boolean);
+    if (filled.length <= 1) {
+      if (filled.length) lines.push(filled[0]);
+      header = null;
+      continue;
+    }
+    if (!header) {
+      header = cells;
+      lines.push(filled.join(' | '));
+      continue;
+    }
+    if (cells.length !== header.length) {
+      lines.push(filled.join(' | '));
+      continue;
+    }
+    const labelled = !header[0] && Boolean(cells[0]);
+    const pairs = cells.map((cell, at) => (!cell || (labelled && at === 0) ? null : header[at] ? `${header[at]} ${cell}` : cell)).filter(Boolean);
+    lines.push(labelled ? `${cells[0]}: ${pairs.join('; ')}` : pairs.join('; '));
+  }
+  return lines.join('\n');
+}
+
+const escapeHtml = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+export function withTableHeaders(html) {
+  return String(html ?? '').replace(/<table\b[^>]*>([\s\S]*?)<\/table>/gi, (whole, inner) => {
+    if (/<table\b/i.test(inner)) return whole;
+    const lines = tableLines(inner);
+    return lines === null ? whole : `<p>${lines.split('\n').map(escapeHtml).join('<br>')}</p>`;
+  });
+}
+
 export function absoluteUrl(href, base) {
   try {
     const url = new URL(String(href).replace(/&amp;/g, '&'), base);
