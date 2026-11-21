@@ -270,3 +270,40 @@ describe('vote with a provider to avoid', () => {
     expect(avoided).toEqual([['first'], ['first', 'p1']]);
   });
 });
+
+describe('FRL_VOTE_APART', () => {
+  const families = ({ within = 0 }: { within?: number } = {}) => (within > 0 ? [{ stack: 'p1', vendor: 'llama' }, { stack: 'p2', vendor: 'gemini' }] : [{ stack: 'p1', vendor: 'llama' }]);
+  const make = (check: unknown = { answer: 'no' }) => Object.assign(fakeRouter({ check }, { providers: ['p1', 'p2', 'p3'], models: { p1: 'llama-3.3-70b', p2: 'gemini-flash', p3: 'qwen-3-32b' } }), { maxWaitMs: 65000, families });
+  const apartOf = (call: unknown) => (call as { apart?: boolean }).apart;
+
+  it('counts a family that comes back within the router wait, and asks the later calls apart from the families that answered', async () => {
+    const before = make();
+    const lone = await vote({ router: before, task: 'check', messages, schema: yesNo });
+    expect([lone.single, before.calls.length, before.calls.map(apartOf)]).toEqual([true, 1, [undefined]]);
+    process.env.FRL_VOTE_APART = '1';
+    try {
+      const after = make();
+      const result = await vote({ router: after, task: 'check', messages, schema: yesNo });
+      expect([result.value, result.single, agreed(result)]).toEqual(['no', undefined, 'no']);
+      expect(after.calls.map((call) => [call.avoid, apartOf(call)])).toEqual([[undefined, undefined], [['p1'], true]]);
+    } finally {
+      delete process.env.FRL_VOTE_APART;
+    }
+  });
+
+  it('stops when no other family answers within the wait, instead of asking once more', async () => {
+    const noneApart = (request: unknown) => (apartOf(request) ? FAIL : { answer: 'yes' });
+    const before = Object.assign(fakeRouter({ check: noneApart }), { maxWaitMs: 65000 });
+    await vote({ router: before, task: 'check', messages, schema: yesNo });
+    expect(before.calls).toHaveLength(2);
+    process.env.FRL_VOTE_APART = '1';
+    try {
+      const after = Object.assign(fakeRouter({ check: noneApart }), { maxWaitMs: 65000 });
+      const result = await vote({ router: after, task: 'check', messages, schema: yesNo });
+      expect([result.value, result.single, agreed(result)]).toEqual(['yes', true, null]);
+      expect(after.calls.map(apartOf)).toEqual([undefined, true]);
+    } finally {
+      delete process.env.FRL_VOTE_APART;
+    }
+  });
+});
