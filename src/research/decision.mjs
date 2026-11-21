@@ -476,7 +476,7 @@ export class DecisionModeler {
         }
       }
     }
-    const checklist = await this.checklistModeler.build(question, guidance);
+    const checklist = await this.checklistModeler.build(question, guidance, project.acceptance?.expected ?? '');
     project.decisionModel = { ...carried(stored, finalModel), version: DECISION_MODEL_VERSION, question, guidance, caseIds: examples.map((c) => c.id), providers: replies.filter(Boolean).map((r) => r.provider), at: new Date().toISOString(), checklist, checklistVersion: CHECKLIST_VERSION, rebuildWeaker };
     if (this.cases && !isDegenerate(finalModel)) await this.cases.record(project.id, question, finalModel);
     return project.decisionModel;

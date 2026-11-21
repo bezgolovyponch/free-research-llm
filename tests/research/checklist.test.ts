@@ -1115,3 +1115,61 @@ describe('"no" means the page states the contrary (FRL_NO_MEANS_CONTRARY)', () =
     }
   });
 });
+
+describe('a check the asker wrote is kept on its quote, not by vote (FRL_QUOTED_CHECKS)', () => {
+  const asker = 'Find 5 bouldering gyms in Leipzig, Germany, each with its own website URL and the adult monthly membership price in EUR.\n5 bouldering gyms, each with its own website URL and an adult monthly membership price in EUR\n';
+  const sample = (items: Array<Record<string, unknown>>) => ({ items });
+  const gym = { clause: 'located in leipzig', question: 'Is this bouldering gym located in Leipzig?', hard: true, quote: 'in Leipzig, Germany' };
+  const own = { clause: 'own website url', question: 'Is this page the bouldering gym\'s own website?', hard: false, quote: 'each with its own website URL' };
+  const invented = { clause: 'open on sundays', question: 'Is this bouldering gym open on Sundays?', hard: true, quote: 'open on Sundays' };
+  const withFlag = (flag: boolean, body: () => void) => {
+    const before = process.env.FRL_QUOTED_CHECKS;
+    if (flag) process.env.FRL_QUOTED_CHECKS = '1';
+    else delete process.env.FRL_QUOTED_CHECKS;
+    try {
+      body();
+    } finally {
+      if (before === undefined) delete process.env.FRL_QUOTED_CHECKS;
+      else process.env.FRL_QUOTED_CHECKS = before;
+    }
+  };
+  it('keeps a minority item whose quote is in the asker text, as hard, and records its provenance', () => {
+    withFlag(true, () => {
+      const clusters = clusterChecklist([sample([gym, own]), sample([gym]), sample([gym])], { askerWords: asker });
+      expect(clusters.map((c: { clause: string }) => c.clause)).toEqual(['in leipzig, germany', 'each with its own website url']);
+      const kept = clusters.find((c: { clause: string }) => c.clause === 'each with its own website url');
+      expect(kept).toMatchObject({ source: 'quoted', quote: 'each with its own website URL', share: 0.33 });
+      expect(kept.items[0].hard).toBe(true);
+    });
+  });
+  it('does not rescue a minority item whose quote is not in the asker text', () => {
+    withFlag(true, () => {
+      const clusters = clusterChecklist([sample([gym, invented]), sample([gym]), sample([gym])], { askerWords: asker });
+      expect(clusters.map((c: { clause: string }) => c.clause)).toEqual(['in leipzig, germany']);
+    });
+  });
+  it('without the flag keeps only majority items, with the old cluster shape', () => {
+    withFlag(false, () => {
+      const clusters = clusterChecklist([sample([gym, own]), sample([gym]), sample([gym])], { askerWords: asker });
+      expect(clusters).toEqual([{ clause: 'located in leipzig', items: [{ clause: 'located in leipzig', question: 'Is this bouldering gym located in Leipzig?', hard: true, numeric: undefined }] }]);
+    });
+  });
+  it('shows the expected result and asks for quotes only with the flag', async () => {
+    const seen: Array<Array<{ role: string; content: string }>> = [];
+    const router = { complete: async ({ messages }: { messages: Array<{ role: string; content: string }> }) => { seen.push(messages); return { data: { items: [gym] } }; } };
+    const before = process.env.FRL_QUOTED_CHECKS;
+    try {
+      delete process.env.FRL_QUOTED_CHECKS;
+      await proposeChecklist({ router: router as never, question: 'Find 5 bouldering gyms in Leipzig', samples: 1, expected: '5 gyms with their own website' });
+      process.env.FRL_QUOTED_CHECKS = '1';
+      await proposeChecklist({ router: router as never, question: 'Find 5 bouldering gyms in Leipzig', samples: 1, expected: '5 gyms with their own website' });
+    } finally {
+      if (before === undefined) delete process.env.FRL_QUOTED_CHECKS;
+      else process.env.FRL_QUOTED_CHECKS = before;
+    }
+    expect(seen[0][1].content).toBe('Question: Find 5 bouldering gyms in Leipzig');
+    expect(seen[0][0].content).not.toContain('"quote"');
+    expect(seen[1][1].content).toBe('Question: Find 5 bouldering gyms in Leipzig\nExpected result: 5 gyms with their own website');
+    expect(seen[1][0].content).toContain('Each item also has "quote"');
+  });
+});
