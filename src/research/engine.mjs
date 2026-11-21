@@ -2121,7 +2121,7 @@ export class ResearchEngine {
 
     if (!isAnalysis && project.checklist && readPage && project.acceptanceResult?.items?.length) {
       const progressLine = (reader) => `reading deeper pages: ${reader.read} read, ${reader.answered} check(s) answered, budget ${reader.budget}`;
-      const deeperReader = new DeeperReader({ judge: this.checklistJudge, readPage, onProgress: (reader) => this.emit(project, 'acceptance', progressLine(reader)) });
+      const deeperReader = new DeeperReader({ judge: this.checklistJudge, readPage, embedder: this.embedder, onProgress: (reader) => this.emit(project, 'acceptance', progressLine(reader)) });
       for (const item of deeperOrder(project.acceptanceResult.items, { checklist: project.checklist, kind: project.decisionModel?.kind ?? null, spec: project.acceptance })) {
         if (deeperReader.spent()) {
           this.emit(project, 'acceptance', `deeper reads stopped at the page budget: ${progressLine(deeperReader)}`);

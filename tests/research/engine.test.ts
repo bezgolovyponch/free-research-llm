@@ -2949,6 +2949,62 @@ describe('a kind no needs a second family on the deeper page', () => {
   });
 });
 
+describe('the deeper pass under FRL_LINKS_BY_MEANING', () => {
+  const GYM = 'https://boulderhalle.example.de/halle/482135';
+  const PREISE = 'https://boulderhalle.example.de/preise/';
+  const QUESTION = 'Does this gym state its adult monthly membership price in EUR?';
+  const judgeFamily = {
+    id: 'alpha',
+    ready: true,
+    describe: () => ({ id: 'alpha', label: 'alpha', state: 'ready', detail: '', configured: true, fast: 'alpha-fast', deep: 'alpha-deep', local: true, keyEnv: null, signup: '', modelCount: 1 }),
+    async chat({ messages }: { messages: { content: string }[] }) {
+      const prompt = messages.map((m) => m.content).join('\n');
+      const content = prompt.includes('Item page text:')
+        ? { answers: [prompt.includes('Monatsbeitrag') ? { id: 'q1', answer: 'yes', spans: ['S1'] } : { id: 'q1', answer: 'unknown', spans: [] }] }
+        : { answer: 'ok', claims: [], confidence: 'high' };
+      return { content: JSON.stringify(content), model: 'alpha-fast', provider: 'alpha', usage: {} };
+    },
+  };
+  const ranker = { ready: true, rank: async (_query: string, texts: string[], k: number) => ({ model: 'fake', order: texts.map((t, i) => ({ i, near: /preise/i.test(t) ? 0 : 1 })).sort((a, b) => a.near - b.near).map((x) => x.i).slice(0, k) }) };
+  const run = async () => {
+    const read: string[] = [];
+    const search = {
+      ...fakeSearch,
+      async readPage(url: string) {
+        read.push(url);
+        if (url === PREISE) return { status: 200, text: 'Monatsbeitrag Erwachsene 55 Euro.', links: [] };
+        if (url === GYM) return { status: 200, text: `Bouldering in Leipzig. ${'Grosse Boulderhalle mit vielen Routen fuer alle Niveaus und einem Bistro. '.repeat(8)}`, links: [{ url: '/kontakt/', text: 'Kontakt' }, { url: '/impressum/', text: 'Impressum' }, { url: '/preise/', text: 'Preise' }] };
+        return { status: 200, text: 'Kontakt und Anfahrt.', links: [] };
+      },
+    };
+    const engine = new ResearchEngine({ router: new ModelRouter({ providers: [judgeFamily] }), search, store: new ProjectStore({ dir }), lanes: 2, embedder: ranker });
+    const project = await engine.createProject({ question: 'Find 3 bouldering gyms in Leipzig, each with the adult monthly membership price in EUR' });
+    await engine.updateProject(project.id, { acceptance: { itemCount: 1, expected: '1 bouldering gym with its adult monthly membership price in EUR' } });
+    const row = { title: 'Boulderhalle', url: GYM, value: null, unit: '', plan: { tier: 'fits', verdict: 'Fits', why: [], risks: [] } };
+    project.candidates = { kept: [row], keptCount: 1, toCheck: [], toCheckCount: 0, tiers: { fits: 1, 'trade-off': 0, unverified: 0, weak: 0, blocked: 0 }, screened: {}, screenedCount: 0, found: 1, verification: null };
+    project.brief = { located: true, kind: { label: 'bouldering gym', terms: ['bouldering'] }, regions: [] };
+    project.decisionModel = { kind: { label: 'bouldering gym', terms: ['bouldering'] }, checklist: [{ clause: 'adult monthly membership price in eur', source: 'quoted', quote: 'adult monthly membership price in EUR', items: [{ clause: 'adult monthly membership price in eur', question: QUESTION, hard: true }] }] };
+    project.report = { verdict: 'GO', modelVerdict: 'GO', kind: 'list', confidence: 'high', summary: 'test', keyNumbers: [], scenarios: [], sensitivity: [], risks: [], openQuestions: [], nextSteps: [], evidenceQuality: {}, bestEstimate: null, actionItems: [], options: [], basis: {}, model: 'demo/m', generatedAt: new Date().toISOString() };
+    await engine.checkAcceptance(project);
+    const check = project.acceptanceResult!.items[0].checks.find((c: { clause: string }) => c.clause === 'adult monthly membership price in eur')!;
+    return { check, read };
+  };
+
+  it('hands the engine embedder to the deeper reader, which reads the price page of a German site and answers the check', async () => {
+    process.env.FRL_LINKS_BY_MEANING = '1';
+    try {
+      const { check, read } = await run();
+      expect(check).toMatchObject({ answer: 'yes', source: PREISE });
+      expect(read).toContain(PREISE);
+    } finally {
+      delete process.env.FRL_LINKS_BY_MEANING;
+    }
+    const words = await run();
+    expect(words.check.answer).toBe('unknown');
+    expect(words.read).not.toContain(PREISE);
+  });
+});
+
 describe('the brief marks a kind of business', () => {
   it('sets kind.entity when the item is not sold on listing pages, and clears it for a listed item', async () => {
     const engine = new ResearchEngine({ router: new ModelRouter({ providers: [new ScriptedProvider()] }), search: fakeSearch, store: new ProjectStore({ dir }) });
