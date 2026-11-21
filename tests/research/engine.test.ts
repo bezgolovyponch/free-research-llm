@@ -4587,3 +4587,35 @@ describe('a concept gap becomes knowledge pieces instead of a pause (FRL_NO_PAUS
     }
   });
 });
+
+describe('an analysis contract carries no item kind into acceptance', () => {
+  it('stores no evaluation kind for a grounded number answer and keeps the kind for the same project as a list', async () => {
+    const flags = ['FRL_ANSWER_UNIT', 'FRL_KIND_ALWAYS_HARD'];
+    const before = Object.fromEntries(flags.map((f) => [f, process.env[f]]));
+    try {
+      for (const numberContract of [false, true]) {
+        process.env.FRL_KIND_ALWAYS_HARD = '1';
+        if (numberContract) process.env.FRL_ANSWER_UNIT = '1';
+        else delete process.env.FRL_ANSWER_UNIT;
+        const { engine } = engineWith(new ScriptedProvider());
+        const project = await engine.createProject({ question: 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.', expected: 'one figure with its source' });
+        project.decisionModel = { kind: { label: 'heat pump installation statistic', terms: ['heat pump installations'] }, criteria: [], answerUnit: 'number', answerUnitShare: 1, answerUnitQuote: 'Give the figure with its source.' };
+        project.acceptance = { itemCount: numberContract ? null : 1, mustMention: [] };
+        const page = { id: 'D1', kind: 'web', url: 'https://stats.example/heat-pumps-2024', title: 'Heat pump installations 2024', text: 'Heat pump installations in Czechia in 2024.' };
+        project.brief = { regions: ['CZ'], kind: project.decisionModel.kind, located: false, text: '' };
+        project.nodes = [{ id: 'D1', parentId: 'Q', status: 'verified', finding: { items: [] } }];
+        project.hubSources = [];
+        project.domainSources = [page];
+        project.report = {};
+        await engine.checkAcceptance(project);
+        expect(project.acceptanceResult?.kind?.label ?? null).toBe(numberContract ? null : 'heat pump installation statistic');
+        expect((project.report.deliverables ?? []).some((d: { evidence?: string }) => d.evidence === page.url)).toBe(!numberContract);
+      }
+    } finally {
+      for (const f of flags) {
+        if (before[f] === undefined) delete process.env[f];
+        else process.env[f] = before[f];
+      }
+    }
+  });
+});
