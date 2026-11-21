@@ -60,6 +60,7 @@ export function ungroundedNumbers(finding, node = {}) {
     ...numbersIn(node.title ?? ''),
     ...numbersIn(node.metric ?? ''),
   ]);
-  const cleanedAnswer = stripDatesAndOrdinals(finding.answer);
+  const answer = process.env.FRL_NUMBERS_OUTSIDE_URLS ? String(finding.answer ?? '').replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ') : finding.answer;
+  const cleanedAnswer = stripDatesAndOrdinals(answer);
   return [...new Set(numbersIn(cleanedAnswer).filter((n) => !allowed.has(n)))];
 }
