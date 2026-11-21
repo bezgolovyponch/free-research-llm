@@ -4510,3 +4510,56 @@ describe('a grounded number answer is not decomposed as a list (FRL_ANSWER_UNIT)
     expect(await run(true)).toBe(false);
   });
 });
+
+describe('a grounded number answer carries no item count and no item-kind validation (FRL_ANSWER_UNIT)', () => {
+  const numberModel = () => ({ kind: { label: 'heat pump installation statistic', terms: ['heat pump installations'] }, criteria: [], noLimit: [], missing: [], answerUnit: 'number', answerUnitShare: 1, answerUnitQuote: 'Give the figure with its source.', caseIds: [] });
+  const withFlag = async (flag: boolean, body: () => Promise<void>) => {
+    const before = process.env.FRL_ANSWER_UNIT;
+    if (flag) process.env.FRL_ANSWER_UNIT = '1';
+    else delete process.env.FRL_ANSWER_UNIT;
+    try {
+      await body();
+    } finally {
+      if (before === undefined) delete process.env.FRL_ANSWER_UNIT;
+      else process.env.FRL_ANSWER_UNIT = before;
+    }
+  };
+  it('drops the item count the count words implied and does not derive it again', async () => {
+    for (const flag of [false, true]) {
+      await withFlag(flag, async () => {
+        const { engine } = engineWith(new ScriptedProvider());
+        const project = await engine.createProject({ question: 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.', expected: 'one figure for 2024 residential heat pump installations in Czechia, with its source and link' });
+        project.acceptance = { ...project.acceptance, itemCount: 1 };
+        project.decisionModel = numberModel();
+        engine.dropNumberItemCount(project);
+        engine.ensureItemCount(project);
+        expect(project.acceptance.itemCount).toBe(flag ? null : 1);
+        expect(project.log.some((l: { type: string; message: string }) => l.type === 'acceptance' && l.message === 'the asker expects one number ("Give the figure with its source."), so no item count is enforced')).toBe(flag);
+      });
+    }
+  });
+  it('keeps a locked item count', async () => {
+    await withFlag(true, async () => {
+      const { engine } = engineWith(new ScriptedProvider());
+      const project = await engine.createProject({ question: 'How many heat pumps?', expected: 'one figure' });
+      project.acceptance = { ...project.acceptance, itemCount: 1, locked: true };
+      project.decisionModel = numberModel();
+      engine.dropNumberItemCount(project);
+      expect(project.acceptance.itemCount).toBe(1);
+    });
+  });
+  it('skips item-kind validation for a number answer and runs it without the flag', async () => {
+    for (const flag of [false, true]) {
+      await withFlag(flag, async () => {
+        let searches = 0;
+        const { engine } = engineWith(new ScriptedProvider(), { enabled: true, lastErrors: [], async search() { searches++; return []; }, describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }) });
+        const project = await engine.createProject({ question: 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.', expected: 'one figure' });
+        project.decisionModel = numberModel();
+        project.brief = { regions: ['CZ'], kind: project.decisionModel.kind, located: false, text: '' };
+        const proceeds = await engine.validateConcept(project);
+        expect(searches > 0).toBe(!flag);
+        expect(proceeds).toBe(flag);
+      });
+    }
+  });
+});
