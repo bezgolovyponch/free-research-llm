@@ -124,11 +124,13 @@ export function clusterChecklist(samples, { askerWords = '' } = {}) {
     }
   }
 
+  const grounded = (quote) => Boolean(quote) && quoteFound(askerWords, quote);
+  const distinctAsks = (a, b) => byQuote && Boolean(process.env.FRL_QUOTED_DISTINCT) && grounded(a.quote) && grounded(b.quote) && !quoteFound(a.quote, b.quote) && !quoteFound(b.quote, a.quote);
   const groups = [];
   for (const item of allItems) {
     let placed = false;
     for (const group of groups) {
-      if (sameMeaning(group[0].question, item.question)) {
+      if (!distinctAsks(group[0], item) && sameMeaning(group[0].question, item.question)) {
         group.push(item);
         placed = true;
         break;
