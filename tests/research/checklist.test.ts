@@ -1439,3 +1439,51 @@ describe('a linked page is judged about the item it was read for (FRL_DEEPER_ITE
     expect(off).not.toContain('answers nothing');
   });
 });
+
+describe('FRL_ONE_ITEM_QUESTION', () => {
+  const listWording = 'Does this list contain coworking spaces each with its own website URL?';
+  const itemWording = 'Does this coworking space have its own website URL?';
+  const otherWording = 'Does this coworking space have a website URL of its own?';
+  const located = 'Does this coworking space have a location in Brno, Czechia?';
+  const proposals = [
+    { items: [{ clause: 'own website', question: listWording, hard: true, numeric: null }] },
+    { items: [{ clause: 'own website', question: itemWording, hard: true, numeric: null }, { clause: 'in brno', question: located, hard: true, numeric: null }] },
+    { items: [{ clause: 'own website', question: otherWording, hard: true, numeric: null }, { clause: 'in brno', question: located, hard: true, numeric: null }] },
+  ];
+  const built = async (flag: boolean, vote: unknown) => {
+    const before = process.env.FRL_ONE_ITEM_QUESTION;
+    if (flag) process.env.FRL_ONE_ITEM_QUESTION = '1';
+    else delete process.env.FRL_ONE_ITEM_QUESTION;
+    const router = fakeRouter({ '': seq(...proposals), 'one-item-question': vote });
+    try {
+      const checklist = await new ChecklistModeler({ router: router as never, samples: 3 }).build('Find 4 coworking spaces in Brno, Czechia, each with its own website URL.');
+      return { checklist: checklist as { clause: string; items: Record<string, unknown>[] }[], router };
+    } finally {
+      if (before === undefined) delete process.env.FRL_ONE_ITEM_QUESTION;
+      else process.env.FRL_ONE_ITEM_QUESTION = before;
+    }
+  };
+  const pickItem = (request: never) => ({ pick: pickLetter(request, (text) => text === itemWording) });
+
+  it('without the flag the first proposal wording is kept, even when it asks about the whole list', async () => {
+    const { checklist, router } = await built(false, pickItem);
+    expect(checklist.map((c) => c.items[0].question)).toEqual([listWording, located]);
+    expect(router.count('one-item-question')).toBe(0);
+    expect(checklist[0].items[0]).not.toHaveProperty('wordings');
+  });
+
+  it('with the flag a vote across provider families picks the wording about one item', async () => {
+    const { checklist, router } = await built(true, pickItem);
+    expect(checklist.map((c) => c.items[0].question)).toEqual([itemWording, located]);
+    expect(router.count('one-item-question')).toBeGreaterThanOrEqual(2);
+    expect(router.userText('one-item-question')).toContain("The asker's words: own website");
+    expect(router.userText('one-item-question')).toContain(listWording);
+    expect(checklist[0].items[0]).not.toHaveProperty('wordings');
+    expect(checklist[0].items[0]).toMatchObject({ clause: 'own website', hard: true });
+  });
+
+  it('with the flag a failed vote, or a vote for none, keeps the first wording', async () => {
+    expect((await built(true, FAIL)).checklist[0].items[0].question).toBe(listWording);
+    expect((await built(true, { pick: 'none' })).checklist[0].items[0].question).toBe(listWording);
+  });
+});
