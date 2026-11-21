@@ -1923,7 +1923,7 @@ export class ResearchEngine {
       return version === JUDGE_VERSION;
     });
     const kindRejectedSet = new Set(project.kindRejected.map((e) => (typeof e === 'object' ? e.url : e)));
-    const deliverables = (brief.located === false
+    const deliverables = (brief.located === false && !isAnalysis
       ? await entityDeliverables([...project.nodes, { id: 'hubs', sources: project.hubSources ?? [] }, { id: 'domain', sources: project.domainSources ?? [] }], { terms: [...new Set([...(project.domain?.terms ?? []), ...(project.decisionModel?.kind?.terms ?? [])])], not: [...new Set([...(project.domain?.not ?? []), ...(project.decisionModel?.kind?.not ?? [])])], kindLabel: project.decisionModel?.kind?.label ?? project.brief?.kind?.label, members: project.decisionModel?.kind?.members ?? [], regions: brief.regions ?? [], readPage, kindTerms: project.decisionModel?.kind?.terms ?? [], findWebsite: this.search?.search ? (name) => this.search.search([`"${name}"`], { maxSources: 5 }) : null })
       : (project.candidates ? fromTable : [...fromTable, ...collectDeliverables(project.nodes).filter((d) => !listed.has(d.url))]))
       .filter((d) => !isExcludedSurfaceUrl(d.url) && !kindRejectedSet.has(d.url));
@@ -1961,7 +1961,7 @@ export class ResearchEngine {
     const prices = lowPriceStats(project.candidates?.kept ?? []);
 
     project.acceptanceResult = await checker.evaluate(project.acceptance, deliverables, { located: brief.located !== false, kind: brief.kind ?? null, purpose: purposeChecks(project), checklist: project.checklist, readPage, checkCache });
-    if (project.acceptanceResult && typeof project.acceptanceResult === 'object') project.acceptanceResult.kind = project.decisionModel?.kind ?? brief.kind ?? null;
+    if (project.acceptanceResult && typeof project.acceptanceResult === 'object') project.acceptanceResult.kind = isAnalysis ? null : project.decisionModel?.kind ?? brief.kind ?? null;
 
     const judgedChecklist = project.decisionModel?.checklist ?? (process.env.FRL_KIND_ALWAYS_HARD === '1' && project.decisionModel?.kind?.label ? [] : null);
     if (!isAnalysis && project.acceptanceResult?.items?.length && judgedChecklist && readPage) {
@@ -2095,7 +2095,7 @@ export class ResearchEngine {
       }
     }
 
-    const kind = project.decisionModel?.kind ?? null;
+    const kind = isAnalysis ? null : project.decisionModel?.kind ?? null;
     if (project.acceptanceResult) {
       this.recomputeAcceptanceValidity(project.acceptanceResult, project.acceptance, project.checklist, kind);
 
