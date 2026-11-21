@@ -106,6 +106,30 @@ describe('search', () => {
     expect((await new SearchService({ fetchImpl, backends: [], jinaReader: false }).readPage('https://spa.example/')).text).toBe('');
   });
 
+  it('reads the text of a PDF document under FRL_READ_PDF, and leaves it unread without the flag', async () => {
+    const pdf = new TextEncoder().encode('%PDF-1.7 table');
+    const fetchImpl = fakeFetch([[/stats\.example/, () => new Response(pdf, { headers: { 'content-type': 'application/pdf' } })]]);
+    const seen: Uint8Array[] = [];
+    const pdfReader = async (bytes: Uint8Array) => {
+      seen.push(bytes);
+      return 'Rok Celkem\n2024 23 094 80 1 634 107 24 918';
+    };
+    const before = process.env.FRL_READ_PDF;
+    try {
+      delete process.env.FRL_READ_PDF;
+      expect((await new SearchService({ fetchImpl, backends: [], jinaReader: false, pdfReader }).readPage('https://stats.example/report.pdf')).text).toBe('');
+      expect(seen).toEqual([]);
+      process.env.FRL_READ_PDF = '1';
+      const page = await new SearchService({ fetchImpl, backends: [], jinaReader: false, pdfReader }).readPage('https://stats.example/report.pdf');
+      expect(page.text).toBe('Rok Celkem\n2024 23 094 80 1 634 107 24 918');
+      expect(page.status).toBe(200);
+      expect(Buffer.from(seen[0]).toString('latin1')).toBe('%PDF-1.7 table');
+    } finally {
+      if (before === undefined) delete process.env.FRL_READ_PDF;
+      else process.env.FRL_READ_PDF = before;
+    }
+  });
+
   it('keeps the coordinates a listing page publishes for its map', async () => {
     const fetchImpl = fakeFetch([[/plot\.example/, () => new Response(`<html><div class="map" data-lat="44.301234" data-lng="15.091234"></div>${' text'.repeat(120)}</html>`, { headers: { 'content-type': 'text/html' } })]]);
     expect((await new SearchService({ fetchImpl, backends: [] }).readPage('https://plot.example/listing-ID1abcd')).coords).toEqual({ lat: 44.301234, lon: 15.091234 });

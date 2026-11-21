@@ -4,6 +4,7 @@ import { sourceCountry } from '../research/brief.mjs';
 import { extractListings, listingKey, pagePlace } from './listings.mjs';
 import { selectDiverse } from './selection.mjs';
 import { pageCoordinates } from '../research/site.mjs';
+import { mayBePdf, pdfReaderOn, pdfText } from './pdf.mjs';
 const USER_AGENT = 'free-research-llm/1.0 (+https://github.com/bezgolovyponch/free-research-llm)';
 const PAGE_TEXT_LIMIT = 6000;
 export const READ_TEXT_LIMIT = 40000;
@@ -319,8 +320,9 @@ export const KEYED_SEARCH_BACKENDS = [
 export const MIN_BROWSER_TEXT = 400;
 
 export class SearchService {
-  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000, recipes = null, browser = null }) {
+  constructor({ backends = [], fetchImpl = fetch, fetchPages = true, jinaReader = true, resultsPerQuery = 4, jinaKey = '', now = () => Date.now(), blockMs = 60 * 60 * 1000, recipes = null, browser = null, pdfReader = pdfText }) {
     this.backends = backends;
+    this.pdfReader = pdfReader;
     this.browser = browser;
     this.recipes = recipes;
     this.pages = new Map();
@@ -347,6 +349,10 @@ export class SearchService {
     try {
       const res = await this.fetchImpl(url, { headers: { 'user-agent': USER_AGENT, accept, ...extraHeaders }, signal: controller.signal });
       const type = res.headers.get('content-type') ?? '';
+      if (res.ok && mayBePdf(type) && pdfReaderOn()) {
+        const text = String(await this.pdfReader(new Uint8Array(await res.arrayBuffer())) ?? '').slice(0, READ_TEXT_LIMIT);
+        return { text, links: [], listings: [], next: '', status: res.status };
+      }
       if (!res.ok || !/text\/(html|plain|markdown)/.test(type)) return { text: '', links: [], listings: [], next: '', status: res.status };
       const body = await res.text();
       const html = /html/.test(type);
