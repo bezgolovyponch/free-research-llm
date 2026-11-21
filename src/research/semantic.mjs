@@ -104,6 +104,16 @@ export async function ask(request) {
   return result.value === null ? null : { value: result.value, provider: result.provider, model: result.model };
 }
 
+export async function spreadSamples(router, request, n) {
+  const sample = (extra = {}) => router.complete({ ...request, ...extra }).catch(() => null);
+  const leads = process.env.FRL_SAMPLES_APART ? router.familyLeads?.({ tier: request.tier, purpose: request.purpose }) ?? [] : [];
+  if (!leads.length) return Promise.all(Array.from({ length: n }, () => sample()));
+  return Promise.all(Array.from({ length: n }, async (_, at) => {
+    if (at < leads.length) return sample(leads.length > 1 ? { avoid: leads.filter((id) => id !== leads[at]) } : {});
+    return (await sample({ avoid: leads, apart: true })) ?? sample();
+  }));
+}
+
 export async function vote({ n = 3, quorum = 2, key = (value) => JSON.stringify(value), avoidSame = true, messages, schema, choice = null, exclude = [], normalize = (value) => value, ...request }) {
   const tier = request.tier ?? 'fast';
   const purpose = tier === 'deep' ? DRAFT_PURPOSE : JUDGE_PURPOSE;

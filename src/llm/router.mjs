@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { PURPOSE_CLASS } from './ranking.mjs';
 import { extractJson } from '../research/json.mjs';
 import { ProviderError, quotaWindowOf } from './provider.mjs';
-import { CHOICE_LETTERS, MAX_PROMPT_TOKENS, familyOf, independentFamilies, letterBias, letterTallies, replyFamily } from './ranking.mjs';
+import { CHOICE_LETTERS, MAX_PROMPT_TOKENS, familyOf, independentFamilies, letterBias, letterTallies, replyFamily, sameFamily } from './ranking.mjs';
 import { paidDailyTokens, paidProviderIds } from './presets.mjs';
 
 export class NoModelAvailableError extends Error {}
@@ -229,6 +229,16 @@ export class ModelRouter {
 
   familyOf(providerId, { tier = 'fast', model = null } = {}) {
     return replyFamily(model ?? this.modelOf(this.providers.find((p) => p.id === providerId), tier), providerId);
+  }
+
+  familyLeads({ tier = 'fast', purpose } = {}) {
+    const leads = [];
+    for (const p of this.available({ tier, purpose })) {
+      if (this.isPaid(p)) continue;
+      const family = this.familyOf(p.id, { tier });
+      if (!leads.some((lead) => sameFamily(lead.family, family))) leads.push({ id: p.id, family });
+    }
+    return leads.map((lead) => lead.id);
   }
 
   families({ tier = 'fast', purpose, within = 0 } = {}) {
