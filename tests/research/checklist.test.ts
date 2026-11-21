@@ -1321,3 +1321,65 @@ describe('two requirements the asker wrote in different words are never merged (
     expect(clauses(true, samples())).toEqual(['in brno, czechia', 'the price of a one-day pass in czk']);
   });
 });
+
+describe('the judge sees the page address, and a yes resting on it alone needs a second vote (FRL_PAGE_ADDRESS)', () => {
+  const checklist = [{ clause: 'each with its own website url', items: [{ clause: 'each with its own website url', question: 'Does this gym have its own website URL?', hard: true, numeric: null }] }];
+  const own = { url: 'https://www.onyx-leipzig.de/preise/', page: 'Preise | Onyx Leipzig. Tageskarten fuer alle Niveaus und Kurse.' };
+  const listing = { url: 'https://bestclimbingwalls.com/climbing-walls/no-limit', page: 'No Limit Leipzig | Best Climbing Walls. Find the climbing walls near you.' };
+  const judgeAnswers = (request: { messages: Array<{ content: string }> }) => {
+    const text = request.messages.map((m) => m.content).join(' ');
+    if (text.includes('Page address:') || text.includes('Onyx')) return { answers: [{ id: 'q1', answer: 'yes', spans: ['S1'] }] };
+    return { answers: [{ id: 'q1', answer: 'unknown', spans: [] }] };
+  };
+  const router = (addressCheck: unknown = (request: { messages: Array<{ content: string }> }) => (request.messages[1].content.includes('onyx-leipzig.de') ? { pick: 'shows' } : { pick: 'other' })) => fakeRouter({ '': judgeAnswers, 'address-check': addressCheck as never });
+  const judgeText = (fake: { calls: Array<{ messages: Array<{ content: string }> }> }) => fake.calls.map((call) => call.messages.map((m) => m.content).join(' ')).find((text) => text.includes('Item page text:') && text.includes('Questions:')) ?? '';
+  const judged = async (flag: boolean, item: { url: string; page: string }, kind: { label: string; terms: string[] } | null = null, addressCheck?: unknown) => {
+    const before = process.env.FRL_PAGE_ADDRESS;
+    if (flag) process.env.FRL_PAGE_ADDRESS = '1';
+    else delete process.env.FRL_PAGE_ADDRESS;
+    try {
+      const fake = addressCheck === undefined ? router() : router(addressCheck);
+      const checks = await new ChecklistJudge({ router: fake as never }).judge({ url: item.url }, item.page, checklist, kind);
+      return { checks, fake };
+    } finally {
+      if (before === undefined) delete process.env.FRL_PAGE_ADDRESS;
+      else process.env.FRL_PAGE_ADDRESS = before;
+    }
+  };
+
+  it('shows the address as the first sentence and keeps a yes on it when the vote agrees the address itself shows it', async () => {
+    const { checks, fake } = await judged(true, own);
+    expect(judgeText(fake)).toContain(`[S1] Page address: ${own.url}`);
+    expect(checks[0]).toMatchObject({ answer: 'yes', quote: `Page address: ${own.url}` });
+    expect(fake.count('address-check')).toBeGreaterThanOrEqual(2);
+    expect(fake.userText('address-check')).toContain('Opening sentences of the page:\nPreise | Onyx Leipzig.');
+  });
+
+  it('falls back to the answer the page gives without its address when the vote finds the address is another site', async () => {
+    const { checks, fake } = await judged(true, listing);
+    expect(checks[0]).toEqual({ id: 'each with its own website url|Does this gym have its own website URL?', answer: 'unknown', quote: '', hard: true, clause: 'each with its own website url', addressUnconfirmed: listing.url });
+    const asked = fake.calls.map((call: { messages: Array<{ content: string }> }) => call.messages.map((m) => m.content).join(' ')).filter((text: string) => text.includes('Item page text:') && text.includes('Questions:'));
+    expect(asked).toHaveLength(2);
+    expect(asked[1]).not.toContain('Page address:');
+  });
+
+  it('never does worse than the page without its address: a vote that no model answers leaves the plain answer', async () => {
+    const { checks } = await judged(true, own, null, FAIL);
+    expect(checks[0]).toMatchObject({ answer: 'yes', quote: 'Preise | Onyx Leipzig.', addressUnconfirmed: own.url });
+  });
+
+  it('keeps the address out of the kind question', async () => {
+    const { fake } = await judged(true, own, { label: 'bouldering gym', terms: ['bouldering'] });
+    const kindPrompt = fake.calls.map((call: { messages: Array<{ content: string }> }) => call.messages.map((m) => m.content).join('\n')).find((text: string) => text.includes('This page offers:'));
+    expect(kindPrompt).toBeTruthy();
+    expect(kindPrompt).not.toContain('Page address:');
+  });
+
+  it('shows no address and asks no second vote without the flag', async () => {
+    const { checks, fake } = await judged(false, listing);
+    expect(judgeText(fake)).toContain('Item page text:');
+    expect(judgeText(fake)).not.toContain('Page address:');
+    expect(fake.count('address-check')).toBe(0);
+    expect(checks[0]).not.toHaveProperty('addressUnconfirmed');
+  });
+});

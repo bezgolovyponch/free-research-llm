@@ -50,6 +50,22 @@ export function noCheckPrompt({ question, quote, options }) {
     { role: 'user', content: `Question: ${question}\nSentence: ${quote}\n\nOptions:\n${optionLines(options)}` },
   ];
 }
+
+export const ADDRESS_LABEL = 'Page address:';
+export const ADDRESS_VOTES = 3;
+export const ADDRESS_OPENING_SPANS = 3;
+export const ADDRESS_READINGS = [
+  { id: 'shows', text: 'The address itself shows it: it is the item\'s own website, or it names what the question asks' },
+  { id: 'other', text: 'The address is a page of another site that lists, reviews, books or sells the item, and does not show it' },
+  { id: 'unclear', text: 'The address and these sentences do not show it' },
+];
+
+export function addressCheckPrompt({ question, address, opening, options }) {
+  return [
+    { role: 'system', content: 'You check one "yes" answer. A judge read an item page and answered "yes" to a question about the item, citing only the address of the page. Pick the option that says what the address, read with the opening sentences of the page, shows. Answer with JSON only: {"pick":"<letter>"}' },
+    { role: 'user', content: `Question: ${question}\n${ADDRESS_LABEL} ${address}\nOpening sentences of the page:\n${opening}\n\nOptions:\n${optionLines(options)}` },
+  ];
+}
 export const SINGLE_KIND_OPINION = 'second opinion from one provider family only: not rejected, to confirm';
 export const SINGLE_KIND_REASON ='priced far below comparable items, and only one independent judgement was available: confirm it is the item itself';
 
@@ -464,6 +480,18 @@ export class ChecklistJudge {
     return { answer: 'unknown', quote: '', noUnconfirmed: found.quote };
   }
 
+  async confirmAddress(question, found, address, spans) {
+    const opening = spans.filter((span) => !span.text.startsWith(ADDRESS_LABEL)).slice(0, ADDRESS_OPENING_SPANS).map((span) => span.text).join('\n');
+    const result = await closedVote({ router: this.router, task: 'address-check', tier: 'fast', n: ADDRESS_VOTES, quorum: 2, options: ADDRESS_READINGS, field: 'pick', seed: `${question.question}|${address}`, prompt: (shown) => addressCheckPrompt({ question: question.question, address, opening, options: shown }), keyOf: (id) => String(id) }).catch(() => null);
+    return agreed(result)?.id === 'shows';
+  }
+
+  async answerOnAddress(question, given, address, askedSpans, spans) {
+    if (await this.confirmAddress(question, given, address, askedSpans)) return given;
+    const plain = (await this.answersFromPage([question], spans)).get(question.short);
+    return { ...(plain ?? { answer: 'unknown', quote: '' }), addressUnconfirmed: address };
+  }
+
   async judgeKind(spans, cluster) {
     const question = cluster.items[0];
     const check = { id: `${cluster.clause}|${question.question}`, answer: 'unknown', quote: '', hard: question.hard, clause: cluster.clause };
@@ -541,18 +569,21 @@ export class ChecklistJudge {
 
     const questions = remainingQualitative.map(({ cluster, item: ci }, index) => ({ short: `q${index + 1}`, id: cluster.clause + '|' + ci.question, question: ci.question, hard: ci.hard, clause: cluster.clause }));
     const spans = this.router ? sentenceSpans(pageText, { limit: JUDGE_PAGE_CHARS }) : [];
+    const address = process.env.FRL_PAGE_ADDRESS && this.router ? String(item?.pageUrl ?? item?.url ?? '').trim() : '';
+    const askedSpans = address ? sentenceSpans(`${ADDRESS_LABEL} ${address}\n${pageText}`, { limit: JUDGE_PAGE_CHARS }) : spans;
 
     for (let at = 0; at < questions.length; at += JUDGE_QUESTIONS_PER_CALL) {
       const asked = questions.slice(at, at + JUDGE_QUESTIONS_PER_CALL);
-      const answers = await this.answersFromPage(asked, spans);
+      const answers = await this.answersFromPage(asked, askedSpans);
       const missing = asked.filter((q) => !answers.has(q.short));
       if (missing.length) {
-        for (const [short, found] of await this.answersFromPage(missing, spans)) answers.set(short, found);
+        for (const [short, found] of await this.answersFromPage(missing, askedSpans)) answers.set(short, found);
       }
       for (const q of asked) {
         const given = answers.get(q.short);
-        const found = process.env.FRL_CONFIRMED_NO && q.hard && given?.answer === 'no' && this.router ? await this.confirmNo(q, given) : given;
-        checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause, ...(found?.noUnconfirmed ? { noUnconfirmed: found.noUnconfirmed } : {}) });
+        const vetted = address && given?.answer === 'yes' && String(given.quote ?? '').startsWith(ADDRESS_LABEL) ? await this.answerOnAddress(q, given, address, askedSpans, spans) : given;
+        const found = process.env.FRL_CONFIRMED_NO && q.hard && vetted?.answer === 'no' && this.router ? await this.confirmNo(q, vetted) : vetted;
+        checks.push({ id: q.id, answer: found?.answer ?? 'unknown', quote: found?.quote ?? '', hard: q.hard, clause: q.clause, ...(found?.noUnconfirmed ? { noUnconfirmed: found.noUnconfirmed } : {}), ...(found?.addressUnconfirmed ? { addressUnconfirmed: found.addressUnconfirmed } : {}) });
       }
     }
 
