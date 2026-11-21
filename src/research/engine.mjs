@@ -19,7 +19,7 @@ import { claimsToCheck, contextOf, needsRecheck, normalizeVote, resolveFromSourc
 import { evaluateAll } from './specs.mjs';
 import { provisionalVerdict, resultStatus } from './gaps.mjs';
 import { droppedNote, groundAcceptance, groundSpec } from './grounding.mjs';
-import { NO_ITEMS_DETAIL, asksForItems, contractClass, listCount } from './deliverable.mjs';
+import { NO_ITEMS_DETAIL, answersWithNumber, asksForItems, contractClass, listCount } from './deliverable.mjs';
 import { runObservations, toCSV, toJSON, tableSpec, extract } from './observations.mjs';
 import { aggregateObservations, askedHorizon, buildResultsTable, forecast } from './forecast.mjs';
 import { harvestItems } from './harvest.mjs';
@@ -487,9 +487,15 @@ export class ResearchEngine {
   }
 
   ensureItemCount(project) {
-    if (project.acceptance?.locked || project.acceptance?.itemCount) return;
+    if (project.acceptance?.locked || project.acceptance?.itemCount || answersWithNumber(project)) return;
     const asked = itemCountFromWords(project.acceptance?.expected, project.question);
     if (typeof asked === 'number') project.acceptance = { ...project.acceptance, itemCount: asked };
+  }
+
+  dropNumberItemCount(project) {
+    if (!answersWithNumber(project) || project.acceptance?.locked || !project.acceptance?.itemCount) return;
+    project.acceptance = { ...project.acceptance, itemCount: null };
+    this.emit(project, 'acceptance', `the asker expects one number ("${project.decisionModel.answerUnitQuote}"), so no item count is enforced`);
   }
 
   async decompose(project, phase = 'decomposing') {
@@ -499,6 +505,7 @@ export class ResearchEngine {
     const template = templateById(project.templateId);
     this.ensureItemCount(project);
     await this.ensureDecisionModel(project);
+    this.dropNumberItemCount(project);
     const model = project.decisionModel;
     const purpose = model?.purpose ?? '';
     const derivedIds = deriveRequirementIds(model);
@@ -565,6 +572,7 @@ export class ResearchEngine {
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
     if (process.env.FRL_ANSWER_UNIT && acceptance?.itemCount) await this.ensureDecisionModel(project);
+    this.dropNumberItemCount(project);
     if (listCount(project)) {
       await this.ensureDecisionModel(project);
       const brief = this.briefOf(project);
@@ -1019,6 +1027,7 @@ export class ResearchEngine {
   async validateConcept(project) {
     const brief = project.brief ?? this.briefOf(project);
     if (brief.located !== false) return true;
+    if (contractClass(project) === 'analysis') return true;
     const kind = project.decisionModel?.kind;
     if (!kind) return true;
     if (kind.validated?.terms?.length) return true;
