@@ -4619,3 +4619,48 @@ describe('an analysis contract carries no item kind into acceptance', () => {
     }
   });
 });
+
+import { fakeRouter as memoCheckRouter } from '../helpers/fakes';
+
+describe('the memo is checked against its own verified findings (FRL_MEMO_CONSISTENCY)', () => {
+  const setUp = async () => {
+    const { engine } = engineWith(new ScriptedProvider());
+    const project = await engine.createProject({ question: 'How many residential heat pumps were installed in Czechia in 2024? Give the figure with its source.', expected: 'one figure with its source' });
+    project.acceptance = { itemCount: null, mustMention: [] };
+    project.report = { verdict: 'In 2024, approximately 23,338 residential heat pumps were installed in Czechia.', confidence: 'medium', openQuestions: [], bestEstimate: { value: '23338', unit: 'units', low: '20000', high: '23338', basis: 'D1.2' } };
+    project.nodes = [{ id: 'D1.2', parentId: 'Q', status: 'verified', finding: { claims: [{ text: 'The figure of 23,338 heat pumps sold refers to the year 2025, not 2024.' }] } }];
+    (engine as unknown as { router: unknown }).router = memoCheckRouter({ 'memo-consistency': () => ({ pick: 'contradicts', quote: 'refers to the year 2025, not 2024' }) });
+    return { engine, project };
+  };
+  it('records the contradiction, lowers confidence, asks which is right and marks the verdict', async () => {
+    const before = process.env.FRL_MEMO_CONSISTENCY;
+    process.env.FRL_MEMO_CONSISTENCY = '1';
+    try {
+      const { engine, project } = await setUp();
+      await engine.checkMemoAgainstFindings(project);
+      expect(project.report.findingsCheck.conflicts.map((c: { nodeId: string }) => c.nodeId)).toEqual(['D1.2']);
+      expect(project.report.confidence).toBe('low');
+      expect(project.report.openQuestions).toEqual(['Which is right: the memo answer, or D1.2 ("refers to the year 2025, not 2024")?']);
+      expect(project.log.some((l: { type: string; message: string }) => l.type === 'report' && l.message === 'memo checked against 1 finding(s): 1 contradiction(s)')).toBe(true);
+      engine.planActions(project);
+      expect(project.report.verdict).toContain('— sources disagree: D1.2 says "refers to the year 2025, not 2024"');
+    } finally {
+      if (before === undefined) delete process.env.FRL_MEMO_CONSISTENCY;
+      else process.env.FRL_MEMO_CONSISTENCY = before;
+    }
+  });
+  it('changes nothing without the flag', async () => {
+    const before = process.env.FRL_MEMO_CONSISTENCY;
+    delete process.env.FRL_MEMO_CONSISTENCY;
+    try {
+      const { engine, project } = await setUp();
+      expect(await engine.checkMemoAgainstFindings(project)).toBeNull();
+      expect(project.report.findingsCheck).toBeUndefined();
+      expect(project.report.confidence).toBe('medium');
+      engine.planActions(project);
+      expect(project.report.verdict).not.toContain('sources disagree');
+    } finally {
+      if (before !== undefined) process.env.FRL_MEMO_CONSISTENCY = before;
+    }
+  });
+});
