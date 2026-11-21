@@ -1742,3 +1742,14 @@ describe('a later vote call kept apart from the families that already answered',
     await expect(router.complete({ messages: [], apart: true })).resolves.toMatchObject({ provider: 'groq' });
   });
 });
+
+describe('one lead provider per model family, for samples that should not share a family', () => {
+  it('names the first free provider of each family in route order', () => {
+    const make = (id: string, model: string, paid = false) => ({ ...provider(id, []), paid, selected: { fast: model, deep: model }, describe: () => ({ id, fast: model, deep: model }) });
+    const router = new ModelRouter({ providers: [make('groq', 'qwen/qwen3.8-27b'), make('cloudflare', '@cf/qwen/qwen3.8-27b'), make('paidone', 'claude-x', true), make('gemini', 'gemini-3.8-flash'), make('local', 'gpt-oss-20b')], routeOrder: { fast: ['groq', 'cloudflare', 'paidone', 'gemini', 'local'], deep: ['paidone', 'gemini', 'groq', 'cloudflare', 'local'] } });
+    expect(router.familyLeads({ tier: 'fast' })).toEqual(['groq', 'gemini', 'local']);
+    expect(router.familyLeads({ tier: 'deep' })).toEqual(['gemini', 'groq', 'local']);
+    router.cooldownUntil.set('groq', Date.now() + 60000);
+    expect(router.familyLeads({ tier: 'fast' })).toEqual(['cloudflare', 'gemini', 'local']);
+  });
+});

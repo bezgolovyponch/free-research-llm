@@ -5062,3 +5062,42 @@ describe('the asked place named in the page\'s own words under FRL_NAMES_BY_QUOT
     }
   });
 });
+
+describe('concept cards drawn from different model families (FRL_SAMPLES_APART)', () => {
+  const make = (id: string, model: string, asked: string[]) => ({
+    id,
+    ready: true,
+    selected: { fast: model, deep: model },
+    describe: () => ({ id, label: id, state: 'ready', detail: '', configured: true, fast: model, deep: model, local: false, keyEnv: null, signup: '', modelCount: 1 }),
+    async chat({ messages }: { messages: { content: string }[] }) {
+      const prompt = messages.map((m) => m.content).join('\n');
+      if (prompt.includes('TASK=CONCEPT_CARD')) {
+        asked.push(id);
+        return { content: JSON.stringify({ terms: ['boulderhalle', 'bouldering gym'], not: [], hubs: [] }), model, provider: id, usage: {} };
+      }
+      return { content: JSON.stringify({ queries: [] }), model, provider: id, usage: {} };
+    },
+  });
+  const run = async () => {
+    const asked: string[] = [];
+    const router = new ModelRouter({ providers: [make('alpha', 'llama-3.3-70b', asked), make('beta', 'gemini-3.8-flash', asked), make('gamma', 'qwen/qwen3.8-27b', asked)], routeOrder: { fast: ['alpha', 'beta', 'gamma'], deep: ['alpha', 'beta', 'gamma'] } });
+    const pages = ['Boulderhalle Leipzig', 'Bouldering gym Leipzig', 'Boulderhalle KOSMOS'].map((title, i) => ({ title, url: `https://gym${i}.example/`, snippet: `${title}: a bouldering gym with routes for all levels`, text: '' }));
+    const search = { enabled: true, lastErrors: [], async search() { return pages; }, describe: () => ({ enabled: true, backends: ['fake'], lastErrors: [] }) };
+    const engine = new ResearchEngine({ router, search, store: new ProjectStore({ dir }), lanes: 2 });
+    const project = await engine.createProject({ question: 'Find 5 bouldering gyms in Leipzig', expected: '5 gyms' });
+    project.decisionModel = { kind: { label: 'bouldering gym', terms: ['bouldering gym'] }, criteria: [] };
+    project.brief = { regions: ['DE'], kind: project.decisionModel.kind, located: false, text: '' };
+    await engine.validateConcept(project);
+    return asked;
+  };
+
+  it('asks each concept card of another family first with the flag, and all of the route\'s first provider without it', async () => {
+    expect(await run()).toEqual(['alpha', 'alpha', 'alpha']);
+    process.env.FRL_SAMPLES_APART = '1';
+    try {
+      expect([...(await run())].sort()).toEqual(['alpha', 'beta', 'gamma']);
+    } finally {
+      delete process.env.FRL_SAMPLES_APART;
+    }
+  });
+});

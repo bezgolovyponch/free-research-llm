@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CallBudget, EXHAUSTIVE_CAP, STAGE_CAPS, agreeAcrossSamples, agreed, ask, matchPrompt, optionLines, retrieveThenVerify, rotate, turnOf, vote } from '../../src/research/semantic.mjs';
+import { spreadSamples } from '../../src/research/semantic.mjs';
 import { FAIL, fakeEmbedder, fakeRouter, lettersOf, pickLetter, seq } from '../helpers/fakes';
 
 const messages = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'user' }];
@@ -304,6 +305,49 @@ describe('FRL_VOTE_APART', () => {
       expect(after.calls.map(apartOf)).toEqual([undefined, true]);
     } finally {
       delete process.env.FRL_VOTE_APART;
+    }
+  });
+});
+
+describe('spreadSamples (FRL_SAMPLES_APART)', () => {
+  const request = { purpose: 'decision-model', tier: 'deep', temperature: 0.7, messages };
+  const make = (leads: string[], failApart = false) => {
+    const calls: { avoid?: string[]; apart?: boolean }[] = [];
+    return {
+      calls,
+      familyLeads: () => leads,
+      complete: async (req: { avoid?: string[]; apart?: boolean }) => {
+        calls.push(req);
+        if (req.apart && failApart) throw new Error('no other model family answered');
+        return { provider: leads.find((id) => !(req.avoid ?? []).includes(id)) ?? 'other', data: { ok: true } };
+      },
+    };
+  };
+
+  it('asks every sample the same way without the flag', async () => {
+    const router = make(['a', 'b', 'c']);
+    const replies = await spreadSamples(router, request, 3);
+    expect(replies.map((reply) => reply?.provider)).toEqual(['a', 'a', 'a']);
+    expect(router.calls).toEqual([request, request, request]);
+  });
+
+  it('asks each sample another family first, and an extra sample apart from all of them, falling back to a plain call', async () => {
+    process.env.FRL_SAMPLES_APART = '1';
+    try {
+      const three = make(['a', 'b', 'c']);
+      expect((await spreadSamples(three, request, 3)).map((reply) => reply?.provider)).toEqual(['a', 'b', 'c']);
+      expect(three.calls.map((call) => [call.avoid, call.apart])).toEqual([[['b', 'c'], undefined], [['a', 'c'], undefined], [['a', 'b'], undefined]]);
+      const two = make(['a', 'b']);
+      expect((await spreadSamples(two, request, 3)).map((reply) => reply?.provider)).toEqual(['a', 'b', 'other']);
+      expect(two.calls.map((call) => [call.avoid, call.apart])).toEqual([[['b'], undefined], [['a'], undefined], [['a', 'b'], true]]);
+      const none = make(['a', 'b'], true);
+      expect((await spreadSamples(none, request, 3)).map((reply) => reply?.provider)).toEqual(['a', 'b', 'a']);
+      expect(none.calls.map((call) => [call.avoid, call.apart])).toEqual([[['b'], undefined], [['a'], undefined], [['a', 'b'], true], [undefined, undefined]]);
+      const lone = make(['a']);
+      expect((await spreadSamples(lone, request, 2)).map((reply) => reply?.provider)).toEqual(['a', 'other']);
+      expect(lone.calls.map((call) => [call.avoid, call.apart])).toEqual([[undefined, undefined], [['a'], true]]);
+    } finally {
+      delete process.env.FRL_SAMPLES_APART;
     }
   });
 });

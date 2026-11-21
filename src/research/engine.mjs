@@ -36,6 +36,7 @@ import { haversineKm } from './site.mjs';
 import { checkMemoClaims, claimNote } from './memocheck.mjs';
 import { checkFindings, conflictQuestions, findingsNote, lowersConfidence, memoAnswer } from './findingscheck.mjs';
 import { assumedFigures, assumedInText, assumedNote } from './attribution.mjs';
+import { spreadSamples } from './semantic.mjs';
 import { applyStrategy, asksSea, foundationOf, foundationText, StrategyRetriever, strategyFor } from './strategy.mjs';
 import { SAMPLE_TEMPERATURE, applyCalibration, applyModel, calibrationPrompt, mergeCalibrations, modelText, verifyKind, withModelRules } from './decision.mjs';
 import { applyVerification, readVerification, verifiableSignature } from './verification.mjs';
@@ -1022,7 +1023,7 @@ export class ResearchEngine {
       this.emit(project, 'phase', `research paused: ${pages.length ? 'one page' : 'no page'} about the kinds of "${kind.label}" was found — name the kinds you mean in the Hints field`);
       return false;
     }
-    const replies = await Promise.all(Array.from({ length: CONCEPT_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: conceptCardPrompt({ kind, question: project.question, pages }) }).catch(() => null)));
+    const replies = await spreadSamples(this.router, { purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: conceptCardPrompt({ kind, question: project.question, pages }) }, CONCEPT_SAMPLES);
     const card = applyConceptCard(mergeConceptCards(replies).data, pages);
     const members = groundMembers(kind.members, card.members ?? [], pages);
     const confirmed = members.filter((member) => member.grounded.length);
@@ -1080,7 +1081,7 @@ export class ResearchEngine {
       this.emit(project, 'phase', `research paused: no page about "${kind.label}" was found — say what the item is in the Hints field`);
       return false;
     }
-    const replies = await Promise.all(Array.from({ length: CONCEPT_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: conceptCardPrompt({ kind, question: project.question, pages }) }).catch(() => null)));
+    const replies = await spreadSamples(this.router, { purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages: conceptCardPrompt({ kind, question: project.question, pages }) }, CONCEPT_SAMPLES);
     const merged = mergeConceptCards(replies);
     const card = applyConceptCard(merged.data, pages);
     if (!card.terms.length) {
@@ -1173,7 +1174,7 @@ export class ResearchEngine {
       if (titles.length) {
         try {
           const messages = calibrationPrompt({ kind, question: project.question, titles });
-          const replies = await Promise.all(Array.from({ length: CALIBRATION_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
+          const replies = await spreadSamples(this.router, { purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }, CALIBRATION_SAMPLES);
           const merged = mergeCalibrations(replies);
           if (merged.samples < 2) throw new Error(`only ${merged.samples} of ${CALIBRATION_SAMPLES} calibration proposals answered`);
           const applied = applyCalibration(kind, merged, titles, { itemTitles: fullPriceTitles(project.sweep.pages) });
@@ -1842,7 +1843,7 @@ export class ResearchEngine {
     const sample = texts.slice(0, VALUE_FACT_TEXTS);
     try {
       const messages = valueFactsPrompt({ question: project.question, texts: sample });
-      const replies = await Promise.all(Array.from({ length: CALIBRATION_SAMPLES }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
+      const replies = await spreadSamples(this.router, { purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }, CALIBRATION_SAMPLES);
       const merged = mergeValueFacts(replies);
       if (merged.samples < 2) throw new Error(`only ${merged.samples} of ${CALIBRATION_SAMPLES} proposals answered`);
       project.valueFacts = applyValueFacts(merged, texts);

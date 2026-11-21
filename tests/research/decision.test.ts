@@ -575,3 +575,43 @@ describe('the answer unit voted for a question without an item count (FRL_UNIT_E
     expect(await new DecisionModeler({ router: routerOf([{ answerUnit: 'number', answerUnitQuote: 'one statistic' }]) as never }).answerUnit({ question })).toBeNull();
   });
 });
+
+describe('independent proposals drawn from independent model families (FRL_SAMPLES_APART)', () => {
+  const ask = 'Find 4 coworking spaces in Brno, Czechia, each with its own website URL and the price of a one-day pass in CZK.';
+  const leads = ['lite', 'big', 'oss'];
+  const kinds: Record<string, object> = { lite: { label: 'property', terms: ['property', 'real estate', 'land'] }, big: { label: 'coworking space', terms: ['coworking', 'coworking space'] }, oss: { label: 'coworking space', terms: ['coworking', 'coworking space', 'hot desk'] } };
+  const make = () => {
+    const calls: { purpose: string; avoid?: string[] }[] = [];
+    const router = {
+      calls,
+      familyLeads: () => leads,
+      complete: async (req: { purpose: string; avoid?: string[] }) => {
+        calls.push(req);
+        const provider = leads.find((id) => !(req.avoid ?? []).includes(id)) ?? leads[0];
+        if (req.purpose === 'checklist') return { provider, data: { items: [{ clause: 'in brno, czechia', question: 'Is this coworking space in Brno, Czechia?', hard: true }] } };
+        return { provider, model: provider, data: { concept: 'Find coworking spaces', kind: kinds[provider], criteria: [] } };
+      },
+    };
+    return router;
+  };
+
+  it('outvotes one weak family that names the wrong kind, because each sample asks another family first', async () => {
+    const before = make();
+    const one = await new DecisionModeler({ router: before }).build({ id: 'b1', question: ask, guidance: '', acceptance: { itemCount: 4, expected: '4 coworking spaces' } });
+    expect(one.kind.label).toBe('property');
+    expect(one.providers).toEqual(['lite', 'lite', 'lite']);
+    process.env.FRL_SAMPLES_APART = '1';
+    try {
+      const after = make();
+      const model = await new DecisionModeler({ router: after }).build({ id: 'b2', question: ask, guidance: '', acceptance: { itemCount: 4, expected: '4 coworking spaces' } });
+      expect(model.kind.label).toBe('coworking space');
+      expect(model.kind.terms).toEqual(expect.arrayContaining(['coworking', 'coworking space']));
+      expect(model.kind.terms).not.toContain('property');
+      expect([...model.providers].sort()).toEqual(['big', 'lite', 'oss']);
+      expect(after.calls.filter((c) => c.purpose === 'decision-model').map((c) => c.avoid)).toEqual([['big', 'oss'], ['lite', 'oss'], ['lite', 'big']]);
+      expect(after.calls.filter((c) => c.purpose === 'checklist').map((c) => c.avoid)).toEqual([['big', 'oss'], ['lite', 'oss'], ['lite', 'big']]);
+    } finally {
+      delete process.env.FRL_SAMPLES_APART;
+    }
+  });
+});

@@ -4,6 +4,7 @@ import { plain } from './itemgate.mjs';
 import { explorePoints } from './site.mjs';
 import { GLAMPING_LOW_ENTRY, TIER_ORDER, areaM2, clausesOf } from './strategy.mjs';
 import { quoteFound } from './quote.mjs';
+import { spreadSamples } from './semantic.mjs';
 import { ChecklistModeler, CHECKLIST_VERSION, clusterChecklist, proposeChecklist, checklistSummary } from './checklist.mjs';
 import { MAX_MEMBERS, MIN_MEMBERS, memberTerms, sameMember } from './concept.mjs';
 import { MEASURES, compare } from './measures.mjs';
@@ -451,7 +452,7 @@ export class DecisionModeler {
     const guidance = String(project.guidance ?? '');
     const expected = project.acceptance?.expected ?? '';
     const messages = answerUnitPrompt({ question, guidance, expected });
-    const replies = await Promise.all(Array.from({ length: this.samples }, () => this.router.complete({ purpose: 'answer-unit', tier: 'fast', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
+    const replies = await spreadSamples(this.router, { purpose: 'answer-unit', tier: 'fast', temperature: SAMPLE_TEMPERATURE, messages }, this.samples);
     const data = replies.filter((r) => r?.data).map((r) => r.data);
     if (data.length < 2) return null;
     const unit = answerUnitOf(data, [question, expected, guidance].join('\n'));
@@ -469,7 +470,7 @@ export class DecisionModeler {
     const guidance = String(project.guidance ?? '');
     const examples = this.cases ? await this.cases.retrieve(question, CASES_RETRIEVED, project.id) : [];
     const messages = decisionPrompt({ question, guidance, expected: project.acceptance?.expected ?? '', examples });
-    const replies = await Promise.all(Array.from({ length: this.samples }, () => this.router.complete({ purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }).catch(() => null)));
+    const replies = await spreadSamples(this.router, { purpose: 'decision-model', tier: 'deep', temperature: SAMPLE_TEMPERATURE, messages }, this.samples);
     const samples = replies.filter((r) => r?.data).map((r) => normalizeSample(r.data));
     if (samples.length < 2) return project.decisionModel ?? null;
     const model = aggregate(samples, { question, guidance, cases: examples, id: project.id });
