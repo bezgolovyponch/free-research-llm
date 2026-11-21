@@ -1216,6 +1216,19 @@ describe('ModelRouter paid providers', () => {
     expect(router.available().map((p) => p.id)).toEqual(['gemini', 'fcc']);
   });
 
+  it('keeps a local provider on the paid list behind the free ones but never rests it on the daily cap, since it spends no money', async () => {
+    const time = Date.parse('2026-11-04T10:00:00Z');
+    const local = { ...provider('llamacpp', ['{"ok":true}']), preset: { local: true } };
+    const gemini = provider('gemini', []);
+    const router = new ModelRouter({ providers: [local, gemini], routeOrder: { fast: ['llamacpp', 'gemini'] }, now: () => time, env: { FRL_PAID_PROVIDERS: 'llamacpp', FRL_PAID_DAILY_TOKENS: '1000' } });
+    router.record({ provider: 'llamacpp', tier: 'fast', ok: true, ms: 100, tokens: 5000 });
+    expect(router.available().map((p) => p.id)).toEqual(['gemini', 'llamacpp']);
+    expect(router.status().find((p: { id: string }) => p.id === 'llamacpp').coolingReason).toBeNull();
+    router.coolDown({ id: 'gemini', preset: {} }, new ProviderError('gemini HTTP 429: slow down', { status: 429, retryAfterMs: 1000 }));
+    const reply = await router.complete({ messages: [], purpose: 'chat' });
+    expect(reply.provider).toBe('llamacpp');
+  });
+
   it('serves a paid provider under the cap when every free provider rests', async () => {
     const time = Date.parse('2026-11-04T10:00:00Z');
     const fcc = provider('fcc', ['{"ok":true}']);

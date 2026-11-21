@@ -273,7 +273,7 @@ export class ModelRouter {
   cappedPaidProviders(now = this.now()) {
     const capped = new Map();
     for (const p of this.providers) {
-      if (!this.isPaid(p)) continue;
+      if (!this.isPaid(p) || p.preset?.local) continue;
       const tokens = this.paidTokensToday(p.id, now);
       if (tokens >= this.paidCap) capped.set(p.id, tokens);
     }
