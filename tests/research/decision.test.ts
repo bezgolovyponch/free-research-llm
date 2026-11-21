@@ -544,3 +544,34 @@ describe('the decision model checklist keeps the conditions the asker wrote (FRL
     }
   });
 });
+
+describe('the answer unit voted for a question without an item count (FRL_UNIT_EVERY_QUESTION)', () => {
+  const question = 'What was the average gross monthly wage in Slovakia in 2024? Give the figure in EUR with its source.';
+  const routerOf = (replies: Array<object | null>) => {
+    let at = 0;
+    const calls: Array<{ purpose: string; tier: string; content: string }> = [];
+    return {
+      calls,
+      complete: async (request: { purpose: string; tier: string; messages: Array<{ content: string }> }) => {
+        calls.push({ purpose: request.purpose, tier: request.tier, content: request.messages.map((m) => m.content).join('\n') });
+        const reply = replies[at++ % replies.length];
+        if (!reply) throw new Error('no model answered');
+        return { data: reply };
+      },
+    };
+  };
+
+  it('keeps the majority unit quoted from the asker, with the question it was voted for', async () => {
+    const router = routerOf([{ answerUnit: 'number', answerUnitQuote: 'Give the figure in EUR' }, { answerUnit: 'number', answerUnitQuote: 'average gross monthly wage' }, { answerUnit: 'claim', answerUnitQuote: '' }]);
+    const unit = await new DecisionModeler({ router: router as never }).answerUnit({ question, acceptance: { expected: '' } });
+    expect(unit).toEqual({ answerUnit: 'number', answerUnitShare: 0.67, answerUnitQuote: 'Give the figure in EUR', question, guidance: '', samples: 3 });
+    expect(router.calls.map((c) => [c.purpose, c.tier])).toEqual([['answer-unit', 'fast'], ['answer-unit', 'fast'], ['answer-unit', 'fast']]);
+    expect(router.calls[0].content).toContain(`Question: ${question}`);
+    expect(router.calls[0].content).toContain('"answerUnit": "items" | "number" | "claim" | "choice"');
+  });
+
+  it('settles nothing from fewer than two answers or without a quote from the asker', async () => {
+    expect(await new DecisionModeler({ router: routerOf([{ answerUnit: 'number', answerUnitQuote: 'Give the figure in EUR' }, null, null]) as never }).answerUnit({ question })).toBeNull();
+    expect(await new DecisionModeler({ router: routerOf([{ answerUnit: 'number', answerUnitQuote: 'one statistic' }]) as never }).answerUnit({ question })).toBeNull();
+  });
+});

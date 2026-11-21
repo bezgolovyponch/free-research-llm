@@ -576,6 +576,7 @@ export class ResearchEngine {
     if (proposed.dropped.length) this.emit(project, 'acceptance', `expected-result checks ${droppedNote(proposed.dropped)}`);
     Object.assign(project, { decision: tree.decision, successCriteria: tree.successCriteria, assumptionsToConfirm: tree.assumptionsToConfirm, nodes: tree.nodes, acceptance });
     if (process.env.FRL_ANSWER_UNIT && acceptance?.itemCount) await this.ensureDecisionModel(project);
+    else if (process.env.FRL_ANSWER_UNIT && process.env.FRL_UNIT_EVERY_QUESTION) await this.ensureAnswerUnit(project);
     this.dropNumberItemCount(project);
     if (listCount(project)) {
       await this.ensureDecisionModel(project);
@@ -725,6 +726,16 @@ export class ResearchEngine {
     }
     this.emit(project, 'candidates', `distance from ${place}: ${measured} listing(s) measured, ${far} farther than ${limit} km, ${unmeasured} not measurable (marked unmeasured)`);
     return table;
+  }
+
+  async ensureAnswerUnit(project) {
+    if (!this.modeler?.answerUnit || this.demo) return project.answerUnit ?? null;
+    const guidance = String(project.guidance ?? '');
+    if (project.answerUnit && project.answerUnit.question === project.question && project.answerUnit.guidance === guidance) return project.answerUnit;
+    const unit = await this.modeler.answerUnit(project).catch(() => null);
+    project.answerUnit = unit;
+    this.emit(project, 'decision', unit ? `answer unit: ${unit.answerUnit}, ${Math.round(unit.answerUnitShare * unit.samples)} of ${unit.samples} proposals, from the asker's words "${unit.answerUnitQuote}"` : 'answer unit not settled: no majority quoting the asker');
+    return unit;
   }
 
   async ensureDecisionModel(project) {
