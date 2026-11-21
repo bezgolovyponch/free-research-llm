@@ -1487,3 +1487,32 @@ describe('FRL_ONE_ITEM_QUESTION', () => {
     expect((await built(true, { pick: 'none' })).checklist[0].items[0].question).toBe(listWording);
   });
 });
+
+describe('checklist proposals from different model families (FRL_SAMPLES_APART)', () => {
+  const make = () => {
+    const calls: { purpose: string; avoid?: string[] }[] = [];
+    const leads = ['a', 'b', 'c'];
+    return {
+      calls,
+      familyLeads: () => leads,
+      complete: async (req: { purpose: string; avoid?: string[] }) => {
+        calls.push(req);
+        return { provider: leads.find((id) => !(req.avoid ?? []).includes(id)) ?? 'a', data: { items: [{ clause: 'in leipzig', question: 'Is this gym in Leipzig?', hard: true }] } };
+      },
+    };
+  };
+
+  it('asks each proposal another family first with the flag, and every proposal the same way without it', async () => {
+    const before = make();
+    expect(await proposeChecklist({ router: before as never, question: 'Find 5 bouldering gyms in Leipzig', samples: 3, expected: '5 gyms' })).toHaveLength(3);
+    expect(before.calls.map((call) => call.avoid)).toEqual([undefined, undefined, undefined]);
+    process.env.FRL_SAMPLES_APART = '1';
+    try {
+      const after = make();
+      expect(await proposeChecklist({ router: after as never, question: 'Find 5 bouldering gyms in Leipzig', samples: 3, expected: '5 gyms' })).toHaveLength(3);
+      expect(after.calls.map((call) => [call.purpose, call.avoid])).toEqual([['checklist', ['b', 'c']], ['checklist', ['a', 'c']], ['checklist', ['a', 'b']]]);
+    } finally {
+      delete process.env.FRL_SAMPLES_APART;
+    }
+  });
+});
