@@ -102,6 +102,16 @@ describe('embedder: ranks only, one model per comparison', () => {
     expect(embedder.failures[0].error).toContain('allowance of 3');
   });
 
+  it('gives each new run its own allowance, so a long-lived app does not stop embedding after a few researches', async () => {
+    const one = route('one');
+    const embedder = new Embedder({ env, routes: [one], fetchImpl: fetchFor([one]) as never, maxTexts: 3 });
+    expect(await embedder.rank('red', ['green', 'blue'])).not.toBeNull();
+    expect(await embedder.rank('red', ['lime'])).toBeNull();
+    embedder.newRun();
+    expect(await embedder.rank('red', ['lime'])).not.toBeNull();
+    expect(embedder.embedded).toBe(1);
+  });
+
   it('round-trips the disk cache per model', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'frl-embed-'));
     const one = route('one');
