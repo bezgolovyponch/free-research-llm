@@ -49,6 +49,20 @@ describe('claim attribution (verified quotes, as in GopherCite and ALCE)', () =>
     expect(ungroundedNumbers({ answer: 'In 2026 there were 3 offers', claims: [] })).toEqual(['3']);
   });
 
+  it('with FRL_NUMBERS_OUTSIDE_URLS digits inside a cited web address are not numbers the answer states', () => {
+    const finding = {
+      answer: '253,789 new passenger cars were registered in Austria in 2024, according to Statistics Austria. Source: https://www.statistik.at/fileadmin/announcement/2025/01/20250114KfzNeuzulassungen2024EN.pdf (also www.example.at/table-7) but 12 more were added.',
+      claims: [{ text: 'According to Statistics Austria, 253 789 new passenger cars were registered in 2024.' }],
+    };
+    expect(ungroundedNumbers(finding)).toEqual(expect.arrayContaining(['01', '20250114']));
+    process.env.FRL_NUMBERS_OUTSIDE_URLS = '1';
+    try {
+      expect(ungroundedNumbers(finding)).toEqual(['12']);
+    } finally {
+      delete process.env.FRL_NUMBERS_OUTSIDE_URLS;
+    }
+  });
+
   it('flags small numbers like 10 camping months when ungrounded', () => {
     expect(ungroundedNumbers({ answer: 'The site has 10 camping months', claims: [] })).toEqual(['10']);
   });
