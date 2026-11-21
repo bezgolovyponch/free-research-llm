@@ -202,3 +202,22 @@ describe('synthesizePrompt chosen option', () => {
     expect(userContent).not.toContain('Also return "chosen": the exact "option" text of that option.');
   });
 });
+describe('synthesizePrompt marks figures that rest on an assumption (FRL_ASSUMED_FIGURES)', () => {
+  const nodes = [
+    { id: 'D4', parentId: 'Q', status: 'weak', question: 'What figure does EHPA give?', finding: { answer: 'EHPA estimates 12,000 heat pumps sold in 2024.' } },
+    { id: 'D1', parentId: 'Q', status: 'weak', question: 'What does CZSO give?', finding: { answer: 'No CZSO figure.' } },
+  ];
+  const base = { question: 'q', decision: 'd', successCriteria: '', template: { decisionRule: 'r' }, constraints: {}, nodes, expected: 'one figure', kind: 'estimate' };
+
+  it('shows the assumed figure under its piece and says it must not be attributed to a source', () => {
+    const content = synthesizePrompt({ ...base, assumed: new Map([['D4', [{ figure: '12000', from: 'D4.2' }]], ['D1', []]]) } as never)[1].content;
+    expect(content).toContain('D4 [weak] What figure does EHPA give?\n  -> EHPA estimates 12,000 heat pumps sold in 2024.\n  assumed, no source read states it: 12,000 (D4.2)\nD1 [weak]');
+    expect(content).toContain('A figure marked "assumed, no source read states it" is an estimate made by the research itself: call it an estimate, and never attribute it to a source, a report or an organisation.');
+  });
+
+  it('is unchanged without assumed figures', () => {
+    const plain = synthesizePrompt(base as never)[1].content;
+    expect(synthesizePrompt({ ...base, assumed: new Map([['D4', []]]) } as never)[1].content).toBe(plain);
+    expect(plain).not.toContain('assumed, no source read states it');
+  });
+});

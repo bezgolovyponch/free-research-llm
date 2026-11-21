@@ -64,3 +64,59 @@ export function ungroundedNumbers(finding, node = {}) {
   const cleanedAnswer = stripDatesAndOrdinals(answer);
   return [...new Set(numbersIn(cleanedAnswer).filter((n) => !allowed.has(n)))];
 }
+
+const withoutUrls = (text) => String(text ?? '').replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ');
+const figuresOf = (text) => numbersIn(withoutUrls(text)).filter((n) => Number(n) !== 0);
+const claimNumbers = (claim) => numbersIn(`${claim?.text ?? ''} ${claim?.value ?? ''}`);
+
+export function assumedFigures(nodes = [], asked = '') {
+  const list = nodes ?? [];
+  const askedNumbers = new Set(numbersIn(asked));
+  const assumed = new Map();
+  const visit = (node, path) => {
+    if (assumed.has(node.id)) return assumed.get(node.id);
+    if (path.has(node.id)) return [];
+    const below = new Map(list.filter((child) => child.parentId === node.id).map((child) => [child.id, visit(child, new Set([...path, node.id]))]));
+    const origins = new Map();
+    const leaning = new Set();
+    for (const claim of node.finding?.claims ?? []) {
+      if (claim.assumption) {
+        leaning.add(claim);
+        for (const figure of claimNumbers(claim)) if (!origins.has(figure)) origins.set(figure, node.id);
+        continue;
+      }
+      for (const id of claim.sourceIds ?? []) {
+        for (const item of below.get(id) ?? []) {
+          if (!numbersIn(claim.text).includes(item.figure)) continue;
+          leaning.add(claim);
+          if (!origins.has(item.figure)) origins.set(item.figure, item.from);
+        }
+      }
+    }
+    const sourced = new Set((node.finding?.claims ?? []).filter((claim) => !leaning.has(claim) && claim.attributed === true).flatMap((claim) => numbersIn(claim.text)));
+    const figures = [...new Set(figuresOf(node.finding?.answer))].filter((figure) => origins.has(figure) && !sourced.has(figure) && !askedNumbers.has(figure)).map((figure) => ({ figure, from: origins.get(figure) }));
+    assumed.set(node.id, figures);
+    return figures;
+  };
+  for (const node of list) visit(node, new Set());
+  return assumed;
+}
+
+export function assumedInText(text, assumed, nodes = [], asked = '') {
+  const list = nodes ?? [];
+  const leaves = list.filter((node) => !list.some((child) => child.parentId === node.id));
+  const sourced = new Set(leaves.flatMap((node) => (node.finding?.claims ?? []).filter((claim) => !claim.assumption && claim.attributed === true).flatMap((claim) => numbersIn(claim.text))));
+  const askedNumbers = new Set(numbersIn(asked));
+  const from = new Map();
+  for (const items of assumed?.values?.() ?? []) for (const item of items) if (!from.has(item.figure)) from.set(item.figure, item.from);
+  return [...new Set(figuresOf(text))].filter((figure) => from.has(figure) && !sourced.has(figure) && !askedNumbers.has(figure)).map((figure) => ({ figure, from: from.get(figure) }));
+}
+
+export function shownFigure(figure) {
+  const value = Number(figure);
+  return Number.isInteger(value) && Math.abs(value) >= 1000 ? value.toLocaleString('en-US') : String(figure);
+}
+
+export function assumedNote(flagged = []) {
+  return flagged.length ? ` — ${flagged.map((item) => `${shownFigure(item.figure)} rests on an assumption (${item.from}): no source read states it`).join('; ')}` : '';
+}
