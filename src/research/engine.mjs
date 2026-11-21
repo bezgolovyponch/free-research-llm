@@ -10,6 +10,7 @@ import { AcceptanceChecker, collectDeliverables, entityDeliverables, isExcludedS
 import { verdict, itemTier, verdictInvariants, hardIdsOf, acceptanceSummaryOf, scoreOf, chosenOptionId } from './verdict.mjs';
 import { ChecklistJudge, JUDGE_VERSION, checklistSummary, checklistFingerprint, filterCountItems, askedCounts, hardenKind, migrateChecks, needsSecondKind, KIND_SECOND_OPINION_BUDGET, SINGLE_KIND_OPINION } from './checklist.mjs';
 import { DeeperReader, deeperOrder, findRelevantLinks } from './deeper.mjs';
+import { resolveOwnSites } from './ownsite.mjs';
 import { critiquePrompt, decomposePrompt, expandPrompt, queryPlanPrompt, researchPrompt, rollupPrompt, synthesizePrompt, withGuidance, GUIDANCE_LIMIT } from './prompts.mjs';
 import { templateById, suggestTemplate } from './templates.mjs';
 import { ROOT_ID, blankNode, childrenOf, isLeaf, normalizeTree, prerequisitesOf, progress, researchOrder, urlList } from './tree.mjs';
@@ -2129,6 +2130,13 @@ export class ResearchEngine {
           }
         }
       }
+    }
+
+    if (process.env.FRL_OWN_SITE && !isAnalysis && project.checklist && readPage && this.router && !this.demo && project.acceptanceResult?.items?.length) {
+      const kindOfItems = project.decisionModel?.kind ?? null;
+      const own = await resolveOwnSites({ items: project.acceptanceResult.items, hardIds: hardIdsOf(project.checklist, kindOfItems), spec: project.acceptance, router: this.router, judge: this.checklistJudge, readPage, judgeArgs: [project.checklist, kindOfItems, project.decisionModel?.criteria ?? [], { trends: project.candidates?.sites?.trends ?? null, euHpi: project.candidates?.sites?.euHpi ?? null }] });
+      project.acceptanceResult.items = own.items;
+      if (own.asked) this.emit(project, 'acceptance', `own websites: ${own.asked} page(s) asked, ${own.moved} item(s) moved to their own site, ${own.merged} merged into an item already listed`);
     }
 
     if (!isAnalysis && project.checklist && readPage && project.acceptanceResult?.items?.length) {
