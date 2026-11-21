@@ -313,3 +313,40 @@ describe('DeeperReader with FRL_LINKS_BY_MEANING', () => {
     expect(read).not.toContain(EUROPAGES_ANOTHER_COMPANY_URL);
   });
 });
+
+describe('DeeperReader with FRL_DEEPER_ITEM_NAMED', () => {
+  const ARTICLE = 'https://shop.example.org/articles/shipping-in-europe';
+  const first = { url: 'https://shop.example.org/item-a', title: 'Item A', checks: [{ id: CHECK_ID, hard: true, answer: 'unknown', clause: 'ships abroad' }] };
+  const second = { url: 'https://shop.example.org/item-b', title: 'Item B', checks: [{ id: CHECK_ID, hard: true, answer: 'unknown', clause: 'ships abroad' }] };
+  const pages = { [first.url]: itemPage([{ url: ARTICLE, text: 'Shipping countries' }]), [second.url]: itemPage([{ url: ARTICLE, text: 'Shipping countries' }]), [ARTICLE]: { text: 'Item A ships to 30 countries.', status: 200, links: [] } };
+  const run = async () => {
+    const readPage = vi.fn(async (url: string) => pages[url] ?? null);
+    const judge = { judge: vi.fn(async (asked: { of?: { title: string } }) => (asked.of?.title === 'Item B' ? [] : yes('Item A ships to 30 countries.'))) };
+    const reader = new DeeperReader({ judge, readPage });
+    const cache = {};
+    const a = { ...first, checks: first.checks.map((c) => ({ ...c })) };
+    const b = { ...second, checks: second.checks.map((c) => ({ ...c })) };
+    await reader.readDeeperForUnknown(a, checklist, cache);
+    await reader.readDeeperForUnknown(b, checklist, cache);
+    return { a, b, judge };
+  };
+
+  it('tells the judge which item a linked page is read for, and does not reuse that verdict for another item', async () => {
+    process.env.FRL_DEEPER_ITEM_NAMED = '1';
+    try {
+      const { a, b, judge } = await run();
+      expect(judge.judge.mock.calls.map((c) => c[0])).toEqual([{ url: ARTICLE, of: { title: 'Item A', url: first.url } }, { url: ARTICLE, of: { title: 'Item B', url: second.url } }]);
+      expect(a.checks[0]).toMatchObject({ answer: 'yes', source: ARTICLE });
+      expect(b.checks[0].answer).toBe('unknown');
+    } finally {
+      delete process.env.FRL_DEEPER_ITEM_NAMED;
+    }
+  });
+
+  it('without the flag judges the linked page once, unnamed, and lends its verdict to every item that links it', async () => {
+    const { a, b, judge } = await run();
+    expect(judge.judge.mock.calls.map((c) => c[0])).toEqual([{ url: ARTICLE }]);
+    expect(a.checks[0].answer).toBe('yes');
+    expect(b.checks[0].answer).toBe('yes');
+  });
+});

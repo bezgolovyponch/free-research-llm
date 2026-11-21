@@ -140,8 +140,9 @@ export class DeeperReader {
       const question = check.id.split('|').pop();
       const byMeaning = process.env.FRL_LINKS_BY_MEANING && this.embedder?.ready ? await linksByMeaning(links, item.url, question, this.embedder) : null;
       const relevantUrls = byMeaning ?? await findRelevantLinks(links, item.url, extractKeyWords(check.clause + ' ' + question));
+      const named = process.env.FRL_DEEPER_ITEM_NAMED ? { of: { title: String(item.title ?? '').trim(), url: item.url } } : {};
       for (const url of relevantUrls) {
-        const cacheKey = `${url}::${check.id}::judge:${JUDGE_VERSION}`;
+        const cacheKey = `${url}::${check.id}::judge:${JUDGE_VERSION}${named.of ? `::of:${named.of.url}` : ''}`;
         let deeperChecks;
         if (cache[cacheKey]) {
           deeperChecks = cache[cacheKey];
@@ -151,7 +152,7 @@ export class DeeperReader {
           const deeperPage = await this.readPage(url).catch(() => null);
           if (this.read % DEEPER_PROGRESS_EVERY === 0) this.onProgress(this);
           if (!deeperPage?.text) continue;
-          deeperChecks = await this.judge.judge({ url }, deeperPage.text, onlyCheck(checklist, check.id));
+          deeperChecks = await this.judge.judge({ url, ...named }, deeperPage.text, onlyCheck(checklist, check.id));
           cache[cacheKey] = deeperChecks;
         }
         const deeperCheck = deeperChecks.find((c) => c.id === check.id);
